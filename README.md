@@ -107,7 +107,7 @@ which selects the per-OS defaults:
 - macOS: bebok-desktop + APP/DMG bundles
 - The engine prints BEBOK_READY http://host:port on stdout at startup
 (parsed by the shell to discover --port 0); all logs go to stderr.
-- Windows notes: run npm as npm.cmd (PowerShell's execution policy
+- Windows notes: run npm as npm.cmd (PowerShell execution policy
 blocks the npm shim); if tauri build errors at startup about a missing
 native binding, install it first:
 npm i -D @tauri-apps/cli-win32-x64-msvc.
@@ -206,7 +206,7 @@ engine/crates/bebok-server/src/routes/mod.rs.
 | POST | /mcp/{name}/toggle?directory= | enable/disable an MCP server |
 | GET/PUT | /config?directory= | resolved config (PUT = delta write + reload) |
 | GET | /docker?directory= | Docker access probe |
-| GET | /models?directory=&provider= | list a provider's models (persists into project config) |
+| GET | /models?directory=&provider= | list a providers models (persists into project config) |
 | GET | /fs/tree?directory=&path= | gitignore-aware lazy file tree (immediate children) |
 | GET/PUT | /fs/file?directory=&path= | file content (viewer / edit) |
 | GET | /plugins | registered plugins + exposed hook points |
