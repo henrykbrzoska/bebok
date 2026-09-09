@@ -1,0 +1,121 @@
+/* Bebok client - global styles (design tokens + shared primitives). */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #121418;
+  --bg-surface: #1a1d24;
+  --bg-raised: #22262f;
+  --bg-hover: #2a2f3a;
+  --border: #2e3440;
+  --fg: #e6e9ef;
+  --fg-muted: #9aa4b2;
+  --accent: #5b8cff;
+  --accent-strong: #3f6fe0;
+  --ok: #4caf7d;
+  --warn: #d9a13b;
+  --err: #e05260;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+::selection {
+  background: rgba(91, 140, 255, 0.35);
+}
+
+/* Shared controls */
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+button.danger {
+  background: transparent;
+  border-color: var(--err);
+  color: var(--err);
+}
+
+button.danger:hover:not(:disabled) {
+  background: rgba(224, 82, 96, 0.12);
+}
+
+button.ghost {
+  background: transparent;
+}
+
+input[type='text'],
+input[type='password'],
+textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  outline: none;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+a {
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--fg-muted);
+}

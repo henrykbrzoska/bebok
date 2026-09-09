@@ -1,0 +1,23 @@
+[package]
+name = "bebok-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+dirs.workspace = true
+futures.workspace = true
+globset.workspace = true
+notify.workspace = true
+bebok-llm = { path = "../bebok-llm" }
+bebok-mcp = { path = "../bebok-mcp" }
+bebok-skills = { path = "../bebok-skills" }
+bebok-tools = { path = "../bebok-tools" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true

@@ -1,0 +1,47 @@
+<section class="terminal">
+  <header class="term-head">
+    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
+    <h1>{{ t('term.title') }}</h1>
+    <span class="muted dir" [title]="directory() ?? ''">{{ directory() }}</span>
+    <button class="primary new-term" (click)="addTerminal()" [disabled]="loading() || !directory()">
+      + {{ t('term.new') }}
+    </button>
+  </header>
+
+  @if (error()) {
+    <div class="error-banner">{{ error() }}</div>
+  }
+
+  @if (tabs().length > 0) {
+    <div class="tab-bar">
+      @for (tab of tabs(); track tab.ptyId) {
+        <div
+          class="tab"
+          [class.active]="activePtyId() === tab.ptyId"
+          (click)="activate(tab.ptyId)"
+          [title]="tab.title"
+        >
+          <span
+            class="dot"
+            [class.live]="tab.status === 'live'"
+            [class.exited]="tab.status === 'exited'"
+            [class.connecting]="tab.status === 'connecting'"
+            [class.error]="tab.status === 'error'"
+          ></span>
+          <span class="tab-title">{{ tab.title }}</span>
+          <button class="tab-close" (click)="$event.stopPropagation(); closeTab(tab.ptyId)">×</button>
+        </div>
+      }
+    </div>
+  }
+
+  <div class="term-body">
+    @if (activePtyId()) {
+      <app-terminal-tab [ptyId]="activePtyId()!" (status)="onStatus(activePtyId()!, $event)" />
+    } @else if (!loading()) {
+      <div class="placeholder">
+        <p>{{ t('term.empty') }}</p>
+      </div>
+    }
+  </div>
+</section>

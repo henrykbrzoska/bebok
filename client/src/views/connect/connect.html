@@ -1,0 +1,32 @@
+<section class="connect">
+  <div class="card">
+    <h1>{{ t('connect.title') }}</h1>
+    <p class="muted">{{ t('connect.hint') }}</p>
+
+    <label>
+      <span>{{ t('connect.address') }}</span>
+      <input
+        type="text"
+        [ngModel]="baseUrl()"
+        (ngModelChange)="baseUrl.set($event)"
+        placeholder="http://192.168.1.20:8787"
+        spellcheck="false"
+      />
+    </label>
+
+    <div class="actions">
+      <button class="primary" (click)="connect()" [disabled]="connecting()">
+        {{ connecting() ? t('connect.connecting') : t('connect.connect') }}
+      </button>
+      @if (connected()) {
+        <button (click)="continueToDirectory()">{{ t('connect.continue') }}</button>
+      }
+    </div>
+
+    @if (error()) {
+      <div class="error-banner">{{ error() }}</div>
+    }
+
+    <a class="ghost-link" routerLink="/">{{ t('connect.back') }}</a>
+  </div>
+</section>

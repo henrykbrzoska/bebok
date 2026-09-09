@@ -1,0 +1,135 @@
+<div class="chat">
+  <header class="chat-head">
+    <div class="chat-title">
+      <a class="back" routerLink="/">{{ t('chat.back') }}</a>
+      <div class="titles">
+        <span class="session-title">{{ meta()?.title || t('chat.session') }}</span>
+        <span class="muted session-sub">
+          {{ meta()?.agent }} · {{ meta()?.directory }}
+          @if (meta()?.model) {
+            · {{ meta()?.model }}
+          }
+        </span>
+      </div>
+    </div>
+
+    <div class="chat-actions">
+      @if (agents().length > 0) {
+        <label class="agent-switch">
+          <span class="muted">{{ t('chat.agent') }}</span>
+          <select [ngModel]="selectedAgent()" (ngModelChange)="selectedAgent.set($event)">
+            @for (agent of agents(); track agent.name) {
+              <option [value]="agent.name">{{ agent.name }}</option>
+            }
+          </select>
+        </label>
+        <label class="agent-switch">
+          <span class="muted">{{ t('chat.model') }}</span>
+          <select [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
+            <option value="">{{ t('settings.defaultOption') }}</option>
+            @if (selectedModel() && !availableModels().includes(selectedModel())) {
+              <option [value]="selectedModel()">{{ selectedModel() }}</option>
+            }
+            @for (model of availableModels(); track model) {
+              <option [value]="model">{{ model }}</option>
+            }
+          </select>
+        </label>
+      }
+      <label class="agent-switch thinking">
+        <span class="muted">{{ t('settings.thinking') }}</span>
+        <select [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
+          <option value="off">{{ t('settings.thinkingOff') }}</option>
+          <option value="low">{{ t('settings.thinkingLow') }}</option>
+          <option value="medium">{{ t('settings.thinkingMedium') }}</option>
+          <option value="high">{{ t('settings.thinkingHigh') }}</option>
+          <option value="max">{{ t('settings.thinkingMax') }}</option>
+        </select>
+      </label>
+      <button class="danger" (click)="abortTurn()" [disabled]="!running()">{{ t('chat.abort') }}</button>
+      @if (running()) {
+        <span class="running-chip">{{ t('chat.running') }}</span>
+      }
+    </div>
+  </header>
+
+  <div class="chat-main">
+    <app-session-sidebar
+      [messages]="filteredMessages()"
+      [meta]="meta()"
+      [running]="running()"
+      [models]="modelsUsed()"
+      [filterModel]="filterModel()"
+      (filterModelChange)="filterModel.set($event)"
+    />
+
+    <div class="chat-col">
+      <div #scroll class="scroll" (scroll)="onScroll()">
+        @if (loading()) {
+          <div class="placeholder">{{ t('chat.loading') }}</div>
+        } @else if (filteredMessages().length === 0 && pending().length === 0) {
+          <div class="placeholder">
+            <p>{{ t('chat.noMessages') }}</p>
+            <p class="muted">{{ t('chat.sendFirst') }}</p>
+          </div>
+        } @else {
+          <div class="messages">
+            @for (message of filteredMessages(); track message.id) {
+              <app-message-row
+                [message]="message"
+                [rollbackEnabled]="true"
+                (rollback)="rollbackTo($event)"
+              />
+            }
+          </div>
+          @for (p of pending(); track p.id) {
+            <div class="pending user-bubble">
+              <div class="parts"><div class="text">{{ p.text }}</div></div>
+              <div class="status">
+                @if (p.state === 'sending') {
+                  <span class="dot" [title]="t('chat.sending')"></span>
+                } @else {
+                  <span class="sent" [title]="t('chat.sent')">✓</span>
+                }
+              </div>
+            </div>
+          }
+        }
+      </div>
+
+      @if (error()) {
+        <div class="chat-error">{{ error() }}</div>
+      }
+
+      <footer class="composer">
+        <textarea
+          rows="3"
+          [placeholder]="t('chat.composerPlaceholder')"
+          [ngModel]="draft()"
+          (ngModelChange)="draft.set($event); saveDraft($event)"
+          (keydown)="onComposerKeydown($event)"
+          [disabled]="loading()"
+        ></textarea>
+        <div class="composer-actions">
+          <label class="follow-toggle">
+            <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
+            {{ t('chat.follow') }}
+          </label>
+          @if (queue().length > 0) {
+            <span class="queue-badge">{{ t('chat.queued') }} ({{ queue().length }})</span>
+            <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
+          }
+          <button
+            class="primary send"
+            (click)="sendPrompt()"
+            [disabled]="!draft().trim() || sending() || loading()"
+          >
+            {{ sending() ? t('chat.sending') : t('chat.send') }}
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <app-permission-popup [activeSessionID]="sessionID" />
+</div>

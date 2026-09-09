@@ -1,0 +1,20 @@
+[package]
+name = "bebok-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bebok-tools = { path = "../bebok-tools" }
+futures.workspace = true
+http.workspace = true
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio-util.workspace = true
+uuid.workspace = true

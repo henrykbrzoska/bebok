@@ -1,0 +1,6 @@
+# Rust / Tauri build output
+/target/
+/gen/
+
+# Bundled engine sidecar (produced by `npm run sidecar:copy`)
+/binaries/

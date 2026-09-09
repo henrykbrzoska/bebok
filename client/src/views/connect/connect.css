@@ -1,0 +1,32 @@
+.connect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.ghost-link {
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 13px;
+  text-align: center;
+}

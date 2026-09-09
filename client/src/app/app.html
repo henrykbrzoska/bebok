@@ -1,0 +1,56 @@
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" routerLink="/">
+      <img class="brand-logo" src="logo.png" alt="Bebok" />
+      <span>Bebok</span>
+    </a>
+    <nav class="topnav">
+      @for (tab of tabs.sessions(); track tab.id) {
+        <a
+          class="session-link"
+          [class.active]="tab.id === currentSessionId()"
+          [routerLink]="['/chat', tab.id]"
+          [title]="tab.title || tab.id"
+        >
+          <span class="session-title">{{ tabLabel(tab.id, tab.title) }}</span>
+          @if (tabRunning(tab.id)) {
+            <span class="spinner" [title]="t('nav.working')"></span>
+          }
+          <button
+            type="button"
+            class="tab-close"
+            (click)="closeTab($event, tab.id)"
+            [title]="t('nav.closeSession')"
+          >
+            ×
+          </button>
+        </a>
+      }
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{ t('nav.directory') }}</a>
+      <a routerLink="/explorer" routerLinkActive="active">{{ t('nav.explorer') }}</a>
+      <a routerLink="/terminal" routerLinkActive="active">{{ t('nav.terminal') }}</a>
+      <a routerLink="/debug" routerLinkActive="active">{{ t('nav.debug') }}</a>
+      <a routerLink="/settings" routerLinkActive="active">{{ t('nav.settings') }}</a>
+      <a routerLink="/config" routerLinkActive="active">{{ t('nav.config') }}</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="engine-status" [class.live]="events.state() === 'live'">
+      <span class="dot"></span>
+      @switch (events.state()) {
+        @case ('live') { {{ t('status.live') }} }
+        @case ('connecting') { {{ t('status.connecting') }} }
+        @case ('reconnecting') { {{ t('status.reconnecting') }} }
+        @default { {{ t('status.idle') }} }
+      }
+    </span>
+    <select class="lang-select" [ngModel]="currentLang()" (ngModelChange)="setLanguage($event)">
+      @for (lang of languages; track lang.code) {
+        <option [value]="lang.code">{{ lang.label }}</option>
+      }
+    </select>
+  </header>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>

@@ -1,0 +1,63 @@
+<section class="explorer">
+  <header class="explorer-head">
+    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
+    <h1>{{ t('explorer.title') }}</h1>
+    <span class="muted dir" title="{{ directory() }}">{{ directory() }}</span>
+  </header>
+
+  @if (loading() && rows().length === 0) {
+    <div class="placeholder">{{ t('explorer.loading') }}</div>
+  } @else {
+    <div class="explorer-body">
+      <aside class="tree">
+        @if (rows().length === 0) {
+          <p class="muted empty">{{ t('explorer.empty') }}</p>
+        }
+        <ul class="tree-list">
+          @for (row of rows(); track row.path) {
+            <li
+              class="tree-row"
+              [class.dir]="row.is_dir"
+              [style.padding-left.px]="8 + row.depth * 16"
+              (click)="toggle(row)"
+            >
+              <span class="icon">{{ row.is_dir ? '▸' : '·' }}</span>
+              <span class="name">{{ row.name }}</span>
+            </li>
+          }
+        </ul>
+      </aside>
+
+      <main class="preview">
+        @if (!selectedPath()) {
+          <div class="placeholder">{{ t('explorer.selectHint') }}</div>
+        } @else {
+          <header class="preview-head">
+            <span class="mono">{{ selectedName() }}</span>
+            <span class="muted mono path">{{ selectedPath() }}</span>
+            <span class="spacer"></span>
+            @if (!editing()) {
+              <button (click)="startEdit()">{{ t('explorer.edit') }}</button>
+            } @else {
+              <button class="primary" (click)="saveEdit()" [disabled]="saving()">
+                {{ saving() ? t('explorer.saving') : t('explorer.save') }}
+              </button>
+              <button (click)="cancelEdit()">{{ t('explorer.cancel') }}</button>
+            }
+          </header>
+          @if (fileLoading()) {
+            <div class="placeholder">{{ t('explorer.loading') }}</div>
+          } @else if (editing()) {
+            <textarea class="file-editor" [ngModel]="draftContent()" (ngModelChange)="draftContent.set($event)" spellcheck="false"></textarea>
+          } @else {
+            <pre class="file-content"><code>{{ fileContent() }}</code></pre>
+          }
+        }
+      </main>
+    </div>
+  }
+
+  @if (error()) {
+    <div class="error-banner">{{ error() }}</div>
+  }
+</section>

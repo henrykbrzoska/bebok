@@ -1,0 +1,36 @@
+# ---- Secrets (NEVER commit) ----
+.bebok-zai-key
+.env
+.env.*
+!.env.example
+
+# ---- Rust build output ----
+engine/target/
+target/
+
+# ---- Node / Angular ----
+node_modules/
+client/dist/
+client/.angular/
+client/tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# ---- Local bebok project config (per-user) ----
+.bebok/
+client/.bebok/
+
+# ---- IDE / editor (IntelliJ) ----
+.idea/
+*.iml
+
+# ---- Tauri: bundled engine sidecar + generated schemas ----
+client/src-tauri/binaries/
+client/src-tauri/gen/
+
+# ---- OS / editor junk ----
+.DS_Store
+Thumbs.db
+*.log
+
+# ---- Local Android NDK symlinks (machine-specific) ----
+client/.ndk-bin/

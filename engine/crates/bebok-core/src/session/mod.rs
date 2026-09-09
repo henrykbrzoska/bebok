@@ -1,0 +1,320 @@
+//! Message part model (SPEC §3.4).
+
+pub mod persist;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::util::now_ms;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Part {
+    Text { text: String },
+    Thinking { text: String },
+    Tool { id: String, name: String, state: ToolState },
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_read_input_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_creation_input_tokens: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ToolState {
+    Pending { input: Value },
+    Running { input: Value, started_at: i64 },
+    Completed { input: Value, output: String, title: String },
+    Error { input: Value, error: String },
+}
+
+impl ToolState {
+    pub fn input(&self) -> &Value {
+        match self {
+            ToolState::Pending { input }
+            | ToolState::Running { input, .. }
+            | ToolState::Completed { input, .. }
+            | ToolState::Error { input, .. } => input,
+        }
+    }
+
+    /// True once the tool reached a closed state (completed/error).
+    pub fn is_closed(&self) -> bool {
+        matches!(self, ToolState::Completed { .. } | ToolState::Error { .. })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MessageMeta {
+    #[serde(default)]
+    pub created_at: i64,
+    /// The agent preset used to produce this message (assistant messages only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// The model used to produce this message (assistant messages only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub id: Uuid,
+    pub role: Role,
+    #[serde(default)]
+    pub parts: Vec<Part>,
+    #[serde(default)]
+    pub meta: MessageMeta,
+}
+
+impl Message {
+    pub fn new(role: Role) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role,
+            parts: Vec::new(),
+            meta: MessageMeta {
+                created_at: now_ms(),
+                agent: None,
+                model: None,
+            },
+        }
+    }
+
+    pub fn user(text: impl Into<String>) -> Self {
+        let mut m = Self::new(Role::User);
+        m.parts.push(Part::Text { text: text.into() });
+        m
+    }
+
+    /// An assistant message tagged with the agent + model that produced it.
+    pub fn assistant_with(agent: &str, model: &str) -> Self {
+        let mut m = Self::new(Role::Assistant);
+        m.meta.agent = Some(agent.to_string());
+        m.meta.model = Some(model.to_string());
+        m
+    }
+
+    /// A compaction summary message: a single user-role text part tagged
+    /// `[summary of messages 0..N]` (SPEC §3.9).
+    pub fn summary(text: impl Into<String>) -> Self {
+        Self::user(text)
+    }
+
+    /// Append a text delta to the trailing Text part (or start a new one).
+    pub fn append_text(&mut self, delta: &str) {
+        if let Some(Part::Text { text }) = self.parts.last_mut() {
+            text.push_str(delta);
+        } else {
+            self.parts.push(Part::Text { text: delta.to_string() });
+        }
+    }
+
+    /// Append a thinking delta to the trailing Thinking part (or start a new one).
+    pub fn append_thinking(&mut self, delta: &str) {
+        if let Some(Part::Thinking { text }) = self.parts.last_mut() {
+            text.push_str(delta);
+        } else {
+            self.parts.push(Part::Thinking { text: delta.to_string() });
+        }
+    }
+
+    pub fn add_tool_call(&mut self, id: String, name: String, input: Value) {
+        self.parts.push(Part::Tool {
+            id,
+            name,
+            state: ToolState::Pending { input },
+        });
+    }
+
+    pub fn set_usage(&mut self, usage: crate::session::UsageTotals) {
+        self.parts.push(Part::Usage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cost: usage.cost,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        });
+    }
+
+    pub fn text_content(&self) -> String {
+        let mut out = String::new();
+        for p in &self.parts {
+            if let Part::Text { text } = p {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(text);
+            }
+        }
+        out
+    }
+
+    /// Tool parts with a pending (not yet executed) state.
+    pub fn pending_tool_calls(&self) -> Vec<(String, String, Value)> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Tool { id, name, state: ToolState::Pending { input } } => {
+                    Some((id.clone(), name.clone(), input.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Index of the Tool part with the given id.
+    pub fn tool_part_index(&self, id: &str) -> Option<usize> {
+        self.parts.iter().position(|p| matches!(p, Part::Tool { id: pid, .. } if pid == id))
+    }
+
+    /// Mark a tool part as running.
+    pub fn mark_tool_running(&mut self, id: &str, started_at: i64) -> bool {
+        let Some(idx) = self.tool_part_index(id) else {
+            return false;
+        };
+        let Part::Tool { name, state, .. } = &mut self.parts[idx] else {
+            return false;
+        };
+        let ToolState::Pending { input } = state else {
+            return false;
+        };
+        let input = input.clone();
+        let name = name.clone();
+        self.parts[idx] = Part::Tool {
+            id: id.to_string(),
+            name,
+            state: ToolState::Running { input, started_at },
+        };
+        true
+    }
+
+    /// Mark a tool part as completed.
+    pub fn mark_tool_completed(&mut self, id: &str, output: String, title: String) -> bool {
+        self.transition_tool_state(id, |state| {
+            let input = state.input().clone();
+            ToolState::Completed { input, output, title }
+        })
+    }
+
+    /// Mark a tool part as failed.
+    pub fn mark_tool_error(&mut self, id: &str, error: String) -> bool {
+        self.transition_tool_state(id, |state| {
+            let input = state.input().clone();
+            ToolState::Error { input, error }
+        })
+    }
+
+    /// Replace the state of the tool part with the given id.
+    fn transition_tool_state<F>(&mut self, id: &str, f: F) -> bool
+    where
+        F: FnOnce(&ToolState) -> ToolState,
+    {
+        let Some(idx) = self.tool_part_index(id) else {
+            return false;
+        };
+        let Part::Tool { state, .. } = &mut self.parts[idx] else {
+            return false;
+        };
+        *state = f(state);
+        true
+    }
+
+    /// True when the message has no parts yet.
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UsageTotals {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+}
+
+impl UsageTotals {
+    pub fn add(
+        &mut self,
+        input: u64,
+        output: u64,
+        cost: Option<f64>,
+        cache_read: Option<u64>,
+        cache_write: Option<u64>,
+    ) {
+        self.input_tokens += input;
+        self.output_tokens += output;
+        if let Some(c) = cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + c);
+        }
+        if let Some(r) = cache_read {
+            self.cache_read_input_tokens = Some(self.cache_read_input_tokens.unwrap_or(0) + r);
+        }
+        if let Some(w) = cache_write {
+            self.cache_creation_input_tokens =
+                Some(self.cache_creation_input_tokens.unwrap_or(0) + w);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Uuid,
+    /// Normalized directory the session is bound to (instance key).
+    pub directory: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<(Uuid, usize)>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub usage: UsageTotals,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<Value>,
+}
+
+impl Session {
+    pub fn new(directory: impl Into<String>, agent: impl Into<String>) -> Self {
+        let now = now_ms();
+        Self {
+            id: Uuid::new_v4(),
+            directory: directory.into(),
+            title: None,
+            agent: agent.into(),
+            model: None,
+            parent: None,
+            created_at: now,
+            updated_at: now,
+            usage: UsageTotals::default(),
+            share: None,
+        }
+    }
+
+    pub fn touch(&mut self) {
+        self.updated_at = now_ms();
+    }
+}

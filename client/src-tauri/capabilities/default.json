@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Bebok desktop: invoke our engine command + native dialogs for the picker",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

@@ -1,0 +1,210 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chat-main {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px 16px 0;
+}
+
+.chat-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex: 0 0 auto;
+}
+
+.chat-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.back {
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.session-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-sub {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.running-chip {
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.agent-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.agent-switch select {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  outline: none;
+}
+
+.scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.placeholder {
+  margin: auto;
+  text-align: center;
+  color: var(--fg-muted);
+}
+
+.chat-error {
+  margin: 0 16px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--err);
+  border-radius: var(--radius-sm);
+  color: var(--err);
+  background: rgba(224, 82, 96, 0.1);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+  max-height: 200px;
+  line-height: 1.45;
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.follow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.queue-badge {
+  font-size: 12px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.send {
+  min-width: 120px;
+}
+
+.pending.user-bubble {
+  align-self: flex-end;
+  margin-top: 12px;
+  max-width: 92%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: rgba(63, 111, 224, 0.14);
+  border: 1px dashed rgba(63, 111, 224, 0.35);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.pending .parts { flex: 1 1 auto; min-width: 0; }
+.pending .status { flex: 0 0 auto; display: flex; align-items: center; }
+.pending .dot {
+  width: 10px; height: 10px; margin-top: 2px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: pendspin 0.8s linear infinite;
+}
+.pending .sent { color: #4caf6b; font-size: 13px; line-height: 1; }
+@keyframes pendspin { to { transform: rotate(360deg); } }

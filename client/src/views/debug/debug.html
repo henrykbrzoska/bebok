@@ -1,0 +1,40 @@
+<section class="debug">
+  <header class="debug-head">
+    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
+    <h1>{{ t('debug.title') }}</h1>
+    <span class="muted">max {{ maxChars() }}</span>
+    <div class="actions">
+      <label class="auto">
+        <input type="checkbox" [checked]="autoRefresh()" (change)="autoRefresh.set(!autoRefresh())" />
+        {{ t('debug.autoRefresh') }}
+      </label>
+      <button (click)="refresh()">{{ t('debug.refresh') }}</button>
+      <button (click)="clear()">{{ t('debug.clear') }}</button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="error-banner">{{ error() }}</div>
+  }
+
+  <div class="log">
+    @if (entries().length === 0) {
+      <div class="placeholder">{{ t('debug.empty') }}</div>
+    }
+    @for (entry of entries(); track $index) {
+      <div
+        class="entry"
+        [class.llm]="entry.source === 'llm'"
+        [class.error]="entry.kind === 'error'"
+      >
+        <div class="entry-head">
+          <span class="ts mono">{{ formatTime(entry.ts) }}</span>
+          <span class="badge source-{{ entry.source }}">{{ entry.source }}</span>
+          <span class="badge kind-{{ entry.kind }}">{{ entry.kind }}</span>
+          <span class="title mono">{{ entry.title }}</span>
+        </div>
+        <div class="detail mono">{{ entry.detail }}</div>
+      </div>
+    }
+  </div>
+</section>
