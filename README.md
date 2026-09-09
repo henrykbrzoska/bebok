@@ -3,7 +3,7 @@
 A local-first AI coding agent, built from scratch in Rust + Angular.
 The engine runs without a cloud, and you keep full control over permissions, tools and configuration.
 
-> **License**: source-available (proprietary). Not open source (yet) - see [LICENSE](./LICENSE).
+<img width="1270" height="857" alt="obraz" src="https://github.com/user-attachments/assets/330355bd-814b-423e-92f3-e93cf019e629" />
 
 ## Features
 
