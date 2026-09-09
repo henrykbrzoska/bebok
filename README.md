@@ -29,7 +29,7 @@ The engine runs without a cloud, and you keep full control over permissions, too
 - **Engine**: Rust, edition 2024 (axum, tokio, rmcp, globset, notify, ignore, reqwest, serde).
 - **Client**: Angular 20.3 (standalone components, signals, zoneless).
 - **Desktop**: Tauri 2 (shell spawning the engine as a sidecar).
-- **Mobile**: Capacitor (client → remote engine over LAN).
+(@TODO - **Mobile**: Capacitor (client → remote engine over LAN).)
 
 ## Structure
 ./
