@@ -57,6 +57,13 @@ export class SettingsView implements OnInit {
   readonly checkingProvider = signal<string | null>(null);
   readonly providerModelsError = signal<string | null>(null);
 
+  /**
+   * JSON snapshot of the providers list as last seen in the engine config.
+   * "Check available models" compares the live form against this snapshot and
+   * persists the delta first, so a freshly typed API key is used by the check.
+   */
+  private savedProvidersJson = '[]';
+
   /** Draft form for adding a custom API (provider). */
   readonly customProvider = signal<{
     name: string;
@@ -127,6 +134,7 @@ export class SettingsView implements OnInit {
       this.config.set(cfg);
       this.rulesText.set(this.rulesToText(cfg.config.permission));
       this.providers.set(cfg.providers ?? []);
+      this.savedProvidersJson = JSON.stringify(cfg.providers ?? []);
       this.typeModels.set({ ...(cfg.config.models ?? {}) });
       this.yolo.set(!!cfg.config.yolo);
       const ui = (cfg.config.ui ?? {}) as {
@@ -329,16 +337,26 @@ export class SettingsView implements OnInit {
     if (!dir || this.checkingProvider()) {
       return;
     }
-    this.checkingProvider.set(provider.name);
+    // Read the live draft from the signal: the @for snapshot can be stale.
+    const draft = this.providers().find((p) => p.name === provider.name) ?? provider;
+    this.checkingProvider.set(draft.name);
     this.error.set(null);
     this.providerModelsError.set(null);
     try {
-      const res = await this.engine.listModels(dir, provider.name);
-      this.checkedModels.update((m) => ({ ...m, [provider.name]: res.models }));
-      // The engine persisted the models to the global config; reload so the
+      // Persist the current form state (kind, endpoint, freshly typed API key,
+      // and providers not saved yet) BEFORE the check - the engine resolves the
+      // key from its saved config, not from the GUI, so an unsaved key would
+      // make the check fail with 401 even though the key is correct.
+      if (JSON.stringify(this.providers()) !== this.savedProvidersJson) {
+        await this.engine.putConfig(dir, { providers: this.providers() });
+        this.savedProvidersJson = JSON.stringify(this.providers());
+      }
+      const res = await this.engine.listModels(dir, draft.name);
+      this.checkedModels.update((m) => ({ ...m, [draft.name]: res.models }));
+      // The engine persisted the models to the project config; reload so the
       // providers/models signals (and the per-agent model selects) refresh.
       await this.reload();
-      this.saved.set(this.i18n.t('settings.modelsSaved', { name: provider.name }));
+      this.saved.set(this.i18n.t('settings.modelsSaved', { name: draft.name }));
     } catch (err) {
       this.providerModelsError.set(this.describe(err));
     } finally {
