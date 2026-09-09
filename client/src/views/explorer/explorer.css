@@ -129,6 +129,14 @@
   white-space: pre;
 }
 
+/* Task 6: sandboxed HTML preview fills the preview pane. */
+.html-preview-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
 .mono {
   font-family: var(--mono);
 }

@@ -1,7 +1,8 @@
 /**
- * Explorer view (M6): a lazy, gitignore-aware file tree + file preview, both
- * served through the engine API (`GET /fs/tree`, `GET /fs/file`) - not the
- * client's raw filesystem, so one permission model covers everything.
+ * Explorer view (M6 + Task 6): a lazy, gitignore-aware file tree + file
+ * preview, both served through the engine API (`GET /fs/tree`, `GET /fs/file`)
+ * - not the client's raw filesystem, so one permission model covers
+ * everything. Task 6: right-click a `.html` file to preview it sandboxed.
  */
 
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
@@ -11,6 +12,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
 
 interface FsNode {
   name: string;
@@ -27,7 +29,7 @@ interface DirState {
 
 @Component({
   selector: 'app-explorer',
-  imports: [RouterLink, FormsModule],
+  imports: [RouterLink, FormsModule, HtmlPreviewComponent],
   templateUrl: './explorer.html',
   styleUrl: './explorer.css',
 })
@@ -48,6 +50,8 @@ export class ExplorerView implements OnInit {
   readonly editing = signal(false);
   readonly draftContent = signal('');
   readonly saving = signal(false);
+  /** Sandboxed HTML preview (right-click a .html file). */
+  readonly htmlPreview = signal<string | null>(null);
 
   /** Directory state keyed by path ('' = root). */
   private readonly dirs = signal<Record<string, DirState>>({});
@@ -65,6 +69,11 @@ export class ExplorerView implements OnInit {
   readonly selectedName = computed(() => {
     const p = this.selectedPath();
     return p ? p.split('/').pop() ?? p : null;
+  });
+
+  readonly isHtmlSelection = computed(() => {
+    const p = this.selectedPath();
+    return !!p && /\.html?$/i.test(p);
   });
 
   async ngOnInit(): Promise<void> {
@@ -142,6 +151,7 @@ export class ExplorerView implements OnInit {
     }
     this.selectedPath.set(node.path);
     this.editing.set(false);
+    this.htmlPreview.set(null);
     this.fileLoading.set(true);
     this.error.set(null);
     try {
@@ -154,6 +164,28 @@ export class ExplorerView implements OnInit {
     } finally {
       this.fileLoading.set(false);
     }
+  }
+
+  /** Right-click a row: `.html` files open a sandboxed preview. */
+  onRowContextMenu(event: MouseEvent, node: FsNode): void {
+    if (node.is_dir || !/\.html?$/i.test(node.path)) {
+      return;
+    }
+    event.preventDefault();
+    void this.openFile(node).then(() => {
+      if (this.selectedPath() === node.path) {
+        this.htmlPreview.set(this.fileContent());
+      }
+    });
+  }
+
+  /** Right-click the preview header: toggle the sandboxed HTML preview. */
+  onPreviewContextMenu(event: MouseEvent): void {
+    if (!this.isHtmlSelection() || this.fileLoading()) {
+      return;
+    }
+    event.preventDefault();
+    this.htmlPreview.set(this.htmlPreview() === null ? this.fileContent() : null);
   }
 
   startEdit(): void {

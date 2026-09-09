@@ -11,6 +11,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { ElementRef } from '@angular/core';
+import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
 import {
@@ -74,7 +75,13 @@ export class ChatView implements OnInit, OnDestroy {
 
   readonly t = this.i18n.t.bind(this.i18n);
 
-  readonly sessionID: string = this.route.snapshot.paramMap.get('sessionID') ?? '';
+  /**
+   * Active session id, driven by the route (`/chat/:sessionID`). A signal (not
+   * a snapshot): Angular reuses this component instance when navigating
+   * between tabs (`/chat/A` -> `/chat/B`), so the id must be re-read on every
+   * `paramMap` emission and the whole view reloaded (see `switchSession`).
+   */
+  readonly sessionID = signal<string>('');
 
   readonly meta = signal<SessionMeta | null>(null);
   private readonly directory = signal<string | null>(null);
@@ -131,6 +138,9 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly unsubscribeEvents: () => void;
   private refreshTimer: number | undefined;
   private lastReconnectVersion = 0;
+  private routeSub: Subscription | null = null;
+  /** Monotonic load generation: stale fetches from a previous tab never win. */
+  private loadSeq = 0;
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => this.handleEvent(ev));
@@ -179,31 +189,74 @@ export class ChatView implements OnInit, OnDestroy {
       }
     }
     this.events.start();
-    await this.loadAll();
+    // React to tab switches: the router reuses this component for
+    // `/chat/A` -> `/chat/B`, so `ngOnInit` runs once and every later
+    // navigation arrives here as a new `paramMap` emission.
+    this.routeSub = this.route.paramMap.subscribe((params) => {
+      void this.switchSession(params.get('sessionID') ?? '');
+    });
   }
 
   ngOnDestroy(): void {
     this.unsubscribeEvents();
+    this.routeSub?.unsubscribe();
+    this.routeSub = null;
     if (this.refreshTimer !== undefined) {
       window.clearTimeout(this.refreshTimer);
     }
   }
 
-  private async loadAll(): Promise<void> {
+  /**
+   * Switch the visible session (tab click, back/forward, direct link).
+   * Resets all per-session UI state first so no stale transcript, queue,
+   * spinner or error leaks into the new tab, then loads it from the engine.
+   * The previous session keeps running on the engine untouched.
+   */
+  private async switchSession(nextID: string): Promise<void> {
+    if (!nextID) {
+      void this.router.navigate(['/']);
+      return;
+    }
+    if (nextID === this.sessionID() && this.meta() !== null) {
+      return;
+    }
+    const seq = ++this.loadSeq;
+    if (this.refreshTimer !== undefined) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    this.sessionID.set(nextID);
+    this.meta.set(null);
+    this.messages.set([]);
+    this.pending.set([]);
+    this.queue.set([]);
+    this.error.set(null);
+    this.running.set(false);
+    this.sending.set(false);
+    this.filterModel.set(null);
+    this.follow.set(true);
+    await this.loadAll(nextID, seq);
+  }
+
+  private async loadAll(sessionID: string, seq: number): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
     try {
       const [meta, messages] = await Promise.all([
-        this.engine.sessionMeta(this.sessionID),
-        this.engine.messages(this.sessionID),
+        this.engine.sessionMeta(sessionID),
+        this.engine.messages(sessionID),
       ]);
+      // A faster tab switch already moved on: drop this stale response.
+      if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
+        return;
+      }
       this.meta.set(meta);
       this.messages.set(messages);
       this.directory.set(meta.directory);
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
       // Restore this session's draft (per-session input, survives tab switches).
-      this.draft.set(this.drafts[this.sessionID] ?? '');
+      this.draft.set(this.drafts[sessionID] ?? '');
       // Nav tab: open (or refresh the title of) this session's tab.
       if (!this.tabs.get(meta.id)) {
         this.tabs.open(meta.id, meta.title ?? null);
@@ -216,6 +269,9 @@ export class ChatView implements OnInit, OnDestroy {
           this.engine.listAgents(meta.directory),
           this.engine.getConfig(meta.directory),
         ]);
+        if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
+          return;
+        }
         this.agents.set(agents);
         this.thinking.set(cfg.config.thinking ?? 'off');
         const models: string[] = [];
@@ -233,16 +289,21 @@ export class ChatView implements OnInit, OnDestroy {
         /* switcher lists are non-critical */
       }
     } catch (err) {
+      if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
+        return;
+      }
       const message = this.describe(err);
       if (message.includes('404')) {
         // Session is gone (engine restart wiped it / bad link): drop the tab.
-        this.tabs.close(this.sessionID);
+        this.tabs.close(sessionID);
         void this.router.navigate(['/']);
         return;
       }
       this.error.set(message);
     } finally {
-      this.loading.set(false);
+      if (seq === this.loadSeq && sessionID === this.sessionID()) {
+        this.loading.set(false);
+      }
     }
   }
 
@@ -272,11 +333,22 @@ export class ChatView implements OnInit, OnDestroy {
     if (this.loading()) {
       return;
     }
+    const sessionID = this.sessionID();
+    if (!sessionID) {
+      return;
+    }
     try {
-      const messages = await this.engine.messages(this.sessionID);
+      const messages = await this.engine.messages(sessionID);
+      // Tab switched mid-fetch: never paint session A into session B.
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       this.messages.set(messages);
       this.reconcilePending();
     } catch (err) {
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       this.error.set(this.describe(err));
     }
   }
@@ -292,7 +364,7 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   private handleEvent(event: EngineEvent): void {
-    if (event.sessionID !== this.sessionID) {
+    if (event.sessionID !== this.sessionID()) {
       return;
     }
     switch (event.type) {
@@ -383,20 +455,31 @@ export class ChatView implements OnInit, OnDestroy {
     if (this.running() || this.sending() || this.queue().length === 0) {
       return;
     }
+    const sessionID = this.sessionID();
+    if (!sessionID) {
+      return;
+    }
     const text = this.queue()[0];
     this.sending.set(true);
     this.error.set(null);
     try {
       await this.engine.prompt(
-        this.sessionID,
+        sessionID,
         text,
         this.selectedAgent(),
         this.selectedModel() || undefined,
       );
+      // Tab switched while the POST was in flight: leave the new tab alone.
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       this.markPending(text, 'sent');
       this.queue.update((q) => q.slice(1));
       this.running.set(true);
     } catch (err) {
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       const message = this.describe(err);
       if (message.includes('409')) {
         // Already running (rare race): keep it queued, the turn will drain it.
@@ -406,7 +489,9 @@ export class ChatView implements OnInit, OnDestroy {
         this.queue.update((q) => q.slice(1));
       }
     } finally {
-      this.sending.set(false);
+      if (sessionID === this.sessionID()) {
+        this.sending.set(false);
+      }
     }
   }
 
@@ -415,10 +500,14 @@ export class ChatView implements OnInit, OnDestroy {
     if (this.queue().length === 0) {
       return;
     }
+    const sessionID = this.sessionID();
     try {
-      await this.engine.abort(this.sessionID);
+      await this.engine.abort(sessionID);
     } catch {
       /* abort is best-effort */
+    }
+    if (sessionID !== this.sessionID()) {
+      return;
     }
     this.running.set(false);
     await this.drainQueue();
@@ -436,26 +525,37 @@ export class ChatView implements OnInit, OnDestroy {
     if (index < 1 || this.sending()) {
       return;
     }
+    const sessionID = this.sessionID();
     this.error.set(null);
     try {
       // Stop any running turn first: truncation is refused while busy.
       try {
-        await this.engine.abort(this.sessionID);
+        await this.engine.abort(sessionID);
       } catch {
         /* best-effort */
       }
-      await this.engine.truncateSession(this.sessionID, index);
+      await this.engine.truncateSession(sessionID, index);
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       this.running.set(false);
       // Re-sync the transcript (message list is shorter now).
       await this.refreshFull();
     } catch (err) {
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
       this.error.set(this.describe(err));
     }
   }
 
   /** Save the draft for this session (called on every input change). */
   saveDraft(text: string): void {
-    this.drafts[this.sessionID] = text;
+    const sessionID = this.sessionID();
+    if (!sessionID) {
+      return;
+    }
+    this.drafts[sessionID] = text;
     persistDrafts(this.drafts);
   }
 
@@ -472,10 +572,11 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   async abortTurn(): Promise<void> {
+    const sessionID = this.sessionID();
     this.running.set(false);
     this.error.set(null);
     try {
-      await this.engine.abort(this.sessionID);
+      await this.engine.abort(sessionID);
     } catch (err) {
       this.error.set(this.describe(err));
     }

@@ -230,6 +230,16 @@ export interface ResolvedConfig {
   skills: unknown;
   terminal: unknown;
   runtimes: unknown;
+  /** Client-only UI overrides: custom CSS (plain text, never executed by the engine). */
+  ui?: UiConfig;
+}
+
+/** Client-only UI overrides (`ui` section of the config). */
+export interface UiConfig {
+  customCss?: string;
+  custom_css?: string;
+  customCssFiles?: string[];
+  custom_css_files?: string[];
 }
 
 /** One provider (name, endpoint, API key, known models). */

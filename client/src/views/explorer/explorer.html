@@ -20,6 +20,8 @@
               [class.dir]="row.is_dir"
               [style.padding-left.px]="8 + row.depth * 16"
               (click)="toggle(row)"
+              (contextmenu)="onRowContextMenu($event, row)"
+              [title]="t('htmlPreview.rightClickHint')"
             >
               <span class="icon">{{ row.is_dir ? '▸' : '·' }}</span>
               <span class="name">{{ row.name }}</span>
@@ -32,12 +34,21 @@
         @if (!selectedPath()) {
           <div class="placeholder">{{ t('explorer.selectHint') }}</div>
         } @else {
-          <header class="preview-head">
+          <header
+            class="preview-head"
+            (contextmenu)="onPreviewContextMenu($event)"
+            [title]="isHtmlSelection() ? t('htmlPreview.rightClickHint') : ''"
+          >
             <span class="mono">{{ selectedName() }}</span>
             <span class="muted mono path">{{ selectedPath() }}</span>
             <span class="spacer"></span>
             @if (!editing()) {
               <button (click)="startEdit()">{{ t('explorer.edit') }}</button>
+              @if (isHtmlSelection()) {
+                <button (click)="htmlPreview.set(htmlPreview() === null ? fileContent() : null)">
+                  {{ t('htmlPreview.preview') }}
+                </button>
+              }
             } @else {
               <button class="primary" (click)="saveEdit()" [disabled]="saving()">
                 {{ saving() ? t('explorer.saving') : t('explorer.save') }}
@@ -49,6 +60,14 @@
             <div class="placeholder">{{ t('explorer.loading') }}</div>
           } @else if (editing()) {
             <textarea class="file-editor" [ngModel]="draftContent()" (ngModelChange)="draftContent.set($event)" spellcheck="false"></textarea>
+          } @else if (htmlPreview() !== null) {
+            <div class="html-preview-wrap">
+              <app-html-preview
+                [html]="htmlPreview() ?? ''"
+                [label]="selectedName() ?? ''"
+                (closed)="htmlPreview.set(null)"
+              />
+            </div>
           } @else {
             <pre class="file-content"><code>{{ fileContent() }}</code></pre>
           }

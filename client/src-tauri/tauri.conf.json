@@ -26,7 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "deb",
+    "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "externalBin": ["binaries/bebok-server"]
   }

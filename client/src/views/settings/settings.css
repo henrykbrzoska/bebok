@@ -384,3 +384,13 @@ ul {
 .raw-card .raw-actions {
   justify-content: space-between;
 }
+
+/* Task 6: Appearance (custom CSS) editor. */
+.css-editor {
+  min-height: 180px;
+  tab-size: 2;
+}
+
+.small {
+  font-size: 12px;
+}

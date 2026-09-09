@@ -1,30 +1,36 @@
-<div class="app-shell">
+<div class="app-shell" [class.topbar-compact]="uiPrefs.topbarCompact()">
   <header class="topbar">
     <a class="brand" routerLink="/">
       <img class="brand-logo" src="logo.svg" alt="Bebok" />
       <span>Bebok</span>
     </a>
     <nav class="topnav">
-      @for (tab of tabs.sessions(); track tab.id) {
-        <a
-          class="session-link"
-          [class.active]="tab.id === currentSessionId()"
-          [routerLink]="['/chat', tab.id]"
-          [title]="tab.title || tab.id"
-        >
-          <span class="session-title">{{ tabLabel(tab.id, tab.title) }}</span>
-          @if (tabRunning(tab.id)) {
-            <span class="spinner" [title]="t('nav.working')"></span>
-          }
-          <button
-            type="button"
-            class="tab-close"
-            (click)="closeTab($event, tab.id)"
-            [title]="t('nav.closeSession')"
+      @if (!uiPrefs.topbarCompact()) {
+        @for (tab of tabs.sessions(); track tab.id) {
+          <a
+            class="session-link"
+            [class.active]="tab.id === currentSessionId()"
+            [routerLink]="['/chat', tab.id]"
+            [title]="tab.title || tab.id"
           >
-            ×
-          </button>
-        </a>
+            <span class="session-title">{{ tabLabel(tab.id, tab.title) }}</span>
+            @if (tabRunning(tab.id)) {
+              <span class="spinner" [title]="t('nav.working')"></span>
+            }
+            <button
+              type="button"
+              class="tab-close"
+              (click)="closeTab($event, tab.id)"
+              [title]="t('nav.closeSession')"
+            >
+              ×
+            </button>
+          </a>
+        }
+      } @else {
+        <span class="compact-count" [title]="t('chrome.tabsHidden')">
+          {{ t('chrome.sessions', { n: tabs.sessions().length }) }}
+        </span>
       }
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{ t('nav.directory') }}</a>
       <a routerLink="/explorer" routerLinkActive="active">{{ t('nav.explorer') }}</a>
@@ -34,6 +40,14 @@
       <a routerLink="/config" routerLinkActive="active">{{ t('nav.config') }}</a>
     </nav>
     <span class="spacer"></span>
+    <button
+      type="button"
+      class="chrome-toggle"
+      (click)="toggleTopbar()"
+      [title]="t('chrome.toggleTopbar')"
+    >
+      {{ uiPrefs.topbarCompact() ? t('chrome.expand') : t('chrome.compact') }}
+    </button>
     <span class="engine-status" [class.live]="events.state() === 'live'">
       <span class="dot"></span>
       @switch (events.state()) {

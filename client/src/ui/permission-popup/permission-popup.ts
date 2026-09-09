@@ -1,4 +1,4 @@
-import { Component, OnDestroy, inject, input, signal } from '@angular/core';
+import { Component, OnDestroy, effect, inject, input, signal } from '@angular/core';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { EngineEvent, PermissionAsked } from '../../core/engine.dtos';
@@ -154,6 +154,13 @@ export class PermissionPopup implements OnDestroy {
 
   constructor() {
     this.unsubscribe = this.events.onEvent((event: EngineEvent) => this.handle(event));
+    // Tab switch (`/chat/A` -> `/chat/B`) reuses the parent chat view: drop
+    // pending asks of the previous session so they never render on the new one.
+    // (`permission.resolved` for the old session is filtered out by `handle`.)
+    effect(() => {
+      this.activeSessionID();
+      this.asks.set([]);
+    });
   }
 
   ngOnDestroy(): void {

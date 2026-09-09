@@ -249,6 +249,38 @@
       </ul>
     </div>
 
+    <div class="card">
+      <h2>{{ t('settings.appearanceTitle') }}</h2>
+      <p class="muted">{{ t('settings.appearanceHint') }}</p>
+      <label>
+        <span>{{ t('settings.customCss') }}</span>
+        <textarea
+          class="css-editor"
+          rows="10"
+          [ngModel]="customCssText()"
+          (ngModelChange)="customCssText.set($event)"
+          spellcheck="false"
+          placeholder="/* .topbar { background: #1a1d27; } */"
+        ></textarea>
+      </label>
+      <label>
+        <span>{{ t('settings.customCssFiles') }}</span>
+        <textarea
+          rows="3"
+          [ngModel]="customCssFilesText()"
+          (ngModelChange)="customCssFilesText.set($event)"
+          spellcheck="false"
+          placeholder="theme.css"
+        ></textarea>
+      </label>
+      <p class="muted small">{{ t('settings.customCssFilesHint') }}</p>
+      <div class="actions">
+        <button class="primary" (click)="saveAppearance()" [disabled]="saving()">
+          {{ t('settings.saveAppearance') }}
+        </button>
+      </div>
+    </div>
+
     <div class="card yolo-card">
       <h2>{{ t('settings.yoloTitle') }}</h2>
       <p class="muted">{{ t('settings.yoloHint') }}</p>

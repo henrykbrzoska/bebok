@@ -1,18 +1,13 @@
 /**
- * Session sidebar (M6): a compact summary of the session - models used (with a
- * filter), tokens (in / out / prompt-cache hit & write / hit rate), cost, files
- * changed - plus live toggles for the environment (MCP servers, skills, YOLO
- * mode). Token/cache semantics:
- *   - In  = input tokens (uncached prompt)
- *   - Out = output tokens
- *   - cache = cache_read_input_tokens (prompt-cache hit)
- *   - cache W = cache_creation_input_tokens (prompt-cache write)
- *   - hit rate = cacheRead / (input + cacheRead + cacheWrite)
+ * Session sidebar (M6 + Task 6): compact session summary - models used (with a
+ * filter), tokens, cost, files changed - plus live environment toggles.
+ * Task 6: collapsible + resizable (width persisted via UiPrefsStore).
  */
 
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import {
   Message,
   McpStatus,
@@ -20,6 +15,7 @@ import {
   SessionMeta,
   UsagePart,
 } from '../../core/engine.dtos';
+import { I18nService } from '../../i18n/i18n.service';
 
 interface Totals {
   input: number;
@@ -32,114 +28,131 @@ interface Totals {
 @Component({
   selector: 'app-session-sidebar',
   template: `
-    <aside class="sidebar">
-      <div class="block">
-        <div class="block-title">Models</div>
-        <ul class="model-list">
-          <li class="model-item" [class.active]="!filterModel()" (click)="filterModelChange.emit(null)">
-            <span class="muted small">all</span>
-          </li>
-          @for (m of models(); track m) {
-            <li
-              class="model-item"
-              [class.active]="filterModel() === m"
-              (click)="filterModelChange.emit(m)"
-              [title]="m"
-            >
-              <span class="mono small">{{ m }}</span>
+    @if (uiPrefs.sidebarVisible()) {
+      <aside class="sidebar" [style.width.px]="uiPrefs.sidebarWidth()">
+        <div
+          class="resize-handle"
+          (mousedown)="startResize($event)"
+          [title]="t('chrome.resizeSidebar')"
+        ></div>
+        <div class="block">
+          <div class="block-head">
+            <span class="block-title">{{ t('chrome.sessionInfo') }}</span>
+            <button type="button" class="mini" (click)="uiPrefs.toggleSidebar()">
+              {{ t('chrome.hide') }}
+            </button>
+          </div>
+          <div class="block-title">{{ t('chrome.models') }}</div>
+          <ul class="model-list">
+            <li class="model-item" [class.active]="!filterModel()" (click)="filterModelChange.emit(null)">
+              <span class="muted small">{{ t('chrome.all') }}</span>
             </li>
-          }
-        </ul>
-      </div>
-
-      <div class="block">
-        <div class="block-title">Tokens</div>
-        <div class="row"><span class="muted">In</span><span class="value">{{ totals().input }}</span></div>
-        <div class="row"><span class="muted">cache</span><span class="value">{{ totals().cacheRead }}</span></div>
-        <div class="row"><span class="muted">Out</span><span class="value">{{ totals().output }}</span></div>
-        <div class="row"><span class="muted">cache R</span><span class="value">{{ totals().cacheRead }}</span></div>
-        <div class="row"><span class="muted">cache W</span><span class="value">{{ totals().cacheWrite }}</span></div>
-        <div class="row"><span class="muted">hit rate</span><span class="value">{{ cacheRate() }}</span></div>
-      </div>
-
-      <div class="block">
-        <div class="block-title">Cost</div>
-        <div class="value">{{ costLabel() }}</div>
-      </div>
-
-      <div class="block">
-        <div class="block-title">Files changed</div>
-        @if (filesChanged().length === 0) {
-          <div class="muted small">-</div>
-        }
-        <ul class="files">
-          @for (file of filesChanged(); track file) {
-            <li class="mono small">{{ file }}</li>
-          }
-        </ul>
-      </div>
-
-      <div class="block">
-        <div class="block-title">YOLO mode</div>
-        <label class="toggle">
-          <input type="checkbox" [checked]="yolo()" (change)="toggleYolo(!yolo())" />
-          <span class="muted small">auto-allow all</span>
-        </label>
-      </div>
-
-      <div class="block">
-        <div class="block-title">MCP</div>
-        @if (mcp().length === 0) {
-          <div class="muted small">-</div>
-        }
-        <ul class="toggles">
-          @for (server of mcp(); track server.name) {
-            <li>
-              <label class="toggle">
-                <input
-                  type="checkbox"
-                  [checked]="server.enabled"
-                  (change)="toggleMcp(server, !server.enabled)"
-                />
-                <span class="mono small">{{ server.name }}</span>
-              </label>
-            </li>
-          }
-        </ul>
-      </div>
-
-      <div class="block">
-        <div class="block-title">Skills</div>
-        @if (skills().length === 0) {
-          <div class="muted small">-</div>
-        }
-        <ul class="toggles">
-          @for (skill of skills(); track skill.name) {
-            <li>
-              <label class="toggle">
-                <input
-                  type="checkbox"
-                  [checked]="skill.enabled"
-                  (change)="toggleSkill(skill, !skill.enabled)"
-                />
-                <span class="mono small">{{ skill.name }}</span>
-              </label>
-            </li>
-          }
-        </ul>
-      </div>
-
-      @if (running()) {
-        <div class="working" aria-label="agent working">
-          <span class="pulse"></span>
-          <span class="muted small">agent working…</span>
+            @for (m of models(); track m) {
+              <li
+                class="model-item"
+                [class.active]="filterModel() === m"
+                (click)="filterModelChange.emit(m)"
+                [title]="m"
+              >
+                <span class="mono small">{{ m }}</span>
+              </li>
+            }
+          </ul>
         </div>
-      }
-    </aside>
+
+        <div class="block">
+          <div class="block-title">{{ t('chrome.tokens') }}</div>
+          <div class="row"><span class="muted">In</span><span class="value">{{ totals().input }}</span></div>
+          <div class="row"><span class="muted">cache</span><span class="value">{{ totals().cacheRead }}</span></div>
+          <div class="row"><span class="muted">Out</span><span class="value">{{ totals().output }}</span></div>
+          <div class="row"><span class="muted">cache R</span><span class="value">{{ totals().cacheRead }}</span></div>
+          <div class="row"><span class="muted">cache W</span><span class="value">{{ totals().cacheWrite }}</span></div>
+          <div class="row"><span class="muted">hit rate</span><span class="value">{{ cacheRate() }}</span></div>
+        </div>
+
+        <div class="block">
+          <div class="block-title">{{ t('chrome.cost') }}</div>
+          <div class="value">{{ costLabel() }}</div>
+        </div>
+
+        <div class="block">
+          <div class="block-title">{{ t('chrome.filesChanged') }}</div>
+          @if (filesChanged().length === 0) {
+            <div class="muted small">-</div>
+          }
+          <ul class="files">
+            @for (file of filesChanged(); track file) {
+              <li class="mono small">{{ file }}</li>
+            }
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-title">YOLO mode</div>
+          <label class="toggle">
+            <input type="checkbox" [checked]="yolo()" (change)="toggleYolo(!yolo())" />
+            <span class="muted small">auto-allow all</span>
+          </label>
+        </div>
+
+        <div class="block">
+          <div class="block-title">MCP</div>
+          @if (mcp().length === 0) {
+            <div class="muted small">-</div>
+          }
+          <ul class="toggles">
+            @for (server of mcp(); track server.name) {
+              <li>
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    [checked]="server.enabled"
+                    (change)="toggleMcp(server, !server.enabled)"
+                  />
+                  <span class="mono small">{{ server.name }}</span>
+                </label>
+              </li>
+            }
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-title">Skills</div>
+          @if (skills().length === 0) {
+            <div class="muted small">-</div>
+          }
+          <ul class="toggles">
+            @for (skill of skills(); track skill.name) {
+              <li>
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    [checked]="skill.enabled"
+                    (change)="toggleSkill(skill, !skill.enabled)"
+                  />
+                  <span class="mono small">{{ skill.name }}</span>
+                </label>
+              </li>
+            }
+          </ul>
+        </div>
+
+        @if (running()) {
+          <div class="working" aria-label="agent working">
+            <span class="pulse"></span>
+            <span class="muted small">agent working…</span>
+          </div>
+        }
+      </aside>
+    } @else {
+      <button type="button" class="sidebar-show" (click)="uiPrefs.toggleSidebar()">
+        {{ t('chrome.showSidebar') }}
+      </button>
+    }
   `,
   styles: `
     .sidebar {
-      width: 230px;
+      position: relative;
       flex-shrink: 0;
       background: var(--bg-surface);
       border: 1px solid var(--border);
@@ -150,6 +163,36 @@ interface Totals {
       gap: 16px;
       overflow-y: auto;
       font-size: 12.5px;
+    }
+    .resize-handle {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: ew-resize;
+      touch-action: none;
+    }
+    .resize-handle:hover {
+      background: rgba(63, 111, 224, 0.25);
+    }
+    .block-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .mini {
+      font-size: 11px;
+      padding: 2px 8px;
+      min-height: 0;
+    }
+    .sidebar-show {
+      flex-shrink: 0;
+      align-self: flex-start;
+      font-size: 11.5px;
+      padding: 4px 10px;
     }
     .block-title {
       font-size: 10.5px;
@@ -228,6 +271,10 @@ interface Totals {
 })
 export class SessionSidebarComponent {
   private readonly engine = inject(EngineClient);
+  private readonly i18n = inject(I18nService);
+  readonly uiPrefs = inject(UiPrefsStore);
+
+  readonly t = this.i18n.t.bind(this.i18n);
 
   readonly messages = input.required<Message[]>();
   readonly meta = input<SessionMeta | null>(null);
@@ -242,6 +289,8 @@ export class SessionSidebarComponent {
   readonly skills = signal<ResolvedSkill[]>([]);
   readonly yolo = signal(false);
 
+  private resizing = false;
+
   constructor() {
     effect(() => {
       const dir = this.meta()?.directory;
@@ -249,6 +298,28 @@ export class SessionSidebarComponent {
         void this.load(dir);
       }
     });
+  }
+
+  /** Drag the sidebar edge to resize (width persisted to localStorage). */
+  startResize(event: MouseEvent): void {
+    event.preventDefault();
+    this.resizing = true;
+    const startX = event.clientX;
+    const startW = this.uiPrefs.sidebarWidth();
+    // Sidebar sits left of the chat column: dragging right widens it.
+    const onMove = (ev: MouseEvent): void => {
+      if (!this.resizing) {
+        return;
+      }
+      this.uiPrefs.setSidebarWidth(startW + (ev.clientX - startX));
+    };
+    const stop = (): void => {
+      this.resizing = false;
+      globalThis.removeEventListener('mousemove', onMove);
+      globalThis.removeEventListener('mouseup', stop);
+    };
+    globalThis.addEventListener('mousemove', onMove);
+    globalThis.addEventListener('mouseup', stop);
   }
 
   readonly totals = computed<Totals>(() => {

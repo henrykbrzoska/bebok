@@ -1,7 +1,8 @@
 /**
- * Settings view (M4): model + API key, agents, permission rules, MCP toggles
- * and skill toggles. Every save maps to a config edit on the engine (PUT /config
- * or POST /mcp/{name}/toggle); the GUI holds no separate state.
+ * Settings view (M4 + Task 6): model + API key, agents, permission rules, MCP
+ * toggles and skill toggles. Every save maps to a config edit on the engine
+ * (PUT /config or POST /mcp/{name}/toggle); the GUI holds no separate state.
+ * Task 6: Appearance card edits `ui.customCss` (+ `ui.customCssFiles`).
  */
 
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
@@ -9,6 +10,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { CustomCssService } from '../../core/custom-css.service';
 import {
   ConfigResponse,
   DockerStatus,
@@ -30,6 +32,7 @@ export class SettingsView implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly events = inject(EventsStore);
   private readonly i18n = inject(I18nService);
+  private readonly customCss = inject(CustomCssService);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -67,6 +70,10 @@ export class SettingsView implements OnInit {
 
   /** YOLO mode: auto-allow every tool call (dangerous). */
   readonly yolo = signal(false);
+
+  /** Task 6: appearance — `ui.customCss` (+ `ui.customCssFiles`). */
+  readonly customCssText = signal('');
+  readonly customCssFilesText = signal('');
 
   /** Flat list of selectable models (`provider/model`) from every provider. */
   readonly availableModels = computed<string[]>(() => {
@@ -122,6 +129,15 @@ export class SettingsView implements OnInit {
       this.providers.set(cfg.providers ?? []);
       this.typeModels.set({ ...(cfg.config.models ?? {}) });
       this.yolo.set(!!cfg.config.yolo);
+      const ui = (cfg.config.ui ?? {}) as {
+        customCss?: string;
+        custom_css?: string;
+        customCssFiles?: string[];
+        custom_css_files?: string[];
+      };
+      this.customCssText.set(ui.customCss ?? ui.custom_css ?? '');
+      const files = ui.customCssFiles ?? ui.custom_css_files ?? [];
+      this.customCssFilesText.set(Array.isArray(files) ? files.join('\n') : '');
       this.pythonPath.set(cfg.runtimes.python);
       this.python3Path.set(cfg.runtimes.python3);
       this.nodePath.set(cfg.runtimes.node);
@@ -132,6 +148,33 @@ export class SettingsView implements OnInit {
       this.error.set(this.describe(err));
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  /** Save the Appearance card: `ui.customCss` (+ `ui.customCssFiles`). */
+  async saveAppearance(): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.saving()) {
+      return;
+    }
+    const files = this.customCssFilesText()
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    this.saving.set(true);
+    this.error.set(null);
+    this.saved.set(null);
+    try {
+      await this.engine.putConfig(dir, {
+        ui: { customCss: this.customCssText(), customCssFiles: files },
+      });
+      this.saved.set(this.i18n.t('settings.savedAppearance'));
+      await this.customCss.sync(dir);
+      await this.reload();
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.saving.set(false);
     }
   }
 
