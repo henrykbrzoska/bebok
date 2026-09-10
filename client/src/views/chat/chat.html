@@ -3,7 +3,11 @@
     <div class="chat-title">
       <a class="back" routerLink="/">{{ t('chat.back') }}</a>
       <div class="titles">
-        <span class="session-title">{{ meta()?.title || t('chat.session') }}</span>
+        @if (meta()?.alias) {
+          <span class="session-title">{{ meta()!.alias }}</span>
+        } @else {
+          <span class="session-title">{{ meta()?.title || t('chat.session') }}</span>
+        }
         <span class="muted session-sub">
           {{ meta()?.agent }} · {{ meta()?.directory }}
           @if (meta()?.model) {
@@ -17,7 +21,7 @@
       @if (agents().length > 0) {
         <label class="agent-switch">
           <span class="muted">{{ t('chat.agent') }}</span>
-          <select [ngModel]="selectedAgent()" (ngModelChange)="selectedAgent.set($event)">
+          <select [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
             @for (agent of agents(); track agent.name) {
               <option [value]="agent.name">{{ agent.name }}</option>
             }
@@ -64,38 +68,82 @@
     />
 
     <div class="chat-col">
-      <div #scroll class="scroll" (scroll)="onScroll()">
-        @if (loading()) {
-          <div class="placeholder">{{ t('chat.loading') }}</div>
-        } @else if (filteredMessages().length === 0 && pending().length === 0) {
-          <div class="placeholder">
-            <p>{{ t('chat.noMessages') }}</p>
-            <p class="muted">{{ t('chat.sendFirst') }}</p>
-          </div>
-        } @else {
-          <div class="messages">
-            @for (message of filteredMessages(); track message.id) {
-              <app-message-row
-                [message]="message"
-                [rollbackEnabled]="true"
-                (rollback)="rollbackTo($event)"
-              />
-            }
-          </div>
-          @for (p of pending(); track p.id) {
-            <div class="pending user-bubble">
-              <div class="parts"><div class="text">{{ p.text }}</div></div>
-              <div class="status">
-                @if (p.state === 'sending') {
-                  <span class="dot" [title]="t('chat.sending')"></span>
-                } @else {
-                  <span class="sent" [title]="t('chat.sent')">✓</span>
-                }
+      <div class="scroll-wrap">
+        <div #scroll class="scroll" (scroll)="onScroll()">
+          @if (loading()) {
+            <div class="placeholder">{{ t('chat.loading') }}</div>
+          } @else if (filteredMessages().length === 0 && pending().length === 0) {
+            <div class="placeholder">
+              <p>{{ t('chat.noMessages') }}</p>
+              <p class="muted">{{ t('chat.sendFirst') }}</p>
+            </div>
+          } @else {
+            <div class="messages">
+              @for (message of filteredMessages(); track message.id) {
+                <app-message-row
+                  [rowId]="'msg-'+message.id"
+                  [message]="message"
+                  [taskLinks]="taskLinks()"
+                  [rollbackEnabled]="true"
+                  (rollback)="rollbackTo($event)"
+                />
+              }
+            </div>
+            @for (p of pending(); track p.id) {
+              <div class="pending user-bubble">
+                <div class="parts"><div class="text">{{ p.text }}</div></div>
+                <div class="status">
+                  @if (p.state === 'sending') {
+                    <span class="dot" [title]="t('chat.sending')"></span>
+                  } @else {
+                    <span class="sent" [title]="t('chat.sent')">✓</span>
+                  }
+                </div>
               </div>
+            }
+          }
+
+          @if (activeTasks().length > 0) {
+            <div class="active-tasks">
+              @for (task of activeTasks(); track task.taskID) {
+                <div class="active-task">
+                  <div class="active-task-info">
+                    <span class="active-task-spinner"></span>
+                    @if (task.childSessionID) {
+                      <a
+                        class="active-task-link"
+                        [routerLink]="['/chat', task.childSessionID]"
+                        [queryParams]="{directory: meta()?.directory}"
+                        [title]="t('chat.openSubagent')"
+                      >{{ task.name || task.agent || task.description || task.taskID }}</a>
+                    } @else {
+                      <span class="active-task-desc">{{ task.name || task.agent || task.description || task.taskID }}</span>
+                    }
+                  </div>
+                  <button class="danger small" (click)="abortTask(task.taskID)">
+                    {{ t('chat.abortTask') }}
+                  </button>
+                </div>
+              }
             </div>
           }
+        </div>
+
+        @if (scrollArea()) {
+          <app-scroll-minimap
+            [messages]="filteredMessages()"
+            [scrollTarget]="scrollArea()!"
+          />
         }
       </div>
+
+      @if (showJump()) {
+        <button
+          class="jump-last-user"
+          (click)="scrollToLastUser()"
+          [title]="t('chat.goToLastUser')"
+        >↑ {{ t('chat.goToLastUser') }}</button>
+      }
 
       @if (error()) {
         <div class="chat-error">{{ error() }}</div>
@@ -110,13 +158,35 @@
           (keydown)="onComposerKeydown($event)"
           [disabled]="loading()"
         ></textarea>
+
+        @if (queue().length > 0) {
+          <div class="queue-panel">
+            <div class="queue-header">
+              <span class="queue-badge">{{ t('chat.queued') }} ({{ queue().length }})</span>
+              @if (queue().length > 1) {
+                <button class="link danger" (click)="clearQueue()">{{ t('chat.clearAll') }}</button>
+              }
+            </div>
+            <div class="queue-list">
+              @for (text of queue(); track $index; let i = $index) {
+                <div class="queue-item">
+                  <span class="queue-item-num">{{ i + 1 }}.</span>
+                  <span class="queue-item-text">{{ truncateQueueText(text) }}</span>
+                  <button class="icon-btn danger" (click)="removeFromQueue(i)" [title]="t('chat.removeFromQueue')">
+                    &times;
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
         <div class="composer-actions">
           <label class="follow-toggle">
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
             {{ t('chat.follow') }}
           </label>
           @if (queue().length > 0) {
-            <span class="queue-badge">{{ t('chat.queued') }} ({{ queue().length }})</span>
             <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
           }
           <button
@@ -131,5 +201,5 @@
     </div>
   </div>
 
-  <app-permission-popup [activeSessionID]="sessionID()" />
+  <app-permission-popup [activeSessionID]="sessionID()" [directory]="meta()?.directory" />
 </div>

@@ -17,6 +17,34 @@
     <div class="error-banner">{{ error() }}</div>
   }
 
+  @if (calls().length > 0) {
+    <h2 class="section-title">{{ t('debug.lastCalls') }}</h2>
+    <div class="calls">
+      @for (call of calls(); track call.id) {
+        <div class="call">
+          <div class="call-head">
+            <span class="ts mono">{{ formatTime(call.ts) }}</span>
+            <span class="badge">#{{ call.id }}</span>
+            <span class="title mono">{{ call.model }}</span>
+            <button class="expand" (click)="toggle(call.id)">
+              {{ isExpanded(call.id) ? t('debug.hideJson') : t('debug.showJson') }}
+            </button>
+          </div>
+          @if (isExpanded(call.id)) {
+            <details open>
+              <summary>{{ t('debug.requestJson') }}</summary>
+              <pre class="mono"><code>{{ jsonText(call.request) }}</code></pre>
+            </details>
+            <details open>
+              <summary>{{ t('debug.responseJson') }}</summary>
+              <pre class="mono"><code>{{ jsonText(call.response) }}</code></pre>
+            </details>
+          }
+        </div>
+      }
+    </div>
+  }
+
   <div class="log">
     @if (entries().length === 0) {
       <div class="placeholder">{{ t('debug.empty') }}</div>

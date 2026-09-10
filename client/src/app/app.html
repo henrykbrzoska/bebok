@@ -6,40 +6,67 @@
     </a>
     <nav class="topnav">
       @if (!uiPrefs.topbarCompact()) {
-        @for (tab of tabs.sessions(); track tab.id) {
-          <a
-            class="session-link"
-            [class.active]="tab.id === currentSessionId()"
-            [routerLink]="['/chat', tab.id]"
-            [title]="tab.title || tab.id"
-          >
-            <span class="session-title">{{ tabLabel(tab.id, tab.title) }}</span>
-            @if (tabRunning(tab.id)) {
-              <span class="spinner" [title]="t('nav.working')"></span>
-            }
-            <button
-              type="button"
-              class="tab-close"
-              (click)="closeTab($event, tab.id)"
-              [title]="t('nav.closeSession')"
+        <button
+          type="button"
+          class="tabs-arrow"
+          [disabled]="!canScrollLeft()"
+          (click)="scrollTabs(-1)"
+          aria-label="Scroll tabs left"
+          title="‹"
+        >
+          ‹
+        </button>
+        <div class="tabs-strip" #tabsStrip (scroll)="onTabsScroll()" [class.can-left]="canScrollLeft()" [class.can-right]="canScrollRight()">
+          @for (tab of tabs.sessions(); track tab.id) {
+            <a
+              class="session-link"
+              [class.active]="tab.id === currentSessionId()"
+              [routerLink]="['/chat', tab.id]"
+              [title]="tab.title || tab.id"
+              (auxclick)="closeOnAuxClick($event, tab.id)"
             >
-              ×
-            </button>
-          </a>
-        }
+              <span class="session-title">{{ tabLabel(tab.id, tab.title, tab.alias) }}</span>
+              @if (tabRunning(tab.id)) {
+                <span class="spinner" [title]="t('nav.working')"></span>
+              }
+              <button
+                type="button"
+                class="tab-close"
+                (click)="closeTab($event, tab.id)"
+                (auxclick)="$event.stopPropagation()"
+                [title]="t('nav.closeSession')"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </a>
+          }
+        </div>
+        <button
+          type="button"
+          class="tabs-arrow"
+          [disabled]="!canScrollRight()"
+          (click)="scrollTabs(1)"
+          aria-label="Scroll tabs right"
+          title="›"
+        >
+          ›
+        </button>
       } @else {
         <span class="compact-count" [title]="t('chrome.tabsHidden')">
           {{ t('chrome.sessions', { n: tabs.sessions().length }) }}
         </span>
       }
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{ t('nav.directory') }}</a>
-      <a routerLink="/explorer" routerLinkActive="active">{{ t('nav.explorer') }}</a>
-      <a routerLink="/terminal" routerLinkActive="active">{{ t('nav.terminal') }}</a>
-      <a routerLink="/debug" routerLinkActive="active">{{ t('nav.debug') }}</a>
-      <a routerLink="/settings" routerLinkActive="active">{{ t('nav.settings') }}</a>
-      <a routerLink="/config" routerLinkActive="active">{{ t('nav.config') }}</a>
+      <span class="tabs-spacer"></span>
+      <div class="main-nav">
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{ t('nav.directory') }}</a>
+        <a routerLink="/explorer" routerLinkActive="active">{{ t('nav.explorer') }}</a>
+        <a routerLink="/terminal" routerLinkActive="active">{{ t('nav.terminal') }}</a>
+        <a routerLink="/debug" routerLinkActive="active">{{ t('nav.debug') }}</a>
+        <a routerLink="/settings" routerLinkActive="active">{{ t('nav.settings') }}</a>
+        <a routerLink="/config" routerLinkActive="active">{{ t('nav.config') }}</a>
+      </div>
     </nav>
-    <span class="spacer"></span>
     <button
       type="button"
       class="chrome-toggle"

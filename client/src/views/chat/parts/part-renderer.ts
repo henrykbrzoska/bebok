@@ -19,7 +19,7 @@ import { UsagePartComponent } from './usage-part';
         <app-thinking-part [part]="part()" />
       }
       @case ('tool') {
-        <app-tool-part [part]="part()" />
+        <app-tool-part [part]="part()" [taskLinks]="taskLinks()" />
       }
       @case ('usage') {
         <app-usage-part [part]="part()" />
@@ -29,4 +29,5 @@ import { UsagePartComponent } from './usage-part';
 })
 export class PartRendererComponent {
   readonly part = input.required<Part>();
+  readonly taskLinks = input<Map<string, string>>(new Map());
 }

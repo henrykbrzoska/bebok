@@ -7,19 +7,23 @@ pub mod context;
 pub mod debug;
 pub mod error;
 pub mod event;
+pub mod llm_trace;
 pub mod permission;
 pub mod plugin;
+pub mod provider;
 pub mod session;
 pub mod store;
 pub mod util;
 
 pub use error::CoreError;
 pub use agent::{Agent, AgentCatalog, AgentInfo};
+pub use llm_trace::{LlmCall, LlmTrace, LLM_TRACE, push_llm_call};
 pub use permission::{
     Action, CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer,
     PermissionEngine, ResolveOutcome, Rule, Verdict,
 };
 pub use store::{Instance, InstanceStore, SessionState};
+pub use provider::build_provider;
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{

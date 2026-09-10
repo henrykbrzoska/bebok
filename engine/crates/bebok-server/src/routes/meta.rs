@@ -34,7 +34,7 @@ pub async fn list_agents(
         .get_or_create_instance(&q.directory)
         .await
         .map_err(|e| err_response(&e))?;
-    let agents = instance.agents.read().unwrap().list();
+    let agents = instance.agent_infos();
     Ok(Json(serde_json::json!({ "agents": agents })))
 }
 

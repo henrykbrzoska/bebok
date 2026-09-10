@@ -959,4 +959,231 @@ if __name__ == "__main__":
         std::fs::remove_dir_all(&base).ok();
     }
 
+    // ------------------------------------------------------------------
+    // Naming & alias (orchestrator sub-agent names)
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn allocate_child_name_preferred_unique() {
+        let base = std::env::temp_dir().join(format!("bebok-name-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        let name1 = session.allocate_child_name(Some("auth-flow-audit"), "code").await;
+        assert_eq!(name1, "auth-flow-audit");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn allocate_child_name_preferred_normalized() {
+        let base = std::env::temp_dir().join(format!("bebok-name-norm-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        // Uppercase + spaces + special chars -> normalized kebab-case
+        let name = session.allocate_child_name(Some("Auth Flow AUDIT!!"), "code").await;
+        assert_eq!(name, "auth-flow-audit");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn allocate_child_name_duplicate_appends_counter() {
+        let base = std::env::temp_dir().join(format!("bebok-name-dup-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        let name1 = session.allocate_child_name(Some("fix-ci"), "code").await;
+        assert_eq!(name1, "fix-ci");
+
+        let name2 = session.allocate_child_name(Some("fix-ci"), "code").await;
+        assert_eq!(name2, "fix-ci-2");
+
+        let name3 = session.allocate_child_name(Some("fix-ci"), "code").await;
+        assert_eq!(name3, "fix-ci-3");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn allocate_child_name_fallback_counter() {
+        let base = std::env::temp_dir().join(format!("bebok-name-fb-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        // No preferred name -> fallback to <role>-<n> (global counter per session)
+        let name1 = session.allocate_child_name(None, "code").await;
+        assert_eq!(name1, "code-1");
+
+        let name2 = session.allocate_child_name(None, "code").await;
+        assert_eq!(name2, "code-2");
+
+        // Counter is global; next allocation gets 3.
+        let name3 = session.allocate_child_name(None, "plan").await;
+        assert_eq!(name3, "plan-3");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn allocate_child_name_empty_preferred_falls_back() {
+        let base = std::env::temp_dir().join(format!("bebok-name-empty-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        let name = session.allocate_child_name(Some(""), "debug").await;
+        assert_eq!(name, "debug-1");
+
+        let name = session.allocate_child_name(Some("   "), "debug").await;
+        assert_eq!(name, "debug-2");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn allocate_child_name_long_preferred_truncated() {
+        let base = std::env::temp_dir().join(format!("bebok-name-long-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+
+        let long = "a-very-very-very-long-name-that-exceeds-the-limit-of-thirty-two-chars";
+        let name = session.allocate_child_name(Some(long), "code").await;
+        assert!(name.len() <= 32, "name must be <= 32 chars, got {} ({name})", name.len());
+        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn child_task_serde_uses_camel_case() {
+        let task = crate::store::session_state::ChildTask {
+            task_id: "abc-123".to_string(),
+            description: "do something".to_string(),
+            child_session_id: "uuid-child".to_string(),
+            name: "fix-ci".to_string(),
+            agent: "code".to_string(),
+        };
+        let json = serde_json::to_value(&task).unwrap();
+        assert!(json.get("taskID").is_some(), "expected camelCase taskID");
+        assert!(json.get("childSessionID").is_some(), "expected camelCase childSessionID");
+        assert!(json.get("name").is_some());
+        assert!(json.get("agent").is_some());
+        // Must NOT have snake_case keys
+        assert!(json.get("task_id").is_none());
+        assert!(json.get("child_session_id").is_none());
+    }
+
+    #[test]
+    fn session_alias_serde_compat() {
+        // Session without alias (legacy JSON) must deserialize.
+        let legacy = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "directory": "/tmp",
+            "agent": "code",
+            "created_at": 0,
+            "updated_at": 0
+        });
+        let session: crate::session::Session = serde_json::from_value(legacy).unwrap();
+        assert_eq!(session.alias, None);
+        assert_eq!(session.title, None);
+
+        // Session with alias.
+        let with_alias = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "directory": "/tmp",
+            "agent": "code",
+            "alias": "auth-flow-audit",
+            "created_at": 0,
+            "updated_at": 0
+        });
+        let session: crate::session::Session = serde_json::from_value(with_alias).unwrap();
+        assert_eq!(session.alias.as_deref(), Some("auth-flow-audit"));
+
+        // Serialization omits None alias.
+        let json = serde_json::to_value(&session).unwrap();
+        assert!(json.get("alias").is_some()); // present when set
+
+        let session_no_alias = crate::session::Session::new("/tmp", "code");
+        let json = serde_json::to_value(&session_no_alias).unwrap();
+        assert!(json.get("alias").is_none(), "None alias must be skipped in serialization");
+    }
+
+    #[test]
+    fn tool_state_completed_structured_serde_compat() {
+        // Completed without structured (legacy) must deserialize.
+        let legacy = serde_json::json!({
+            "state": "completed",
+            "input": {},
+            "output": "done",
+            "title": "task: code-1"
+        });
+        let ts: ToolState = serde_json::from_value(legacy).unwrap();
+        match &ts {
+            ToolState::Completed { structured, .. } => {
+                assert!(structured.is_none());
+            }
+            _ => panic!("expected Completed"),
+        }
+
+        // Completed with structured.
+        let with_struct = serde_json::json!({
+            "state": "completed",
+            "input": {},
+            "output": "done",
+            "title": "task: fix-ci",
+            "structured": { "taskID": "abc", "name": "fix-ci" }
+        });
+        let ts: ToolState = serde_json::from_value(with_struct).unwrap();
+        match &ts {
+            ToolState::Completed { structured, .. } => {
+                assert!(structured.is_some());
+                assert_eq!(structured.as_ref().unwrap()["taskID"], "abc");
+            }
+            _ => panic!("expected Completed"),
+        }
+    }
+
 }

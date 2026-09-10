@@ -1,6 +1,6 @@
 //! Context management (SPEC §3.9): token estimation, pruning and the
-//! deterministic compaction summary. Pruning replaces old tool outputs with
-//! `[truncated]` in the *request* only (full history stays on disk); compaction
+//! deterministic compaction summary. Pruning replaces old tool outputs with a
+//! compact digest (non-destructive: full history stays on disk); compaction
 //! produces a `[summary of messages 0..N]` marker for the internal fork.
 
 use bebok_llm::ChatMessage;
@@ -42,6 +42,56 @@ pub fn estimate_chat(chat: &[ChatMessage], system: &str) -> usize {
     total
 }
 
+/// Produce a compact digest of a tool output, preserving the most informative
+/// parts (last lines, error messages, key data) in ~100-200 tokens. This is
+/// used instead of bare `[truncated]` so the model retains semantic context
+/// about what the tool returned.
+pub fn summarize_tool_output(_tool_name: &str, output: &str) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    let line_count = lines.len();
+
+    // Error detection: if the output looks like an error, say so.
+    let is_error = output.contains("error:")
+        || output.contains("Error:")
+        || output.contains("FAILED")
+        || output.contains("panic:")
+        || output.contains("Traceback");
+
+    let prefix = if is_error {
+        "[error output]"
+    } else {
+        "[summarized]"
+    };
+
+    if line_count <= 5 {
+        // Short enough to include in full.
+        return format!("{prefix} {output}");
+    }
+
+    // For multi-line output: keep the first 3 lines (often a header/command
+    // echo) and the last 5 lines (often the actual result), with a note
+    // about what was dropped.
+    let head: Vec<&str> = lines[..3.min(line_count)].to_vec();
+    let tail_start = line_count.saturating_sub(5);
+    let tail: Vec<&str> = lines[tail_start..].to_vec();
+    let dropped = line_count - head.len() - tail.len();
+
+    let mut summary = format!("{prefix} ({line_count} lines, {dropped} dropped):\n");
+    for line in &head {
+        summary.push_str(line);
+        summary.push('\n');
+    }
+    if dropped > 0 {
+        summary.push_str(&format!("  ... ({dropped} lines omitted) ...\n"));
+    }
+    for line in &tail {
+        summary.push_str(line);
+        summary.push('\n');
+    }
+    // Remove trailing newline.
+    summary.trim_end().to_string()
+}
+
 /// A deterministic compaction summary for messages `0..end`: a `[summary of
 /// messages 0..N]` marker followed by a digest of each message's text. (An LLM
 /// summarization can replace this later without changing the fork mechanics.)
@@ -61,4 +111,34 @@ pub fn compact_summary(messages: &[Message], end: usize) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summarize_tool_output_short() {
+        let out = summarize_tool_output("bash", "hello world");
+        assert!(out.starts_with("[summarized]"));
+        assert!(out.contains("hello world"));
+    }
+
+    #[test]
+    fn summarize_tool_output_error() {
+        let out = summarize_tool_output("bash", "Error: something went wrong");
+        assert!(out.starts_with("[error output]"));
+    }
+
+    #[test]
+    fn summarize_tool_output_long() {
+        let lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
+        let output = lines.join("\n");
+        let summary = summarize_tool_output("bash", &output);
+        assert!(summary.contains("100 lines"));
+        assert!(summary.contains("line 0"));
+        // Should contain last 5 lines.
+        assert!(summary.contains("line 99"));
+        assert!(summary.contains("line 95"));
+    }
 }

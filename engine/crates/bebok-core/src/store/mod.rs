@@ -12,4 +12,4 @@ pub mod session_state;
 
 pub use instance::Instance;
 pub use instance_store::InstanceStore;
-pub use session_state::SessionState;
+pub use session_state::{ChildTask, SessionState};

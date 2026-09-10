@@ -1,6 +1,6 @@
 //! Per-session runtime state (metadata + transcript + turn lock).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -15,6 +15,18 @@ use crate::permission::{
 };
 use crate::session::persist;
 use crate::session::{Message, Session};
+
+/// Active child task info (emitted with `task.started`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChildTask {
+    #[serde(rename = "taskID")]
+    pub task_id: String,
+    pub description: String,
+    #[serde(rename = "childSessionID")]
+    pub child_session_id: String,
+    pub name: String,
+    pub agent: String,
+}
 
 /// Per-session runtime state (metadata + transcript + turn lock).
 pub struct SessionState {
@@ -36,6 +48,13 @@ pub struct SessionState {
     /// Session-scoped decision cache: identical `(tool, pattern)` is not asked
     /// twice within one session (M2).
     decision_cache: Mutex<HashMap<DecisionKey, CachedDecision>>,
+    /// Active child tasks spawned by the orchestrator via the `task` tool.
+    /// Keyed by task ID; each holds the child's cancellation token + metadata.
+    child_tasks: Mutex<HashMap<String, (CancellationToken, ChildTask)>>,
+    /// Set of allocated child names within this session (for uniqueness).
+    child_names: Mutex<HashSet<String>>,
+    /// Monotonic counter for fallback child names (`<role>-<n>`).
+    child_name_counter: Mutex<u64>,
 }
 
 impl SessionState {
@@ -60,6 +79,9 @@ impl SessionState {
             abort: Mutex::new(None),
             pending_asks: Mutex::new(HashMap::new()),
             decision_cache: Mutex::new(HashMap::new()),
+            child_tasks: Mutex::new(HashMap::new()),
+            child_names: Mutex::new(HashSet::new()),
+            child_name_counter: Mutex::new(1),
         }
     }
 
@@ -245,6 +267,138 @@ impl SessionState {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
     }
+
+    // -- child task tracking --------------------------------------------------
+
+    /// Allocate a unique child name within this session.
+    ///
+    /// Normalizes the preferred name (lowercase, replace non-alnum with `-`,
+    /// collapse/trim, truncate to 32 chars, must match `^[a-z0-9][a-z0-9-]{0,30}$`).
+    /// If empty/invalid after normalization → fallback `<role>-<n>`.
+    /// If valid but taken → append `-2`, `-3`, etc.
+    pub async fn allocate_child_name(&self, preferred: Option<&str>, role: &str) -> String {
+        use std::sync::OnceLock;
+        static CLEAN: OnceLock<regex::Regex> = OnceLock::new();
+        static VALID: OnceLock<regex::Regex> = OnceLock::new();
+        let clean = CLEAN.get_or_init(|| regex::Regex::new(r"[^a-z0-9]+").unwrap());
+        let valid = VALID.get_or_init(|| regex::Regex::new(r"^[a-z0-9][a-z0-9-]{0,30}$").unwrap());
+
+        let mut names = self.child_names.lock().await;
+        let mut counter = self.child_name_counter.lock().await;
+
+        // Try the preferred name first.
+        if let Some(pref) = preferred {
+            let normalized = {
+                let lower = pref.to_lowercase();
+                let cleaned = clean.replace_all(&lower, "-").to_string();
+                let trimmed = cleaned.trim_matches('-').to_string();
+                if trimmed.len() > 32 {
+                    trimmed[..32].trim_matches('-').to_string()
+                } else {
+                    trimmed
+                }
+            };
+            if valid.is_match(&normalized) {
+                if !names.contains(&normalized) {
+                    names.insert(normalized.clone());
+                    return normalized;
+                }
+                // Taken: try -2, -3, ...
+                let mut n = 2u64;
+                loop {
+                    let candidate = format!("{normalized}-{n}");
+                    if !names.contains(&candidate) {
+                        names.insert(candidate.clone());
+                        return candidate;
+                    }
+                    n += 1;
+                }
+            }
+        }
+
+        // Fallback: <role>-<n>, skipping taken names.
+        let role_lower = role.to_lowercase();
+        loop {
+            let candidate = format!("{role_lower}-{counter}");
+            *counter += 1;
+            if !names.contains(&candidate) {
+                names.insert(candidate.clone());
+                return candidate;
+            }
+        }
+    }
+
+    /// Register a child task's cancellation token + metadata.
+    pub async fn register_child_task(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        token: CancellationToken,
+    ) -> ChildTask {
+        let info = ChildTask {
+            task_id: task_id.to_string(),
+            description: description.to_string(),
+            child_session_id: child_session_id.to_string(),
+            name: name.to_string(),
+            agent: agent.to_string(),
+        };
+        self.child_tasks
+            .lock()
+            .await
+            .insert(task_id.to_string(), (token, info.clone()));
+        info
+    }
+
+    /// Unregister a child task (when it finishes or is aborted).
+    pub async fn unregister_child_task(&self, task_id: &str) {
+        self.child_tasks.lock().await.remove(task_id);
+    }
+
+    /// Cancel a specific child task. Returns `true` if it existed and was cancelled.
+    pub async fn abort_child_task(&self, task_id: &str) -> bool {
+        if let Some((token, _info)) = self.child_tasks.lock().await.get(task_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Snapshot of active child tasks (for listing / rendering).
+    pub async fn child_tasks_snapshot(&self) -> Vec<ChildTask> {
+        self.child_tasks
+            .lock()
+            .await
+            .values()
+            .map(|(_, info)| info.clone())
+            .collect()
+    }
+
+    /// Abort all child tasks and cancel the parent turn.
+    /// Called when any child is aborted — propagates up to the orchestrator.
+    pub async fn abort_children_and_parent(&self, reason: &str) {
+        // Cancel all child tokens.
+        {
+            let mut tasks = self.child_tasks.lock().await;
+            for (token, _) in tasks.values() {
+                token.cancel();
+            }
+            tasks.clear();
+        }
+        // Cancel the parent turn.
+        if let Some(token) = self.abort.lock().await.clone() {
+            token.cancel();
+        }
+        tracing::info!(
+            "session {}: abort_children_and_parent: {reason}",
+            self.id
+        );
+    }
+
+    // -- permission -----------------------------------------------------------
 
     /// Register a pending permission request under its unique request id.
     pub async fn register_permission_request(

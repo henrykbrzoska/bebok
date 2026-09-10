@@ -28,11 +28,19 @@ export interface ToolStateRunning {
   started_at: number;
 }
 
+export interface TaskLink {
+  taskID: string;
+  name: string;
+  agent: string;
+  childSessionID: string;
+}
+
 export interface ToolStateCompleted {
   state: 'completed';
   input: unknown;
   output: string;
   title: string;
+  structured?: TaskLink;
 }
 
 export interface ToolStateError {
@@ -89,6 +97,7 @@ export interface SessionMeta {
   /** Normalized working directory the session is bound to. */
   directory: string;
   title?: string | null;
+  alias?: string | null;
   agent: string;
   model?: string | null;
   parent?: [string, number] | null;
@@ -118,6 +127,12 @@ export interface PromptResponse {
 
 export interface AbortResponse {
   sessionID: string;
+  aborted: boolean;
+}
+
+export interface AbortTaskResponse {
+  sessionID: string;
+  taskID: string;
   aborted: boolean;
 }
 
@@ -160,6 +175,15 @@ export interface PermissionResolved {
   allowed: boolean;
 }
 
+/** Active sub-task spawned by the orchestrator (emitted via `task.started`). */
+export interface ActiveTask {
+  taskID: string;
+  description: string;
+  childSessionID: string;
+  name?: string;
+  agent?: string;
+}
+
 export type ToolStateKind = 'pending' | 'running' | 'completed' | 'error';
 
 export const TOOL_STATE_KINDS: readonly ToolStateKind[] = [
@@ -180,6 +204,10 @@ export function toolStateKind(state: ToolState): ToolStateKind {
 export interface AgentInfo {
   name: string;
   description?: string | null;
+  /**
+   * Effective model for this agent: the preset's own model if it pins one,
+   * else `config.models.<name>`, else the global `config.model`.
+   */
   model?: string | null;
   builtin: boolean;
   source?: string | null;
@@ -353,9 +381,20 @@ export interface DebugEntry {
   detail: string;
 }
 
+/** One captured LLM call: full wire request + assembled response (memory-only, last 2). */
+export interface DebugLlmCall {
+  id: number;
+  ts: number;
+  model: string;
+  request: unknown;
+  response: unknown;
+}
+
 export interface DebugLogResponse {
   entries: DebugEntry[];
   maxChars: number;
+  /** Last 2 full LLM request/response payloads (absent on old engines). */
+  calls?: DebugLlmCall[];
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,15 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   NavigationEnd,
@@ -23,7 +34,7 @@ import { LANGUAGES, type Language } from '../i18n';
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App implements OnInit, OnDestroy {
+export class App implements OnInit, AfterViewInit, OnDestroy {
   readonly events = inject(EventsStore);
   readonly activity = inject(SessionActivityStore);
   readonly tabs = inject(OpenSessionsStore);
@@ -41,6 +52,12 @@ export class App implements OnInit, OnDestroy {
   /** The chat currently open (synced from the route) - no session switching here. */
   readonly currentSessionId = signal<string | null>(null);
 
+  /** Variant 2: independent tabs-strip scroll state. */
+  readonly tabsStrip = viewChild<ElementRef<HTMLElement>>('tabsStrip');
+  readonly canScrollLeft = signal(false);
+  readonly canScrollRight = signal(false);
+  private resizeObserver: ResizeObserver | null = null;
+
   /** Custom CSS is directory-scoped: re-sync on navigation. */
   private lastCssDirectory: string | null = null;
   private readonly unsubscribeEvents: () => void;
@@ -51,6 +68,15 @@ export class App implements OnInit, OnDestroy {
         void this.customCss.resync();
       }
     });
+    // Keep arrows + active-tab visibility in sync with tabs/route.
+    effect(() => {
+      void this.tabs.sessions().length;
+      void this.currentSessionId();
+      queueMicrotask(() => {
+        this.updateScrollArrows();
+        this.scrollActiveIntoView(false);
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -58,28 +84,85 @@ export class App implements OnInit, OnDestroy {
     void this.syncCustomCss();
   }
 
+  ngAfterViewInit(): void {
+    this.updateScrollArrows();
+    this.scrollActiveIntoView(false);
+    window.addEventListener('resize', this.onWindowResize);
+    const el = this.tabsStrip()?.nativeElement ?? null;
+    if (el && typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.updateScrollArrows());
+      this.resizeObserver.observe(el);
+    }
+  }
+
   /** Per-tab spinner comes straight from the SSE activity store. */
   tabRunning(id: string): boolean {
     return this.activity.isRunning(id);
   }
 
-  /** Tab label: session title (or its id when the title is unknown). */
-  tabLabel(id: string, title: string | null): string {
-    return title?.trim() || id.slice(0, 8);
+  /** Tab label: prefer alias, then session title (or its id when both are unknown). */
+  tabLabel(id: string, title: string | null, alias?: string | null): string {
+    return alias?.trim() || title?.trim() || id.slice(0, 8);
   }
 
   closeTab(event: Event, id: string): void {
     event.preventDefault();
     event.stopPropagation();
+    this.closeTabById(id);
+  }
+
+  closeOnAuxClick(event: MouseEvent, id: string): void {
+    if (event.button === 1) {
+      event.preventDefault();
+      this.closeTabById(id);
+    }
+  }
+
+  private closeTabById(id: string): void {
     this.tabs.close(id);
     // Closing the tab of the currently viewed chat navigates home.
     if (this.currentSessionId() === id) {
       void this.router.navigate(['/']);
     }
+    queueMicrotask(() => this.updateScrollArrows());
   }
 
   toggleTopbar(): void {
     this.uiPrefs.toggleTopbar();
+  }
+
+  scrollTabs(dir: 1 | -1): void {
+    this.tabsStrip()?.nativeElement.scrollBy({ left: dir * 240, behavior: 'smooth' });
+  }
+
+  onTabsScroll(): void {
+    this.updateScrollArrows();
+  }
+
+  private readonly onWindowResize = (): void => {
+    this.updateScrollArrows();
+  };
+
+  private updateScrollArrows(): void {
+    const el = this.tabsStrip()?.nativeElement;
+    if (!el) {
+      this.canScrollLeft.set(false);
+      this.canScrollRight.set(false);
+      return;
+    }
+    const tolerance = 2;
+    this.canScrollLeft.set(el.scrollLeft > tolerance);
+    this.canScrollRight.set(el.scrollLeft + el.clientWidth < el.scrollWidth - tolerance);
+  }
+
+  private scrollActiveIntoView(smooth = true): void {
+    const strip = this.tabsStrip()?.nativeElement;
+    const active = strip?.querySelector<HTMLElement>('.session-link.active');
+    active?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: smooth ? 'smooth' : 'auto',
+    });
   }
 
   private readonly subscription = this.router.events.subscribe((ev) => {
@@ -113,6 +196,9 @@ export class App implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.unsubscribeEvents();
     this.subscription.unsubscribe();
+    window.removeEventListener('resize', this.onWindowResize);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
   }
 
   setLanguage(lang: Language): void {

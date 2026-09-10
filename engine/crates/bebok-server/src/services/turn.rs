@@ -9,6 +9,8 @@
 //! seam for config/plugin editable prompts (Task 2): overrides hook in at
 //! `assemble_prompt` without touching the handler.
 
+use std::sync::Arc;
+
 use axum::http::StatusCode;
 use axum::Json;
 use tokio_util::sync::CancellationToken;
@@ -16,11 +18,89 @@ use uuid::Uuid;
 
 use bebok_core::agent::run_turn;
 use bebok_core::error::CoreError;
+use bebok_core::store::SessionState;
 
 use super::provider_factory::build_provider;
 use crate::error::ApiError;
 use crate::routes::session::PromptBody;
 use crate::state::AppState;
+
+/// RAII guard that owns the turn slot.
+///
+/// Constructed via [`TurnSlot::new`] (returns `None` if the session is
+/// already busy). When dropped, the guard calls [`SessionState::end_turn`]
+/// — so early `?` returns after the claim can never leak the slot.
+/// Call [`TurnSlot::disarm`] to transfer ownership of the release to a
+/// long-lived task (e.g. the `tokio::spawn`ed turn).
+struct TurnSlot {
+    session: Arc<SessionState>,
+    armed: bool,
+}
+
+impl TurnSlot {
+    /// Try to claim the turn slot. Returns `None` if busy.
+    fn new(session: Arc<SessionState>) -> Option<Self> {
+        if session.try_begin_turn() {
+            Some(Self {
+                session,
+                armed: true,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Prevent the Drop impl from releasing the slot — ownership is
+    /// transferred to the caller (typically the spawned background task).
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TurnSlot {
+    fn drop(&mut self) {
+        if self.armed {
+            self.session.end_turn();
+        }
+    }
+}
+
+/// Best-effort drop guard held across `run_turn` inside the spawned task.
+///
+/// If `run_turn` panics this guard fires and releases the turn slot so the
+/// session is not permanently wedged. On the normal (non-panic) path the
+/// explicit `end_turn` + `clear_abort` run first and the guard is already
+/// disarmed by being dropped *after* (or just a no-op second release).
+///
+/// `clear_abort` is async and cannot be called from a `Drop` impl, so we
+/// only release the sync slot here — the normal path handles `clear_abort`.
+struct ReleaseOnDrop {
+    session: Arc<SessionState>,
+    active: bool,
+}
+
+impl ReleaseOnDrop {
+    fn new(session: Arc<SessionState>) -> Self {
+        Self {
+            session,
+            active: true,
+        }
+    }
+
+    /// Cancel the guard without releasing the slot (used on the happy path
+    /// right before the explicit `end_turn` call).
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        if self.active {
+            self.session.end_turn();
+        }
+    }
+}
 
 /// Orchestrate one prompt turn; returns the `202 running` payload.
 pub async fn prompt_turn(
@@ -35,9 +115,11 @@ pub async fn prompt_turn(
         .map_err(ApiError::from)?;
 
     // One turn per session: synchronously claim the slot -> 409 otherwise.
-    if !session.try_begin_turn() {
-        return Err(ApiError::conflict("session busy: a turn is already running"));
-    }
+    // TurnSlot is an RAII guard: if any of the fallible steps below return
+    // early the slot is automatically released.
+    let mut slot = TurnSlot::new(session.clone()).ok_or_else(|| {
+        ApiError::conflict("session busy: a turn is already running")
+    })?;
 
     let instance = state
         .store
@@ -103,11 +185,19 @@ pub async fn prompt_turn(
             .with_properties(serde_json::json!({ "running": true })),
     );
 
+    // Transfer ownership of the turn slot to the background task. After
+    // disarm, the Drop impl on `slot` becomes a no-op.
+    slot.disarm();
+
     let task_state = session.clone();
     let store = state.store.clone();
     tokio::spawn(async move {
         // Hold the turn mutex for the whole turn (flag already claimed above).
         let _guard = task_state.turn.lock().await;
+
+        // Safety net: if run_turn panics the turn slot is still released.
+        let mut release = ReleaseOnDrop::new(task_state.clone());
+
         let result = run_turn(
             task_state.clone(),
             agent,
@@ -119,8 +209,13 @@ pub async fn prompt_turn(
             &model,
         )
         .await;
+
+        // Happy path: disarm the panic guard, then do the normal teardown
+        // (clear_abort is async so it can't live in Drop).
+        release.disarm();
         task_state.clear_abort().await;
         task_state.end_turn();
+
         if let Err(e) = result {
             if abort.is_cancelled() {
                 tracing::info!("turn aborted for session {id}: {e}");

@@ -129,6 +129,7 @@ dependencies = [
  "futures",
  "globset",
  "notify",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

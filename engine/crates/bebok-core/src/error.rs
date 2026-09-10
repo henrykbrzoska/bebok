@@ -14,6 +14,10 @@ pub enum CoreError {
     Llm(#[from] LlmError),
     #[error("tool not found: {0}")]
     ToolNotFound(String),
+    #[error("bad request: {0}")]
+    BadRequest(String),
+    #[error("invalid provider configuration: {0}")]
+    ProviderConfig(String),
     #[error("{0}")]
     Other(String),
 }

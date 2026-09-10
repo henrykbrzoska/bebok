@@ -1,8 +1,10 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
 import {
   Part,
+  TaskLink,
   ToolPart,
   ToolState,
   ToolStateCompleted,
@@ -13,11 +15,23 @@ import { I18nService } from '../../../i18n/i18n.service';
 
 @Component({
   selector: 'app-tool-part',
-  imports: [DiffViewComponent],
+  imports: [DiffViewComponent, RouterLink],
   template: `
     <div class="tool" [class.closed]="isClosed()">
       <div class="tool-head">
         <span class="tool-name">{{ name() }}</span>
+        @if (isTask()) {
+          <span class="badge delegation">{{ t('tool.delegation') }}</span>
+          @if (taskLink()) {
+            <a
+              class="task-target muted"
+              [routerLink]="['/chat', taskLink()!]"
+              [title]="t('tool.openSubagent')"
+            >{{ taskName() }}</a>
+          } @else {
+            <span class="task-target muted">{{ taskName() }}</span>
+          }
+        }
         <span class="badge state-{{ kind() }}">{{ kind() }}</span>
         <button class="expand" (click)="detailsOpen.set(!detailsOpen())">
           {{ detailsOpen() ? t('tool.collapse') : t('tool.expand') }}
@@ -107,6 +121,22 @@ import { I18nService } from '../../../i18n/i18n.service';
     .badge.state-pending {
       color: var(--fg-muted);
     }
+    .badge.delegation {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(63, 111, 224, 0.12);
+    }
+    .task-target {
+      font-size: 12px;
+      font-weight: 600;
+    }
+    a.task-target {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a.task-target:hover {
+      text-decoration: underline;
+    }
     .expand {
       margin-left: auto;
       background: none;
@@ -160,6 +190,8 @@ export class ToolPartComponent {
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
+  /** Task name/ID → childSessionID map, passed down from the chat view. */
+  readonly taskLinks = input<Map<string, string>>(new Map());
   readonly detailsOpen = signal(true);
 
   private readonly toolPart = computed(() => this.part() as ToolPart);
@@ -167,6 +199,39 @@ export class ToolPartComponent {
 
   readonly name = computed(() => this.toolPart().name);
   readonly kind = computed(() => this.state().state);
+  /** True for the sub-agent delegation tool (`task`). */
+  readonly isTask = computed(() => this.toolPart().name === 'task');
+
+  /** Display name for the delegated task (from structured metadata or input). */
+  readonly taskName = computed(() => {
+    const completed = this.completed();
+    const structured = completed?.structured as TaskLink | undefined;
+    if (structured?.name) {
+      return structured.name;
+    }
+    const input = this.state().input as Record<string, unknown> | undefined;
+    const name = input?.['name'];
+    if (typeof name === 'string' && name.trim()) {
+      return name.trim();
+    }
+    const agent = input?.['agent'];
+    if (typeof agent === 'string' && agent.trim()) {
+      return agent.trim();
+    }
+    return structured?.agent ?? 'code';
+  });
+
+  /** Child session ID for a task link (from structured metadata or the parent map). */
+  readonly taskLink = computed<string | null>(() => {
+    const completed = this.completed();
+    const structured = completed?.structured as TaskLink | undefined;
+    if (structured?.childSessionID) {
+      return structured.childSessionID;
+    }
+    // Fall back to the parent-provided name→id map.
+    const name = this.taskName();
+    return this.taskLinks().get(name) ?? null;
+  });
   readonly isClosed = computed(
     () => this.state().state === 'completed' || this.state().state === 'error',
   );

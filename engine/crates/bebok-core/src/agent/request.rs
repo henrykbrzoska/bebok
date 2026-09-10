@@ -6,6 +6,8 @@
 //! text / messages before the request is returned, without touching the
 //! persisted transcript.
 
+use std::collections::HashSet;
+
 use bebok_llm::{ChatMessage, ChatRequest, ChatRole, Thinking, ToolDef, ToolResult};
 use bebok_tools::ToolRegistry;
 
@@ -114,6 +116,13 @@ impl<'a> RequestBuilder<'a> {
             return Err(CoreError::Other("empty conversation".to_string()));
         }
 
+        // --- Lazy tool definitions (token saving #7) ---
+        // Count which tools the model has actually called in this session. Tools
+        // that have never been called get a short stub description; tools that
+        // were used get the full description. This saves ~100-300 tokens per tool
+        // for unused tools (e.g. fs_tree, fs_file, debug_log, mcp list are
+        // rarely needed in a simple code-editing session).
+        let used_tools = collect_used_tools(&messages);
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -122,16 +131,26 @@ impl<'a> RequestBuilder<'a> {
                 self.agent.tools.is_empty()
                     || self.agent.tools.iter().any(|n| n == t.name())
             })
-            .map(|t| ToolDef {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                input_schema: t.parameters_schema(),
+            .map(|t| {
+                let used = used_tools.contains(t.name());
+                ToolDef {
+                    name: t.name().to_string(),
+                    description: if used {
+                        t.description().to_string()
+                    } else {
+                        // Short stub: just name + one-liner.
+                        let desc = t.description();
+                        let short: String = desc.chars().take(80).collect();
+                        format!("{short} [available; call to use]")
+                    },
+                    input_schema: t.parameters_schema(),
+                }
             })
             .collect();
 
         // Context management (§3.9): if the transcript exceeds the token budget,
-        // prune old tool outputs down to a `[truncated]` marker (non-destructive:
-        // the full history stays on disk).
+        // prune old tool outputs down to a compact digest (non-destructive: the
+        // full history stays on disk).
         let budget = self.state.config_snapshot().context_budget;
         let chat = prune_for_budget(chat, &self.agent.prompt, budget);
 
@@ -177,32 +196,77 @@ pub async fn build_request(
         .await
 }
 
-/// Replace old tool results with `[truncated]` (oldest first) until the built
-/// request fits the token budget. Never mutates the persisted transcript.
+/// Collect the set of tool names that have been used in the session.
+/// Used for lazy tool definitions: previously-used tools get full descriptions,
+/// unused tools get short stubs.
+fn collect_used_tools(messages: &[crate::session::Message]) -> HashSet<String> {
+    let mut used = HashSet::new();
+    for msg in messages {
+        for part in &msg.parts {
+            if let crate::session::Part::Tool { name, .. } = part {
+                used.insert(name.clone());
+            }
+        }
+    }
+    used
+}
+
+/// Replace old tool results with a compact digest (oldest first) until the
+/// built request fits the token budget. Never mutates the persisted transcript.
+///
+/// Instead of bare `[truncated]`, uses `summarize_tool_output` to preserve
+/// the first/last lines and error markers so the model retains context about
+/// what each tool returned.
 pub fn prune_for_budget(
     mut chat: Vec<ChatMessage>,
     system: &str,
     budget: usize,
 ) -> Vec<ChatMessage> {
-    let truncated_tokens = crate::context::estimate_tokens("[truncated]");
     let mut tokens = crate::context::estimate_chat(&chat, system);
     if tokens <= budget {
         return chat;
     }
-    'outer: for i in 0..chat.len() {
-        for j in 0..chat[i].tool_results.len() {
-            if chat[i].tool_results[j].content == "[truncated]" {
-                continue;
-            }
-            let before = crate::context::estimate_tokens(&chat[i].tool_results[j].content);
-            chat[i].tool_results[j].content = "[truncated]".to_string();
-            tokens = tokens.saturating_sub(before) + truncated_tokens;
-            if tokens <= budget {
-                break 'outer;
+
+    // Collect indices of tool results that can be pruned (oldest first).
+    let mut candidates: Vec<(usize, usize)> = Vec::new(); // (message_idx, result_idx)
+    for (i, msg) in chat.iter().enumerate() {
+        for (j, tr) in msg.tool_results.iter().enumerate() {
+            if tr.content != "[truncated]" {
+                candidates.push((i, j));
             }
         }
     }
+
+    for (i, j) in candidates {
+        if tokens <= budget {
+            break;
+        }
+        let old_content = &chat[i].tool_results[j].content;
+        let before_tokens = crate::context::estimate_tokens(old_content);
+
+        // Produce a compact digest that preserves semantic context.
+        let tool_name = extract_tool_name(&chat, i, &chat[i].tool_results[j].tool_use_id);
+        let digest = crate::context::summarize_tool_output(&tool_name, old_content);
+        let after_tokens = crate::context::estimate_tokens(&digest);
+
+        chat[i].tool_results[j].content = digest;
+        tokens = tokens.saturating_sub(before_tokens) + after_tokens;
+    }
+
     chat
+}
+
+/// Find the tool name for a given tool_use_id in the chat history.
+fn extract_tool_name(chat: &[ChatMessage], result_msg_idx: usize, tool_use_id: &str) -> String {
+    // The tool call is in the assistant message *before* the results message.
+    for i in (0..=result_msg_idx).rev() {
+        for tc in &chat[i].tool_calls {
+            if tc.id == tool_use_id {
+                return tc.name.clone();
+            }
+        }
+    }
+    "unknown".to_string()
 }
 
 /// Convert a provider message into the (lightweight) plugin request view.

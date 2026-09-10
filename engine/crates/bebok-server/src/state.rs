@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use bebok_core::{DebugLog, InstanceStore};
+use bebok_core::{DebugLog, InstanceStore, LlmTrace};
 #[cfg(not(target_os = "android"))]
 use bebok_pty::PtyManager;
 
@@ -16,4 +16,5 @@ pub struct AppState {
     #[cfg(not(target_os = "android"))]
     pub ptys: Arc<PtyManager>,
     pub debug: Arc<DebugLog>,
+    pub llm_trace: Arc<LlmTrace>,
 }

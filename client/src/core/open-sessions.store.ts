@@ -10,6 +10,7 @@ import { Injectable, signal } from '@angular/core';
 export interface OpenSession {
   id: string;
   title: string | null;
+  alias?: string | null;
 }
 
 const STORAGE_KEY = 'bebok.openSessions';
@@ -31,6 +32,7 @@ function load(): OpenSession[] {
         return {
           id: typeof o['id'] === 'string' ? o['id'] : '',
           title: typeof o['title'] === 'string' ? o['title'] : null,
+          alias: typeof o['alias'] === 'string' ? o['alias'] : null,
         };
       })
       .filter((s) => s.id !== '')
@@ -52,19 +54,25 @@ function persist(list: OpenSession[]): void {
 export class OpenSessionsStore {
   readonly sessions = signal<OpenSession[]>(load());
 
-  /** Open (or move to front) a tab; optionally set its title. */
-  open(id: string, title: string | null = null): void {
+  /** Open (or move to front) a tab; optionally set its title and alias. */
+  open(id: string, title: string | null = null, alias: string | null = null): void {
     if (!id) {
       return;
     }
     this.sessions.update((list) =>
-      persisting([{ id, title }, ...list.filter((s) => s.id !== id)].slice(0, MAX_OPEN)),
+      persisting([{ id, title, alias }, ...list.filter((s) => s.id !== id)].slice(0, MAX_OPEN)),
     );
   }
 
   setTitle(id: string, title: string | null): void {
     this.sessions.update((list) =>
       persisting(list.map((s) => (s.id === id ? { ...s, title } : s))),
+    );
+  }
+
+  setAlias(id: string, alias: string | null): void {
+    this.sessions.update((list) =>
+      persisting(list.map((s) => (s.id === id ? { ...s, alias } : s))),
     );
   }
 

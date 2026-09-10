@@ -12,7 +12,7 @@ use axum::middleware;
 #[cfg(not(target_os = "android"))]
 use bebok_pty::PtyManager;
 
-use bebok_core::{DebugLog, InstanceStore};
+use bebok_core::{DebugLog, InstanceStore, LLM_TRACE};
 
 use crate::cli::BindSpec;
 use crate::cors::cors_layer;
@@ -22,7 +22,7 @@ use crate::state::AppState;
 
 /// Assemble shared state + the full router (same wiring as the old `main`).
 pub fn build_app() -> (Router, AppState) {
-    let store = Arc::new(InstanceStore::new());
+    let store = InstanceStore::new();
 
     // Single debug.log file, cleared on startup (fresh every app open).
     let debug = Arc::new(DebugLog::new(
@@ -52,11 +52,17 @@ pub fn build_app() -> (Router, AppState) {
         });
     }
 
+    // LLM trace: last 2 request/response payloads (memory-only, global).
+    // The LazyLock global is the single source of truth; turn.rs pushes there,
+    // and both AppState and the debug route read from the same Arc.
+    let llm_trace = LLM_TRACE.clone();
+
     let state = AppState {
         store,
         #[cfg(not(target_os = "android"))]
         ptys: Arc::new(PtyManager::new()),
         debug,
+        llm_trace,
     };
 
     let app = build_api_router()

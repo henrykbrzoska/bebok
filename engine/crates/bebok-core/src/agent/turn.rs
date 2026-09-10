@@ -22,10 +22,12 @@ use super::preset::Agent;
 use super::request::RequestBuilder;
 use crate::error::Result;
 use crate::event::{Event, EventBus};
+use crate::llm_trace::{LlmCall, LLM_TRACE, push_llm_call};
 use crate::permission::{CompiledLayer, PermissionEngine};
 use crate::plugin::{Hook, PluginHost, TurnHook};
-use crate::session::Message;
+use crate::session::{Message, Role};
 use crate::store::SessionState;
+use crate::util::now_ms;
 
 /// Orchestrates one full turn (owns everything `run_turn` took as args).
 pub struct TurnRunner {
@@ -89,6 +91,8 @@ impl TurnRunner {
 
         loop {
             if abort.is_cancelled() {
+                // Persist a clear abort message so the transcript is informative.
+                persist_abort_message(&state, &bus, &agent.name, &model).await;
                 break;
             }
 
@@ -103,6 +107,12 @@ impl TurnRunner {
             let mut req = builder.build().await?;
             // Plugin hook: inspect / mutate the request before it is sent.
             builder.apply_request_hook(&mut req).await;
+
+            // ── LLM trace: capture the full request body before it is consumed ──
+            let trace_ts = now_ms();
+            let trace_model = model.clone();
+            let trace_request: serde_json::Value = serde_json::to_value(&req)
+                .unwrap_or_else(|_| serde_json::json!({"_serialize_error": true}));
 
             bus.publish(
                 Event::new("debug.log", state.directory(), &state.id().to_string()).with_properties(
@@ -124,6 +134,15 @@ impl TurnRunner {
             let mut stream = match provider.stream(req).await {
                 Ok(s) => s,
                 Err(err) => {
+                    // ── LLM trace: record the failed call ──
+                    push_llm_call(LlmCall {
+                        id: LLM_TRACE.next_id(),
+                        ts: trace_ts,
+                        model: trace_model,
+                        request: trace_request,
+                        response: serde_json::json!({ "error": err.to_string() }),
+                    });
+
                     // A provider-level failure (e.g. a model that refuses tool
                     // use, invalid request, 5xx): note it in the project config so
                     // repeat offenders can be handled/filtered later.
@@ -226,9 +245,28 @@ impl TurnRunner {
             // Drop the stream so the HTTP connection closes promptly.
             drop(stream);
 
+            // ── LLM trace: record the completed call ──
+            {
+                let messages = state.messages.read().await;
+                if let Some(assistant_msg) = messages.get(assistant_idx) {
+                    push_llm_call(LlmCall {
+                        id: LLM_TRACE.next_id(),
+                        ts: trace_ts,
+                        model: trace_model,
+                        request: trace_request,
+                        response: serde_json::json!({
+                            "model": model,
+                            "message": assistant_msg,
+                        }),
+                    });
+                }
+            }
+
             if abort.is_cancelled() {
-                // Persist whatever streamed so far (crash-safe transcript).
+                // Persist whatever streamed so far (crash-safe transcript),
+                // then add a clear abort marker.
                 state.persist_message_at(assistant_idx).await;
+                persist_abort_message(&state, &bus, &agent.name, &model).await;
                 break;
             }
 
@@ -306,7 +344,7 @@ impl TurnRunner {
         // surface through `session.updated` events to the observers).
         if hooks.has_plugins().await {
             let mut payload = TurnHook {
-                ok: true,
+                ok: !abort.is_cancelled(),
                 messages: state.messages_snapshot().await.len(),
             };
             hooks.run_hook(Hook::TURN_END, &mut payload).await;
@@ -315,6 +353,43 @@ impl TurnRunner {
         emit_session(&bus, &state, "session.updated");
         Ok(())
     }
+}
+
+/// Persist a clear "Turn aborted" assistant message so the transcript is
+/// informative when a user (or child task abort) cancels the turn.
+async fn persist_abort_message(
+    state: &Arc<SessionState>,
+    bus: &EventBus,
+    agent_name: &str,
+    model: &str,
+) {
+    // Only add an abort marker if there isn't already a recent assistant
+    // message that ended with an abort indicator (avoid duplicates).
+    let already_marked = {
+        let messages = state.messages.read().await;
+        messages
+            .last()
+            .map(|m| {
+                m.role == Role::Assistant
+                    && m.text_content().contains("[Turn aborted")
+            })
+            .unwrap_or(false)
+    };
+    if already_marked {
+        return;
+    }
+
+    let idx = {
+        let mut messages = state.messages.write().await;
+        let mut msg = Message::assistant_with(agent_name, model);
+        msg.append_text("[Turn aborted by user]");
+        let idx = messages.len();
+        messages.push(msg);
+        idx
+    };
+    state.note_message_index(idx);
+    state.persist_message_at(idx).await;
+    emit_message(bus, state, "message.updated", idx);
 }
 
 /// Compat shim: the old 8-argument entry point delegates to `TurnRunner`.

@@ -5,6 +5,7 @@
  */
 
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
@@ -27,6 +28,7 @@ interface Totals {
 
 @Component({
   selector: 'app-session-sidebar',
+  imports: [RouterLink],
   template: `
     @if (uiPrefs.sidebarVisible()) {
       <aside class="sidebar" [style.width.px]="uiPrefs.sidebarWidth()">
@@ -83,6 +85,27 @@ interface Totals {
           <ul class="files">
             @for (file of filesChanged(); track file) {
               <li class="mono small">{{ file }}</li>
+            }
+          </ul>
+        </div>
+
+        <div class="block">
+          <div class="block-title">{{ t('chrome.subagents') }}</div>
+          @if (subagents().length === 0) {
+            <div class="muted small">{{ t('chrome.noSubagents') }}</div>
+          }
+          <ul class="subagents">
+            @for (child of subagents(); track child.id) {
+              <li>
+                <a
+                  class="subagent"
+                  [routerLink]="['/chat', child.id]"
+                  [title]="child.alias || child.title || child.id"
+                >
+                  <span class="mono small">{{ child.agent }}</span>
+                  <span class="subagent-title">{{ child.alias || child.title || shortId(child.id) }}</span>
+                </a>
+              </li>
             }
           </ul>
         </div>
@@ -240,6 +263,36 @@ interface Totals {
       border-color: var(--accent);
       background: rgba(63, 111, 224, 0.12);
     }
+    .subagents {
+      list-style: none;
+      margin: 4px 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .subagent {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 6px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      color: inherit;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+    .subagent:hover {
+      background: var(--bg-raised);
+      border-color: var(--border);
+    }
+    .subagent-title {
+      font-size: 11.5px;
+      color: var(--fg-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .toggle {
       display: inline-flex;
       align-items: center;
@@ -285,6 +338,8 @@ export class SessionSidebarComponent {
   readonly filterModel = input<string | null>(null);
   readonly filterModelChange = output<string | null>();
 
+  /** Sub-agent sessions delegated from this session (via the `task` tool). */
+  readonly subagents = signal<SessionMeta[]>([]);
   readonly mcp = signal<McpStatus[]>([]);
   readonly skills = signal<ResolvedSkill[]>([]);
   readonly yolo = signal(false);
@@ -298,6 +353,37 @@ export class SessionSidebarComponent {
         void this.load(dir);
       }
     });
+    // Sub-agent sessions are created during a turn: refresh when it settles.
+    effect(() => {
+      const meta = this.meta();
+      const running = this.running();
+      if (meta?.directory) {
+        void this.loadSubagents(meta.id, meta.directory, running);
+      }
+    });
+  }
+
+  /** List child sessions whose `parent` points at the current session. */
+  private async loadSubagents(
+    parentId: string,
+    dir: string,
+    running: boolean,
+  ): Promise<void> {
+    void running;
+    try {
+      const sessions = await this.engine.listSessions(dir);
+      if (this.meta()?.id !== parentId) {
+        return;
+      }
+      this.subagents.set(sessions.filter((s) => s.parent?.[0] === parentId));
+    } catch {
+      /* sub-agent list is non-critical */
+    }
+  }
+
+  /** First 8 chars of a UUID (title fallback for sub-agent links). */
+  shortId(id: string): string {
+    return id.slice(0, 8);
   }
 
   /** Drag the sidebar edge to resize (width persisted to localStorage). */

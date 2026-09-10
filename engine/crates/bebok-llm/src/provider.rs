@@ -133,7 +133,7 @@ impl Thinking {
 }
 
 /// The request the agent loop builds for a turn.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
     pub model: String,
     pub system: String,

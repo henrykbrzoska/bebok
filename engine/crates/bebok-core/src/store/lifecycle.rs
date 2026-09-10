@@ -78,7 +78,7 @@ impl InstanceStore {
         {
             let mut messages = state.messages.write().await;
             if keep >= messages.len() {
-                return Err(CoreError::Other(
+                return Err(CoreError::BadRequest(
                     "nothing to truncate: message index is beyond the transcript".into(),
                 ));
             }

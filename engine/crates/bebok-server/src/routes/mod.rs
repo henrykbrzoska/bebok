@@ -34,6 +34,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/session/{id}/message", get(session::get_messages))
         .route("/session/{id}/prompt", post(session::prompt))
         .route("/session/{id}/abort", post(session::abort))
+        .route("/session/{id}/task/{taskID}/abort", post(session::abort_task))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/truncate", post(session::truncate_session))

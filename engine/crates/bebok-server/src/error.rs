@@ -5,7 +5,7 @@
 //! - `202` prompt accepted (returned directly, not an error)
 //! - `409` session busy (`CoreError::SessionBusy`)
 //! - `404` unknown session / ask id / pty / provider
-//! - `400` bad request bodies / fs errors / compact preconditions
+//! - `400` bad request bodies / truncate preconditions / provider misconfig / fs errors / compact preconditions
 //! - `403` invalid PTY ticket
 //! - `502` provider `list_models` failure
 //! - `500` everything else (pty spawn, config write, …)
@@ -57,6 +57,8 @@ impl ApiError {
             CoreError::SessionNotFound(_) => Self::NotFound(e.to_string()),
             CoreError::SessionBusy => Self::Conflict(e.to_string()),
             CoreError::ToolNotFound(_) => Self::BadRequest(e.to_string()),
+            CoreError::BadRequest(_) => Self::BadRequest(e.to_string()),
+            CoreError::ProviderConfig(_) => Self::BadRequest(e.to_string()),
             _ => Self::Internal(e.to_string()),
         }
     }

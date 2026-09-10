@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Weak;
 
 use bebok_mcp::{McpManager, McpServerSpec};
 use bebok_tools::{Runtimes, ToolRegistry, builtin_tools};
@@ -30,16 +31,33 @@ pub struct InstanceStore {
     pub(crate) sessions: RwLock<HashMap<Uuid, Arc<SessionState>>>,
     /// Metadata of every known session (startup scan + created).
     pub(crate) meta: RwLock<HashMap<Uuid, Session>>,
+    /// Weak self-reference, set once via `Arc::new_cyclic`. Lets the per-instance
+    /// `task` tool reach the store (child sessions, bus) without an ownership
+    /// cycle (store -> instance -> tools -> task tool -> store).
+    pub(crate) self_weak: std::sync::OnceLock<Weak<InstanceStore>>,
 }
 
 impl InstanceStore {
-    /// Create the store and run the startup repair pass.
-    pub fn new() -> Self {
+    /// Create the shared store and run the startup repair pass.
+    ///
+    /// Returns an `Arc` (built with `Arc::new_cyclic`) so the store can give the
+    /// per-instance `task` tool a `Weak<InstanceStore>` back-reference without
+    /// creating an ownership cycle.
+    pub fn new() -> Arc<Self> {
         Self::with_data_dir(data_root())
     }
 
-    /// Create the store rooted at a custom data directory (tests / embedding).
-    pub fn with_data_dir(data_dir: PathBuf) -> Self {
+    /// Create the shared store rooted at a custom data directory.
+    pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
+        Arc::new_cyclic(|weak| {
+            let store = Self::build_with(data_dir);
+            let _ = store.self_weak.set(weak.clone());
+            store
+        })
+    }
+
+    /// Build the store value (shared constructors wrap it in `Arc`).
+    fn build_with(data_dir: PathBuf) -> Self {
         let recovered = persist::repair(&data_dir);
         let meta: HashMap<Uuid, Session> =
             recovered.into_iter().map(|s| (s.id, s)).collect();
@@ -50,6 +68,7 @@ impl InstanceStore {
             instances: RwLock::new(HashMap::new()),
             sessions: RwLock::new(HashMap::new()),
             meta: RwLock::new(meta),
+            self_weak: std::sync::OnceLock::new(),
         }
     }
 
@@ -100,6 +119,14 @@ impl InstanceStore {
                 return Ok(inst.clone());
             }
             instances.insert(normalized.clone(), instance.clone());
+        }
+
+        // Register the sub-agent `task` tool. It needs the store back-reference
+        // (set once via `Arc::new_cyclic`); a plain (non-shared) store skips it.
+        if let Some(weak) = self.self_weak.get() {
+            instance.tools.register_tool(Arc::new(
+                crate::agent::task_tool::TaskTool::new(weak.clone()),
+            ));
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -208,6 +235,28 @@ impl InstanceStore {
         Ok(state)
     }
 
+    /// Create an isolated child session for a delegated sub-agent.
+    ///
+    /// The child is registered like any other session (it shows up in the GUI
+    /// and its permission prompts can be answered) and tagged `parent` so the
+    /// lineage is visible. Used by the `task` tool.
+    pub async fn create_subagent_session(
+        &self,
+        parent: &SessionState,
+        agent: &str,
+        model: Option<&str>,
+        alias: Option<&str>,
+    ) -> Result<Arc<SessionState>> {
+        let instance = self.get_or_create_instance(parent.directory()).await?;
+        let parent_id = parent.id();
+        let parent_len = parent.messages_snapshot().await.len();
+        let mut session = Session::new(parent.directory(), agent);
+        session.model = model.map(str::to_string);
+        session.alias = alias.map(str::to_string);
+        session.parent = Some((parent_id, parent_len.saturating_sub(1)));
+        self.spawn_session(&instance, session).await
+    }
+
     /// List session metadata for a directory (restart-safe: from the scan).
     pub async fn list_sessions(&self, directory: &str) -> Vec<Session> {
         let normalized = normalize_path(Path::new(directory));
@@ -239,6 +288,6 @@ impl InstanceStore {
 
 impl Default for InstanceStore {
     fn default() -> Self {
-        Self::new()
+        Self::build_with(data_root())
     }
 }

@@ -1,4 +1,4 @@
-# AGENTS.md — Bebok (agent-rs)
+# AGENTS.md — Bebok
 
 Orientation guide for anyone (human or agent) working in this repository. It
 captures the things that are *not* obvious from a first skim of the code.

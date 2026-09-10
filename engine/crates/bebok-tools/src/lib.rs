@@ -6,6 +6,7 @@
 
 pub mod bash;
 pub mod docker;
+pub mod edit_file;
 pub mod explorer;
 pub mod glob_tool;
 pub mod grep;
@@ -30,6 +31,7 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(read_file::ReadFile),
         Arc::new(write_file::WriteFile),
+        Arc::new(edit_file::EditFile),
         Arc::new(bash::Bash),
         Arc::new(glob_tool::Glob),
         Arc::new(grep::Grep),

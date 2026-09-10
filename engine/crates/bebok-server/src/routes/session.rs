@@ -1,5 +1,5 @@
 //! Session routes (Facade leaves; thin `extract -> service -> json`).
-//! Covers `/session*` incl. prompt/abort/permission/export/compact/truncate.
+//! Covers `/session*` incl. prompt/abort/task-abort/permission/export/compact/truncate.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -198,6 +198,66 @@ pub async fn abort(
     })))
 }
 
+/// `POST /session/{id}/task/{taskID}/abort` -> cancel a specific child task.
+///
+/// When a child task is aborted, the cancellation propagates to the parent's
+/// abort token — the entire orchestrator turn is cancelled so the model can
+/// decide what to do next.
+pub async fn abort_task(
+    State(state): State<AppState>,
+    Path((id, task_id)): Path<(Uuid, String)>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let session = state
+        .store
+        .open_session(id)
+        .await
+        .map_err(|e| err_response(&e))?;
+
+    // Cancel the child token. This triggers the child's run_turn to break out
+    // and return, which causes the task tool to emit task.ended with
+    // status=aborted. The child's abort token was created as child_token() of
+    // the parent, so cancelling it also marks the parent as cancelled — the
+    // parent turn loop breaks and persists "[Turn aborted by user]".
+    //
+    // However, for the orchestrator to ask the user "what to do next?", we
+    // need the parent turn to *not* be fully dead. The child_token() of the
+    // parent's abort already handles this: when the child is cancelled, the
+    // parent sees is_cancelled() = true and breaks out of its loop. The
+    // services/turn.rs post-turn handler then sets running = false so the
+    // user can send a new prompt.
+    let cancelled = session.abort_child_task(&task_id).await;
+
+    if cancelled {
+        // Emit a descriptive event so the client knows which task was aborted.
+        state
+            .store
+            .bus()
+            .publish(bebok_core::event::Event::new(
+                "task.aborted",
+                session.directory(),
+                &id.to_string(),
+            )
+            .with_properties(serde_json::json!({
+                "taskID": task_id,
+            })));
+    }
+
+    state
+        .store
+        .bus()
+        .publish(bebok_core::event::Event::new(
+            "session.updated",
+            session.directory(),
+            &id.to_string(),
+        ));
+
+    Ok(Json(serde_json::json!({
+        "sessionID": id.to_string(),
+        "taskID": task_id,
+        "aborted": cancelled,
+    })))
+}
+
 /// `POST /session/{id}/permission/{requestID}` -> resolve an `ask`.
 ///
 /// Body: `{ "decision": "allow"|"deny", "always": bool }`. The first client to
@@ -263,7 +323,7 @@ pub async fn export_session(
 
 /// `POST /session/{id}/compact` -> an internal fork: a new session whose
 /// transcript is `[summary of messages 0..N]` + the tail. The original session
-/// is untouched on disk (full history still available via `export`).
+/// is untouched on disk ("show full history" still available via `export`).
 pub async fn compact_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -351,4 +411,3 @@ pub fn compact_cutoff(messages: &[bebok_core::session::Message], budget: usize) 
     }
     n.saturating_sub(keep)
 }
-

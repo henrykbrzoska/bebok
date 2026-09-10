@@ -46,6 +46,9 @@ export const en = {
   'chat.agent': 'Agent',
   'chat.model': 'Model',
   'chat.abort': 'Abort',
+  'chat.abortTask': 'Abort task',
+  'chat.removeFromQueue': 'Remove',
+  'chat.clearAll': 'Clear all',
   'chat.running': 'agent running…',
   'chat.loading': 'Loading session…',
   'chat.noMessages': 'No messages.',
@@ -58,6 +61,7 @@ export const en = {
   'chat.queued': 'queued',
   'chat.forceSend': 'Force send',
   'chat.rollback': 'Roll back here: forks the session before this prompt and lets you edit it again',
+  'chat.goToLastUser': 'Go to last question ↑',
 
   'settings.title': 'Settings',
   'settings.noDirectory': 'No directory. Go back to the directory view and pick a project directory.',
@@ -227,6 +231,17 @@ export const en = {
   'debug.refresh': 'Refresh',
   'debug.clear': 'Clear',
   'debug.empty': 'No log entries yet.',
+  'debug.lastCalls': 'Last LLM calls (full JSON)',
+  'debug.showJson': 'show JSON',
+  'debug.hideJson': 'hide JSON',
+  'debug.requestJson': 'request',
+  'debug.responseJson': 'response',
+  'chrome.subagents': 'Sub-agents',
+  'chrome.noSubagents': 'No sub-agents',
+  'tool.delegation': 'delegation',
+  'tool.openSubagent': 'Open sub-agent session',
+  'tool.subagent': 'sub-agent',
+  'chat.openSubagent': 'Open sub-agent session',
 };
 
 export type MessageKey = keyof typeof en;

@@ -18,7 +18,7 @@ use crate::event::{Event, EventBus};
 use crate::permission::PermissionEngine;
 use crate::plugin::{Hook, PluginHost, ToolCallHook, ToolResultHook};
 use crate::store::SessionState;
-use crate::util::{now_ms, truncate_output};
+use crate::util::{compress_tool_output, now_ms, truncate_output};
 
 /// What the permission gate decided for one tool call.
 pub enum ToolOutcome {
@@ -106,11 +106,18 @@ pub async fn exec_gated_call(
         abort: ctx.abort.clone(),
     };
     let output = tool.execute(tool_ctx, input.clone()).await;
-    let text = truncate_output(&output.text, ctx.tool_output_cap);
+
+    // Token-saving pipeline: compress first (strip ANSI, collapse whitespace),
+    // then truncate against the configured static cap. The full output is
+    // persisted at this size; request-time pruning (prune_for_budget) handles
+    // further reduction when the transcript exceeds context_budget.
+    let compressed = compress_tool_output(&output.text);
+    let text = truncate_output(&compressed, ctx.tool_output_cap);
+
     let ok = ctx
         .state
         .update_tool_state(ctx.assistant_idx, call_id, |m, name| {
-            m.mark_tool_completed(call_id, text.clone(), name.to_string())
+            m.mark_tool_completed(call_id, text.clone(), name.to_string(), output.structured.clone())
         })
         .await;
     if !ok {

@@ -7,6 +7,8 @@ import { prettyJson } from '../../core/format';
 import { I18nService } from '../../i18n/i18n.service';
 
 export interface PendingAsk {
+  /** Session that raised the ask (the sub-agent's child session for `task`). */
+  sessionID: string;
   requestID: string;
   messageIndex: number;
   toolName: string;
@@ -147,6 +149,12 @@ export class PermissionPopup implements OnDestroy {
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly activeSessionID = input<string>();
+  /**
+   * Working directory of the open chat. Asks raised by a delegated sub-agent
+   * carry the *child* session id, so the popup also matches by directory -
+   * otherwise sub-agent permission prompts would be invisible on the parent.
+   */
+  readonly directory = input<string>();
 
   readonly asks = signal<PendingAsk[]>([]);
   readonly current = () => this.asks()[0];
@@ -154,11 +162,11 @@ export class PermissionPopup implements OnDestroy {
 
   constructor() {
     this.unsubscribe = this.events.onEvent((event: EngineEvent) => this.handle(event));
-    // Tab switch (`/chat/A` -> `/chat/B`) reuses the parent chat view: drop
-    // pending asks of the previous session so they never render on the new one.
-    // (`permission.resolved` for the old session is filtered out by `handle`.)
+    // Switching to a different directory (or a new chat view) must not show
+    // asks from the previous one. Within the same directory we keep asks so
+    // sub-agent (child-session) prompts survive parent tab switches.
     effect(() => {
-      this.activeSessionID();
+      this.directory();
       this.asks.set([]);
     });
   }
@@ -169,7 +177,10 @@ export class PermissionPopup implements OnDestroy {
 
   private handle(event: EngineEvent): void {
     const active = this.activeSessionID();
-    if (!active || event.sessionID !== active) {
+    const dir = this.directory();
+    const matches =
+      (!!active && event.sessionID === active) || (!!dir && event.directory === dir);
+    if (!matches) {
       return;
     }
     if (event.type === 'permission.asked') {
@@ -185,6 +196,7 @@ export class PermissionPopup implements OnDestroy {
           ...list,
           {
             ...asked,
+            sessionID: event.sessionID,
             inputText: prettyJson(asked.input),
             askedAt: Date.now(),
             busy: false,
@@ -201,10 +213,11 @@ export class PermissionPopup implements OnDestroy {
 
   private async resolve(decision: 'allow' | 'deny', always: boolean): Promise<void> {
     const item = this.current();
-    const sessionID = this.activeSessionID();
-    if (!item || !sessionID) {
+    if (!item) {
       return;
     }
+    // Resolve against the session that asked (child session for sub-agents).
+    const sessionID = item.sessionID;
     this.asks.update((list) =>
       list.map((a) => (a.requestID === item.requestID ? { ...a, busy: true } : a)),
     );

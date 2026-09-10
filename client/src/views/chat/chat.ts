@@ -15,6 +15,7 @@ import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
 import {
+  ActiveTask,
   AgentInfo,
   EngineEvent,
   Message,
@@ -26,6 +27,7 @@ import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { SessionSidebarComponent } from '../../ui/session-sidebar/session-sidebar';
 import { MessageRowComponent } from './parts/message-row';
+import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
 const REFRESH_DEBOUNCE_MS = 300;
 const DRAFT_KEY = 'bebok.sessionDrafts';
@@ -61,7 +63,14 @@ function persistDrafts(drafts: Record<string, string>): void {
 
 @Component({
   selector: 'app-chat',
-  imports: [FormsModule, RouterLink, PermissionPopup, MessageRowComponent, SessionSidebarComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PermissionPopup,
+    MessageRowComponent,
+    SessionSidebarComponent,
+    ScrollMinimapComponent,
+  ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
 })
@@ -112,6 +121,21 @@ export class ChatView implements OnInit, OnDestroy {
    *  board, replaced once the engine reflects the real message). */
   readonly pending = signal<PendingPrompt[]>([]);
 
+  /** Active sub-tasks spawned by the orchestrator (from task.started events). */
+  readonly activeTasks = signal<ActiveTask[]>([]);
+
+  /**
+   * Durable map of task name/ID → child session ID, fed by task.started
+   * events. NOT cleared on task.ended/aborted/turn end so that completed
+   * tool-part links remain resolvable.
+   */
+  readonly taskLinks = signal<Map<string, string>>(new Map());
+
+  /** Resolve a task name or ID to its child session ID (if known). */
+  resolveTaskLink(nameOrId: string): string | null {
+    return this.taskLinks().get(nameOrId) ?? null;
+  }
+
   readonly modelsUsed = computed<string[]>(() => {
     const set = new Set<string>();
     for (const m of this.messages()) {
@@ -131,7 +155,17 @@ export class ChatView implements OnInit, OnDestroy {
     return this.messages().filter((m) => m.meta?.model === filter);
   });
 
+  /** Show the "jump to last user message" button when user has scrolled up
+   *  and there is at least one user message in the conversation. */
+  readonly showJump = computed<boolean>(() => {
+    if (this.follow()) {
+      return false;
+    }
+    return this.filteredMessages().some((m) => m.role === 'user');
+  });
+
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
+  readonly minimap = viewChild(ScrollMinimapComponent);
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
@@ -230,11 +264,14 @@ export class ChatView implements OnInit, OnDestroy {
     this.messages.set([]);
     this.pending.set([]);
     this.queue.set([]);
+    this.activeTasks.set([]);
     this.error.set(null);
     this.running.set(false);
     this.sending.set(false);
     this.filterModel.set(null);
     this.follow.set(true);
+    // Reset minimap geometry for the new session.
+    this.minimap()?.refresh();
     await this.loadAll(nextID, seq);
   }
 
@@ -259,9 +296,10 @@ export class ChatView implements OnInit, OnDestroy {
       this.draft.set(this.drafts[sessionID] ?? '');
       // Nav tab: open (or refresh the title of) this session's tab.
       if (!this.tabs.get(meta.id)) {
-        this.tabs.open(meta.id, meta.title ?? null);
+        this.tabs.open(meta.id, meta.title ?? null, meta.alias ?? null);
       } else {
         this.tabs.setTitle(meta.id, meta.title ?? null);
+        this.tabs.setAlias(meta.id, meta.alias ?? null);
       }
       // Load the agent presets + provider model list for the switchers.
       try {
@@ -288,6 +326,8 @@ export class ChatView implements OnInit, OnDestroy {
       } catch {
         /* switcher lists are non-critical */
       }
+      // Recompute minimap after messages load + render.
+      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
         return;
@@ -345,6 +385,8 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.messages.set(messages);
       this.reconcilePending();
+      // Refresh minimap after transcript sync.
+      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (sessionID !== this.sessionID()) {
         return;
@@ -381,9 +423,58 @@ export class ChatView implements OnInit, OnDestroy {
         this.running.set(running);
         if (!running) {
           this.scheduleRefresh();
+          this.activeTasks.set([]);
           const err = event.properties?.['error'];
           if (typeof err === 'string' && err) {
             this.error.set(err);
+          }
+        }
+        break;
+      }
+      case 'task.started': {
+        const props = event.properties;
+        if (props) {
+          const taskID = String(props['taskID'] ?? props['task_id'] ?? '');
+          const description = String(props['description'] ?? '');
+          const childSessionID = String(props['childSessionID'] ?? props['child_session_id'] ?? '');
+          const name = String(props['name'] ?? '');
+          const agent = String(props['agent'] ?? '');
+          const task: ActiveTask = { taskID, description, childSessionID, name, agent };
+          if (taskID) {
+            this.activeTasks.update((tasks) => [...tasks, task]);
+          }
+          // Feed the durable link map (name → childSessionID, taskID → childSessionID).
+          if (childSessionID) {
+            this.taskLinks.update((m) => {
+              const next = new Map(m);
+              if (name) {
+                next.set(name, childSessionID);
+              }
+              if (taskID) {
+                next.set(taskID, childSessionID);
+              }
+              return next;
+            });
+          }
+        }
+        break;
+      }
+      case 'task.ended': {
+        const props = event.properties;
+        if (props) {
+          const taskID = String(props['taskID'] ?? '');
+          if (taskID) {
+            this.activeTasks.update((tasks) => tasks.filter((t) => t.taskID !== taskID));
+          }
+        }
+        break;
+      }
+      case 'task.aborted': {
+        const props = event.properties;
+        if (props) {
+          const taskID = String(props['taskID'] ?? '');
+          if (taskID) {
+            this.activeTasks.update((tasks) => tasks.filter((t) => t.taskID !== taskID));
           }
         }
         break;
@@ -421,6 +512,27 @@ export class ChatView implements OnInit, OnDestroy {
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     this.follow.set(distance < 90);
+  }
+
+  /** Scroll to the last user message in the current (filtered) transcript. */
+  scrollToLastUser(): void {
+    const msgs = this.filteredMessages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        const el = this.scrollArea()?.nativeElement;
+        if (!el) {
+          return;
+        }
+        const target = el.querySelector<HTMLElement>(
+          '#' + CSS.escape('msg-' + msgs[i].id),
+        );
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          this.follow.set(false);
+        }
+        return;
+      }
+    }
   }
 
   async sendPrompt(): Promise<void> {
@@ -513,6 +625,16 @@ export class ChatView implements OnInit, OnDestroy {
     await this.drainQueue();
   }
 
+  /** Remove a single message from the queue by index. */
+  removeFromQueue(index: number): void {
+    this.queue.update((q) => q.filter((_, i) => i !== index));
+  }
+
+  /** Remove all messages from the queue. */
+  clearQueue(): void {
+    this.queue.set([]);
+  }
+
   /**
    * Roll back to just before this user prompt: rewind the *current* session in
    * place, keeping every message before this prompt (index 0..index-1) and
@@ -571,12 +693,35 @@ export class ChatView implements OnInit, OnDestroy {
     });
   }
 
+  /**
+   * Agent switched in the chat header. Remember the new agent and clear the
+   * model override so the engine resolves the default model for this agent
+   * type (config.models.<agent> -> preset -> config) on the next prompt.
+   * The agent's display model must NOT be copied into `selectedModel`: that
+   * signal is sent as an explicit override, which would freeze the choice.
+   */
+  onAgentChange(value: string): void {
+    this.selectedAgent.set(value);
+    this.selectedModel.set('');
+  }
+
   async abortTurn(): Promise<void> {
     const sessionID = this.sessionID();
     this.running.set(false);
     this.error.set(null);
     try {
       await this.engine.abort(sessionID);
+    } catch (err) {
+      this.error.set(this.describe(err));
+    }
+  }
+
+  /** Abort a specific orchestrator sub-task (cancels the child + parent turn). */
+  async abortTask(taskID: string): Promise<void> {
+    const sessionID = this.sessionID();
+    this.error.set(null);
+    try {
+      await this.engine.abortTask(sessionID, taskID);
     } catch (err) {
       this.error.set(this.describe(err));
     }
@@ -591,6 +736,11 @@ export class ChatView implements OnInit, OnDestroy {
 
   describe(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
+  }
+
+  /** Truncate a queued message for display (keeps first 60 chars). */
+  truncateQueueText(text: string): string {
+    return text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
   }
 }
 

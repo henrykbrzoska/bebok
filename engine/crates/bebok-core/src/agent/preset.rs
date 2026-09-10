@@ -53,7 +53,22 @@ pub(crate) const ORCHESTRATOR_PROMPT: &str = r#"You are Bebok in "orchestrator" 
 Break the user's goal into subtasks, delegate work in a sensible order, and
 coordinate the results into a coherent outcome. Plan first, identify which
 subtasks are independent (parallel) vs sequential, then drive each one to
-completion using the available tools. Summarize what was accomplished at the end.
+completion. Summarize what was accomplished at the end.
+
+Delegation: use the `task` tool to hand a subtask to a sub-agent. Each `task`
+call runs the chosen agent preset in an isolated context (it cannot see this
+conversation) and returns only that sub-agent's final answer — so give it a
+complete, self-contained prompt. Good fits: `plan` to design a step, `ask` to
+research the codebase, `debug` to diagnose a failure, `code` for a focused edit.
+Do the coordination, sequencing and — when no suitable sub-agent exists — the
+work directly with the normal tools. Do not delegate trivial lookups you can do
+yourself.
+
+Naming: when delegating, pass a short kebab-case `name` that is unique within
+this run and descriptive of the subtask (e.g. `auth-flow-audit`,
+`fix-ci-pipeline`). If you omit `name` the engine assigns `<agent>-<n>`.
+Reference the returned `name` when reporting results so the user can track
+which subtask produced what.
 "#;
 
 /// An agent preset: pure configuration (name, prompt, tool whitelist, model).
@@ -103,6 +118,7 @@ impl Agent {
             ],
             permissions: vec![
                 Rule { pattern: "write_file(*)".to_string(), action: Action::Deny },
+                Rule { pattern: "edit_file(*)".to_string(), action: Action::Deny },
                 Rule { pattern: "edit(*)".to_string(), action: Action::Deny },
                 Rule { pattern: "mcp__*".to_string(), action: Action::Ask },
             ],
@@ -125,6 +141,7 @@ impl Agent {
             ],
             permissions: vec![
                 Rule { pattern: "write_file(*)".to_string(), action: Action::Deny },
+                Rule { pattern: "edit_file(*)".to_string(), action: Action::Deny },
                 Rule { pattern: "mcp__*".to_string(), action: Action::Ask },
             ],
             model: None,

@@ -8,11 +8,12 @@ import { PartRendererComponent } from './part-renderer';
 @Component({
   selector: 'app-message-row',
   imports: [PartRendererComponent],
+  host: { '[id]': 'rowId()' },
   template: `
     <div class="message" [class.user-message]="isUser()">
       <div class="message-head">
         <span class="who">{{ isUser() ? 'Ty' : 'Bebok' }}</span>
-        @if (!isUser() && (agentModel())) {
+        @if (!isUser() && agentModel()) {
           <span class="muted tag">{{ agentModel() }}</span>
         }
         <span class="muted time">{{ time() }}</span>
@@ -21,17 +22,20 @@ import { PartRendererComponent } from './part-renderer';
             class="rollback"
             [title]="t('chat.rollback')"
             (click)="rollback.emit(message().id)"
-          >↩</button>
+          >&#8617;</button>
         }
       </div>
       <div class="parts">
         @for (part of message().parts; track $index) {
-          <app-part-renderer [part]="part" />
+          <app-part-renderer [part]="part" [taskLinks]="taskLinks()" />
         }
       </div>
     </div>
   `,
   styles: `
+    :host {
+      display: block;
+    }
     .message {
       padding: 12px 16px;
       border-radius: var(--radius);
@@ -93,21 +97,21 @@ export class MessageRowComponent {
   private readonly i18n = inject(I18nService);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly message = input.required<Message>();
-  /** Show the ↩ rollback button on user prompts (chat view sets this). */
   readonly rollbackEnabled = input(false);
-  /** Emits the message id of the user prompt to roll back to. */
   readonly rollback = output<string>();
+  readonly rowId = input('');
+  /** Task name/ID → childSessionID map for clickable sub-agent links. */
+  readonly taskLinks = input<Map<string, string>>(new Map());
   readonly isUser = computed(() => this.message().role === 'user');
   readonly time = computed(() => {
     const created = this.message().meta?.created_at;
     return created ? formatMs(created) : '';
   });
-  /** e.g. "code · zai/glm-5.3-flash" for assistant messages. */
   readonly agentModel = computed(() => {
     const meta = this.message().meta;
     if (!meta?.agent && !meta?.model) {
       return '';
     }
-    return [meta?.agent, meta?.model].filter(Boolean).join(' · ');
+    return [meta?.agent, meta?.model].filter(Boolean).join(' \u00b7 ');
   });
 }

@@ -10,6 +10,7 @@ import { Injectable, computed, signal } from '@angular/core';
 import { authFetch } from './auth.interceptor';
 import {
   AbortResponse,
+  AbortTaskResponse,
   AgentInfo,
   AgentListResponse,
   CompactResponse,
@@ -199,6 +200,14 @@ export class EngineClient {
 
   abort(id: string): Promise<AbortResponse> {
     return this.request<AbortResponse>('POST', `/session/${id}/abort`);
+  }
+
+  /** Abort a specific child task spawned by the orchestrator. */
+  abortTask(sessionID: string, taskID: string): Promise<AbortTaskResponse> {
+    return this.request<AbortTaskResponse>(
+      'POST',
+      `/session/${encodeURIComponent(sessionID)}/task/${encodeURIComponent(taskID)}/abort`,
+    );
   }
 
   /**

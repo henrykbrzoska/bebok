@@ -3,14 +3,21 @@
  * requests to the engine (client -> server), with their responses. The log is
  * a single `debug.log` file owned by the engine, cleared on every app start and
  * capped (old entries dropped first).
+ *
+ * On top of the flat log, the engine keeps the last 2 full LLM
+ * request/response JSON payloads (memory-only ring, never written to disk).
+ * They are shown as collapsible panels below.
  */
 
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { DebugEntry } from '../../core/engine.dtos';
+import { prettyJson } from '../../core/format';
+import { DebugEntry, DebugLlmCall } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+
+const MAX_JSON_CHARS = 50000;
 
 @Component({
   selector: 'app-debug',
@@ -25,9 +32,12 @@ export class DebugView implements OnInit, OnDestroy {
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly entries = signal<DebugEntry[]>([]);
+  readonly calls = signal<DebugLlmCall[]>([]);
   readonly maxChars = signal(10000);
   readonly error = signal<string | null>(null);
   readonly autoRefresh = signal(true);
+  /** Ids of LLM calls whose JSON panel is expanded. */
+  readonly expanded = signal<Set<number>>(new Set());
 
   private timer?: number;
 
@@ -58,6 +68,7 @@ export class DebugView implements OnInit, OnDestroy {
     try {
       const res = await this.engine.debugLog();
       this.entries.set(res.entries);
+      this.calls.set(res.calls ?? []);
       this.maxChars.set(res.maxChars);
     } catch (err) {
       this.error.set(this.describe(err));
@@ -68,9 +79,34 @@ export class DebugView implements OnInit, OnDestroy {
     try {
       await this.engine.clearDebugLog();
       this.entries.set([]);
+      this.calls.set([]);
+      this.expanded.set(new Set());
     } catch (err) {
       this.error.set(this.describe(err));
     }
+  }
+
+  isExpanded(id: number): boolean {
+    return this.expanded().has(id);
+  }
+
+  toggle(id: number): void {
+    const next = new Set(this.expanded());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.expanded.set(next);
+  }
+
+  /** Pretty JSON, truncated client-side to avoid DOM blowup on huge payloads. */
+  jsonText(value: unknown): string {
+    const text = prettyJson(value);
+    if (text.length > MAX_JSON_CHARS) {
+      return text.slice(0, MAX_JSON_CHARS) + '\n…[truncated ' + (text.length - MAX_JSON_CHARS) + ' chars]';
+    }
+    return text;
   }
 
   formatTime(ts: number): string {

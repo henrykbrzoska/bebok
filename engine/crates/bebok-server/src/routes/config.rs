@@ -22,7 +22,7 @@ fn config_response(instance: &Instance) -> serde_json::Value {
     let mut discovered = bebok_core::skills::discover(&instance.root);
     bebok_core::skills::apply_toggles(&mut discovered, Some(&cfg.skills));
     let servers = instance.mcp.status();
-    let agents = instance.agents.read().unwrap().list();
+    let agents = instance.agent_infos();
 
     let global_path = config::global_config_path();
     let project_path = config::project_config_path(&instance.root);

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bebok_mcp::McpManager;
 use bebok_tools::ToolRegistry;
 
-use crate::agent::{Agent, AgentCatalog};
+use crate::agent::{Agent, AgentCatalog, AgentInfo};
 use crate::config::ResolvedConfig;
 use crate::permission::PermissionEngine;
 
@@ -36,6 +36,21 @@ impl Instance {
     /// Resolve an agent preset by name (falls back to `code`).
     pub fn resolve_agent(&self, name: &str) -> Agent {
         self.agents.read().unwrap().resolve(name)
+    }
+
+    /// Agent summaries for the GUI with the **effective** per-agent model
+    /// resolved from config: `preset.model` -> `config.models.<name>` -> the
+    /// global `config.model` (see `ResolvedConfig::model_for`). A preset that
+    /// pins its own model wins; otherwise the GUI shows what would actually run.
+    pub fn agent_infos(&self) -> Vec<AgentInfo> {
+        let cfg = self.config_snapshot();
+        let mut agents = self.agents.read().unwrap().list();
+        for a in &mut agents {
+            if a.model.is_none() {
+                a.model = Some(cfg.model_for(&a.name));
+            }
+        }
+        agents
     }
 
     /// Record an environment change to surface in the next prompt's context.

@@ -2,7 +2,7 @@
 
 A local-first AI coding agent, built from scratch in Rust + Angular.
 The engine runs without a cloud, and you keep full control over permissions, tools and configuration.
-
+Orchestrator works AWSOME.
 <img width="1270" height="857" alt="obraz" src="https://github.com/user-attachments/assets/330355bd-814b-423e-92f3-e93cf019e629" />
 
 ## Features
@@ -72,7 +72,7 @@ engine (`cargo build` / `cargo test --workspace` from `engine/`) plus the client
 
 ## Running
 
-### 1. Engine (headless)
+### 1. Engine (headless) engine start no problem 5 minute tidin tidin tidin problem engine kaput :D
 
 ```bash
 cd engine

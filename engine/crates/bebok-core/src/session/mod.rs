@@ -38,7 +38,13 @@ pub enum Part {
 pub enum ToolState {
     Pending { input: Value },
     Running { input: Value, started_at: i64 },
-    Completed { input: Value, output: String, title: String },
+    Completed {
+        input: Value,
+        output: String,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        structured: Option<Value>,
+    },
     Error { input: Value, error: String },
 }
 
@@ -49,6 +55,14 @@ impl ToolState {
             | ToolState::Running { input, .. }
             | ToolState::Completed { input, .. }
             | ToolState::Error { input, .. } => input,
+        }
+    }
+
+    /// Extra structured payload (e.g. task metadata) attached to the completed tool call.
+    pub fn structured(&self) -> Option<&Value> {
+        match self {
+            ToolState::Completed { structured, .. } => structured.as_ref(),
+            _ => None,
         }
     }
 
@@ -203,10 +217,21 @@ impl Message {
     }
 
     /// Mark a tool part as completed.
-    pub fn mark_tool_completed(&mut self, id: &str, output: String, title: String) -> bool {
+    pub fn mark_tool_completed(
+        &mut self,
+        id: &str,
+        output: String,
+        title: String,
+        structured: Option<Value>,
+    ) -> bool {
         self.transition_tool_state(id, |state| {
             let input = state.input().clone();
-            ToolState::Completed { input, output, title }
+            ToolState::Completed {
+                input,
+                output,
+                title,
+                structured,
+            }
         })
     }
 
@@ -284,6 +309,11 @@ pub struct Session {
     pub directory: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Human-readable name assigned by the orchestrator (e.g. `auth-flow-audit`).
+    /// Separate from `title` which is prompt-derived; `alias` is set once at
+    /// spawn time and never overwritten by the title heuristic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     pub agent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -304,6 +334,7 @@ impl Session {
             id: Uuid::new_v4(),
             directory: directory.into(),
             title: None,
+            alias: None,
             agent: agent.into(),
             model: None,
             parent: None,
