@@ -22,9 +22,7 @@ pub fn emit_message(bus: &EventBus, state: &SessionState, kind: &str, idx: usize
 pub async fn emit_part(bus: &EventBus, state: &SessionState, kind: &str, idx: usize) {
     let snapshot = {
         let messages = state.messages.read().await;
-        messages
-            .get(idx)
-            .and_then(|m| serde_json::to_value(m).ok())
+        messages.get(idx).and_then(|m| serde_json::to_value(m).ok())
     };
     let properties = match snapshot {
         Some(message) => serde_json::json!({ "messageIndex": idx, "message": message }),

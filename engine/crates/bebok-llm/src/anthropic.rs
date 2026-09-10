@@ -106,9 +106,18 @@ pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
 
 /// Convert provider-neutral messages into Anthropic content blocks.
 pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
+    use crate::provider::ContentPart;
     let mut out = Vec::with_capacity(msgs.len());
     for m in msgs {
         let mut blocks: Vec<Value> = Vec::new();
+        for p in &m.content_parts {
+            if let ContentPart::Image { media_type, data } = p {
+                blocks.push(serde_json::json!({
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": media_type, "data": data },
+                }));
+            }
+        }
         if !m.content.is_empty() {
             blocks.push(serde_json::json!({ "type": "text", "text": m.content }));
         }
@@ -371,5 +380,46 @@ mod tests {
 
         let max = anthropic_body(&req(Thinking::Max), "claude-sonnet");
         assert_eq!(max["thinking"]["budget_tokens"], 8192);
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use crate::provider::{ChatMessage, ChatRole, ContentPart};
+
+    fn img_msg() -> ChatMessage {
+        ChatMessage {
+            role: ChatRole::User,
+            content: "look".to_string(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn anthropic_emits_image_blocks_before_text() {
+        let msgs = to_anthropic_messages(&[img_msg()]);
+        assert_eq!(msgs.len(), 1);
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["source"]["type"], "base64");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[0]["source"]["data"], "aGVsbG8=");
+        assert_eq!(blocks[1]["type"], "text");
+        assert_eq!(blocks[1]["text"], "look");
+    }
+
+    #[test]
+    fn anthropic_text_only_path_unchanged() {
+        let msgs = to_anthropic_messages(&[ChatMessage::user("hi")]);
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], serde_json::json!({"type": "text", "text": "hi"}));
     }
 }

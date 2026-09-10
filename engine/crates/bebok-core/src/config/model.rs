@@ -78,6 +78,28 @@ impl UiConfig {
     }
 }
 
+/// One member of the parallel-agents fleet.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FleetMember {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub agent: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// Toggleable parallel-agents fleet configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FleetConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub members: Vec<FleetMember>,
+}
+
 /// Fully resolved configuration for one instance.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedConfig {
@@ -109,6 +131,9 @@ pub struct ResolvedConfig {
     /// Client-only UI overrides (custom CSS, plain text).
     #[serde(default)]
     pub ui: UiConfig,
+    /// Toggleable parallel-agents fleet.
+    #[serde(default)]
+    pub fleet: FleetConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -130,6 +155,7 @@ impl Default for ResolvedConfig {
             terminal: Value::Object(serde_json::Map::new()),
             runtimes: Value::Object(serde_json::Map::new()),
             ui: UiConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 }
@@ -159,6 +185,17 @@ impl ResolvedConfig {
             .and_then(|m| m.as_str())
             .map(str::to_string)
             .unwrap_or_else(|| self.model.clone())
+    }
+
+    /// Whether the parallel-agents fleet is enabled. Capability gate only:
+    /// fan-out still requires explicit `fleet: true` on the prompt.
+    pub fn is_fleet_enabled(&self) -> bool {
+        self.fleet.enabled
+    }
+
+    /// Fleet members (empty when the fleet is disabled/unconfigured).
+    pub fn fleet_members(&self) -> &[FleetMember] {
+        &self.fleet.members
     }
 }
 
@@ -230,6 +267,11 @@ impl ResolvedConfigBuilder {
 
     pub fn yolo(mut self, yolo: bool) -> Self {
         self.inner.yolo = yolo;
+        self
+    }
+
+    pub fn fleet(mut self, fleet: FleetConfig) -> Self {
+        self.inner.fleet = fleet;
         self
     }
 

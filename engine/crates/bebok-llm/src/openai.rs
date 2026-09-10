@@ -52,11 +52,55 @@ pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
 /// Convert provider-neutral messages into OpenAI `messages` (system message
 /// first, tool results as `role: tool`).
 pub fn to_openai_messages(msgs: &[ChatMessage], system: &str) -> Vec<Value> {
+    use crate::provider::ContentPart;
     let mut out = Vec::with_capacity(msgs.len() + 1);
     if !system.is_empty() {
         out.push(serde_json::json!({ "role": "system", "content": system }));
     }
     for m in msgs {
+        // Multimodal user content: emit OpenAI content-part array.
+        let has_images = m
+            .content_parts
+            .iter()
+            .any(|p| matches!(p, ContentPart::Image { .. }));
+        if has_images && m.tool_results.is_empty() {
+            let mut parts: Vec<Value> = Vec::new();
+            if !m.content.is_empty() {
+                parts.push(serde_json::json!({ "type": "text", "text": m.content }));
+            }
+            for p in &m.content_parts {
+                if let ContentPart::Image { media_type, data } = p {
+                    parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:{media_type};base64,{data}") },
+                    }));
+                }
+            }
+            if m.role.as_str() == "assistant" && !m.tool_calls.is_empty() {
+                let tool_calls: Vec<Value> = m
+                    .tool_calls
+                    .iter()
+                    .map(|tc| {
+                        serde_json::json!({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": serde_json::to_string(&tc.input).unwrap_or_else(|_| "{}".into()),
+                            }
+                        })
+                    })
+                    .collect();
+                out.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": parts,
+                    "tool_calls": tool_calls,
+                }));
+            } else {
+                out.push(serde_json::json!({ "role": m.role.as_str(), "content": parts }));
+            }
+            continue;
+        }
         if !m.tool_results.is_empty() {
             // Each tool result becomes its own `role: tool` message.
             for tr in &m.tool_results {
@@ -377,5 +421,53 @@ mod tests {
 
         let max = openai_body(&req(Thinking::Max), "gpt-5");
         assert_eq!(max["reasoning_effort"], "high");
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use crate::provider::{ChatMessage, ChatRole, ContentPart};
+
+    fn img_msg() -> ChatMessage {
+        ChatMessage {
+            role: ChatRole::User,
+            content: "look".to_string(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn openai_emits_content_part_array_with_data_url() {
+        let msgs = to_openai_messages(&[img_msg()], "");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        let parts = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], serde_json::json!({"type": "text", "text": "look"}));
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,aGVsbG8=");
+    }
+
+    #[test]
+    fn openai_text_only_path_unchanged() {
+        let msgs = to_openai_messages(&[ChatMessage::user("hi")], "sys");
+        assert_eq!(msgs[0], serde_json::json!({"role": "system", "content": "sys"}));
+        assert_eq!(msgs[1], serde_json::json!({"role": "user", "content": "hi"}));
+    }
+
+    #[test]
+    fn openai_skips_empty_text_with_images() {
+        let mut m = img_msg();
+        m.content.clear();
+        let msgs = to_openai_messages(&[m], "");
+        let parts = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "image_url");
     }
 }

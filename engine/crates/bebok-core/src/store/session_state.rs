@@ -10,9 +10,7 @@ use uuid::Uuid;
 
 use crate::config::ResolvedConfig;
 use crate::error::Result;
-use crate::permission::{
-    CachedDecision, DecisionKey, PermissionAnswer, ResolveOutcome,
-};
+use crate::permission::{CachedDecision, DecisionKey, PermissionAnswer, ResolveOutcome};
 use crate::session::persist;
 use crate::session::{Message, Session};
 
@@ -60,8 +58,7 @@ pub struct SessionState {
 impl SessionState {
     pub(crate) fn new(
         meta: Session,
-        #[allow(dead_code)]
-        instance_dir: PathBuf,
+        #[allow(dead_code)] instance_dir: PathBuf,
         disk_dir: PathBuf,
         config: ResolvedConfig,
     ) -> Self {
@@ -155,7 +152,10 @@ impl SessionState {
         if let Some(message) = message {
             let result = persist::persist_message(&self.disk_dir, idx, &message).await;
             if let Err(e) = result {
-                tracing::error!("failed to persist message {idx} of session {}: {e}", self.id);
+                tracing::error!(
+                    "failed to persist message {idx} of session {}: {e}",
+                    self.id
+                );
             }
         }
         self.max_message_index.fetch_max(idx + 1, Ordering::Relaxed);
@@ -163,9 +163,18 @@ impl SessionState {
 
     /// Append the user prompt message and persist it. Returns its index.
     pub async fn append_user_message(&self, text: &str) -> Result<usize> {
+        self.append_user_message_with_images(text, Vec::new()).await
+    }
+
+    /// Append a user message carrying text plus image parts, persist it.
+    pub async fn append_user_message_with_images(
+        &self,
+        text: &str,
+        images: Vec<crate::session::Part>,
+    ) -> Result<usize> {
         let idx = {
             let mut messages = self.messages.write().await;
-            messages.push(Message::user(text));
+            messages.push(Message::user_with_images(text, images));
             messages.len() - 1
         };
         self.persist_message_at(idx).await;
@@ -392,10 +401,7 @@ impl SessionState {
         if let Some(token) = self.abort.lock().await.clone() {
             token.cancel();
         }
-        tracing::info!(
-            "session {}: abort_children_and_parent: {reason}",
-            self.id
-        );
+        tracing::info!("session {}: abort_children_and_parent: {reason}", self.id);
     }
 
     // -- permission -----------------------------------------------------------

@@ -79,15 +79,19 @@ pub async fn ask_for_permission(
     ctx.state.register_permission_request(&request_id, tx).await;
 
     ctx.bus.publish(
-        Event::new("permission.asked", ctx.state.directory(), &ctx.state.id().to_string())
-            .with_properties(serde_json::json!({
-                "requestID": request_id,
-                "messageIndex": ctx.assistant_idx,
-                "toolName": tool_name,
-                "agent": ctx.agent_name,
-                "input": input.clone(),
-                "pattern": evaluation.pattern.clone(),
-            })),
+        Event::new(
+            "permission.asked",
+            ctx.state.directory(),
+            &ctx.state.id().to_string(),
+        )
+        .with_properties(serde_json::json!({
+            "requestID": request_id,
+            "messageIndex": ctx.assistant_idx,
+            "toolName": tool_name,
+            "agent": ctx.agent_name,
+            "input": input.clone(),
+            "pattern": evaluation.pattern.clone(),
+        })),
     );
 
     // Wait without polling. The decision endpoint answers the oneshot; the
@@ -125,17 +129,21 @@ pub async fn ask_for_permission(
     }
 
     ctx.bus.publish(
-        Event::new("permission.resolved", ctx.state.directory(), &ctx.state.id().to_string())
-            .with_properties(serde_json::json!({
-                "requestID": request_id,
-                "messageIndex": ctx.assistant_idx,
-                "toolName": tool_name,
-                "agent": ctx.agent_name,
-                "pattern": evaluation.pattern.clone(),
-                "decision": if answer.allow { "allow" } else { "deny" },
-                "always": answer.always,
-                "allowed": answer.allow,
-            })),
+        Event::new(
+            "permission.resolved",
+            ctx.state.directory(),
+            &ctx.state.id().to_string(),
+        )
+        .with_properties(serde_json::json!({
+            "requestID": request_id,
+            "messageIndex": ctx.assistant_idx,
+            "toolName": tool_name,
+            "agent": ctx.agent_name,
+            "pattern": evaluation.pattern.clone(),
+            "decision": if answer.allow { "allow" } else { "deny" },
+            "always": answer.always,
+            "allowed": answer.allow,
+        })),
     );
 
     fire_permission_hook(
@@ -161,6 +169,8 @@ pub async fn fire_permission_hook(tool: &str, pattern: &str, decision: &str) {
             decision: decision.to_string(),
             pattern: pattern.to_string(),
         };
-        hooks.run_hook(Hook::PERMISSION_RESOLVED, &mut payload).await;
+        hooks
+            .run_hook(Hook::PERMISSION_RESOLVED, &mut payload)
+            .await;
     }
 }

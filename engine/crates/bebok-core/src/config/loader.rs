@@ -10,7 +10,7 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{ResolvedConfig, UiConfig};
+use super::model::{FleetConfig, ResolvedConfig, UiConfig};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -104,6 +104,10 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(ui) = v.get("ui") {
         apply_ui(&mut cfg.ui, ui);
     }
+    // Fleet section: project layer fully replaces global when present.
+    if let Some(fleet) = v.get("fleet") {
+        cfg.fleet = parse_fleet(fleet);
+    }
 }
 
 fn apply_ui(ui: &mut UiConfig, v: &Value) {
@@ -131,8 +135,44 @@ fn apply_ui(ui: &mut UiConfig, v: &Value) {
             }
         }
         // Cap total length (sanitize_files already caps fresh lists).
-        ui.custom_css_files.truncate(super::model::MAX_CUSTOM_CSS_FILES);
+        ui.custom_css_files
+            .truncate(super::model::MAX_CUSTOM_CSS_FILES);
     }
+}
+
+/// Parse a `fleet` section. Malformed values are ignored gracefully:
+/// `enabled` accepts bool only, `members` accepts an array of objects.
+fn parse_fleet(v: &Value) -> FleetConfig {
+    let enabled = v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+    let members = v
+        .get("members")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let obj = m.as_object()?;
+                    Some(super::model::FleetMember {
+                        name: obj
+                            .get("name")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        agent: obj
+                            .get("agent")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        model: obj
+                            .get("model")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    FleetConfig { enabled, members }
 }
 
 /// Upsert `specs` into `base` by name (later entries win).
@@ -234,7 +274,10 @@ mod tests {
         )
         .unwrap();
         let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.model, "zai/glm-4.6", "project config must override global");
+        assert_eq!(
+            cfg.model, "zai/glm-4.6",
+            "project config must override global"
+        );
         assert_eq!(cfg.permission["edit"], "allow");
         // Global terminal survives (shallow merge per top-level key).
         assert_eq!(cfg.terminal["shell"], "bash");
@@ -304,5 +347,73 @@ mod tests {
         assert_eq!(cfg.ui.custom_css, "body { color: blue; }");
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn fleet_defaults_disabled() {
+        let cfg = ResolvedConfig::default();
+        assert!(!cfg.is_fleet_enabled());
+        assert!(cfg.fleet_members().is_empty());
+    }
+
+    #[test]
+    fn fleet_project_replaces_global() {
+        let base = std::env::temp_dir().join(format!("bebok-fleet-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+
+        // Global fleet inherited when project has no fleet key.
+        std::fs::write(
+            &global,
+            r#"{ "fleet": { "enabled": true, "members": [{ "name": "a", "agent": "code", "model": "zai/glm-4.5" }] } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(cfg.is_fleet_enabled());
+        assert_eq!(cfg.fleet_members().len(), 1);
+        assert_eq!(cfg.fleet_members()[0].name, "a");
+
+        // Project fleet fully replaces global.
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "fleet": { "enabled": false, "members": [] } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(!cfg.is_fleet_enabled());
+        assert!(cfg.fleet_members().is_empty());
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn fleet_empty_members_and_malformed_tolerance() {
+        let mut cfg = ResolvedConfig::default();
+        // Empty members OK.
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "fleet": { "enabled": true, "members": [] } }),
+        );
+        assert!(cfg.is_fleet_enabled());
+        assert!(cfg.fleet_members().is_empty());
+
+        // Malformed: enabled non-bool ignored, members non-array ignored,
+        // non-object entries skipped.
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "fleet": { "enabled": "yes", "members": "nope" } }),
+        );
+        assert!(!cfg.is_fleet_enabled());
+        assert!(cfg.fleet_members().is_empty());
+
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "fleet": { "enabled": true, "members": ["bad", 42, { "name": "ok" }] } }),
+        );
+        assert!(cfg.is_fleet_enabled());
+        assert_eq!(cfg.fleet_members().len(), 1);
+        assert_eq!(cfg.fleet_members()[0].name, "ok");
+        assert_eq!(cfg.fleet_members()[0].agent, "");
     }
 }

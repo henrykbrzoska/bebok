@@ -67,7 +67,17 @@ export interface UsagePart {
   cache_creation_input_tokens?: number | null;
 }
 
-export type Part = TextPart | ThinkingPart | ToolPart | UsagePart;
+export type Part = TextPart | ThinkingPart | ToolPart | UsagePart | ImagePart;
+
+/** An image attached to a message (engine `Part` union member). */
+export interface ImagePart {
+  type: 'image';
+  media_type: string;
+  /** Raw base64 payload (no `data:` prefix). */
+  data: string;
+  name?: string;
+  bytes?: number;
+}
 
 export interface MessageMeta {
   created_at?: number;
@@ -123,6 +133,21 @@ export interface PromptResponse {
   sessionID: string;
   messageIndex: number;
   status: string;
+}
+
+/** One image attached to an outgoing prompt (raw base64, no `data:` prefix). */
+export interface PromptImage {
+  media_type: string;
+  data: string;
+  name?: string;
+}
+
+/** `POST /session/{id}/prompt` body: text plus optional image attachments. */
+export interface PromptBody {
+  message: string;
+  agent?: string;
+  model?: string;
+  images?: PromptImage[];
 }
 
 export interface AbortResponse {
@@ -238,6 +263,19 @@ export interface ResolvedSkill {
   enabled: boolean;
 }
 
+/** One member of the parallel-agents fleet (`fleet.members` in config). */
+export interface FleetMember {
+  name: string;
+  agent: string;
+  model: string;
+}
+
+/** Parallel-agents fleet config (`fleet` section of the config). */
+export interface FleetConfig {
+  enabled: boolean;
+  members: FleetMember[];
+}
+
 export interface ResolvedConfig {
   model: string;
   provider: string;
@@ -253,6 +291,8 @@ export interface ResolvedConfig {
   yolo?: boolean;
   /** Reasoning/thinking effort: `off` | `low` | `medium` | `high` | `max`. */
   thinking?: string;
+  /** Parallel-agents fleet (absent = disabled with no members). */
+  fleet?: FleetConfig;
   permission: unknown;
   mcp: unknown;
   skills: unknown;

@@ -20,7 +20,11 @@ use crate::session::{Message, Session};
 impl InstanceStore {
     /// Fork a session: a new, independent session that materializes a copy of
     /// messages `0..=message_index`, recording `parent: (source, message_index)`.
-    pub async fn fork_session(&self, source: Uuid, message_index: usize) -> Result<Arc<SessionState>> {
+    pub async fn fork_session(
+        &self,
+        source: Uuid,
+        message_index: usize,
+    ) -> Result<Arc<SessionState>> {
         let source_state = self.open_session(source).await?;
         let source_meta = source_state.meta_snapshot().await;
         let messages = source_state.messages_snapshot().await;
@@ -60,7 +64,8 @@ impl InstanceStore {
         let state = self.spawn_session(&instance, session).await?;
         // [summary] first, then the tail.
         let summary_message = Message::summary(&summary);
-        self.copy_messages(&state, std::slice::from_ref(&summary_message)).await;
+        self.copy_messages(&state, std::slice::from_ref(&summary_message))
+            .await;
         self.copy_messages(&state, &messages[tail_from..]).await;
         Ok(state)
     }
@@ -162,7 +167,11 @@ impl InstanceStore {
 
     /// Low-level session spawn: create the on-disk dir, persist metadata, append
     /// the index event, register in memory and emit `session.created`.
-    pub(crate) async fn spawn_session(&self, instance: &Instance, session: Session) -> Result<Arc<SessionState>> {
+    pub(crate) async fn spawn_session(
+        &self,
+        instance: &Instance,
+        session: Session,
+    ) -> Result<Arc<SessionState>> {
         let inst_dir = persist::instance_dir(self.data_dir(), &instance.directory);
         let disk_dir = persist::session_dir(&inst_dir, session.id);
         tokio::fs::create_dir_all(&disk_dir)
@@ -180,10 +189,17 @@ impl InstanceStore {
         ));
 
         self.meta.write().await.insert(session.id, session.clone());
-        self.sessions.write().await.insert(session.id, state.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(session.id, state.clone());
         self.bus.publish(
-            crate::event::Event::new("session.created", &instance.directory, &session.id.to_string())
-                .with_properties(serde_json::json!({ "session": session })),
+            crate::event::Event::new(
+                "session.created",
+                &instance.directory,
+                &session.id.to_string(),
+            )
+            .with_properties(serde_json::json!({ "session": session })),
         );
         Ok(state)
     }
@@ -196,7 +212,10 @@ impl InstanceStore {
             let idx = start + offset;
             guard.push(message.clone());
             if let Err(e) = persist::persist_message(state.disk_dir(), idx, message).await {
-                tracing::error!("failed to persist message {idx} of session {}: {e}", state.id());
+                tracing::error!(
+                    "failed to persist message {idx} of session {}: {e}",
+                    state.id()
+                );
             }
         }
         state.note_message_index(start + messages.len());

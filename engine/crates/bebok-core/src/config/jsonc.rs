@@ -96,8 +96,8 @@ impl JsoncDocument {
     pub fn with_set(&self, key: &str, new_value: &Value) -> String {
         match top_level_value_range(&self.raw, key) {
             Some((start, end)) => {
-                let replacement = serde_json::to_string_pretty(new_value)
-                    .unwrap_or_else(|_| "null".to_string());
+                let replacement =
+                    serde_json::to_string_pretty(new_value).unwrap_or_else(|_| "null".to_string());
                 let mut out = String::with_capacity(self.raw.len() + replacement.len());
                 out.push_str(&self.raw[..start]);
                 out.push_str(&replacement);
@@ -254,7 +254,8 @@ fn scan_balanced(raw: &str, start: usize) -> usize {
 
 /// Append `key` to a JSON object before its final closing brace.
 fn append_key(raw: &str, key: &str, new_value: &Value) -> String {
-    let replacement = serde_json::to_string_pretty(new_value).unwrap_or_else(|_| "null".to_string());
+    let replacement =
+        serde_json::to_string_pretty(new_value).unwrap_or_else(|_| "null".to_string());
 
     // Find the last top-level `}`.
     let mut last_close = None;

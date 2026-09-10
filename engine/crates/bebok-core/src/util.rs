@@ -211,7 +211,9 @@ pub fn truncate_output(text: &str, max: usize) -> String {
     let marker_bytes = marker.len() + 2;
     let remaining = max.saturating_sub(head_bytes + marker_bytes + 256);
     let avg_line_len = (text.len() / line_count).max(1);
-    let tail_lines = (remaining / avg_line_len).max(5).min(line_count - head_lines);
+    let tail_lines = (remaining / avg_line_len)
+        .max(5)
+        .min(line_count - head_lines);
 
     let head: String = lines[..head_lines].join("\n");
     let tail_start = line_count.saturating_sub(tail_lines);
@@ -242,7 +244,9 @@ pub fn truncate_chars(s: &str, max_bytes: usize) -> &str {
 /// - 5-15 messages: cap = min(configured, 24 KiB)
 /// - 16-30 messages: cap = min(configured, 16 KiB)
 /// - 31+ messages:  cap = min(configured, 8 KiB)
-#[deprecated(note = "Phase 4: persist path now uses static tool_output_cap; prune_for_budget handles request-time shrinking")]
+#[deprecated(
+    note = "Phase 4: persist path now uses static tool_output_cap; prune_for_budget handles request-time shrinking"
+)]
 #[allow(dead_code)]
 pub fn dynamic_output_cap(configured_cap: usize, message_count: usize) -> usize {
     match message_count {
@@ -360,10 +364,7 @@ mod tests {
 
         let persist_result = truncate_output(&compressed, configured_cap);
         #[allow(deprecated)]
-        let old_result = truncate_output(
-            &compressed,
-            dynamic_output_cap(configured_cap, 40),
-        );
+        let old_result = truncate_output(&compressed, dynamic_output_cap(configured_cap, 40));
 
         // Static cap keeps full output; old dynamic cap would have truncated.
         assert_eq!(persist_result, long_output);

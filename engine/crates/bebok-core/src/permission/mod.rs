@@ -20,8 +20,8 @@ pub mod rule;
 pub mod store;
 
 pub use engine::{
-    CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer,
-    PermissionEngine, ResolveOutcome, Verdict,
+    CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer, PermissionEngine,
+    ResolveOutcome, Verdict,
 };
 pub use matcher::{call_arg_text, call_string};
 pub use rule::{Action, Rule, parse_rules};

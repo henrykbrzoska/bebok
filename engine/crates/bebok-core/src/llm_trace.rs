@@ -3,7 +3,6 @@
 /// Stores the last 2 complete request/response JSON payloads for inspection
 /// in the Debug tab. The ring is a global static so `turn.rs` (bebok-core)
 /// can push without threading `AppState` through the call stack.
-
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, RwLock};
 
@@ -49,7 +48,8 @@ impl LlmTrace {
 
     /// Atomically allocate the next monotonically increasing call id.
     pub fn next_id(&self) -> u64 {
-        self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        self.counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Append a call, evicting the oldest when at capacity.

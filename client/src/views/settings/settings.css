@@ -33,6 +33,48 @@
   font-size: 13px;
 }
 
+.type-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.type-model-grid label {
+  margin-bottom: 0;
+}
+
+.type-model-grid select {
+  width: 100%;
+}
+
+/* Section tabs: split the long settings page into Agents / Providers / Others. */
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-tabs button {
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.settings-tabs button:hover {
+  color: var(--fg);
+}
+
+.settings-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -393,4 +435,33 @@ ul {
 
 .small {
   font-size: 12px;
+}
+
+/* Parallel fleet members editor. */
+.fleet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+
+.fleet-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fleet-row input[type='text'] {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.fleet-row select {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.actions-spread {
+  justify-content: space-between;
 }

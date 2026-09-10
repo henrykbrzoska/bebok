@@ -19,6 +19,7 @@
 
 pub mod catalog;
 pub mod exec;
+pub mod fleet_tool;
 pub mod gate;
 pub mod observe;
 pub mod preset;
@@ -31,6 +32,7 @@ mod tests;
 
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
 pub use exec::{ToolOutcome, fail_tool};
+pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;

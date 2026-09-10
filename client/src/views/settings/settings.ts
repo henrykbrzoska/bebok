@@ -14,6 +14,7 @@ import { CustomCssService } from '../../core/custom-css.service';
 import {
   ConfigResponse,
   DockerStatus,
+  FleetMember,
   McpStatus,
   ProviderSpec,
   ResolvedSkill,
@@ -47,8 +48,14 @@ export class SettingsView implements OnInit {
 
   readonly config = signal<ConfigResponse | null>(null);
 
-  readonly rulesText = signal('[]');
+  /**
+   * Active settings section. The page got too long, so the cards are grouped
+   * into tabs: agents (type models + presets + parallel fleet), providers, and
+   * everything else. State only - all cards still live in this one view.
+   */
+  readonly tab = signal<'agents' | 'providers' | 'other'>('agents');
 
+  readonly rulesText = signal('[]');
 
   /** M6: providers + per-agent-type models */
   readonly providers = signal<ProviderSpec[]>([]);
@@ -77,6 +84,10 @@ export class SettingsView implements OnInit {
 
   /** YOLO mode: auto-allow every tool call (dangerous). */
   readonly yolo = signal(false);
+
+  /** Parallel-agents fleet: enabled flag + editable member list. */
+  readonly fleetEnabled = signal(false);
+  readonly fleetMembers = signal<FleetMember[]>([]);
 
   /** Task 6: appearance — `ui.customCss` (+ `ui.customCssFiles`). */
   readonly customCssText = signal('');
@@ -137,6 +148,17 @@ export class SettingsView implements OnInit {
       this.savedProvidersJson = JSON.stringify(cfg.providers ?? []);
       this.typeModels.set({ ...(cfg.config.models ?? {}) });
       this.yolo.set(!!cfg.config.yolo);
+      const fleet = cfg.config.fleet;
+      this.fleetEnabled.set(!!fleet?.enabled);
+      this.fleetMembers.set(
+        Array.isArray(fleet?.members)
+          ? fleet.members.map((m) => ({
+              name: m.name ?? '',
+              agent: m.agent ?? 'code',
+              model: m.model ?? '',
+            }))
+          : [],
+      );
       const ui = (cfg.config.ui ?? {}) as {
         customCss?: string;
         custom_css?: string;
@@ -157,6 +179,13 @@ export class SettingsView implements OnInit {
     } finally {
       this.loading.set(false);
     }
+  }
+
+  /** Switch the active settings tab; clear any leftover banners. */
+  setTab(tab: 'agents' | 'providers' | 'other'): void {
+    this.tab.set(tab);
+    this.error.set(null);
+    this.saved.set(null);
   }
 
   /** Save the Appearance card: `ui.customCss` (+ `ui.customCssFiles`). */
@@ -482,6 +511,76 @@ export class SettingsView implements OnInit {
 
   typeModelFor(type: string): string {
     return this.typeModels()[type] ?? '';
+  }
+
+  /** Toggle the parallel fleet on/off (PUT /config `fleet` delta). */
+  async toggleFleet(enabled: boolean): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.saving()) {
+      return;
+    }
+    this.saving.set(true);
+    this.error.set(null);
+    this.saved.set(null);
+    try {
+      await this.engine.putConfig(dir, {
+        fleet: { enabled, members: this.fleetMembers() },
+      });
+      this.fleetEnabled.set(enabled);
+      this.saved.set(this.i18n.t('settings.fleetSaved'));
+      await this.reload();
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  /** Save the fleet members list (with the current enabled flag). */
+  async saveFleet(): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.saving()) {
+      return;
+    }
+    this.saving.set(true);
+    this.error.set(null);
+    this.saved.set(null);
+    try {
+      const members = this.fleetMembers()
+        .map((m) => ({
+          name: m.name.trim(),
+          agent: m.agent.trim() || 'code',
+          model: m.model.trim(),
+        }))
+        .filter((m) => m.name.length > 0);
+      await this.engine.putConfig(dir, {
+        fleet: { enabled: this.fleetEnabled(), members },
+      });
+      this.saved.set(this.i18n.t('settings.fleetSaved'));
+      await this.reload();
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  addFleetMember(): void {
+    this.fleetMembers.update((list) => [...list, { name: '', agent: 'code', model: '' }]);
+  }
+
+  removeFleetMember(index: number): void {
+    this.fleetMembers.update((list) => list.filter((_, i) => i !== index));
+  }
+
+  updateFleetMember(index: number, field: 'name' | 'agent' | 'model', value: string): void {
+    this.fleetMembers.update((list) => {
+      const next = list.map((m) => ({ ...m }));
+      if (next[index]) {
+        next[index] = { ...next[index], [field]: value };
+      }
+      return next;
+    });
   }
 
   rulesToText(permission: unknown): string {

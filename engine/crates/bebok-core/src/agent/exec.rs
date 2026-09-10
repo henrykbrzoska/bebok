@@ -68,7 +68,14 @@ pub async fn exec_gated_call(
         };
         hooks.run_hook(Hook::BEFORE_TOOL, &mut payload).await;
         if !payload.allowed {
-            fail_tool(ctx.state, ctx.bus, ctx.assistant_idx, call_id, "denied by plugin").await;
+            fail_tool(
+                ctx.state,
+                ctx.bus,
+                ctx.assistant_idx,
+                call_id,
+                "denied by plugin",
+            )
+            .await;
             return true;
         }
     }
@@ -77,10 +84,7 @@ pub async fn exec_gated_call(
     let Some(tool) = ctx.tools.get(tool_name) else {
         // The model called a tool that is not registered: note it in the
         // project config (de-duplicated) so it can be implemented later.
-        crate::config::record_unknown_tool(
-            std::path::Path::new(ctx.state.directory()),
-            tool_name,
-        );
+        crate::config::record_unknown_tool(std::path::Path::new(ctx.state.directory()), tool_name);
         fail_tool(
             ctx.state,
             ctx.bus,
@@ -98,7 +102,13 @@ pub async fn exec_gated_call(
         })
         .await;
     ctx.state.persist_message_at(ctx.assistant_idx).await;
-    emit_part(ctx.bus, ctx.state, "message.part.updated", ctx.assistant_idx).await;
+    emit_part(
+        ctx.bus,
+        ctx.state,
+        "message.part.updated",
+        ctx.assistant_idx,
+    )
+    .await;
 
     let tool_ctx = ToolCtx {
         root: ctx.state.directory().into(),
@@ -117,7 +127,12 @@ pub async fn exec_gated_call(
     let ok = ctx
         .state
         .update_tool_state(ctx.assistant_idx, call_id, |m, name| {
-            m.mark_tool_completed(call_id, text.clone(), name.to_string(), output.structured.clone())
+            m.mark_tool_completed(
+                call_id,
+                text.clone(),
+                name.to_string(),
+                output.structured.clone(),
+            )
         })
         .await;
     if !ok {
@@ -136,7 +151,13 @@ pub async fn exec_gated_call(
     }
 
     ctx.state.persist_message_at(ctx.assistant_idx).await;
-    emit_part(ctx.bus, ctx.state, "message.part.updated", ctx.assistant_idx).await;
+    emit_part(
+        ctx.bus,
+        ctx.state,
+        "message.part.updated",
+        ctx.assistant_idx,
+    )
+    .await;
     emit_message(ctx.bus, ctx.state, "message.updated", ctx.assistant_idx);
     true
 }

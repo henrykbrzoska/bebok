@@ -77,15 +77,25 @@ mod tests {
             pattern: "mcp__github__*".into(),
             action: Action::Ask,
         }]);
-        assert!(layer.first_match("mcp__github__create_issue({\"title\":\"x\"})").is_some());
+        assert!(
+            layer
+                .first_match("mcp__github__create_issue({\"title\":\"x\"})")
+                .is_some()
+        );
         assert_eq!(layer.first_match("bash(git status)"), None);
     }
 
     #[test]
     fn first_rule_wins_within_a_layer() {
         let layer = CompiledLayer::compile(&[
-            Rule { pattern: "bash(git *)".into(), action: Action::Deny },
-            Rule { pattern: "bash(git status)".into(), action: Action::Allow },
+            Rule {
+                pattern: "bash(git *)".into(),
+                action: Action::Deny,
+            },
+            Rule {
+                pattern: "bash(git status)".into(),
+                action: Action::Allow,
+            },
         ]);
         // Deny comes first and must win.
         let (_, action) = layer.first_match("bash(git status)").unwrap();

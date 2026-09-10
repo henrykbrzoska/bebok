@@ -133,7 +133,10 @@ pub fn spawn_agent_watcher(
     })
     .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-    for dir in [global_dir.as_deref(), Some(project_dir.as_path())].into_iter().flatten() {
+    for dir in [global_dir.as_deref(), Some(project_dir.as_path())]
+        .into_iter()
+        .flatten()
+    {
         if dir.exists() {
             let _ = watcher.watch(dir, RecursiveMode::NonRecursive);
         }

@@ -63,6 +63,17 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
     pub tool_results: Vec<ToolResult>,
+    /// Multimodal parts (e.g. images); empty for text-only messages.
+    #[serde(default)]
+    pub content_parts: Vec<ContentPart>,
+}
+
+/// One multimodal content part attached to a [`ChatMessage`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    Image { media_type: String, data: String },
 }
 
 impl ChatMessage {
@@ -72,6 +83,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
+            content_parts: Vec::new(),
         }
     }
 }

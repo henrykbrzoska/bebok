@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use bebok_llm::{ChatMessage, ChatRequest, ChatRole, Thinking, ToolDef, ToolResult};
+use bebok_llm::{ChatMessage, ChatRequest, ChatRole, ContentPart, Thinking, ToolDef, ToolResult};
 use bebok_tools::ToolRegistry;
 
 use super::preset::Agent;
@@ -55,6 +55,11 @@ impl<'a> RequestBuilder<'a> {
             match msg.role {
                 Role::User => {
                     let text = msg.text_content();
+                    let content_parts: Vec<ContentPart> = msg
+                        .image_parts()
+                        .into_iter()
+                        .map(|(media_type, data, _name)| ContentPart::Image { media_type, data })
+                        .collect();
                     // A user message may carry tool results produced right before
                     // it in the same turn; normally results are attached below.
                     chat.push(ChatMessage {
@@ -62,6 +67,7 @@ impl<'a> RequestBuilder<'a> {
                         content: text,
                         tool_calls: Vec::new(),
                         tool_results: Vec::new(),
+                        content_parts,
                     });
                 }
                 Role::Assistant => {
@@ -99,6 +105,7 @@ impl<'a> RequestBuilder<'a> {
                         content,
                         tool_calls,
                         tool_results: Vec::new(),
+                        content_parts: Vec::new(),
                     });
                     if !tool_results.is_empty() {
                         chat.push(ChatMessage {
@@ -106,6 +113,7 @@ impl<'a> RequestBuilder<'a> {
                             content: String::new(),
                             tool_calls: Vec::new(),
                             tool_results,
+                            content_parts: Vec::new(),
                         });
                     }
                 }
@@ -128,8 +136,13 @@ impl<'a> RequestBuilder<'a> {
             .list()
             .iter()
             .filter(|t| {
-                self.agent.tools.is_empty()
-                    || self.agent.tools.iter().any(|n| n == t.name())
+                // The `fleet` fan-out tool is orchestrator-only: withheld from
+                // every other agent so parallel fleets are never user-triggered
+                // or spawned by a sub-agent.
+                if t.name() == "fleet" && self.agent.name != "orchestrator" {
+                    return false;
+                }
+                self.agent.tools.is_empty() || self.agent.tools.iter().any(|n| n == t.name())
             })
             .map(|t| {
                 let used = used_tools.contains(t.name());
@@ -276,5 +289,80 @@ pub(crate) fn hook_request_message(m: &ChatMessage) -> RequestMessage {
         text: m.content.clone(),
         tool_calls: m.tool_calls.len(),
         tool_results: m.tool_results.len(),
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use crate::session::{Message, Part};
+    use bebok_tools::ToolRegistry;
+
+    fn test_state<'a>(
+        store: &'a crate::store::InstanceStore,
+        session: &'a SessionState,
+    ) -> (&'a SessionState, Agent, ToolRegistry) {
+        let _ = store;
+        let agent = Agent::code();
+        let tools = ToolRegistry::new(Vec::new());
+        (session, agent, tools)
+    }
+
+    #[tokio::test]
+    async fn builder_maps_user_images_to_content_parts() {
+        let base = std::env::temp_dir().join(format!("bebok-img-req-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session
+            .append_user_message_with_images(
+                "look",
+                vec![Part::Image {
+                    media_type: "image/png".to_string(),
+                    data: "aGVsbG8=".to_string(),
+                    name: Some("shot.png".to_string()),
+                }],
+            )
+            .await
+            .unwrap();
+
+        let (_s, agent, tools) = test_state(&store, &session);
+        let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
+        let req = builder.build().await.unwrap();
+        assert_eq!(req.messages.len(), 1);
+        assert_eq!(req.messages[0].content, "look");
+        assert_eq!(req.messages[0].content_parts.len(), 1);
+        assert_eq!(
+            req.messages[0].content_parts[0],
+            ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string()
+            }
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn builder_text_only_has_no_content_parts() {
+        let base = std::env::temp_dir().join(format!("bebok-txt-req-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.append_user_message("hi").await.unwrap();
+
+        let (_s, agent, tools) = test_state(&store, &session);
+        let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
+        let req = builder.build().await.unwrap();
+        assert!(req.messages[0].content_parts.is_empty());
+        let _ = Message::user("unused");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

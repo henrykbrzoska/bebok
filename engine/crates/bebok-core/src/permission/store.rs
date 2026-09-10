@@ -89,7 +89,8 @@ mod tests {
     use super::*;
 
     fn tmp_path(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("bebok-perm-store-{name}-{}", uuid::Uuid::new_v4()));
+        let d =
+            std::env::temp_dir().join(format!("bebok-perm-store-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d.join(".bebok").join("config.json")
     }
@@ -99,19 +100,21 @@ mod tests {
         let path = tmp_path("mkdir");
         persist_project_rule(
             &path,
-            &Rule { pattern: "bash(pwd)".into(), action: Action::Allow },
+            &Rule {
+                pattern: "bash(pwd)".into(),
+                action: Action::Allow,
+            },
         )
         .unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("bash(pwd)"));
         // No stray tmp file left behind.
         assert!(
-            !path
-                .parent()
+            !path.parent().unwrap().read_dir().unwrap().any(|e| e
                 .unwrap()
-                .read_dir()
-                .unwrap()
-                .any(|e| e.unwrap().file_name().to_string_lossy().contains(".tmp-"))
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-"))
         );
     }
 
@@ -122,7 +125,10 @@ mod tests {
         std::fs::write(&path, "{ not valid json").unwrap();
         let err = persist_project_rule(
             &path,
-            &Rule { pattern: "bash(pwd)".into(), action: Action::Allow },
+            &Rule {
+                pattern: "bash(pwd)".into(),
+                action: Action::Allow,
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("invalid project config"));

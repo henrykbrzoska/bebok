@@ -249,7 +249,10 @@ impl PluginHost {
     pub async fn register(&self, plugin: Arc<dyn BebokPlugin>) {
         let mut plugins = self.inner.plugins.write().await;
         if let Some(pos) = plugins.iter().position(|p| p.name() == plugin.name()) {
-            tracing::warn!("plugin '{}' already registered; replacing it", plugin.name());
+            tracing::warn!(
+                "plugin '{}' already registered; replacing it",
+                plugin.name()
+            );
             plugins[pos] = plugin;
             return;
         }

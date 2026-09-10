@@ -1,22 +1,22 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use tokio_util::sync::CancellationToken;
-    use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost, Verdict};
     use crate::agent::{run_turn, spawn_agent_watcher};
-    use crate::event::EventBus;
-    use crate::session::ToolState;
     use crate::event::Event;
+    use crate::event::EventBus;
     use crate::permission::{PermissionAnswer, ResolveOutcome};
     use crate::session::Part;
+    use crate::session::ToolState;
     use crate::store::InstanceStore;
+    use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost, Verdict};
     use bebok_llm::{ChatRequest, Provider, StreamEvent, ToolCall, Usage};
     use bebok_mcp::{McpManager, McpServerSpec, McpTransport};
     use bebok_tools::{Runtimes, ToolRegistry, builtin_tools};
     use std::path::Path;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tokio::sync::broadcast;
+    use tokio_util::sync::CancellationToken;
 
     /// Minimal stdio MCP server (JSON-RPC over stdin/stdout) used by the
     /// permission-gate acceptance test.
@@ -177,11 +177,7 @@ if __name__ == "__main__":
                 let outcome = session
                     .resolve_permission_request(&request_id, answer)
                     .await;
-                assert_eq!(
-                    outcome,
-                    ResolveOutcome::Resolved,
-                    "first ask must resolve"
-                );
+                assert_eq!(outcome, ResolveOutcome::Resolved, "first ask must resolve");
                 return;
             }
         }
@@ -211,7 +207,10 @@ if __name__ == "__main__":
             .unwrap();
 
         // Append the prompt (like the server does) before running the turn.
-        session.append_user_message("create a file hello.txt with the content hello").await.unwrap();
+        session
+            .append_user_message("create a file hello.txt with the content hello")
+            .await
+            .unwrap();
         session.set_title_if_empty("create a file hello.txt").await;
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
@@ -246,14 +245,21 @@ if __name__ == "__main__":
         session.end_turn();
 
         // hello.txt must exist with content "hello"
-        let content = tokio::fs::read_to_string(project.join("hello.txt")).await.unwrap();
+        let content = tokio::fs::read_to_string(project.join("hello.txt"))
+            .await
+            .unwrap();
         assert_eq!(content, "hello", "write_file tool must create hello.txt");
 
         // Transcript: [user, assistant(write_file tool), assistant(final text)].
         // The tool result is carried by the Tool part (Completed), not by a
         // separate persisted message.
         let messages = session.messages_snapshot().await;
-        assert_eq!(messages.len(), 3, "expected 3 messages, got {}", messages.len());
+        assert_eq!(
+            messages.len(),
+            3,
+            "expected 3 messages, got {}",
+            messages.len()
+        );
         assert!(messages[0].parts.iter().any(|p| matches!(p, Part::Text { text } if text == "create a file hello.txt with the content hello")));
 
         // Tool part must be Completed.
@@ -264,7 +270,10 @@ if __name__ == "__main__":
 
         // Final assistant text present.
         let final_text = messages[2].text_content();
-        assert!(final_text.contains("hello.txt created"), "got: {final_text}");
+        assert!(
+            final_text.contains("hello.txt created"),
+            "got: {final_text}"
+        );
 
         // Events observed.
         let kinds: std::collections::HashSet<String> = drain_events(&mut events, 300)
@@ -275,14 +284,25 @@ if __name__ == "__main__":
         assert!(kinds.contains("message.updated"));
         assert!(kinds.contains("message.part.updated"));
         assert!(kinds.contains("session.updated"));
-        assert!(!kinds.contains("permission.asked"), "allow rule must avoid ask");
+        assert!(
+            !kinds.contains("permission.asked"),
+            "allow rule must avoid ask"
+        );
 
         // Disk: msg files + session.json + index.jsonl.
         let disk = session.disk_dir().to_path_buf();
         assert!(disk.join("msg-000000.json").exists());
         assert!(disk.join("msg-000002.json").exists());
         assert!(disk.join("session.json").exists());
-        let idx = data.join("instances").read_dir().unwrap().next().unwrap().unwrap().path().join("sessions/index.jsonl");
+        let idx = data
+            .join("instances")
+            .read_dir()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+            .join("sessions/index.jsonl");
         assert!(idx.exists(), "index.jsonl missing: {idx:?}");
 
         // Cleanup
@@ -340,7 +360,10 @@ if __name__ == "__main__":
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        session.append_user_message("delete must-survive.txt").await.unwrap();
+        session
+            .append_user_message("delete must-survive.txt")
+            .await
+            .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
@@ -389,7 +412,10 @@ if __name__ == "__main__":
             .into_iter()
             .map(|ev| ev.kind)
             .collect();
-        assert!(!kinds.contains("permission.asked"), "a deny rule must not ask");
+        assert!(
+            !kinds.contains("permission.asked"),
+            "a deny rule must not ask"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -406,7 +432,10 @@ if __name__ == "__main__":
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        session.append_user_message("print the working directory").await.unwrap();
+        session
+            .append_user_message("print the working directory")
+            .await
+            .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
@@ -458,7 +487,10 @@ if __name__ == "__main__":
 
         // Events: asked + resolved(allow).
         let evs = drain_events(&mut events, 300).await;
-        assert_eq!(evs.iter().filter(|e| e.kind == "permission.asked").count(), 1);
+        assert_eq!(
+            evs.iter().filter(|e| e.kind == "permission.asked").count(),
+            1
+        );
         let resolved = evs
             .iter()
             .find(|e| e.kind == "permission.resolved")
@@ -481,7 +513,10 @@ if __name__ == "__main__":
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        session.append_user_message("print the working directory").await.unwrap();
+        session
+            .append_user_message("print the working directory")
+            .await
+            .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
@@ -526,7 +561,10 @@ if __name__ == "__main__":
             matches!(p, Part::Tool { name, state: ToolState::Error { error, .. }, .. }
                 if name == "bash" && error == "denied by user")
         });
-        assert!(tool_err, "user-denied call must be Error with 'denied by user'");
+        assert!(
+            tool_err,
+            "user-denied call must be Error with 'denied by user'"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -543,7 +581,10 @@ if __name__ == "__main__":
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        session.append_user_message("print the working directory twice").await.unwrap();
+        session
+            .append_user_message("print the working directory twice")
+            .await
+            .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         // Two identical calls back to back; the second must not re-ask.
@@ -600,8 +641,14 @@ if __name__ == "__main__":
         let config_text = tokio::fs::read_to_string(project.join(".bebok").join("config.json"))
             .await
             .unwrap();
-        assert!(config_text.contains("bash(pwd)"), "rule persisted: {config_text}");
-        assert!(config_text.contains("allow"), "rule persisted: {config_text}");
+        assert!(
+            config_text.contains("bash(pwd)"),
+            "rule persisted: {config_text}"
+        );
+        assert!(
+            config_text.contains("allow"),
+            "rule persisted: {config_text}"
+        );
 
         // The engine's in-memory layer was recompiled, so the next identical
         // call resolves straight to Allow.
@@ -630,7 +677,9 @@ if __name__ == "__main__":
         let base = std::env::temp_dir().join(format!("bebok-readonly-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
         tokio::fs::create_dir_all(&project).await.unwrap();
-        tokio::fs::write(project.join("data.txt"), "hello world").await.unwrap();
+        tokio::fs::write(project.join("data.txt"), "hello world")
+            .await
+            .unwrap();
         let data = base.join("data");
 
         let store = InstanceStore::with_data_dir(data.clone());
@@ -775,7 +824,10 @@ if __name__ == "__main__":
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        session.append_user_message("mutate target.txt").await.unwrap();
+        session
+            .append_user_message("mutate target.txt")
+            .await
+            .unwrap();
 
         // Connect the MCP server and register its tools alongside built-ins.
         let manager = McpManager::new();
@@ -797,7 +849,11 @@ if __name__ == "__main__":
 
         let tools = Arc::new(registry);
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
-            tool_step("mcp__test__mutate", serde_json::json!({ "target": "target.txt" }), 1),
+            tool_step(
+                "mcp__test__mutate",
+                serde_json::json!({ "target": "target.txt" }),
+                1,
+            ),
             text_step("done"),
         ]));
         let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
@@ -908,7 +964,11 @@ if __name__ == "__main__":
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
-            tool_step("bash", serde_json::json!({ "command": "rm -f must-survive.txt" }), 1),
+            tool_step(
+                "bash",
+                serde_json::json!({ "command": "rm -f must-survive.txt" }),
+                1,
+            ),
             text_step("rm is vetoed"),
         ]));
         let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
@@ -976,7 +1036,9 @@ if __name__ == "__main__":
             .await
             .unwrap();
 
-        let name1 = session.allocate_child_name(Some("auth-flow-audit"), "code").await;
+        let name1 = session
+            .allocate_child_name(Some("auth-flow-audit"), "code")
+            .await;
         assert_eq!(name1, "auth-flow-audit");
 
         let _ = std::fs::remove_dir_all(&base);
@@ -996,7 +1058,9 @@ if __name__ == "__main__":
             .unwrap();
 
         // Uppercase + spaces + special chars -> normalized kebab-case
-        let name = session.allocate_child_name(Some("Auth Flow AUDIT!!"), "code").await;
+        let name = session
+            .allocate_child_name(Some("Auth Flow AUDIT!!"), "code")
+            .await;
         assert_eq!(name, "auth-flow-audit");
 
         let _ = std::fs::remove_dir_all(&base);
@@ -1091,7 +1155,11 @@ if __name__ == "__main__":
 
         let long = "a-very-very-very-long-name-that-exceeds-the-limit-of-thirty-two-chars";
         let name = session.allocate_child_name(Some(long), "code").await;
-        assert!(name.len() <= 32, "name must be <= 32 chars, got {} ({name})", name.len());
+        assert!(
+            name.len() <= 32,
+            "name must be <= 32 chars, got {} ({name})",
+            name.len()
+        );
         assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
 
         let _ = std::fs::remove_dir_all(&base);
@@ -1108,7 +1176,10 @@ if __name__ == "__main__":
         };
         let json = serde_json::to_value(&task).unwrap();
         assert!(json.get("taskID").is_some(), "expected camelCase taskID");
-        assert!(json.get("childSessionID").is_some(), "expected camelCase childSessionID");
+        assert!(
+            json.get("childSessionID").is_some(),
+            "expected camelCase childSessionID"
+        );
         assert!(json.get("name").is_some());
         assert!(json.get("agent").is_some());
         // Must NOT have snake_case keys
@@ -1148,7 +1219,10 @@ if __name__ == "__main__":
 
         let session_no_alias = crate::session::Session::new("/tmp", "code");
         let json = serde_json::to_value(&session_no_alias).unwrap();
-        assert!(json.get("alias").is_none(), "None alias must be skipped in serialization");
+        assert!(
+            json.get("alias").is_none(),
+            "None alias must be skipped in serialization"
+        );
     }
 
     #[test]
@@ -1185,5 +1259,4 @@ if __name__ == "__main__":
             _ => panic!("expected Completed"),
         }
     }
-
 }

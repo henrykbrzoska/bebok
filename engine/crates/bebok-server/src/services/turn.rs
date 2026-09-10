@@ -108,6 +108,8 @@ pub async fn prompt_turn(
     id: Uuid,
     body: PromptBody,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    // Validate image attachments before claiming the turn slot.
+    let image_parts = validate_images(body.images)?;
     let session = state
         .store
         .open_session(id)
@@ -167,7 +169,7 @@ pub async fn prompt_turn(
 
     // Append the user message, set the title, persist, emit.
     let user_idx = session
-        .append_user_message(&body.message)
+        .append_user_message_with_images(&body.message, image_parts.clone())
         .await
         .map_err(ApiError::from)?;
     if session.set_title_if_empty(&body.message).await {
@@ -277,3 +279,63 @@ fn assemble_prompt(
 // CoreError only flows through `ApiError::from`).
 #[allow(dead_code)]
 fn _keep_core_error(_: &CoreError) {}
+
+/// Allowed image MIME types for prompt attachments.
+const ALLOWED_IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
+/// Max images per prompt.
+const MAX_IMAGES_PER_PROMPT: usize = 5;
+/// Max base64 chars per image (~7MB text ≈ 5MB decoded).
+const MAX_IMAGE_BASE64_LEN: usize = 7 * 1024 * 1024;
+
+/// Validate prompt image attachments -> session `Part::Image` list.
+///
+/// - Skips entries with empty data (after prefix strip + trim).
+/// - Accepts and strips a `data:<mime>;base64,` prefix when present.
+/// - Rejects disallowed MIME types, oversized payloads, and >5 images with 400.
+pub fn validate_images(
+    images: Vec<crate::routes::session::ImageInput>,
+) -> Result<Vec<bebok_core::session::Part>, ApiError> {
+    let mut out = Vec::new();
+    for mut img in images {
+        let mut data = img.data.trim().to_string();
+        // Accept a data: URL prefix: data:<mime>;base64,<payload>.
+        if let Some(rest) = data.strip_prefix("data:") {
+            if let Some(comma) = rest.find(',') {
+                let (meta, payload) = rest.split_at(comma);
+                let payload = payload[1..].trim().to_string();
+                // Adopt the MIME from the prefix when the field is empty.
+                if img.media_type.trim().is_empty() {
+                    img.media_type = meta.split(';').next().unwrap_or("").trim().to_string();
+                }
+                data = payload;
+            }
+        }
+        if data.trim().is_empty() {
+            continue; // truncate/skip empty data
+        }
+        let media_type = img.media_type.trim().to_lowercase();
+        if !ALLOWED_IMAGE_TYPES.contains(&media_type.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "unsupported image media_type '{media_type}': expected one of image/png, image/jpeg, image/webp, image/gif"
+            )));
+        }
+        if data.len() > MAX_IMAGE_BASE64_LEN {
+            return Err(ApiError::bad_request(format!(
+                "image '{}' too large: {} base64 chars (max ~7MB)",
+                img.name.as_deref().unwrap_or("unnamed"),
+                data.len()
+            )));
+        }
+        out.push(bebok_core::session::Part::Image {
+            media_type,
+            data,
+            name: img.name.filter(|n| !n.trim().is_empty()),
+        });
+        if out.len() > MAX_IMAGES_PER_PROMPT {
+            return Err(ApiError::bad_request(format!(
+                "too many images: max {MAX_IMAGES_PER_PROMPT} per prompt"
+            )));
+        }
+    }
+    Ok(out)
+}

@@ -1,6 +1,7 @@
 import { Component, input } from '@angular/core';
 
 import { Part } from '../../../core/engine.dtos';
+import { ImagePartComponent } from './image-part';
 import { TextPartComponent } from './text-part';
 import { ThinkingPartComponent } from './thinking-part';
 import { ToolPartComponent } from './tool-part';
@@ -9,7 +10,7 @@ import { UsagePartComponent } from './usage-part';
 /** Maps one `Part` to its renderer (SPEC §7: parts drive the chat). */
 @Component({
   selector: 'app-part-renderer',
-  imports: [TextPartComponent, ThinkingPartComponent, ToolPartComponent, UsagePartComponent],
+  imports: [TextPartComponent, ThinkingPartComponent, ToolPartComponent, UsagePartComponent, ImagePartComponent],
   template: `
     @switch (part().type) {
       @case ('text') {
@@ -23,6 +24,9 @@ import { UsagePartComponent } from './usage-part';
       }
       @case ('usage') {
         <app-usage-part [part]="part()" />
+      }
+      @case ('image') {
+        <app-image-part [part]="part()" />
       }
     }
   `,

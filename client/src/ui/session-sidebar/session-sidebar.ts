@@ -4,16 +4,18 @@
  * Task 6: collapsible + resizable (width persisted via UiPrefsStore).
  */
 
-import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { EventsStore } from '../../core/events.store';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
 import {
   Message,
   McpStatus,
   ResolvedSkill,
   SessionMeta,
+  EngineEvent,
   UsagePart,
 } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
@@ -324,6 +326,8 @@ interface Totals {
 })
 export class SessionSidebarComponent {
   private readonly engine = inject(EngineClient);
+  private readonly events = inject(EventsStore);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly i18n = inject(I18nService);
   readonly uiPrefs = inject(UiPrefsStore);
 
@@ -361,6 +365,48 @@ export class SessionSidebarComponent {
         void this.loadSubagents(meta.id, meta.directory, running);
       }
     });
+    // Live sub-agent updates: session.created carries the full SessionMeta
+    // (incl. parent), task.started carries the childSessionID on the parent.
+    // Without this the list stays stale until a session switch forces a reload.
+    const unsubscribe = this.events.onEvent((ev) => this.handleSubagentEvent(ev));
+    this.destroyRef.onDestroy(unsubscribe);
+  }
+
+  private handleSubagentEvent(ev: EngineEvent): void {
+    const meta = this.meta();
+    if (!meta?.id || !meta.directory) {
+      return;
+    }
+    if (ev.directory !== meta.directory) {
+      return;
+    }
+    if (ev.type === 'session.created') {
+      const session = ev.properties?.['session'] as SessionMeta | undefined;
+      const parentId = Array.isArray(session?.parent) ? session.parent[0] : null;
+      if (session && parentId === meta.id) {
+        // Guard against a tab switch racing the event delivery.
+        if (this.meta()?.id !== meta.id) {
+          return;
+        }
+        this.subagents.update((list) =>
+          list.some((s) => s.id === session.id) ? list : [...list, session],
+        );
+      }
+    } else if (ev.type === 'task.started') {
+      // Emitted on the parent session; backstop in case session.created was missed.
+      if (ev.sessionID !== meta.id) {
+        return;
+      }
+      const childId = ev.properties?.['childSessionID'] ?? ev.properties?.['child_session_id'];
+      if (typeof childId === 'string' && childId) {
+        if (this.meta()?.id !== meta.id) {
+          return;
+        }
+        if (!this.subagents().some((s) => s.id === childId)) {
+          void this.loadSubagents(meta.id, meta.directory, this.running());
+        }
+      }
+    }
   }
 
   /** List child sessions whose `parent` points at the current session. */

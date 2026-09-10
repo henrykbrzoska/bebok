@@ -12,9 +12,15 @@ pub fn estimate_tokens(text: &str) -> usize {
     (text.chars().count() + 3) / 4
 }
 
+/// Flat token estimate per attached image (all providers bill images as a
+/// fixed-ish block; 1000 is a conservative middle ground).
+pub const IMAGE_TOKENS_PER_IMAGE: usize = 1000;
+
 /// Estimate the token cost of one persisted message.
 pub fn estimate_message(m: &Message) -> usize {
     let mut total = estimate_tokens(&m.text_content());
+    // Flat per-image estimate so context budgets account for multimodal input.
+    total += m.image_parts().len() * IMAGE_TOKENS_PER_IMAGE;
     for p in &m.parts {
         if let Part::Tool { state, .. } = p {
             total += estimate_tokens(&serde_json::to_string(state.input()).unwrap_or_default());
@@ -31,6 +37,7 @@ pub fn estimate_chat(chat: &[ChatMessage], system: &str) -> usize {
     let mut total = estimate_tokens(system);
     for m in chat {
         total += estimate_tokens(&m.content);
+        total += m.content_parts.len() * IMAGE_TOKENS_PER_IMAGE;
         for tc in &m.tool_calls {
             total += estimate_tokens(&tc.name);
             total += estimate_tokens(&serde_json::to_string(&tc.input).unwrap_or_default());

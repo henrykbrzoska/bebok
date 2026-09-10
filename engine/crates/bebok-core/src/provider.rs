@@ -17,7 +17,10 @@ use crate::config::{ResolvedConfig, provider_from_model};
 use crate::error::CoreError;
 
 /// Build the provider for a model (see module docs for selection rules).
-pub fn build_provider(config: &ResolvedConfig, model: &str) -> Result<Arc<dyn Provider>, CoreError> {
+pub fn build_provider(
+    config: &ResolvedConfig,
+    model: &str,
+) -> Result<Arc<dyn Provider>, CoreError> {
     let name = provider_from_model(model);
     let spec = config
         .provider_spec(&name)

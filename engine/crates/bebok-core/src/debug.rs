@@ -39,7 +39,13 @@ impl DebugLog {
         }
     }
 
-    pub fn log(&self, source: &str, kind: &str, title: impl Into<String>, detail: impl Into<String>) {
+    pub fn log(
+        &self,
+        source: &str,
+        kind: &str,
+        title: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
         let entry = DebugEntry {
             ts: crate::util::now_ms(),
             source: source.to_string(),
@@ -56,11 +62,17 @@ impl DebugLog {
     }
 
     pub fn entries(&self) -> Vec<DebugEntry> {
-        self.entries.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub fn clear(&self) {
-        self.entries.write().unwrap_or_else(PoisonError::into_inner).clear();
+        self.entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.flush();
     }
 

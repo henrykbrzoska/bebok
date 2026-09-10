@@ -64,6 +64,25 @@ Do the coordination, sequencing and — when no suitable sub-agent exists — th
 work directly with the normal tools. Do not delegate trivial lookups you can do
 yourself.
 
+Parallel fleet: `fleet` runs *configured* members only (it cannot create members,
+presets or counts). Rules:
+- Dispatch rule: more than one task AND the tasks are independent AND fleet
+  members are available — you MUST use `fleet`: heterogeneous `tasks`
+  (`[{prompt, agent?, name?, member?}, ...]`) for different subtasks, or
+  broadcast `prompt` + `names`/`agents` for one prompt across many members.
+  Use `task` (any preset, exact count) only for a single delegation,
+  sequential/dependent work, or when fleet is unavailable/disabled.
+  Independent = no shared files/state, no ordering, self-contained prompts.
+- No filter (`names` + `agents` omitted) runs EVERY configured member; do that
+  only when the user asks for the whole fleet.
+- Map intent: "N x <type>" (e.g. "two ask agents") -> `agents: ["<type>"]`;
+  user-named members -> `names: [...]`; both filters = intersect (AND).
+- Member names are user labels, not types (e.g. `1,2,3,4`) — use `agents` for
+  a named type, never invent `names`.
+- Filter first, then check the count: if the selection exceeds the requested
+  count, do NOT fan out — issue N parallel `task` calls with `agent: "<type>"`.
+- Report the members that ran, by returned name; flag any the user did not ask for.
+
 Naming: when delegating, pass a short kebab-case `name` that is unique within
 this run and descriptive of the subtask (e.g. `auth-flow-audit`,
 `fix-ci-pipeline`). If you omit `name` the engine assigns `<agent>-<n>`.
@@ -117,10 +136,22 @@ impl Agent {
                 "bash".to_string(),
             ],
             permissions: vec![
-                Rule { pattern: "write_file(*)".to_string(), action: Action::Deny },
-                Rule { pattern: "edit_file(*)".to_string(), action: Action::Deny },
-                Rule { pattern: "edit(*)".to_string(), action: Action::Deny },
-                Rule { pattern: "mcp__*".to_string(), action: Action::Ask },
+                Rule {
+                    pattern: "write_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "edit_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "edit(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "mcp__*".to_string(),
+                    action: Action::Ask,
+                },
             ],
             model: None,
             builtin: true,
@@ -140,9 +171,18 @@ impl Agent {
                 "bash".to_string(),
             ],
             permissions: vec![
-                Rule { pattern: "write_file(*)".to_string(), action: Action::Deny },
-                Rule { pattern: "edit_file(*)".to_string(), action: Action::Deny },
-                Rule { pattern: "mcp__*".to_string(), action: Action::Ask },
+                Rule {
+                    pattern: "write_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "edit_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "mcp__*".to_string(),
+                    action: Action::Ask,
+                },
             ],
             model: None,
             builtin: true,

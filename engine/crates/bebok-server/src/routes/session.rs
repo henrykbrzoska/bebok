@@ -45,6 +45,18 @@ pub struct PromptBody {
     /// Optional model override for this turn (switch model mid-chat).
     #[serde(default)]
     pub model: Option<String>,
+    /// Optional image attachments (raw base64, no `data:` URL prefix required).
+    #[serde(default)]
+    pub images: Vec<ImageInput>,
+}
+
+/// One image attached to a prompt: raw base64 payload + MIME type.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ImageInput {
+    pub media_type: String,
+    pub data: String,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize)]

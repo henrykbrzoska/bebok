@@ -19,8 +19,8 @@ use crate::config;
 use crate::error::{CoreError, Result};
 use crate::event::EventBus;
 use crate::permission::PermissionEngine;
-use crate::session::persist::{self, data_root};
 use crate::session::Session;
+use crate::session::persist::{self, data_root};
 use crate::util::normalize_path;
 
 /// Global store: instances keyed by normalized directory, sessions by id.
@@ -59,8 +59,7 @@ impl InstanceStore {
     /// Build the store value (shared constructors wrap it in `Arc`).
     fn build_with(data_dir: PathBuf) -> Self {
         let recovered = persist::repair(&data_dir);
-        let meta: HashMap<Uuid, Session> =
-            recovered.into_iter().map(|s| (s.id, s)).collect();
+        let meta: HashMap<Uuid, Session> = recovered.into_iter().map(|s| (s.id, s)).collect();
         tracing::info!("recovered {} session(s) from disk", meta.len());
         Self {
             data_dir,
@@ -90,7 +89,9 @@ impl InstanceStore {
         // Ensure the project directory exists (tools write relative to root).
         let root = PathBuf::from(&normalized);
         if !root.exists() {
-            tokio::fs::create_dir_all(&root).await.map_err(CoreError::Io)?;
+            tokio::fs::create_dir_all(&root)
+                .await
+                .map_err(CoreError::Io)?;
             let normalized = normalize_path(&root);
             return Box::pin(self.get_or_create_instance(&normalized)).await;
         }
@@ -124,9 +125,18 @@ impl InstanceStore {
         // Register the sub-agent `task` tool. It needs the store back-reference
         // (set once via `Arc::new_cyclic`); a plain (non-shared) store skips it.
         if let Some(weak) = self.self_weak.get() {
-            instance.tools.register_tool(Arc::new(
-                crate::agent::task_tool::TaskTool::new(weak.clone()),
-            ));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::task_tool::TaskTool::new(
+                    weak.clone(),
+                )));
+            // Orchestrator-only parallel `fleet` tool (withheld from other
+            // agents in `request.rs`; same back-reference reasoning).
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::fleet_tool::FleetTool::new(
+                    weak.clone(),
+                )));
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -136,11 +146,7 @@ impl InstanceStore {
         let mcp_tools = instance.mcp.sync(&specs, &runtimes).await;
         instance.tools.set_mcp_tools(mcp_tools);
 
-        let _ = spawn_agent_watcher(
-            root.clone(),
-            instance.agents.clone(),
-            self.bus.clone(),
-        );
+        let _ = spawn_agent_watcher(root.clone(), instance.agents.clone(), self.bus.clone());
 
         Ok(instance)
     }
@@ -185,7 +191,10 @@ impl InstanceStore {
     }
 
     /// Resolve the most recent session for a directory (for `continueLast`).
-    pub async fn continue_last_session(&self, directory: &str) -> Result<Option<Arc<SessionState>>> {
+    pub async fn continue_last_session(
+        &self,
+        directory: &str,
+    ) -> Result<Option<Arc<SessionState>>> {
         let sessions = self.list_sessions(directory).await;
         let Some(last) = sessions.into_iter().next() else {
             return Ok(None);

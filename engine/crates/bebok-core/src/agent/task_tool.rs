@@ -225,14 +225,18 @@ impl Tool for TaskTool {
         };
 
         // Allocate a unique human-readable name for this subtask.
-        let name = parent.allocate_child_name(args.name.as_deref(), &agent.name).await;
+        let name = parent
+            .allocate_child_name(args.name.as_deref(), &agent.name)
+            .await;
 
         let child = match store
             .create_subagent_session(&parent, &agent.name, Some(&model), Some(&name))
             .await
         {
             Ok(c) => c,
-            Err(e) => return ToolOutput::new(format!("task: cannot create sub-session: {e}"), "task"),
+            Err(e) => {
+                return ToolOutput::new(format!("task: cannot create sub-session: {e}"), "task");
+            }
         };
 
         if let Err(e) = child.append_user_message(prompt).await {
@@ -267,12 +271,8 @@ impl Tool for TaskTool {
         // Emit task.started so the client can render the sub-task with an
         // individual abort button.
         bus.publish(
-            crate::event::Event::new(
-                "task.started",
-                &directory,
-                &ctx.session_id,
-            )
-            .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
+            crate::event::Event::new("task.started", &directory, &ctx.session_id)
+                .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
         );
 
         let result = run_turn(
@@ -294,7 +294,10 @@ impl Tool for TaskTool {
         let (status, error_msg) = match &result {
             Ok(()) => {
                 if abort.is_cancelled() {
-                    ("aborted".to_string(), Some("sub-task was cancelled".to_string()))
+                    (
+                        "aborted".to_string(),
+                        Some("sub-task was cancelled".to_string()),
+                    )
                 } else {
                     ("completed".to_string(), None)
                 }
@@ -302,7 +305,10 @@ impl Tool for TaskTool {
             Err(e) => {
                 let msg = e.to_string();
                 if abort.is_cancelled() {
-                    ("aborted".to_string(), Some(format!("sub-task was cancelled: {msg}")))
+                    (
+                        "aborted".to_string(),
+                        Some(format!("sub-task was cancelled: {msg}")),
+                    )
                 } else {
                     ("error".to_string(), Some(msg))
                 }
@@ -312,18 +318,15 @@ impl Tool for TaskTool {
         // Unregister and emit task.ended.
         parent.unregister_child_task(&task_id).await;
         bus.publish(
-            crate::event::Event::new(
-                "task.ended",
-                &directory,
-                &ctx.session_id,
-            )
-            .with_properties(json!({
-                "taskID": task_id,
-                "status": status,
-                "error": error_msg,
-                "childSessionID": child_session_id,
-                "name": name,
-            })),
+            crate::event::Event::new("task.ended", &directory, &ctx.session_id).with_properties(
+                json!({
+                    "taskID": task_id,
+                    "status": status,
+                    "error": error_msg,
+                    "childSessionID": child_session_id,
+                    "name": name,
+                }),
+            ),
         );
 
         // If the child was aborted, the abort token was already cancelled.

@@ -22,7 +22,7 @@ use super::preset::Agent;
 use super::request::RequestBuilder;
 use crate::error::Result;
 use crate::event::{Event, EventBus};
-use crate::llm_trace::{LlmCall, LLM_TRACE, push_llm_call};
+use crate::llm_trace::{LLM_TRACE, LlmCall, push_llm_call};
 use crate::permission::{CompiledLayer, PermissionEngine};
 use crate::plugin::{Hook, PluginHost, TurnHook};
 use crate::session::{Message, Role};
@@ -115,8 +115,8 @@ impl TurnRunner {
                 .unwrap_or_else(|_| serde_json::json!({"_serialize_error": true}));
 
             bus.publish(
-                Event::new("debug.log", state.directory(), &state.id().to_string()).with_properties(
-                    serde_json::json!({
+                Event::new("debug.log", state.directory(), &state.id().to_string())
+                    .with_properties(serde_json::json!({
                         "source": "llm",
                         "kind": "request",
                         "title": format!("llm {model}"),
@@ -128,8 +128,7 @@ impl TurnRunner {
                             req.max_tokens,
                             req.thinking.as_str()
                         ),
-                    }),
-                ),
+                    })),
             );
             let mut stream = match provider.stream(req).await {
                 Ok(s) => s,
@@ -146,7 +145,11 @@ impl TurnRunner {
                     // A provider-level failure (e.g. a model that refuses tool
                     // use, invalid request, 5xx): note it in the project config so
                     // repeat offenders can be handled/filtered later.
-                    crate::config::record_llm_error(Path::new(state.directory()), &model, &err.to_string());
+                    crate::config::record_llm_error(
+                        Path::new(state.directory()),
+                        &model,
+                        &err.to_string(),
+                    );
                     bus.publish(
                         Event::new("debug.log", state.directory(), &state.id().to_string())
                             .with_properties(serde_json::json!({
@@ -179,19 +182,27 @@ impl TurnRunner {
                 match ev? {
                     StreamEvent::Text(delta) => {
                         saw_any = true;
-                        state.append_to_part(assistant_idx, |m| m.append_text(&delta)).await;
+                        state
+                            .append_to_part(assistant_idx, |m| m.append_text(&delta))
+                            .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                     }
                     StreamEvent::Thinking(delta) => {
                         saw_any = true;
-                        state.append_to_part(assistant_idx, |m| m.append_thinking(&delta)).await;
+                        state
+                            .append_to_part(assistant_idx, |m| m.append_thinking(&delta))
+                            .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                     }
                     StreamEvent::ToolCall(call) => {
                         saw_any = true;
                         state
                             .append_to_part(assistant_idx, |m| {
-                                m.add_tool_call(call.id.clone(), call.name.clone(), call.input.clone())
+                                m.add_tool_call(
+                                    call.id.clone(),
+                                    call.name.clone(),
+                                    call.input.clone(),
+                                )
                             })
                             .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
@@ -219,7 +230,13 @@ impl TurnRunner {
                             })
                             .await;
                         state
-                            .add_usage(usage.input_tokens, usage.output_tokens, cost, cache_read, cache_write)
+                            .add_usage(
+                                usage.input_tokens,
+                                usage.output_tokens,
+                                cost,
+                                cache_read,
+                                cache_write,
+                            )
                             .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                         bus.publish(
@@ -369,10 +386,7 @@ async fn persist_abort_message(
         let messages = state.messages.read().await;
         messages
             .last()
-            .map(|m| {
-                m.role == Role::Assistant
-                    && m.text_content().contains("[Turn aborted")
-            })
+            .map(|m| m.role == Role::Assistant && m.text_content().contains("[Turn aborted"))
             .unwrap_or(false)
     };
     if already_marked {

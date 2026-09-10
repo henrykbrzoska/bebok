@@ -91,7 +91,16 @@
             </div>
             @for (p of pending(); track p.id) {
               <div class="pending user-bubble">
-                <div class="parts"><div class="text">{{ p.text }}</div></div>
+                <div class="parts">
+                  @if (p.images?.length) {
+                    <div class="pending-thumbs">
+                      @for (img of p.images; track $index) {
+                        <img class="thumb" [src]="pendingImageUrl(img)" [alt]="img.name || 'image'" />
+                      }
+                    </div>
+                  }
+                  <div class="text">{{ p.text }}</div>
+                </div>
                 <div class="status">
                   @if (p.state === 'sending') {
                     <span class="dot" [title]="t('chat.sending')"></span>
@@ -149,7 +158,37 @@
         <div class="chat-error">{{ error() }}</div>
       }
 
-      <footer class="composer">
+      <footer
+        class="composer"
+        (dragover)="onComposerDragOver($event)"
+        (drop)="onComposerDrop($event)"
+        (paste)="onComposerPaste($event)"
+      >
+        <input
+          #filePicker
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          (change)="onFilesPicked($event)"
+        />
+        @if (attachments().length > 0) {
+          <div class="attach-strip">
+            @for (a of attachments(); track a.id) {
+              <div class="attach-thumb">
+                <img [src]="a.dataUrl" [alt]="a.name" />
+                <button
+                  class="icon-btn danger attach-remove"
+                  (click)="removeAttachment(a.id)"
+                  [title]="t('chat.removeAttachment')"
+                >&times;</button>
+              </div>
+            }
+          </div>
+        }
+        @if (attachError()) {
+          <div class="attach-error">{{ attachError() }}</div>
+        }
         <textarea
           rows="3"
           [placeholder]="t('chat.composerPlaceholder')"
@@ -168,10 +207,17 @@
               }
             </div>
             <div class="queue-list">
-              @for (text of queue(); track $index; let i = $index) {
+              @for (q of queue(); track $index; let i = $index) {
                 <div class="queue-item">
                   <span class="queue-item-num">{{ i + 1 }}.</span>
-                  <span class="queue-item-text">{{ truncateQueueText(text) }}</span>
+                  @if (q.images.length > 0) {
+                    <span class="queue-thumbs">
+                      @for (img of q.images; track $index) {
+                        <img class="thumb small" [src]="queuedImageUrl(img)" [alt]="img.name || 'image'" />
+                      }
+                    </span>
+                  }
+                  <span class="queue-item-text">{{ truncateQueueText(q.text) || (q.images.length ? '🖼' : '') }}</span>
                   <button class="icon-btn danger" (click)="removeFromQueue(i)" [title]="t('chat.removeFromQueue')">
                     &times;
                   </button>
@@ -182,6 +228,12 @@
         }
 
         <div class="composer-actions">
+          <button
+            class="attach-btn"
+            (click)="filePicker.click()"
+            [title]="t('chat.attachImage')"
+            [disabled]="loading()"
+          >📎</button>
           <label class="follow-toggle">
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
             {{ t('chat.follow') }}
@@ -192,7 +244,7 @@
           <button
             class="primary send"
             (click)="sendPrompt()"
-            [disabled]="!draft().trim() || sending() || loading()"
+            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading()"
           >
             {{ sending() ? t('chat.sending') : t('chat.send') }}
           </button>

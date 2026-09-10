@@ -99,7 +99,10 @@ pub fn parse_rules(value: &Value) -> Vec<Rule> {
 pub(crate) fn rule_from_object(v: &Value, tool: Option<&str>) -> Option<Rule> {
     let o = v.as_object()?;
     let inner = o.get("pattern")?.as_str()?;
-    let action = o.get("action").and_then(Value::as_str).and_then(parse_action)?;
+    let action = o
+        .get("action")
+        .and_then(Value::as_str)
+        .and_then(parse_action)?;
     let pattern = match tool {
         // Per-tool shorthand stores argument globs; wrap them into the
         // canonical `tool(arg-glob)` form.
@@ -146,21 +149,44 @@ mod tests {
         .unwrap();
         let rules = parse_rules(&v);
         assert_eq!(rules.len(), 4);
-        assert_eq!(rules[0], Rule { pattern: "edit(*)".into(), action: Action::Allow });
-        assert_eq!(rules[1], Rule { pattern: "bash(git *)".into(), action: Action::Allow });
-        assert_eq!(rules[2], Rule { pattern: "bash(rm *)".into(), action: Action::Deny });
-        assert_eq!(rules[3], Rule { pattern: "webfetch(*)".into(), action: Action::Ask });
+        assert_eq!(
+            rules[0],
+            Rule {
+                pattern: "edit(*)".into(),
+                action: Action::Allow
+            }
+        );
+        assert_eq!(
+            rules[1],
+            Rule {
+                pattern: "bash(git *)".into(),
+                action: Action::Allow
+            }
+        );
+        assert_eq!(
+            rules[2],
+            Rule {
+                pattern: "bash(rm *)".into(),
+                action: Action::Deny
+            }
+        );
+        assert_eq!(
+            rules[3],
+            Rule {
+                pattern: "webfetch(*)".into(),
+                action: Action::Ask
+            }
+        );
     }
 
     #[test]
     fn parses_single_rule_and_bare_array() {
-        let single: Value = serde_json::from_str(r#"{ "pattern": "bash(rm *)", "action": "deny" }"#).unwrap();
+        let single: Value =
+            serde_json::from_str(r#"{ "pattern": "bash(rm *)", "action": "deny" }"#).unwrap();
         assert_eq!(parse_rules(&single)[0].pattern, "bash(rm *)");
 
-        let arr: Value = serde_json::from_str(
-            r#"[ { "pattern": "bash(git *)", "action": "allow" } ]"#,
-        )
-        .unwrap();
+        let arr: Value =
+            serde_json::from_str(r#"[ { "pattern": "bash(git *)", "action": "allow" } ]"#).unwrap();
         assert_eq!(parse_rules(&arr).len(), 1);
     }
 }

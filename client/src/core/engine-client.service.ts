@@ -30,6 +30,7 @@ import {
   MessageListResponse,
   ModelsResponse,
   PermissionResponse,
+  PromptBody,
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
@@ -190,12 +191,26 @@ export class EngineClient {
     });
   }
 
-  prompt(id: string, message: string, agent?: string, model?: string): Promise<unknown> {
-    return this.request('POST', `/session/${id}/prompt`, {
-      message,
-      ...(agent ? { agent } : {}),
-      ...(model ? { model } : {}),
-    });
+  prompt(
+    id: string,
+    body: PromptBody | string,
+    agent?: string,
+    model?: string,
+  ): Promise<unknown> {
+    const payload: PromptBody =
+      typeof body === 'string'
+        ? {
+            message: body,
+            ...(agent ? { agent } : {}),
+            ...(model ? { model } : {}),
+          }
+        : {
+            message: body.message,
+            ...(body.agent ?? agent ? { agent: (body.agent ?? agent) as string } : {}),
+            ...(body.model ?? model ? { model: (body.model ?? model) as string } : {}),
+            ...(body.images?.length ? { images: body.images } : {}),
+          };
+    return this.request('POST', `/session/${id}/prompt`, payload);
   }
 
   abort(id: string): Promise<AbortResponse> {

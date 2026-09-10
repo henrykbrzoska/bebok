@@ -15,6 +15,31 @@
       <div class="saved-banner">{{ saved() }}</div>
     }
 
+    <nav class="settings-tabs" role="tablist">
+      <button
+        type="button"
+        role="tab"
+        [class.active]="tab() === 'agents'"
+        [attr.aria-selected]="tab() === 'agents'"
+        (click)="setTab('agents')"
+      >{{ t('settings.tabAgents') }}</button>
+      <button
+        type="button"
+        role="tab"
+        [class.active]="tab() === 'providers'"
+        [attr.aria-selected]="tab() === 'providers'"
+        (click)="setTab('providers')"
+      >{{ t('settings.tabProviders') }}</button>
+      <button
+        type="button"
+        role="tab"
+        [class.active]="tab() === 'other'"
+        [attr.aria-selected]="tab() === 'other'"
+        (click)="setTab('other')"
+      >{{ t('settings.tabOther') }}</button>
+    </nav>
+
+    @if (tab() === 'agents') {
     <div class="card">
       <h2>{{ t('settings.typeModelsTitle') }}</h2>
       <p class="muted">{{ t('settings.typeModelsHint') }}</p>
@@ -40,6 +65,101 @@
       </div>
     </div>
 
+    <div class="card">
+      <h2>{{ t('settings.agentsTitle') }}</h2>
+      <p class="muted">{{ t('settings.agentsHint') }}</p>
+      <ul class="agent-list">
+        @for (agent of config()?.agents ?? []; track agent.name) {
+          <li>
+            <span class="agent-name">{{ agent.name }}</span>
+            @if (agent.model) {
+              <code class="muted">{{ agent.model }}</code>
+            }
+            <span class="muted">{{ agent.builtin ? t('settings.builtin') : t('settings.file') }}</span>
+            @if (agent.description) {
+              <span class="muted desc">{{ agent.description }}</span>
+            }
+          </li>
+        }
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>{{ t('settings.fleetTitle') }}</h2>
+      <p class="muted">{{ t('settings.fleetHint') }}</p>
+      <label class="yolo-toggle">
+        <input
+          type="checkbox"
+          [checked]="fleetEnabled()"
+          (change)="toggleFleet(!fleetEnabled())"
+          [disabled]="saving()"
+        />
+        {{ t('settings.fleetEnabled') }}
+      </label>
+      <ul class="fleet-list">
+        @for (member of fleetMembers(); track $index; let i = $index) {
+          <li class="fleet-row">
+            <input
+              type="text"
+              [ngModel]="member.name"
+              (ngModelChange)="updateFleetMember(i, 'name', $event)"
+              placeholder="{{ t('settings.fleetName') }}"
+              spellcheck="false"
+            />
+            <select
+              [ngModel]="member.agent"
+              (ngModelChange)="updateFleetMember(i, 'agent', $event)"
+            >
+              @if ((config()?.agents ?? []).length === 0) {
+                @for (type of agentTypes; track type) {
+                  <option [value]="type">{{ type }}</option>
+                }
+              } @else {
+                @for (agent of config()?.agents ?? []; track agent.name) {
+                  <option [value]="agent.name">{{ agent.name }}</option>
+                }
+              }
+            </select>
+            @if (availableModels().length > 0) {
+              <select
+                [ngModel]="member.model"
+                (ngModelChange)="updateFleetMember(i, 'model', $event)"
+              >
+                <option value="">{{ t('settings.defaultOption') }}</option>
+                @if (member.model && !availableModels().includes(member.model)) {
+                  <option [value]="member.model">{{ member.model }}</option>
+                }
+                @for (model of availableModels(); track model) {
+                  <option [value]="model">{{ model }}</option>
+                }
+              </select>
+            } @else {
+              <input
+                type="text"
+                [ngModel]="member.model"
+                (ngModelChange)="updateFleetMember(i, 'model', $event)"
+                placeholder="{{ t('settings.fleetModel') }}"
+                spellcheck="false"
+              />
+            }
+            <button type="button" (click)="removeFleetMember(i)">
+              {{ t('settings.fleetRemove') }}
+            </button>
+          </li>
+        }
+      </ul>
+      <div class="actions actions-spread">
+        <button type="button" (click)="addFleetMember()">
+          {{ t('settings.fleetAdd') }}
+        </button>
+        <button class="primary" (click)="saveFleet()" [disabled]="saving()">
+          {{ t('settings.fleetSave') }}
+        </button>
+      </div>
+    </div>
+    }
+
+    @if (tab() === 'providers') {
     <div class="card">
       <h2>{{ t('settings.providersTitle') }}</h2>
       <p class="muted">{{ t('settings.providersHint') }}</p>
@@ -140,7 +260,9 @@
         </button>
       </div>
     </div>
+    }
 
+    @if (tab() === 'other') {
     <div class="card">
       <h2>{{ t('settings.runtimesTitle') }}</h2>
       <p class="muted">{{ t('settings.runtimesHint') }}</p>
@@ -228,25 +350,6 @@
           </span>
         }
       </div>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.agentsTitle') }}</h2>
-      <p class="muted">{{ t('settings.agentsHint') }}</p>
-      <ul class="agent-list">
-        @for (agent of config()?.agents ?? []; track agent.name) {
-          <li>
-            <span class="agent-name">{{ agent.name }}</span>
-            @if (agent.model) {
-              <code class="muted">{{ agent.model }}</code>
-            }
-            <span class="muted">{{ agent.builtin ? t('settings.builtin') : t('settings.file') }}</span>
-            @if (agent.description) {
-              <span class="muted desc">{{ agent.description }}</span>
-            }
-          </li>
-        }
-      </ul>
     </div>
 
     <div class="card">
@@ -372,5 +475,6 @@
         }
       </ul>
     </div>
+    }
   }
 </section>

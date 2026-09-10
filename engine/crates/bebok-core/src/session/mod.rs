@@ -18,9 +18,23 @@ pub enum Role {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Part {
-    Text { text: String },
-    Thinking { text: String },
-    Tool { id: String, name: String, state: ToolState },
+    Text {
+        text: String,
+    },
+    Image {
+        media_type: String,
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    Thinking {
+        text: String,
+    },
+    Tool {
+        id: String,
+        name: String,
+        state: ToolState,
+    },
     Usage {
         input_tokens: u64,
         output_tokens: u64,
@@ -36,8 +50,13 @@ pub enum Part {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ToolState {
-    Pending { input: Value },
-    Running { input: Value, started_at: i64 },
+    Pending {
+        input: Value,
+    },
+    Running {
+        input: Value,
+        started_at: i64,
+    },
     Completed {
         input: Value,
         output: String,
@@ -45,7 +64,10 @@ pub enum ToolState {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         structured: Option<Value>,
     },
-    Error { input: Value, error: String },
+    Error {
+        input: Value,
+        error: String,
+    },
 }
 
 impl ToolState {
@@ -114,6 +136,18 @@ impl Message {
         m
     }
 
+    /// A user message carrying text plus pre-built image parts.
+    pub fn user_with_images(text: impl Into<String>, images: Vec<Part>) -> Self {
+        let mut m = Self::new(Role::User);
+        m.parts.push(Part::Text { text: text.into() });
+        for img in images {
+            if matches!(img, Part::Image { .. }) {
+                m.parts.push(img);
+            }
+        }
+        m
+    }
+
     /// An assistant message tagged with the agent + model that produced it.
     pub fn assistant_with(agent: &str, model: &str) -> Self {
         let mut m = Self::new(Role::Assistant);
@@ -133,7 +167,9 @@ impl Message {
         if let Some(Part::Text { text }) = self.parts.last_mut() {
             text.push_str(delta);
         } else {
-            self.parts.push(Part::Text { text: delta.to_string() });
+            self.parts.push(Part::Text {
+                text: delta.to_string(),
+            });
         }
     }
 
@@ -142,7 +178,9 @@ impl Message {
         if let Some(Part::Thinking { text }) = self.parts.last_mut() {
             text.push_str(delta);
         } else {
-            self.parts.push(Part::Thinking { text: delta.to_string() });
+            self.parts.push(Part::Thinking {
+                text: delta.to_string(),
+            });
         }
     }
 
@@ -177,14 +215,31 @@ impl Message {
         out
     }
 
+    /// Image parts as `(media_type, base64_data, name)`.
+    pub fn image_parts(&self) -> Vec<(String, String, Option<String>)> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Image {
+                    media_type,
+                    data,
+                    name,
+                } => Some((media_type.clone(), data.clone(), name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Tool parts with a pending (not yet executed) state.
     pub fn pending_tool_calls(&self) -> Vec<(String, String, Value)> {
         self.parts
             .iter()
             .filter_map(|p| match p {
-                Part::Tool { id, name, state: ToolState::Pending { input } } => {
-                    Some((id.clone(), name.clone(), input.clone()))
-                }
+                Part::Tool {
+                    id,
+                    name,
+                    state: ToolState::Pending { input },
+                } => Some((id.clone(), name.clone(), input.clone())),
                 _ => None,
             })
             .collect()
@@ -192,7 +247,9 @@ impl Message {
 
     /// Index of the Tool part with the given id.
     pub fn tool_part_index(&self, id: &str) -> Option<usize> {
-        self.parts.iter().position(|p| matches!(p, Part::Tool { id: pid, .. } if pid == id))
+        self.parts
+            .iter()
+            .position(|p| matches!(p, Part::Tool { id: pid, .. } if pid == id))
     }
 
     /// Mark a tool part as running.
@@ -347,5 +404,68 @@ impl Session {
 
     pub fn touch(&mut self) {
         self.updated_at = now_ms();
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    #[test]
+    fn image_part_serde_round_trip() {
+        let mut m = Message::user("look");
+        m.parts.push(Part::Image {
+            media_type: "image/png".to_string(),
+            data: "aGVsbG8=".to_string(),
+            name: Some("shot.png".to_string()),
+        });
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["parts"][1]["type"], "image");
+        assert_eq!(v["parts"][1]["media_type"], "image/png");
+        assert_eq!(v["parts"][1]["data"], "aGVsbG8=");
+        let back: Message = serde_json::from_value(v).unwrap();
+        assert_eq!(back.parts.len(), 2);
+        // text_content ignores images.
+        assert_eq!(back.text_content(), "look");
+        assert_eq!(
+            back.image_parts(),
+            vec![(
+                "image/png".to_string(),
+                "aGVsbG8=".to_string(),
+                Some("shot.png".to_string())
+            )]
+        );
+        // Legacy payload without name still deserializes.
+        let legacy = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "role": "user",
+            "parts": [{"type": "image", "media_type": "image/jpeg", "data": "eA=="}],
+        });
+        let legacy_msg: Message = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            legacy_msg.image_parts(),
+            vec![("image/jpeg".to_string(), "eA==".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn user_with_images_keeps_only_image_parts() {
+        let m = Message::user_with_images(
+            "hi",
+            vec![
+                Part::Text {
+                    text: "nope".to_string(),
+                },
+                Part::Image {
+                    media_type: "image/png".to_string(),
+                    data: "eA==".to_string(),
+                    name: None,
+                },
+            ],
+        );
+        assert_eq!(m.parts.len(), 2);
+        assert!(matches!(m.parts[0], Part::Text { .. }));
+        assert!(matches!(m.parts[1], Part::Image { .. }));
+        assert_eq!(m.text_content(), "hi");
     }
 }

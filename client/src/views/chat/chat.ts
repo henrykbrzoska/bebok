@@ -19,10 +19,12 @@ import {
   AgentInfo,
   EngineEvent,
   Message,
+  PromptImage,
   SessionMeta,
 } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
+import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { SessionSidebarComponent } from '../../ui/session-sidebar/session-sidebar';
@@ -31,15 +33,41 @@ import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
 const REFRESH_DEBOUNCE_MS = 300;
 const DRAFT_KEY = 'bebok.sessionDrafts';
+const MAX_IMAGES = 5;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]);
 let pendingSeq = 0;
+let attachmentSeq = 0;
 
 /** A user prompt echoed locally while waiting for the engine to reflect it. */
 interface PendingPrompt {
   id: string;
   text: string;
+  images?: PromptImage[];
   /** "sending" until accepted by the engine, then "sent". */
   state: 'sending' | 'sent';
   ts: number;
+}
+
+/** One queued prompt: text plus image attachments (raw base64). */
+export interface QueuedPrompt {
+  text: string;
+  images: PromptImage[];
+}
+
+/** An image staged in the composer (dataUrl for preview, base64 for sending). */
+export interface StagedAttachment {
+  id: string;
+  media_type: string;
+  dataUrl: string;
+  base64: string;
+  name: string;
+  size: number;
 }
 
 /** Per-session drafts persisted to localStorage (survive tab switches). */
@@ -81,6 +109,7 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly i18n = inject(I18nService);
   private readonly tabs = inject(OpenSessionsStore);
+  private readonly activity = inject(SessionActivityStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -115,7 +144,12 @@ export class ChatView implements OnInit, OnDestroy {
   readonly filterModel = signal<string | null>(null);
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
-  readonly queue = signal<string[]>([]);
+  readonly queue = signal<QueuedPrompt[]>([]);
+
+  /** Images staged in the composer (previews; sent as raw base64). */
+  readonly attachments = signal<StagedAttachment[]>([]);
+  /** Last attachment validation error (shown under the composer). */
+  readonly attachError = signal<string | null>(null);
 
   /** Optimistic echo of prompts sent this session (shown immediately on the
    *  board, replaced once the engine reflects the real message). */
@@ -169,6 +203,11 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
+  /** Per-session queued prompts + optimistic echoes (survive tab switches). */
+  private readonly queuedBySession = new Map<string, QueuedPrompt[]>();
+  private readonly pendingBySession = new Map<string, PendingPrompt[]>();
+  /** Local running flag per session (fallback when activity store missed it). */
+  private readonly runningBySession = new Map<string, boolean>();
   private readonly unsubscribeEvents: () => void;
   private refreshTimer: number | undefined;
   private lastReconnectVersion = 0;
@@ -203,12 +242,45 @@ export class ChatView implements OnInit, OnDestroy {
       });
     });
 
-    // Drain the prompt queue once the agent becomes idle.
+    // Drain the prompt queue once the agent becomes idle. Skipped while a
+    // session is (re)loading so a restored queue is sent with that session's
+    // own agent/model (loaded in loadAll), not the previous tab's.
     effect(() => {
       const running = this.running();
+      if (this.loading()) {
+        return;
+      }
       if (!running && this.queue().length > 0) {
         void this.drainQueue();
       }
+    });
+
+    // Keep the per-session running cache live: the activity store only sees
+    // transitions that arrive as events, while local POST/abort flows set the
+    // signal directly (e.g. 409 race, in-flight prompt before any event).
+    effect(() => {
+      const id = this.sessionID();
+      if (!id) {
+        return;
+      }
+      this.runningBySession.set(id, this.running());
+    });
+
+    // Persist the visible tab's queue/pending echoes as they change so a
+    // later switchSession() restores them (switch saves once more, cheap).
+    effect(() => {
+      const id = this.sessionID();
+      if (!id) {
+        return;
+      }
+      this.queuedBySession.set(id, this.queue());
+    });
+    effect(() => {
+      const id = this.sessionID();
+      if (!id) {
+        return;
+      }
+      this.pendingBySession.set(id, this.pending());
     });
   }
 
@@ -242,8 +314,8 @@ export class ChatView implements OnInit, OnDestroy {
 
   /**
    * Switch the visible session (tab click, back/forward, direct link).
-   * Resets all per-session UI state first so no stale transcript, queue,
-   * spinner or error leaks into the new tab, then loads it from the engine.
+   * Queue/pending/running are per-session: the previous tab's state is saved
+   * and the next tab's state is restored, so queued prompts are never lost.
    * The previous session keeps running on the engine untouched.
    */
   private async switchSession(nextID: string): Promise<void> {
@@ -259,20 +331,47 @@ export class ChatView implements OnInit, OnDestroy {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+    // Persist the outgoing tab's queue/pending/running before resetting.
+    const prevID = this.sessionID();
+    if (prevID) {
+      this.queuedBySession.set(prevID, this.queue());
+      this.pendingBySession.set(prevID, this.pending());
+      this.runningBySession.set(prevID, this.running());
+    }
     this.sessionID.set(nextID);
     this.meta.set(null);
     this.messages.set([]);
-    this.pending.set([]);
-    this.queue.set([]);
+    // Restore this tab's queued prompts + optimistic echoes (not cleared).
+    this.pending.set(this.pendingBySession.get(nextID) ?? []);
+    this.queue.set(this.queuedBySession.get(nextID) ?? []);
+    this.attachments.set([]);
+    this.attachError.set(null);
     this.activeTasks.set([]);
     this.error.set(null);
-    this.running.set(false);
+    // Restore running state: the activity store (SSE `session.updated`) is
+    // authoritative; fall back to the locally cached flag for turns started
+    // here that haven't produced an event yet.
+    this.running.set(
+      this.activity.isRunning(nextID) || this.runningBySession.get(nextID) === true,
+    );
     this.sending.set(false);
     this.filterModel.set(null);
     this.follow.set(true);
     // Reset minimap geometry for the new session.
     this.minimap()?.refresh();
     await this.loadAll(nextID, seq);
+    // Stale navigation already moved on: leave the new tab alone.
+    if (seq !== this.loadSeq || nextID !== this.sessionID()) {
+      return;
+    }
+    // Re-sync running (events may have arrived during load) and drain any
+    // restored queue now that agent/model for this session are loaded.
+    this.running.set(
+      this.activity.isRunning(nextID) || this.running(),
+    );
+    if (!this.running() && this.queue().length > 0) {
+      void this.drainQueue();
+    }
   }
 
   private async loadAll(sessionID: string, seq: number): Promise<void> {
@@ -357,7 +456,23 @@ export class ChatView implements OnInit, OnDestroy {
     if (texts.size === 0) {
       return;
     }
-    this.pending.update((p) => p.filter((x) => !texts.has(x.text)));
+    this.pending.update((p) =>
+      p.filter((x) => {
+        if (!texts.has(x.text)) {
+          return true;
+        }
+        // Keep echoes that carried images until an image part is reflected.
+        if (x.images?.length) {
+          return !this.messages().some(
+            (m) =>
+              m.role === 'user' &&
+              this.userText(m) === x.text &&
+              m.parts.some((part) => part.type === 'image'),
+          );
+        }
+        return false;
+      }),
+    );
   }
 
   private userText(m: Message): string {
@@ -537,16 +652,30 @@ export class ChatView implements OnInit, OnDestroy {
 
   async sendPrompt(): Promise<void> {
     const text = this.draft().trim();
-    if (!text || this.loading()) {
+    const staged = this.attachments();
+    if ((!text && staged.length === 0) || this.loading()) {
       return;
     }
     this.draft.set('');
     this.saveDraft('');
+    const images: PromptImage[] = staged.map((a) => ({
+      media_type: a.media_type,
+      data: a.base64,
+      ...(a.name ? { name: a.name } : {}),
+    }));
+    this.attachments.set([]);
+    this.attachError.set(null);
     // Always enqueue; sends immediately when idle, otherwise waits for the turn.
-    this.queue.update((q) => [...q, text]);
+    this.queue.update((q) => [...q, { text, images }]);
     this.pending.update((p) => [
       ...p,
-      { id: `pending-${++pendingSeq}`, text, state: 'sending', ts: Date.now() },
+      {
+        id: `pending-${++pendingSeq}`,
+        text,
+        ...(images.length ? { images } : {}),
+        state: 'sending',
+        ts: Date.now(),
+      },
     ]);
     await this.drainQueue();
   }
@@ -571,21 +700,24 @@ export class ChatView implements OnInit, OnDestroy {
     if (!sessionID) {
       return;
     }
-    const text = this.queue()[0];
+    const head = this.queue()[0];
     this.sending.set(true);
     this.error.set(null);
     try {
       await this.engine.prompt(
         sessionID,
-        text,
-        this.selectedAgent(),
-        this.selectedModel() || undefined,
+        {
+          message: head.text,
+          agent: this.selectedAgent(),
+          ...(this.selectedModel() ? { model: this.selectedModel() } : {}),
+          ...(head.images.length ? { images: head.images } : {}),
+        },
       );
       // Tab switched while the POST was in flight: leave the new tab alone.
       if (sessionID !== this.sessionID()) {
         return;
       }
-      this.markPending(text, 'sent');
+      this.markPending(head.text, 'sent');
       this.queue.update((q) => q.slice(1));
       this.running.set(true);
     } catch (err) {
@@ -627,12 +759,26 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Remove a single message from the queue by index. */
   removeFromQueue(index: number): void {
+    const removed = this.queue()[index];
     this.queue.update((q) => q.filter((_, i) => i !== index));
+    // Drop the matching optimistic echo as well.
+    if (removed) {
+      this.pending.update((p) => {
+        const at = p.findIndex(
+          (x) => x.text === removed.text && x.state === 'sending',
+        );
+        if (at < 0) {
+          return p;
+        }
+        return p.filter((_, i) => i !== at);
+      });
+    }
   }
 
   /** Remove all messages from the queue. */
   clearQueue(): void {
     this.queue.set([]);
+    this.pending.update((p) => p.filter((x) => x.state !== 'sending'));
   }
 
   /**
@@ -742,6 +888,125 @@ export class ChatView implements OnInit, OnDestroy {
   truncateQueueText(text: string): string {
     return text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
   }
+
+  /** Preview data URL for a queued prompt's images. */
+  queuedImageUrl(image: PromptImage): string {
+    return `data:${image.media_type};base64,${image.data}`;
+  }
+
+  /** Preview data URL for an optimistic pending echo's images. */
+  pendingImageUrl(image: PromptImage): string {
+    return `data:${image.media_type};base64,${image.data}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Image attachments (composer): file picker + drag&drop + paste.
+  // ---------------------------------------------------------------------------
+
+  onFilesPicked(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    if (input?.files) {
+      void this.addFiles([...input.files]);
+      // Reset so picking the same file twice still fires `change`.
+      input.value = '';
+    }
+  }
+
+  onComposerDragOver(event: DragEvent): void {
+    if (this.hasImageDrag(event)) {
+      event.preventDefault();
+    }
+  }
+
+  onComposerDrop(event: DragEvent): void {
+    if (!this.hasImageDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (files.length > 0) {
+      void this.addFiles(files);
+    }
+  }
+
+  onComposerPaste(event: ClipboardEvent): void {
+    const files = [...(event.clipboardData?.files ?? [])].filter((f) =>
+      f.type.startsWith('image/'),
+    );
+    if (files.length > 0) {
+      void this.addFiles(files);
+    }
+  }
+
+  /** Only intercept drags that actually carry image files (keeps any
+   *  drag-to-resize/scroll behaviors on other drags untouched). */
+  private hasImageDrag(event: DragEvent): boolean {
+    const items = event.dataTransfer?.items;
+    if (!items || items.length === 0) {
+      return false;
+    }
+    return [...items].some(
+      (item) => item.kind === 'file' && item.type.startsWith('image/'),
+    );
+  }
+
+  /** Validate + stage image files (reads them as base64 data URLs). */
+  async addFiles(files: File[]): Promise<void> {
+    for (const file of files) {
+      if (this.attachments().length >= MAX_IMAGES) {
+        break;
+      }
+      const mime = file.type || 'image/png';
+      if (!ACCEPTED_IMAGE_TYPES.has(mime)) {
+        this.attachError.set(
+          this.t('chat.unsupportedImageType').replace('{name}', file.name || mime),
+        );
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        this.attachError.set(
+          this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
+        );
+        continue;
+      }
+      try {
+        const dataUrl = await readAsDataUrl(file);
+        // Split `data:<mime>;base64,<payload>`: send raw base64 only.
+        const comma = dataUrl.indexOf(',');
+        const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        this.attachError.set(null);
+        this.attachments.update((list) => [
+          ...list,
+          {
+            id: `attach-${++attachmentSeq}`,
+            media_type: mime,
+            dataUrl,
+            base64,
+            name: file.name || `image-${attachmentSeq}`,
+            size: file.size,
+          },
+        ]);
+      } catch {
+        this.attachError.set(
+          this.t('chat.unsupportedImageType').replace('{name}', file.name || mime),
+        );
+      }
+    }
+  }
+
+  removeAttachment(id: string): void {
+    this.attachments.update((list) => list.filter((a) => a.id !== id));
+  }
+}
+
+/** Read a file as a `data:<mime>;base64,...` URL. */
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(file);
+  });
 }
 
 /** Extract a full message snapshot from event properties. */

@@ -159,7 +159,9 @@ impl PermissionEngine {
     pub fn load_with_global(root: &Path, global_path: Option<&Path>) -> Self {
         let project_path = root.join(".bebok").join("config.json");
         let project_rules = super::store::read_rules_from(&project_path);
-        let global_rules = global_path.map(super::store::read_rules_from).unwrap_or_default();
+        let global_rules = global_path
+            .map(super::store::read_rules_from)
+            .unwrap_or_default();
         Self {
             root: root.to_path_buf(),
             project_path,
@@ -293,8 +295,17 @@ mod tests {
         .unwrap();
 
         let engine = PermissionEngine::load_with_global(&dir, Some(&global));
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "rm -rf x" }), false);
-        assert_eq!(eval.verdict, Verdict::Allow, "project rule must override global");
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "rm -rf x" }),
+            false,
+        );
+        assert_eq!(
+            eval.verdict,
+            Verdict::Allow,
+            "project rule must override global"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -309,10 +320,20 @@ mod tests {
         )
         .unwrap();
         let engine = PermissionEngine::load_with_global(&dir, Some(&global));
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "rm -rf x" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "rm -rf x" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Deny);
         // An unrelated call falls through to the default.
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "git status" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "git status" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -322,10 +343,20 @@ mod tests {
         let dir = tmp_dir("defaults");
         let engine = PermissionEngine::load_with_global(&dir, None);
         // read-only default: Allow
-        let eval = engine.evaluate(None, "read_file", &serde_json::json!({ "path": "a.txt" }), true);
+        let eval = engine.evaluate(
+            None,
+            "read_file",
+            &serde_json::json!({ "path": "a.txt" }),
+            true,
+        );
         assert_eq!(eval.verdict, Verdict::Allow);
         // mutating default: Ask with the canonical call as its pattern
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "git status" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "git status" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
         assert_eq!(eval.pattern, "bash(git status)");
         let _ = std::fs::remove_dir_all(&dir);
@@ -343,12 +374,22 @@ mod tests {
         assert!(text.contains("allow"));
 
         // In-memory layer updated -> no reload required.
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "pwd" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "pwd" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Allow);
 
         // Persisted file reloads cleanly into a fresh engine.
         let engine2 = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine2.evaluate(None, "bash", &serde_json::json!({ "command": "pwd" }), false);
+        let eval = engine2.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "pwd" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Allow);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -365,11 +406,21 @@ mod tests {
         .unwrap();
         let engine = PermissionEngine::load_with_global(&dir, None);
 
-        let before = engine.evaluate(None, "bash", &serde_json::json!({ "command": "pwd" }), false);
+        let before = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "pwd" }),
+            false,
+        );
         assert_eq!(before.verdict, Verdict::Ask);
 
         engine.always_allow("bash(pwd)").unwrap();
-        let after = engine.evaluate(None, "bash", &serde_json::json!({ "command": "pwd" }), false);
+        let after = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "pwd" }),
+            false,
+        );
         assert_eq!(after.verdict, Verdict::Allow);
 
         // Only one rule remains in the file (upsert, not duplicate).
@@ -385,7 +436,12 @@ mod tests {
     fn reload_picks_up_external_config_changes() {
         let dir = tmp_dir("reload");
         let engine = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "rm -rf x" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "rm -rf x" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
 
         let project_cfg = dir.join(".bebok").join("config.json");
@@ -396,7 +452,12 @@ mod tests {
         )
         .unwrap();
         engine.reload();
-        let eval = engine.evaluate(None, "bash", &serde_json::json!({ "command": "rm -rf x" }), false);
+        let eval = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "rm -rf x" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Deny);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -408,10 +469,17 @@ mod tests {
         let path = dir.join(".bebok").join("config.json");
         persist_project_rule(
             &path,
-            &Rule { pattern: "bash(pwd)".into(), action: Action::Allow },
+            &Rule {
+                pattern: "bash(pwd)".into(),
+                action: Action::Allow,
+            },
         )
         .unwrap();
-        assert!(std::fs::read_to_string(&path).unwrap().contains("bash(pwd)"));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("bash(pwd)")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

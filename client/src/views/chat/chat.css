@@ -153,7 +153,7 @@
 .jump-last-user {
   position: absolute;
   bottom: 12px;
-  right: 300px;
+  left: 200px;
   z-index: 5;
   padding: 6px 14px;
   border: 1px solid var(--border);
@@ -356,6 +356,81 @@ button.small {
 
 .icon-btn:hover {
   color: var(--err);
+}
+
+/* --- Image attachments (composer) --- */
+
+.attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attach-thumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+
+.attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attach-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 0 0 0 6px;
+}
+
+.attach-error {
+  font-size: 12px;
+  color: var(--err);
+}
+
+.attach-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  line-height: 1;
+  padding: 5px 10px;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.attach-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.pending-thumbs,
+.queue-thumbs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.thumb.small {
+  width: 28px;
+  height: 28px;
 }
 
 .link {

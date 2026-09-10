@@ -10,12 +10,12 @@ mod provider;
 mod spec;
 mod zai;
 
-pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider};
+pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider, to_anthropic_messages};
 pub use cost::{Pricing, compute_cost, pricing_for};
 pub use openai::{OpenAiProvider, openai_body, openai_stream, to_openai_messages};
 pub use provider::{
-    ChatMessage, ChatRequest, ChatRole, LlmError, Provider, StreamEvent, StreamResult, Thinking,
-    ToolCall, ToolDef, ToolResult, Usage,
+    ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider, StreamEvent, StreamResult,
+    Thinking, ToolCall, ToolDef, ToolResult, Usage,
 };
 pub use spec::{
     ProviderKind, ProviderSpec, builtin_provider_specs, find_provider_spec, list_models,

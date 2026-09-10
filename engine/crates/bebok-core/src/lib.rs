@@ -15,15 +15,15 @@ pub mod session;
 pub mod store;
 pub mod util;
 
-pub use error::CoreError;
 pub use agent::{Agent, AgentCatalog, AgentInfo};
-pub use llm_trace::{LlmCall, LlmTrace, LLM_TRACE, push_llm_call};
+pub use error::CoreError;
+pub use llm_trace::{LLM_TRACE, LlmCall, LlmTrace, push_llm_call};
 pub use permission::{
     Action, CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer,
     PermissionEngine, ResolveOutcome, Rule, Verdict,
 };
-pub use store::{Instance, InstanceStore, SessionState};
 pub use provider::build_provider;
+pub use store::{Instance, InstanceStore, SessionState};
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{

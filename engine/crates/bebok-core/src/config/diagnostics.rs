@@ -19,11 +19,13 @@ pub fn record_unknown_tool(directory: &Path, tool_name: &str) {
         .ok()
         .and_then(|t| jsonc::parse(&t).ok())
         .and_then(|v| {
-            v.get("unknown_tools").and_then(|a| a.as_array()).map(|arr| {
-                arr.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
+            v.get("unknown_tools")
+                .and_then(|a| a.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
         })
         .unwrap_or_default();
     if names.iter().any(|n| n == tool_name) {
@@ -146,13 +148,21 @@ mod tests {
         let project_dir = base.join("project");
         std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
 
-        record_llm_error(&project_dir, "openrouter/x", "http error 404: no tool support");
+        record_llm_error(
+            &project_dir,
+            "openrouter/x",
+            "http error 404: no tool support",
+        );
         let text = std::fs::read_to_string(project_config_path(&project_dir)).unwrap();
         let v = jsonc::parse(&text).unwrap();
         assert_eq!(v["llm_errors"]["openrouter/x"].as_array().unwrap().len(), 1);
 
         // Same message for the same model is not stored twice.
-        record_llm_error(&project_dir, "openrouter/x", "http error 404: no tool support");
+        record_llm_error(
+            &project_dir,
+            "openrouter/x",
+            "http error 404: no tool support",
+        );
         let text = std::fs::read_to_string(project_config_path(&project_dir)).unwrap();
         let v = jsonc::parse(&text).unwrap();
         assert_eq!(v["llm_errors"]["openrouter/x"].as_array().unwrap().len(), 1);
