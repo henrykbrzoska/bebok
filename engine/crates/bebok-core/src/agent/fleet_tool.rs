@@ -338,9 +338,10 @@ impl Tool for FleetTool {
          prompts for independent tasks, e.g. {\"tasks\": [{\"prompt\": \"research auth\", \
          \"agent\": \"ask\"}, {\"prompt\": \"research db\", \"agent\": \"ask\"}]} — each entry \
          is {prompt (required), agent?, name?, member?} and runs concurrently in its own \
-         isolated session; `task.member` must match a configured member name. Always dispatch \
-         a fleet when there is more than one task AND the tasks do not affect each other, and \
-         fleet members are available. Returns member names; report which ran."
+         isolated session; `task.member` must match a configured member name. Use fleet when \
+         the user explicitly requests parallel execution or when running many independent tasks \
+         concurrently is clearly beneficial and fleet members are available. For most delegation, \
+         prefer `task` calls. Returns member names; report which ran."
     }
 
     fn parameters_schema(&self) -> Value {

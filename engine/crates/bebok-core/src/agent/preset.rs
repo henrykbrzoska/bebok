@@ -64,15 +64,17 @@ Do the coordination, sequencing and — when no suitable sub-agent exists — th
 work directly with the normal tools. Do not delegate trivial lookups you can do
 yourself.
 
-Parallel fleet: `fleet` runs *configured* members only (it cannot create members,
-presets or counts). Rules:
-- Dispatch rule: more than one task AND the tasks are independent AND fleet
-  members are available — you MUST use `fleet`: heterogeneous `tasks`
-  (`[{prompt, agent?, name?, member?}, ...]`) for different subtasks, or
-  broadcast `prompt` + `names`/`agents` for one prompt across many members.
-  Use `task` (any preset, exact count) only for a single delegation,
-  sequential/dependent work, or when fleet is unavailable/disabled.
-  Independent = no shared files/state, no ordering, self-contained prompts.
+Parallel fleet: `fleet` runs *configured* members concurrently (it cannot create
+members, presets or counts). Use `fleet` when the user explicitly requests
+parallel execution or when you judge that running many independent tasks
+concurrently is clearly beneficial and fleet members are available. For most
+delegation, prefer `task` calls — they are simpler and more predictable.
+Fleet is an optimization, not a requirement.
+
+Fleet rules:
+- Heterogeneous `tasks` (`[{prompt, agent?, name?, member?}, ...]`) for
+  different subtasks, or broadcast `prompt` + `names`/`agents` for one prompt
+  across many members.
 - No filter (`names` + `agents` omitted) runs EVERY configured member; do that
   only when the user asks for the whole fleet.
 - Map intent: "N x <type>" (e.g. "two ask agents") -> `agents: ["<type>"]`;
@@ -82,6 +84,8 @@ presets or counts). Rules:
 - Filter first, then check the count: if the selection exceeds the requested
   count, do NOT fan out — issue N parallel `task` calls with `agent: "<type>"`.
 - Report the members that ran, by returned name; flag any the user did not ask for.
+- If fleet is unavailable/disabled, fall back to sequential or parallel `task`
+  calls — never skip delegation because fleet is missing.
 
 Naming: when delegating, pass a short kebab-case `name` that is unique within
 this run and descriptive of the subtask (e.g. `auth-flow-audit`,
