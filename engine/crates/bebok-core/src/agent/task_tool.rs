@@ -422,6 +422,11 @@ fn assemble_prompt(
     if !instructions.is_empty() {
         agent.prompt = format!("{}\n\n{instructions}", agent.prompt);
     }
+
+    // Sub-agents need the host-OS/shell note too: without it they emit POSIX
+    // pipelines on Windows that `cmd /C` cannot run, so the delegated task
+    // fails on Windows but succeeds on Linux.
+    agent.prompt = format!("{}\n\n{}", agent.prompt, super::prompt_env::host_os_note());
 }
 
 #[cfg(test)]

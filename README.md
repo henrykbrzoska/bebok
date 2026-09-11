@@ -203,11 +203,16 @@ writing OS-specific scripts (`bash` runs `cmd /C` on Windows, `sh -c` elsewhere)
   when no native tool fits (builds, tests, git, package managers).
 - File management - native ports of the common shell commands, identical on
   every OS: `mkdir`, `touch`, `cp`, `mv`, `rm` (a directory needs
-  `recursive: true`), `chmod`, and `append_file` (grows a file without
-  re-sending its whole content).
+  `recursive: true`), `chmod`, `ln` (symbolic or hard), `gzip`
+  (compress/decompress), and `append_file` (grows a file without re-sending its
+  whole content).
 - Inspection - `list_dir`, `tree`, `stat` (type/size/mtime/mode), `du` (size
   breakdown), `head`, `tail`, `wc`, `sort`, `uniq`, `diff` (unified, Myers),
-  `which` (is it installed?), `glob`, `grep`.
+  `which` (is it installed?), `glob`, `grep`, `find` (glob/type/depth,
+  gitignore-aware), `realpath`, `basename`, `dirname`, `sha256sum`, `base64`
+  (read-only unless `out` is given).
+- Text - `read_file` (ranges), `edit_file` (literal replace), `sed`
+  (`s/pattern/replacement/flags`, regex, in place by default).
 - Read-only tools default to `allow`, mutating ones to `ask` (see Permissions).
 
 ## Endpoints (engine)

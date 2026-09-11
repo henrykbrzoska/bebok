@@ -5,26 +5,35 @@
 //! know the difference.
 
 pub mod append_file;
+pub mod base64;
 pub mod bash;
+pub mod basename;
 pub mod chmod;
 pub mod cp;
 pub mod diff;
+pub mod dirname;
 pub mod docker;
 pub mod du;
 pub mod edit_file;
 pub mod explorer;
 pub mod fetch;
+pub mod find;
 pub mod glob_tool;
 pub mod grep;
+pub mod gzip;
 pub mod head;
 pub mod list_dir;
+pub mod ln;
 pub mod mkdir;
 pub mod mv;
 pub mod pwd;
 pub mod read_file;
+pub mod realpath;
 pub mod registry;
 pub mod rm;
 pub mod runtimes;
+pub mod sed;
+pub mod sha256sum;
 pub mod sort;
 pub mod stat;
 pub mod tail;
@@ -52,8 +61,10 @@ use std::sync::Arc;
 /// `sh` and `cmd`):
 ///
 /// * read-only — `pwd`, `head`, `tail`, `wc`, `stat`, `du`, `sort`, `uniq`,
-///   `diff`, `which`;
-/// * mutating — `mkdir`, `touch`, `cp`, `mv`, `rm`, `append_file`, `chmod`.
+///   `diff`, `which`, `find`, `realpath`, `basename`, `dirname`, `sha256sum`,
+///   `base64` (read-only unless `out` is given);
+/// * mutating — `mkdir`, `touch`, `cp`, `mv`, `rm`, `append_file`, `chmod`,
+///   `ln`, `sed`, `gzip`.
 pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
     vec![
         // Read / inspect.
@@ -68,21 +79,30 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(du::Du),
         Arc::new(glob_tool::Glob),
         Arc::new(grep::Grep),
+        Arc::new(find::Find),
         Arc::new(sort::Sort),
         Arc::new(uniq::Uniq),
         Arc::new(diff::Diff),
         Arc::new(which::Which),
+        Arc::new(realpath::Realpath),
+        Arc::new(basename::Basename),
+        Arc::new(dirname::Dirname),
+        Arc::new(sha256sum::Sha256Sum),
+        Arc::new(base64::Base64),
         Arc::new(fetch::Fetch),
         // Write / mutate.
         Arc::new(write_file::WriteFile),
         Arc::new(append_file::AppendFile),
         Arc::new(edit_file::EditFile),
+        Arc::new(sed::Sed),
         Arc::new(mkdir::Mkdir),
         Arc::new(touch::Touch),
         Arc::new(cp::Cp),
         Arc::new(mv::Mv),
         Arc::new(rm::Rm),
         Arc::new(chmod::Chmod),
+        Arc::new(ln::Ln),
+        Arc::new(gzip::Gzip),
         // Escape hatch.
         Arc::new(bash::Bash),
     ]

@@ -1,14 +1,14 @@
 //! Host-environment notes injected into an agent's system prompt.
 //!
 //! The agent presets are platform-agnostic but the `bash` tool is not: it runs
-//! PowerShell on Windows and a POSIX `sh` on macOS/Linux. Telling the model
+//! `cmd /C` on Windows and a POSIX `sh -c` on macOS/Linux. Telling the model
 //! *which* host it is on is what makes it emit the right syntax.
 //!
 //! This lives in one place on purpose. Prompt assembly happens on three paths
 //! (`services/turn.rs` for user sessions, `agent/task_tool.rs` and
 //! `agent/fleet_tool.rs` for delegated sub-agents) and they used to drift:
 //! sub-agents were never told the host OS, so on Windows they wrote POSIX
-//! pipelines that PowerShell could not run and the delegated `task` failed
+//! pipelines that `cmd /C` could not run and the delegated `task` failed
 //! while the same work succeeded on Linux.
 
 /// Human-readable host OS label (`Windows`, `macOS`, `Linux`, …).
@@ -26,8 +26,10 @@ pub fn host_os_label() -> &'static str {
 /// delegated sub-agents.
 pub fn host_os_note() -> String {
     format!(
-        "Host OS: {}. Use that OS's shell syntax for the `bash` tool \
-         (PowerShell on Windows, POSIX `sh` on macOS/Linux).",
+        "Host OS: {}. The `bash` tool runs that OS's native shell: `cmd /C` on \
+         Windows, POSIX `sh -c` on macOS/Linux. On Windows use `cmd` syntax \
+         (or, preferably, the native file/search tools) — never POSIX-only \
+         pipelines like `head`, `tail`, `grep`, `wc` or `|` chains.",
         host_os_label()
     )
 }

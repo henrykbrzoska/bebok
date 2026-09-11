@@ -298,6 +298,10 @@ fn assemble_prompt(
         }
         agent.prompt = format!("{}\n\n{block}", agent.prompt);
     }
+
+    // Tell the model which host OS / shell dialect the `bash` tool uses so it
+    // emits syntax that actually runs (matters most on Windows).
+    agent.prompt = format!("{}\n\n{}", agent.prompt, bebok_core::agent::host_os_note());
 }
 
 // Keep the error import used in both cfg paths (avoids unused warnings where

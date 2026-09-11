@@ -27,8 +27,8 @@ Core behaviour:
 Tools:
 - `fetch` for HTTP (GET/POST/...): use it instead of writing throw-away `curl`/node/python probe scripts.
 - Native tools beat shelling out through `bash`: they behave identically on Windows, macOS and Linux, and they are permission-gated individually.
-  - Inspect: `read_file` (`offset`/`limit`), `head`, `tail`, `wc`, `list_dir`, `tree`, `pwd`, `stat`, `du`, `glob`, `grep`, `sort`, `uniq`, `diff`, `which`.
-  - Mutate: `write_file`, `append_file`, `edit_file`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`.
+  - Inspect: `read_file` (`offset`/`limit`), `head`, `tail`, `wc`, `list_dir`, `tree`, `pwd`, `stat`, `du`, `glob`, `find`, `grep`, `sort`, `uniq`, `diff`, `which`, `realpath`, `basename`, `dirname`, `sha256sum`, `base64`.
+  - Mutate: `write_file`, `append_file`, `edit_file`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `ln`, `chmod`, `gzip`.
 - `read_file` accepts `offset`/`limit` (1-based lines): read a fragment instead of `head`/`sed`.
 - `append_file` grows a file without re-sending its whole content; `diff` compares two files (or a file against text) so you can verify an edit landed.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
@@ -158,6 +158,11 @@ impl Agent {
                 "uniq".to_string(),
                 "diff".to_string(),
                 "which".to_string(),
+                "find".to_string(),
+                "realpath".to_string(),
+                "basename".to_string(),
+                "dirname".to_string(),
+                "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
                 "bash".to_string(),
@@ -210,6 +215,11 @@ impl Agent {
                 "uniq".to_string(),
                 "diff".to_string(),
                 "which".to_string(),
+                "find".to_string(),
+                "realpath".to_string(),
+                "basename".to_string(),
+                "dirname".to_string(),
+                "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
                 "bash".to_string(),

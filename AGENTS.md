@@ -280,9 +280,10 @@ and tree tools use it too.
 - bebok-tools ships native Rust equivalents of the most important shell
   commands, so the agent does not have to guess `sh` vs `cmd` syntax:
   - read-only: `pwd`, `head`, `tail`, `wc`, `list_dir`, `tree`, `stat`, `du`,
-    `glob`, `grep`, `sort`, `uniq`, `diff`, `which`;
-  - mutating: `write_file`, `append_file`, `edit_file`, `mkdir`, `touch`,
-    `cp`, `mv`, `rm`, `chmod`.
+    `glob`, `grep`, `find`, `sort`, `uniq`, `diff`, `which`, `realpath`,
+    `basename`, `dirname`, `sha256sum`, `base64` (unless `out` is given);
+  - mutating: `write_file`, `append_file`, `edit_file`, `sed`, `mkdir`, `touch`,
+    `cp`, `mv`, `rm`, `chmod`, `ln`, `gzip`.
 - Every tool implements `bebok-tools/src/tool.rs::Tool`; `is_read_only`
   defaults to false and is what the permission engine keys off (read-only ->
   Allow, mutating -> Ask).

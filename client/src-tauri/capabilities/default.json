@@ -2,5 +2,19 @@
   "identifier": "default",
   "description": "Bebok desktop: invoke our engine command + native dialogs for the picker",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "bebok-server",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
+  ]
 }

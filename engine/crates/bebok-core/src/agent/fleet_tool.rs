@@ -834,6 +834,10 @@ fn assemble_prompt(
     if !instructions.is_empty() {
         agent.prompt = format!("{}\n\n{instructions}", agent.prompt);
     }
+
+    // Fleet members are sub-agents too: they need the host-OS/shell note, or on
+    // Windows they emit POSIX pipelines `cmd /C` cannot run.
+    agent.prompt = format!("{}\n\n{}", agent.prompt, super::prompt_env::host_os_note());
 }
 
 #[cfg(test)]

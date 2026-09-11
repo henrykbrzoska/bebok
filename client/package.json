@@ -12,6 +12,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "sidecar:copy": "node scripts/copy-sidecar.mjs",
+    "tauri:diag": "node scripts/diag-tauri-build.mjs",
+    "tauri:clean": "node scripts/clean-tauri-target.mjs",
+    "tauri:rebuild": "node scripts/rebuild-tauri.mjs",
     "cap:sync": "ng build && cap sync",
     "cap:android": "cap add android",
     "cap:ios": "cap add ios"
@@ -42,7 +45,7 @@
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "rxjs": "~7.8.0",
-    "tslib": "^2.3.0"
+    "tslib": "~2.3.0"
   },
   "devDependencies": {
     "@angular/build": "^20.3.36",

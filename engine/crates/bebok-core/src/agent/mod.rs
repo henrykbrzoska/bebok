@@ -24,6 +24,7 @@ pub mod gate;
 pub mod images;
 pub mod observe;
 pub mod preset;
+pub mod prompt_env;
 pub mod request;
 pub mod task_tool;
 pub mod turn;
@@ -38,6 +39,7 @@ pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permis
 pub use images::{AgentImageInput, ALLOWED_IMAGE_TYPES, MAX_IMAGES_PER_PROMPT, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES, model_supports_images, validate_agent_images};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
+pub use prompt_env::host_os_note;
 pub use request::{RequestBuilder, build_request, prune_for_budget};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};
