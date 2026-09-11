@@ -252,4 +252,6 @@ export const hi: Record<MessageKey, string> = {
   'chat.removeAttachment': 'अनुलग्नक हटाएं',
   'chat.imageTooLarge': 'छवि बहुत बड़ी है (अधिकतम 5 MB): {name}',
   'chat.unsupportedImageType': 'असमर्थित छवि प्रकार: {name}',
+  'chat.tooManyImages': 'बहुत अधिक छवियां (अधिकतम {n}): फ़ाइल नहीं जोड़ी गई',
+  'chat.attachReady': '{n}/5 छवियां — भेजने के लिए तैयार',
 };

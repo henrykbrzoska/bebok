@@ -266,6 +266,36 @@ pub fn prune_for_budget(
         tokens = tokens.saturating_sub(before_tokens) + after_tokens;
     }
 
+    // Images are the single most expensive entries (flat IMAGE_TOKENS_PER_IMAGE
+    // each) and used to be unprunable, so an image-heavy transcript could blow
+    // the budget forever. Prune oldest-first, replacing each image with a text
+    // marker: the model is told an image was dropped, nothing vanishes silently,
+    // and the newest attachment survives whenever the budget allows.
+    let image_candidates: Vec<(usize, usize)> = chat
+        .iter()
+        .enumerate()
+        .flat_map(|(i, msg)| {
+            msg.content_parts
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| matches!(p, ContentPart::Image { .. }))
+                .map(move |(j, _)| (i, j))
+        })
+        .collect();
+
+    for (i, j) in image_candidates {
+        if tokens <= budget {
+            break;
+        }
+        if let ContentPart::Image { media_type, .. } = &chat[i].content_parts[j] {
+            let marker =
+                format!("[image omitted to fit the context budget: {media_type}]");
+            tokens = tokens.saturating_sub(crate::context::IMAGE_TOKENS_PER_IMAGE)
+                + crate::context::estimate_tokens(&marker);
+            chat[i].content_parts[j] = ContentPart::Text { text: marker };
+        }
+    }
+
     chat
 }
 
@@ -363,6 +393,161 @@ mod image_tests {
         let req = builder.build().await.unwrap();
         assert!(req.messages[0].content_parts.is_empty());
         let _ = Message::user("unused");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn prune_leaves_images_alone_within_budget() {
+        let msgs = vec![ChatMessage {
+            role: ChatRole::User,
+            content: "x".to_string(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        }];
+        let out = prune_for_budget(msgs, "", 100_000);
+        assert!(matches!(
+            out[0].content_parts[0],
+            ContentPart::Image { .. }
+        ));
+    }
+
+    #[test]
+    fn prune_replaces_oldest_images_with_marker_until_under_budget() {
+        // 4 images * 1000 tokens = 4000 > 2500 budget: at least 2 are pruned.
+        let msgs: Vec<ChatMessage> = (0..4)
+            .map(|_| ChatMessage {
+                role: ChatRole::User,
+                content: "x".to_string(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                content_parts: vec![ContentPart::Image {
+                    media_type: "image/png".to_string(),
+                    data: "aGVsbG8=".to_string(),
+                }],
+            })
+            .collect();
+        let out = prune_for_budget(msgs, "", 2500);
+        let images = out
+            .iter()
+            .flat_map(|m| m.content_parts.iter())
+            .filter(|p| matches!(p, ContentPart::Image { .. }))
+            .count();
+        let markers = out
+            .iter()
+            .flat_map(|m| m.content_parts.iter())
+            .filter(|p| matches!(p, ContentPart::Text { .. }))
+            .count();
+        assert!(images < 4, "expected pruned images, {images} left");
+        assert!(markers >= 1, "dropped images must leave a marker");
+        assert!(
+            crate::context::estimate_chat(&out, "") <= 2500,
+            "pruning must bring the request back under budget"
+        );
+        // Oldest first: the last message keeps its image.
+        assert!(matches!(
+            out.last().unwrap().content_parts[0],
+            ContentPart::Image { .. }
+        ));
+    }
+
+    #[test]
+    fn prune_breaks_down_an_image_only_transcript() {
+        // Even an oversized image-only transcript converges (no infinite loop,
+        // no silent drop): every image becomes a text marker.
+        let msgs: Vec<ChatMessage> = (0..10)
+            .map(|_| ChatMessage {
+                role: ChatRole::User,
+                content: String::new(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                content_parts: vec![ContentPart::Image {
+                    media_type: "image/jpeg".to_string(),
+                    data: "aGVsbG8=".to_string(),
+                }],
+            })
+            .collect();
+        let out = prune_for_budget(msgs, "", 500);
+        assert_eq!(out.len(), 10);
+        assert_eq!(
+            out.iter()
+                .flat_map(|m| m.content_parts.iter())
+                .filter(|p| matches!(p, ContentPart::Text { .. }))
+                .count(),
+            10
+        );
+    }
+
+    /// End-to-end without a provider: a session transcript holding a PNG and a
+    /// JPEG, built into a ChatRequest, must reach BOTH provider wire formats
+    /// with the image payloads intact (covers repro hops 3 -> 6 together).
+    #[tokio::test]
+    async fn session_images_reach_both_provider_wire_formats() {
+        use crate::agent::images::fixtures::{JPEG_MIN, PNG_1X1};
+        let base = std::env::temp_dir().join(format!("bebok-wire-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session
+            .append_user_message_with_images(
+                "what is in these?",
+                vec![
+                    Part::Image {
+                        media_type: "image/png".to_string(),
+                        data: PNG_1X1.to_string(),
+                        name: Some("a.png".to_string()),
+                    },
+                    Part::Image {
+                        media_type: "image/jpeg".to_string(),
+                        data: JPEG_MIN.to_string(),
+                        name: Some("b.jpg".to_string()),
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+        let (_s, agent, tools) = test_state(&store, &session);
+        let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
+        let req = builder.build().await.unwrap();
+        assert_eq!(req.messages[0].content_parts.len(), 2);
+
+        // OpenAI Chat Completions shape: text + two image_url data URLs.
+        let openai = bebok_llm::to_openai_messages(&req.messages, &req.system);
+        // The system message comes first when the agent prompt is non-empty.
+        let openai_user = openai
+            .iter()
+            .find(|m| m["role"] == "user")
+            .expect("user message present");
+        let parts = openai_user["content"].as_array().unwrap();
+        let urls: Vec<&str> = parts
+            .iter()
+            .filter_map(|p| p["image_url"]["url"].as_str())
+            .collect();
+        assert_eq!(urls.len(), 2, "{openai:?}");
+        assert_eq!(urls[0], format!("data:image/png;base64,{PNG_1X1}"));
+        assert_eq!(urls[1], format!("data:image/jpeg;base64,{JPEG_MIN}"));
+
+        // Anthropic Messages shape: two image blocks followed by the text block.
+        let anthropic = bebok_llm::to_anthropic_messages(&req.messages);
+        let blocks = anthropic[0]["content"].as_array().unwrap();
+        let types: Vec<&str> = blocks
+            .iter()
+            .filter_map(|b| b["type"].as_str())
+            .collect();
+        assert_eq!(types, vec!["image", "image", "text"], "{anthropic:?}");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[0]["source"]["data"], PNG_1X1);
+        assert_eq!(blocks[1]["source"]["media_type"], "image/jpeg");
+        assert_eq!(blocks[1]["source"]["data"], JPEG_MIN);
+
         let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -41,6 +41,12 @@ const ACCEPTED_IMAGE_TYPES = new Set([
   'image/webp',
   'image/gif',
 ]);
+/** Longest edge kept when downscaling a staged image. */
+const IMAGE_MAX_EDGE = 2048;
+/** Staged files above this are downscaled/re-encoded before sending (~1 MiB). */
+const IMAGE_DOWNSCALE_THRESHOLD = 1 * 1024 * 1024;
+/** Decoded-byte target after downscaling (~2 MiB); the engine's 5 MiB is the hard cap. */
+const IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
 let pendingSeq = 0;
 let attachmentSeq = 0;
 
@@ -150,6 +156,8 @@ export class ChatView implements OnInit, OnDestroy {
   readonly attachments = signal<StagedAttachment[]>([]);
   /** Last attachment validation error (shown under the composer). */
   readonly attachError = signal<string | null>(null);
+  /** Staged attachment count (n/MAX_IMAGES shown above the composer). */
+  readonly attachCount = computed(() => this.attachments().length);
 
   /** Optimistic echo of prompts sent this session (shown immediately on the
    *  board, replaced once the engine reflects the real message). */
@@ -954,6 +962,9 @@ export class ChatView implements OnInit, OnDestroy {
   async addFiles(files: File[]): Promise<void> {
     for (const file of files) {
       if (this.attachments().length >= MAX_IMAGES) {
+        this.attachError.set(
+          this.t('chat.tooManyImages').replace('{n}', String(MAX_IMAGES)),
+        );
         break;
       }
       const mime = file.type || 'image/png';
@@ -970,20 +981,31 @@ export class ChatView implements OnInit, OnDestroy {
         continue;
       }
       try {
-        const dataUrl = await readAsDataUrl(file);
+        const prepared = await prepareImage(file, mime);
+        if (prepared.size > MAX_IMAGE_BYTES) {
+          this.attachError.set(
+            this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
+          );
+          continue;
+        }
         // Split `data:<mime>;base64,<payload>`: send raw base64 only.
-        const comma = dataUrl.indexOf(',');
-        const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        const comma = prepared.dataUrl.indexOf(',');
+        const base64 =
+          comma >= 0 ? prepared.dataUrl.slice(comma + 1) : prepared.dataUrl;
+        // The engine validates and trusts the *payload bytes*; label the
+        // attachment with what the bytes actually are so a mislabelled file
+        // (e.g. a JPEG named .png) is not rejected for a MIME mismatch.
+        const media_type = sniffMediaType(base64) ?? prepared.media_type;
         this.attachError.set(null);
         this.attachments.update((list) => [
           ...list,
           {
             id: `attach-${++attachmentSeq}`,
-            media_type: mime,
-            dataUrl,
+            media_type,
+            dataUrl: prepared.dataUrl,
             base64,
             name: file.name || `image-${attachmentSeq}`,
-            size: file.size,
+            size: prepared.size,
           },
         ]);
       } catch {
@@ -1007,6 +1029,85 @@ function readAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('read failed'));
     reader.readAsDataURL(file);
   });
+}
+
+/** Decoded byte size of a `data:<mime>;base64,<payload>` URL. */
+function dataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',');
+  const payload = comma >= 0 ? dataUrl.length - comma - 1 : dataUrl.length;
+  return Math.floor((payload * 3) / 4);
+}
+
+/** Detect an image media type from the payload's magic bytes (client-side labelling). */
+function sniffMediaType(base64: string): string | null {
+  const head = base64.slice(0, 24);
+  if (head.length < 4) return null;
+  let raw: string;
+  try {
+    raw = atob(head.slice(0, Math.floor(head.length / 4) * 4));
+  } catch {
+    return null;
+  }
+  const bytes = [...raw].map((c) => c.charCodeAt(0));
+  const ascii = (from: number, to: number) =>
+    String.fromCharCode(...bytes.slice(from, to));
+  if (bytes[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (ascii(0, 4) === 'GIF8') return 'image/gif';
+  if (bytes.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+/**
+ * Read + normalize a staged image file.
+ *
+ * Files above ~1 MiB are downscaled to at most `IMAGE_MAX_EDGE` on the longest
+ * edge and re-encoded (PNG keeps PNG/alpha, everything else becomes JPEG) with
+ * a quality step-down until the payload is near `IMAGE_TARGET_BYTES`. This
+ * keeps a large photo from becoming ~6.7 MB of base64 in every request and in
+ * the on-disk transcript. The engine's 5 MB / 5-image limits and payload
+ * validation remain authoritative.
+ *
+ * Animated GIFs are passed through untouched (canvas would keep only frame 1).
+ */
+async function prepareImage(
+  file: File,
+  declared: string,
+): Promise<{ dataUrl: string; media_type: string; size: number }> {
+  const original = await readAsDataUrl(file);
+  if (file.size <= IMAGE_DOWNSCALE_THRESHOLD || declared === 'image/gif') {
+    return { dataUrl: original, media_type: declared, size: file.size };
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longest = Math.max(bitmap.width, bitmap.height) || 1;
+    const scale = Math.min(1, IMAGE_MAX_EDGE / longest);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    let outType = declared === 'image/png' ? 'image/png' : 'image/jpeg';
+    let dataUrl = canvas.toDataURL(outType, 0.85);
+    let quality = 0.85;
+    while (dataUrlBytes(dataUrl) > IMAGE_TARGET_BYTES && quality > 0.4) {
+      quality -= 0.15;
+      outType = 'image/jpeg';
+      dataUrl = canvas.toDataURL('image/jpeg', quality);
+    }
+    if (dataUrlBytes(dataUrl) > MAX_IMAGE_BYTES) {
+      throw new Error('still too large after downscale');
+    }
+    return { dataUrl, media_type: outType, size: dataUrlBytes(dataUrl) };
+  } catch {
+    // Downscaling unavailable (no createImageBitmap/canvas): keep the original
+    // bytes; the engine's size check stays authoritative.
+    return { dataUrl: original, media_type: declared, size: file.size };
+  }
 }
 
 /** Extract a full message snapshot from event properties. */

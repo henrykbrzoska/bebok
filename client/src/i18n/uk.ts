@@ -253,4 +253,6 @@ export const uk: Record<MessageKey, string> = {
   'chat.removeAttachment': 'Видалити вкладення',
   'chat.imageTooLarge': 'Зображення завелике (макс. 5 МБ): {name}',
   'chat.unsupportedImageType': 'Непідтримуваний тип зображення: {name}',
+  'chat.tooManyImages': 'Забагато зображень (макс. {n}): файл не додано',
+  'chat.attachReady': '{n}/5 зображень — готові до надсилання',
 };

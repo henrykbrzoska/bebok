@@ -30,6 +30,9 @@ pub fn build_app() -> (Router, AppState) {
     ));
     {
         // Forward engine-side LLM debug events into the debug log.
+        // Survives broadcast lag (a lagged receiver resyncs) and only exits
+        // when the bus itself is closed, so the last request/response pair
+        // is never silently dropped.
         let mut rx = store.bus().subscribe();
         let debug = debug.clone();
         tokio::spawn(async move {
@@ -46,7 +49,11 @@ pub fn build_app() -> (Router, AppState) {
                             );
                         }
                     }
-                    Err(_) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("debug log forwarder lagged, skipped {n} events");
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -66,6 +73,11 @@ pub fn build_app() -> (Router, AppState) {
     };
 
     let app = build_api_router()
+        // Image attachments: up to 5 images x 5 MiB base64 (~35 MB JSON).
+        // Axum's default 2 MiB Json limit would reject those with 413 before
+        // our validator runs, so disable it here; size rules live in
+        // `bebok_core::agent::images::validate_agent_images`.
+        .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(middleware::from_fn_with_state(state.clone(), log_http))
         .layer(cors_layer())
         .with_state(state.clone());

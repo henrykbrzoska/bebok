@@ -1,8 +1,8 @@
 //! Last-N LLM call trace (memory-only ring, never flushed to disk).
 //!
-/// Stores the last 2 complete request/response JSON payloads for inspection
-/// in the Debug tab. The ring is a global static so `turn.rs` (bebok-core)
-/// can push without threading `AppState` through the call stack.
+//! Stores the last 2 complete request/response JSON payloads for inspection
+//! in the Debug tab. The ring is a global static so `turn.rs` (bebok-core)
+//! can push without threading `AppState` through the call stack.
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, RwLock};
 
@@ -24,8 +24,9 @@ pub struct LlmCall {
     /// Full wire request body (ChatRequest serialized as JSON).
     pub request: serde_json::Value,
     /// Response summary: `{ model, message: <assembled Message JSON>,
-    ///   usage: { input_tokens, output_tokens, … } }` or
-    /// `{ model, error: "…" }` on failure.
+    ///   usage: { input_tokens, output_tokens, … } }`,
+    /// `{ model, error: "…" }` on failure, or `{ pending: true }` while the
+    /// call is still streaming.
     pub response: serde_json::Value,
 }
 
@@ -61,6 +62,14 @@ impl LlmTrace {
         q.push_back(call);
     }
 
+    /// Update the response of an in-flight call (no-op when already evicted).
+    pub fn complete(&self, id: u64, response: serde_json::Value) {
+        let mut q = self.inner.write().unwrap();
+        if let Some(call) = q.iter_mut().find(|c| c.id == id) {
+            call.response = response;
+        }
+    }
+
     /// Snapshot of all stored calls (newest last).
     pub fn list(&self) -> Vec<LlmCall> {
         self.inner.read().unwrap().iter().cloned().collect()
@@ -75,6 +84,27 @@ impl LlmTrace {
 /// Convenience: push to the global trace. Call from the agent loop.
 pub fn push_llm_call(call: LlmCall) {
     LLM_TRACE.push(call);
+}
+
+/// Begin a call: visible in `GET /debug/log` immediately with
+/// `response = { pending: true }`, so the in-flight (last) request is never
+/// missing while streaming. Returns the allocated call id — pass it to
+/// [`complete_llm_call`] when the stream finishes or fails.
+pub fn begin_llm_call(model: String, request: serde_json::Value) -> u64 {
+    let id = LLM_TRACE.next_id();
+    LLM_TRACE.push(LlmCall {
+        id,
+        ts: crate::util::now_ms(),
+        model,
+        request,
+        response: serde_json::json!({ "pending": true }),
+    });
+    id
+}
+
+/// Finish a call started with [`begin_llm_call`].
+pub fn complete_llm_call(id: u64, response: serde_json::Value) {
+    LLM_TRACE.complete(id, response);
 }
 
 #[cfg(test)]
@@ -121,6 +151,22 @@ mod tests {
         assert_eq!(a, 1);
         assert_eq!(b, 2);
         assert_eq!(c, 3);
+    }
+
+    #[test]
+    fn complete_updates_pending_in_place() {
+        let trace = LlmTrace::new(2);
+        trace.push(LlmCall {
+            id: 7,
+            ts: 1000,
+            model: "m".to_string(),
+            request: serde_json::json!({}),
+            response: serde_json::json!({ "pending": true }),
+        });
+        trace.complete(7, serde_json::json!({ "ok": true }));
+        let calls = trace.list();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].response, serde_json::json!({ "ok": true }));
     }
 
     #[test]

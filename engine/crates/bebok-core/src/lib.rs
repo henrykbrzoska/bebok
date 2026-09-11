@@ -17,7 +17,7 @@ pub mod util;
 
 pub use agent::{Agent, AgentCatalog, AgentInfo};
 pub use error::CoreError;
-pub use llm_trace::{LLM_TRACE, LlmCall, LlmTrace, push_llm_call};
+pub use llm_trace::{LLM_TRACE, LlmCall, LlmTrace, begin_llm_call, complete_llm_call, push_llm_call};
 pub use permission::{
     Action, CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer,
     PermissionEngine, ResolveOutcome, Rule, Verdict,

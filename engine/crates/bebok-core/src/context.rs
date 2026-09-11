@@ -37,7 +37,12 @@ pub fn estimate_chat(chat: &[ChatMessage], system: &str) -> usize {
     let mut total = estimate_tokens(system);
     for m in chat {
         total += estimate_tokens(&m.content);
-        total += m.content_parts.len() * IMAGE_TOKENS_PER_IMAGE;
+        for p in &m.content_parts {
+            match p {
+                bebok_llm::ContentPart::Image { .. } => total += IMAGE_TOKENS_PER_IMAGE,
+                bebok_llm::ContentPart::Text { text } => total += estimate_tokens(text),
+            }
+        }
         for tc in &m.tool_calls {
             total += estimate_tokens(&tc.name);
             total += estimate_tokens(&serde_json::to_string(&tc.input).unwrap_or_default());
@@ -147,5 +152,29 @@ mod tests {
         // Should contain last 5 lines.
         assert!(summary.contains("line 99"));
         assert!(summary.contains("line 95"));
+    }
+
+    #[test]
+    fn estimate_chat_charges_images_but_not_dropped_markers() {
+        use bebok_llm::{ChatMessage, ChatRole, ContentPart};
+        let with_image = ChatMessage {
+            role: ChatRole::User,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        };
+        let with_marker = ChatMessage {
+            content_parts: vec![ContentPart::Text {
+                text: "[image omitted to fit the context budget: image/png]".to_string(),
+            }],
+            ..with_image.clone()
+        };
+        assert_eq!(estimate_chat(&[with_image.clone()], ""), IMAGE_TOKENS_PER_IMAGE);
+        assert!(estimate_chat(&[with_marker], "") < IMAGE_TOKENS_PER_IMAGE);
+        let _ = ChatRole::User;
     }
 }

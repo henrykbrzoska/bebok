@@ -173,6 +173,7 @@
           (change)="onFilesPicked($event)"
         />
         @if (attachments().length > 0) {
+          <div class="attach-count">{{ attachCount() }}/5 &middot; {{ t('chat.attachReady') }}</div>
           <div class="attach-strip">
             @for (a of attachments(); track a.id) {
               <div class="attach-thumb">
@@ -232,7 +233,7 @@
             class="attach-btn"
             (click)="filePicker.click()"
             [title]="t('chat.attachImage')"
-            [disabled]="loading()"
+            [disabled]="loading() || attachments().length >= 5"
           >📎</button>
           <label class="follow-toggle">
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />

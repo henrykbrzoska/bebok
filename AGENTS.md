@@ -275,11 +275,31 @@ write_file_text), re-exported as bebok_core::explorer; the list_dir
 and tree tools use it too.
 - The client explorer view is src/views/explorer/.
 
+### Built-in tools (native shell replacements)
+
+- bebok-tools ships native Rust equivalents of the most important shell
+  commands, so the agent does not have to guess `sh` vs `cmd` syntax:
+  - read-only: `pwd`, `head`, `tail`, `wc`, `list_dir`, `tree`, `stat`, `du`,
+    `glob`, `grep`, `sort`, `uniq`, `diff`, `which`;
+  - mutating: `write_file`, `append_file`, `edit_file`, `mkdir`, `touch`,
+    `cp`, `mv`, `rm`, `chmod`.
+- Every tool implements `bebok-tools/src/tool.rs::Tool`; `is_read_only`
+  defaults to false and is what the permission engine keys off (read-only ->
+  Allow, mutating -> Ask).
+- The set is registered in `bebok-tools/src/lib.rs::builtin_tools()`. Presets
+  with a tool whitelist (`ask`, `plan` in `bebok-core/src/agent/preset.rs`)
+  list the read-only ones explicitly, so a new read-only tool must be added
+  there too.
+- The agent prompts (`bebok-core/src/agent/preset.rs`) and this file tell the
+  model to prefer these over `bash` (builds, tests, git and package managers
+  are what `bash` is still for). Keep the lists in sync when adding tools.
+
 ### Context management
 
 - Tool output is truncated at capture to config.tool_output_cap (tail preserved).
-- build_request prunes old tool outputs to [truncated] (request-only, never
-persisted) when the transcript exceeds context_budget.
+- build_request prunes old tool outputs to a compact digest (request-only, never
+persisted) when the transcript exceeds context_budget; images are pruned after
+tool results (see "Image attachments" below).
 - Compaction (POST /session/{id}/compact) is an internal fork: it creates a
 new session (parent set) whose transcript is [summary of messages 0..N] +
 the tail. The original session is untouched on disk, so "show full history"
@@ -288,6 +308,49 @@ bebok-core/src/context.rs; the summary is currently deterministic (LLM
 summarization is a later refinement).
 - Rollback (POST /session/{id}/truncate { keep }) rewinds the *same* session
 in place (no fork); refused while a turn runs.
+
+### Image attachments (multimodal prompts)
+
+- Wire shape: `POST /session/{id}/prompt { ..., images: [{ media_type, data,
+  name }] }` with raw base64 (`data:` URL prefixes are accepted and stripped).
+  The client stages/renders (views/chat/chat.ts) and never defines the contract.
+- Limits + validation live in ONE place: `bebok-core/src/agent/images.rs`
+  (`MAX_IMAGES_PER_PROMPT = 5`, `MAX_IMAGE_BYTES = 5 MiB` decoded,
+  `ALLOWED_IMAGE_TYPES = png/jpeg/webp/gif`). The prompt route
+  (`services/turn.rs::validate_images`), the `task` tool and the `fleet`
+  tool all call `validate_agent_images`, so there is a single contract to
+  change. Client mirrors: `chat.ts` MAX_IMAGES / MAX_IMAGE_BYTES /
+  ACCEPTED_IMAGE_TYPES, `engine.dtos.ts` PromptImage / ImagePart, and the
+  `chat.attach*` keys in every `i18n/*` dictionary.
+- Validation is payload-based, not client-trust-based: strict base64 decode,
+  decoded-size check, and a magic-byte check that must agree with the declared
+  `media_type`. A JPEG relabelled `image/png` is a 400, never a provider error.
+- Composer normalization (client-only): files >1 MiB are downscaled to a
+  2048 px longest edge and re-encoded (target ~2 MiB) before staging, so a
+  5 MiB photo does not become ~6.7 MB of base64 in every request/transcript.
+  Animated GIFs pass through untouched; the engine limits stay authoritative.
+- Vision capability: `images::model_supports_images` is a conservative
+  deny-list (deepseek-chat/reasoner, llama-3.3/3.1 text models). A prompt with
+  images for a known text-only model fails fast with a 400 *before* the user
+  message is appended (no orphaned attachment). Unknown models are assumed
+  capable; if such a model still rejects the images, the turn error published
+  via `session.updated { error }` is annotated with a vision hint instead of
+  only the raw provider error.
+- Pruning: `prune_for_budget` prunes tool results first, then images
+  oldest-first, replacing each with
+  `[image omitted to fit the context budget: <mime>]` so nothing is dropped
+  silently and an attachment-heavy transcript still converges. The newest image
+  survives whenever the budget allows.
+- Wire format: `to_openai_messages` emits `content_parts` as a
+  text + `image_url` array -- including when the same message carries
+  `tool_results` (user content is never dropped there) -- and
+  `to_anthropic_messages` emits `tool_result` blocks first, then `image`,
+  then `text` (Anthropic ordering requirement).
+- Tests: `cd engine && cargo test -p bebok-core image` (validation, magic
+  bytes, pruning), `cargo test -p bebok-llm` (openai/anthropic wire format),
+  `cargo test -p bebok-server` (HTTP-layer 400s). Manual end-to-end check:
+  attach a PNG + a JPEG in the composer against a vision model and confirm the
+  reply references the image content.
 
 ### Session lifecycle (fork / continue / export / truncate / delete)
 
@@ -346,3 +409,47 @@ remote-URL fallback).
 - ChatView (views/chat/chat.ts) is reused across tabs: sessionID is a
 signal fed by route.paramMap.subscribe(...) → switchSession(nextID),
 which resets
+
+## [windows] — sidecar discovery, delegation smoke test, cmd gotchas (2026-09-11)
+
+Desktop spawns the engine as a sidecar: `bebok-desktop.exe` launches
+`bebok-server.exe` with `--port 0`, so the HTTP port is RANDOM on every
+start. The engine prints `BEBOK_READY http://host:port` on stdout (parsed
+by the Tauri shell, src-tauri/src/lib.rs); all logs go to stderr. There is
+NO fixed 8787 for desktop — 8787 is only the default for a manually started
+engine (`cd engine && cargo run`).
+
+How to find the live sidecar engine (verified 2026-09-11, PID 5980 -> 127.0.0.1:64083):
+- `tasklist | findstr /I bebok` lists both processes (bebok-desktop.exe + bebok-server.exe + PID).
+- `netstat -ano | findstr LISTENING` then match the bebok-server PID to a
+  `127.0.0.1:<port>` line — that port IS the engine (e.g. 64083).
+- No BEBOK_ADDR/BEBOK_PORT/BEBOK_HOST env is visible in the agent shell; do not rely on env.
+- Proof: GET /plugins -> 200, GET /agent?directory= -> orchestrator/code/ask/plan/debug (+ file agents),
+  GET /session?directory= -> session list. Sidecar config = project .bebok/config.json
+  (models.code/ask/plan/debug/orchestrator overrides, providers with keys).
+
+Delegation smoke test through the SIDE CAR (not cargo run):
+- POST /session {directory, agent:'orchestrator'} -> parentID (200).
+- POST /session/{parentID}/prompt {message, agent:'orchestrator'} -> 202 running.
+- Poll GET /session/{parentID}/message every 3s; assistant text arrives as parts[type=text].
+- GET /session?directory= and filter sessions whose parent contains parentID to find the child;
+  GET /session/{childID} + /message to verify child agent + final text.
+- Lesson 2026-09-11: a polite "use the task tool once..." prompt does NOT guarantee a tool call —
+  the orchestrator (Meta/muse-spark-1.3-contributor) answered "OK" directly with NO child session
+  (52 sessions scanned, zero children). To force delegation say explicitly:
+  "You MUST use the `task` tool now (agent='ask', name='smoke-ok2', ...) Do NOT answer directly -
+  your first action must be a task tool call. After the tool returns, reply RESULT: <output>."
+- Abort propagation is real: cancelling a child cancels the whole parent turn (second attempt
+  returned "aborted" after user abort). task.started/task.ended SSE events carry taskID/status.
+- Unit proof without engine: `cd engine && cargo test -p bebok-core task_` -> 5 passed
+  (task_schema_documents_images, task_images_validated_not_appended_raw,
+  task_args_deserialize_images, hetero_task_agent_overrides_member_agent, child_task_serde_uses_camel_case).
+
+Windows cmd gotchas for probes (cmd /C, no sh utils):
+- No head/tail/wc/grep/curl/jq — use `findstr`, `tasklist | findstr`, `netstat -ano | findstr`.
+- `tasklist /FI "IMAGENAME eq ..."` quoting breaks under cmd-chained '&'; prefer plain
+  `tasklist | findstr /I bebok`.
+- `node -e "..."` with nested double quotes fails (Unterminated string constant); write probe
+  .js files (http module only) and run `node probe.js` instead (probe-engine.js, delegate-test.js,
+  inspect-parent.js, check-config.js pattern).
+- set | findstr /I BEBOK to check env; node v24 + cargo 1.98 verified on this box.

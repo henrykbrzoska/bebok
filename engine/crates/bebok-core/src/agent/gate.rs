@@ -36,10 +36,12 @@ pub async fn resolve_permission(
     tool_name: &str,
     input: &serde_json::Value,
 ) -> ToolOutcome {
+    // Per-call classification (`is_read_only_for`): most tools are statically
+    // read-only, `fetch` is read-only only for GET/HEAD.
     let read_only = ctx
         .tools
         .get(tool_name)
-        .map(|t| t.is_read_only())
+        .map(|t| t.is_read_only_for(input))
         .unwrap_or(false);
     let evaluation = ctx
         .permission

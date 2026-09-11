@@ -165,7 +165,20 @@ pub async fn prompt_turn(
     // context) can override the system text without touching the handler.
     assemble_prompt(&instance, &mut agent, &cfg);
 
+    // Pre-flight vision capability check: a model known to reject image input
+    // fails fast with a 400 *before* the user message is appended, so the
+    // transcript never ends up with an orphaned, unanswerable attachment.
+    // Unknown models are assumed capable (conservative deny-list).
+    if !image_parts.is_empty() && !bebok_core::agent::model_supports_images(&model) {
+        return Err(ApiError::bad_request(format!(
+            "model '{model}' does not support image input: remove the attachment or switch to a vision-capable model"
+        )));
+    }
+
     let provider = build_provider(&cfg, &model).map_err(ApiError::from)?;
+
+    // Whether this turn carried image attachments (drives the error hint below).
+    let images_attached = !image_parts.is_empty();
 
     // Append the user message, set the title, persist, emit.
     let user_idx = session
@@ -223,6 +236,18 @@ pub async fn prompt_turn(
                 tracing::info!("turn aborted for session {id}: {e}");
             } else {
                 tracing::error!("turn failed for session {id}: {e}");
+                // A turn that carried images can fail because the model has no
+                // vision support; say so explicitly instead of surfacing only
+                // the raw provider error.
+                let surfaced = if images_attached {
+                    format!(
+                        "{e} — the user message included image attachments; model '{model}' \
+                         may not support image input. Retry without the attachment or switch \
+                         to a vision-capable model."
+                    )
+                } else {
+                    format!("{e}")
+                };
                 // Unstick GUI clients: the normal end-of-turn `session.updated`
                 // never fires on this path (SPEC §3.11 fan-out).
                 let _ = bus.publish(
@@ -231,7 +256,7 @@ pub async fn prompt_turn(
                         task_state.directory(),
                         &id.to_string(),
                     )
-                    .with_properties(serde_json::json!({ "error": format!("{e}") })),
+                    .with_properties(serde_json::json!({ "error": surfaced })),
                 );
             }
         }
@@ -280,62 +305,88 @@ fn assemble_prompt(
 #[allow(dead_code)]
 fn _keep_core_error(_: &CoreError) {}
 
-/// Allowed image MIME types for prompt attachments.
-const ALLOWED_IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
-/// Max images per prompt.
-const MAX_IMAGES_PER_PROMPT: usize = 5;
-/// Max base64 chars per image (~7MB text ≈ 5MB decoded).
-const MAX_IMAGE_BASE64_LEN: usize = 7 * 1024 * 1024;
+/// Image limits live in `bebok_core::agent::images` (single source of truth,
+/// shared with the `task`/`fleet` tools); this module only adapts them to
+/// the HTTP layer (`ImageInput` -> `AgentImageInput`, `String` -> `ApiError`).
 
 /// Validate prompt image attachments -> session `Part::Image` list.
 ///
-/// - Skips entries with empty data (after prefix strip + trim).
-/// - Accepts and strips a `data:<mime>;base64,` prefix when present.
-/// - Rejects disallowed MIME types, oversized payloads, and >5 images with 400.
+/// Delegates to the shared `bebok_core::agent::images` validator (single
+/// source of truth with the `task`/`fleet` tools); maps the error to 400.
 pub fn validate_images(
     images: Vec<crate::routes::session::ImageInput>,
 ) -> Result<Vec<bebok_core::session::Part>, ApiError> {
-    let mut out = Vec::new();
-    for mut img in images {
-        let mut data = img.data.trim().to_string();
-        // Accept a data: URL prefix: data:<mime>;base64,<payload>.
-        if let Some(rest) = data.strip_prefix("data:") {
-            if let Some(comma) = rest.find(',') {
-                let (meta, payload) = rest.split_at(comma);
-                let payload = payload[1..].trim().to_string();
-                // Adopt the MIME from the prefix when the field is empty.
-                if img.media_type.trim().is_empty() {
-                    img.media_type = meta.split(';').next().unwrap_or("").trim().to_string();
-                }
-                data = payload;
-            }
-        }
-        if data.trim().is_empty() {
-            continue; // truncate/skip empty data
-        }
-        let media_type = img.media_type.trim().to_lowercase();
-        if !ALLOWED_IMAGE_TYPES.contains(&media_type.as_str()) {
-            return Err(ApiError::bad_request(format!(
-                "unsupported image media_type '{media_type}': expected one of image/png, image/jpeg, image/webp, image/gif"
-            )));
-        }
-        if data.len() > MAX_IMAGE_BASE64_LEN {
-            return Err(ApiError::bad_request(format!(
-                "image '{}' too large: {} base64 chars (max ~7MB)",
-                img.name.as_deref().unwrap_or("unnamed"),
-                data.len()
-            )));
-        }
-        out.push(bebok_core::session::Part::Image {
-            media_type,
-            data,
-            name: img.name.filter(|n| !n.trim().is_empty()),
-        });
-        if out.len() > MAX_IMAGES_PER_PROMPT {
-            return Err(ApiError::bad_request(format!(
-                "too many images: max {MAX_IMAGES_PER_PROMPT} per prompt"
-            )));
+    let adapted = images
+        .into_iter()
+        .map(|img| bebok_core::agent::images::AgentImageInput {
+            media_type: img.media_type,
+            data: img.data,
+            name: img.name,
+        })
+        .collect();
+    bebok_core::agent::images::validate_agent_images(adapted).map_err(ApiError::bad_request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routes::session::ImageInput;
+
+    const PNG_1X1: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+    fn img(media_type: &str, data: &str) -> ImageInput {
+        ImageInput {
+            media_type: media_type.to_string(),
+            data: data.to_string(),
+            name: None,
         }
     }
-    Ok(out)
+
+    fn msg(err: ApiError) -> String {
+        match err {
+            ApiError::BadRequest(m)
+            | ApiError::NotFound(m)
+            | ApiError::Conflict(m)
+            | ApiError::Forbidden(m)
+            | ApiError::BadGateway(m)
+            | ApiError::Internal(m) => m,
+        }
+    }
+
+    #[test]
+    fn five_images_ok_sixth_is_400() {
+        let five: Vec<ImageInput> = (0..5).map(|_| img("image/png", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")).collect();
+        assert_eq!(validate_images(five).unwrap_or_else(|e| panic!("{}", msg(e))).len(), 5);
+        let six: Vec<ImageInput> = (0..6).map(|_| img("image/png", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")).collect();
+        let err = match validate_images(six) {
+            Ok(_) => panic!("expected too-many-images error"),
+            Err(e) => msg(e),
+        };
+        assert!(err.contains("max 5 images"), "{err}");
+    }
+
+    #[test]
+    fn bad_mime_is_400() {
+        let err = match validate_images(vec![img("image/bmp", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")]) {
+            Ok(_) => panic!("expected bad-mime error"),
+            Err(e) => msg(e),
+        };
+        assert!(err.contains("unsupported image media_type"), "{err}");
+    }
+
+    #[test]
+    fn data_url_prefix_stripped() {
+        let raw = ImageInput {
+            media_type: String::new(),
+            data: format!("data:image/png;base64,{PNG_1X1}"),
+            name: None,
+        };
+        let out = validate_images(vec![raw]).unwrap_or_else(|e| panic!("{}", msg(e)));
+        assert_eq!(out.len(), 1);
+        assert!(matches!(
+            &out[0],
+            bebok_core::session::Part::Image { media_type, data, .. }
+            if media_type == "image/png" && data == PNG_1X1
+        ));
+    }
 }

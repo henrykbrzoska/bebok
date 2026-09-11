@@ -252,4 +252,6 @@ export const zh: Record<MessageKey, string> = {
   'chat.removeAttachment': '删除附件',
   'chat.imageTooLarge': '图片太大（最大 5MB）：{name}',
   'chat.unsupportedImageType': '不支持的图片类型：{name}',
+  'chat.tooManyImages': '图片太多（最多 {n} 张）：未添加文件',
+  'chat.attachReady': '{n}/5 张图片 — 可发送',
 };

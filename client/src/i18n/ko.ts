@@ -252,4 +252,6 @@ export const ko: Record<MessageKey, string> = {
   'chat.removeAttachment': '첨부 제거',
   'chat.imageTooLarge': '이미지가 너무 큽니다(최대 5MB): {name}',
   'chat.unsupportedImageType': '지원되지 않는 이미지 형식: {name}',
+  'chat.tooManyImages': '이미지가 너무 많습니다(최대 {n}): 파일이 추가되지 않았습니다',
+  'chat.attachReady': '{n}/5 이미지 — 전송 준비 완료',
 };

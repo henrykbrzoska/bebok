@@ -110,6 +110,17 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
     let mut out = Vec::with_capacity(msgs.len());
     for m in msgs {
         let mut blocks: Vec<Value> = Vec::new();
+        // Anthropic requires tool_result blocks to come first in a user turn;
+        // images and text follow, so an attachment sent together with tool
+        // results is still delivered (never dropped, never misordered).
+        for tr in &m.tool_results {
+            blocks.push(serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": tr.tool_use_id,
+                "content": tr.content,
+                "is_error": tr.is_error,
+            }));
+        }
         for p in &m.content_parts {
             if let ContentPart::Image { media_type, data } = p {
                 blocks.push(serde_json::json!({
@@ -127,14 +138,6 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
                 "id": tc.id,
                 "name": tc.name,
                 "input": tc.input,
-            }));
-        }
-        for tr in &m.tool_results {
-            blocks.push(serde_json::json!({
-                "type": "tool_result",
-                "tool_use_id": tr.tool_use_id,
-                "content": tr.content,
-                "is_error": tr.is_error,
             }));
         }
         if blocks.is_empty() {
@@ -421,5 +424,35 @@ mod image_tests {
         let blocks = msgs[0]["content"].as_array().unwrap();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0], serde_json::json!({"type": "text", "text": "hi"}));
+    }
+
+    /// Regression: images attached in the same turn as tool results keep both,
+    /// with tool_result blocks first (Anthropic API ordering requirement).
+    #[test]
+    fn anthropic_tool_results_precede_images() {
+        use crate::provider::ToolResult;
+        let m = ChatMessage {
+            role: ChatRole::User,
+            content: "see this".to_string(),
+            tool_calls: Vec::new(),
+            tool_results: vec![ToolResult {
+                tool_use_id: "call-1".to_string(),
+                content: "ok".to_string(),
+                is_error: false,
+            }],
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        };
+        let msgs = to_anthropic_messages(&[m]);
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0]["type"], "tool_result");
+        assert_eq!(blocks[0]["tool_use_id"], "call-1");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["source"]["data"], "aGVsbG8=");
+        assert_eq!(blocks[2]["type"], "text");
+        assert_eq!(blocks[2]["text"], "see this");
     }
 }

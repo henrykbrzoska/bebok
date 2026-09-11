@@ -135,7 +135,7 @@ export interface PromptResponse {
   status: string;
 }
 
-/** One image attached to an outgoing prompt (raw base64, no `data:` prefix). */
+/** One image attached to an outgoing prompt (raw base64, no `data:` prefix; max 5 images, 5 MB each, png/jpeg/webp/gif). */
 export interface PromptImage {
   media_type: string;
   data: string;

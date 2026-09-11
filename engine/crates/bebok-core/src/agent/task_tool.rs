@@ -38,6 +38,7 @@ use serde_json::{Value, json};
 
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
+use super::images::{AgentImageInput, validate_agent_images};
 use super::turn::run_turn;
 use crate::provider::build_provider;
 use crate::session::Role;
@@ -85,6 +86,10 @@ struct TaskArgs {
     /// the engine assigns `<agent>-<n>`.
     #[serde(default)]
     name: Option<String>,
+    /// Optional image attachments for the sub-agent (raw base64, max 5,
+    /// png/jpeg/webp/gif, max 5 MB each). Forwards parent images the
+    /// sub-agent needs.
+    images: Option<Vec<AgentImageInput>>,
 }
 
 /// RAII depth guard: decrements the shared counter on drop.
@@ -115,7 +120,8 @@ impl Tool for TaskTool {
          answer. Use for independent subtasks (e.g. research with `ask`, planning \
          with `plan`, or a focused edit with `code`); sequence dependent work \
          yourself. Provide a complete, standalone `prompt` — the sub-agent cannot \
-         see this conversation."
+         see this conversation. Optional `images` forwards parent images the \
+         sub-agent needs (raw base64, max 5)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -137,6 +143,19 @@ impl Tool for TaskTool {
                 "name": {
                     "type": "string",
                     "description": "Short kebab-case name for this subtask (e.g. auth-flow-audit). Engine guarantees uniqueness within the session; if omitted or taken the engine assigns <agent>-<n>."
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "media_type": { "type": "string", "description": "Image MIME type (image/png, image/jpeg, image/webp, image/gif)." },
+                            "data": { "type": "string", "description": "Raw base64 payload (data: URL prefix also accepted)." },
+                            "name": { "type": "string", "description": "Optional file name." }
+                        },
+                        "required": ["media_type", "data"]
+                    },
+                    "description": "Optional image attachments forwarded to the sub-agent (raw base64, max 5, max 5 MB each)."
                 }
             },
             "required": ["prompt"]
@@ -155,10 +174,14 @@ impl Tool for TaskTool {
             Ok(a) => a,
             Err(e) => return ToolOutput::new(format!("task: invalid arguments: {e}"), "task"),
         };
-        let prompt = args.prompt.trim();
+        let prompt = args.prompt.trim().to_string();
         if prompt.is_empty() {
             return ToolOutput::new("task: `prompt` must not be empty", "task");
         }
+        let image_parts = match validate_agent_images(args.images.unwrap_or_default()) {
+            Ok(p) => p,
+            Err(e) => return ToolOutput::new(format!("task: {e}"), "task"),
+        };
 
         if self.depth.load(Ordering::Acquire) >= self.max_depth {
             return ToolOutput::new(
@@ -239,7 +262,7 @@ impl Tool for TaskTool {
             }
         };
 
-        if let Err(e) = child.append_user_message(prompt).await {
+        if let Err(e) = child.append_user_message_with_images(&prompt, image_parts).await {
             return ToolOutput::new(format!("task: cannot record subtask: {e}"), "task");
         }
 
@@ -398,5 +421,66 @@ fn assemble_prompt(
     let instructions = crate::skills::assemble_prompt(&discovered);
     if !instructions.is_empty() {
         agent.prompt = format!("{}\n\n{instructions}", agent.prompt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::images::{AgentImageInput, fixtures::PNG_1X1, validate_agent_images};
+
+    #[test]
+    fn task_args_deserialize_images() {
+        let args: TaskArgs = serde_json::from_value(json!({
+            "prompt": "look at this",
+            "images": [{"media_type": "image/png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "name": "a.png"}],
+        }))
+        .unwrap();
+        let imgs = args.images.unwrap();
+        assert_eq!(imgs.len(), 1);
+        let parts = validate_agent_images(imgs).unwrap();
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            crate::session::Part::Image { media_type, data, name } => {
+                assert_eq!(media_type, "image/png");
+                assert_eq!(data, PNG_1X1);
+                assert_eq!(name.as_deref(), Some("a.png"));
+            }
+            other => panic!("expected image part, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_images_validated_not_appended_raw() {
+        // 6 images -> clear error, no panic.
+        let many: Vec<AgentImageInput> = (0..6)
+            .map(|_| AgentImageInput {
+                media_type: "image/png".into(),
+                data: PNG_1X1.into(),
+                name: None,
+            })
+            .collect();
+        let err = validate_agent_images(many).unwrap_err();
+        assert!(err.contains("max 5 images"), "{err}");
+        // bad MIME -> clear error.
+        let bad = vec![AgentImageInput {
+            media_type: "image/tiff".into(),
+            data: PNG_1X1.into(),
+            name: None,
+        }];
+        let err = validate_agent_images(bad).unwrap_err();
+        assert!(err.contains("unsupported image media_type"), "{err}");
+    }
+
+    #[test]
+    fn task_schema_documents_images() {
+        let tool = TaskTool {
+            store: Weak::new(),
+            depth: AtomicUsize::new(0),
+            max_depth: 3,
+        };
+        let schema = Tool::parameters_schema(&tool);
+        assert!(schema["properties"]["images"].is_object());
+        assert!(tool.description().contains("images"));
     }
 }

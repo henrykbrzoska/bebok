@@ -48,6 +48,7 @@ use serde_json::{Value, json};
 
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
+use super::images::{AgentImageInput, validate_agent_images};
 use super::task_tool::MAX_TASK_DEPTH;
 use super::turn::run_turn;
 use crate::provider::build_provider;
@@ -86,6 +87,9 @@ struct FleetTask {
     /// Optional configured fleet member name this task targets.
     #[serde(default)]
     member: Option<String>,
+    /// Optional image attachments for this task (raw base64, max 5, max 5 MB each).
+    #[serde(default)]
+    images: Option<Vec<AgentImageInput>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +111,10 @@ struct FleetArgs {
     /// broadcast `prompt`/`names`/`agents` selection.
     #[serde(default)]
     tasks: Option<Vec<FleetTask>>,
+    /// Optional image attachments broadcast to every selected member
+    /// (raw base64, max 5). Ignored in heterogeneous mode (per-task `images` win).
+    #[serde(default)]
+    images: Option<Vec<AgentImageInput>>,
 }
 
 /// A `tasks` entry with all fields trimmed; `prompt` guaranteed non-empty.
@@ -115,6 +123,7 @@ struct CleanTask {
     agent: Option<String>,
     name: Option<String>,
     member: Option<String>,
+    images: Vec<AgentImageInput>,
 }
 
 /// Clean `tasks` entries (trim every field; drop entries with an empty
@@ -136,6 +145,7 @@ fn clean_tasks(raw: Option<Vec<FleetTask>>) -> Vec<CleanTask> {
                 agent: opt(t.agent),
                 name: opt(t.name),
                 member: opt(t.member),
+                images: t.images.unwrap_or_default(),
             })
         })
         .collect()
@@ -151,7 +161,7 @@ fn clean_tasks(raw: Option<Vec<FleetTask>>) -> Vec<CleanTask> {
 fn resolve_hetero_members(
     configured: &[crate::config::FleetMember],
     tasks: &[CleanTask],
-) -> Result<Vec<(crate::config::FleetMember, String)>, String> {
+) -> Result<Vec<(crate::config::FleetMember, String, Vec<AgentImageInput>)>, String> {
     let mut out = Vec::with_capacity(tasks.len());
     for t in tasks {
         let matched = t
@@ -189,6 +199,7 @@ fn resolve_hetero_members(
                 model: String::new(),
             },
             t.prompt.clone(),
+            t.images.clone(),
         ));
     }
     Ok(out)
@@ -337,7 +348,7 @@ impl Tool for FleetTool {
          `task` calls with agent=<type> instead. Heterogeneous mode: pass `tasks` with per-task \
          prompts for independent tasks, e.g. {\"tasks\": [{\"prompt\": \"research auth\", \
          \"agent\": \"ask\"}, {\"prompt\": \"research db\", \"agent\": \"ask\"}]} — each entry \
-         is {prompt (required), agent?, name?, member?} and runs concurrently in its own \
+         is {prompt (required), agent?, name?, member?, images?} and runs concurrently in its own \
          isolated session; `task.member` must match a configured member name. Use fleet when \
          the user explicitly requests parallel execution or when running many independent tasks \
          concurrently is clearly beneficial and fleet members are available. For most delegation, \
@@ -362,6 +373,19 @@ impl Tool for FleetTool {
                     "items": { "type": "string" },
                     "description": "Agent preset types to run, case-insensitive (e.g. [\"ask\"] runs only ask members). Prefer this over `names` when the user asked for a type or a count of a type. Intersects with `names`. Empty/omitted = no restriction (with no `names` either, runs all members)."
                 },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "media_type": { "type": "string" },
+                            "data": { "type": "string" },
+                            "name": { "type": "string" }
+                        },
+                        "required": ["media_type", "data"]
+                    },
+                    "description": "Optional image attachments broadcast to every selected member (raw base64, max 5, max 5 MB each). Ignored in heterogeneous mode (use per-task images)."
+                },
                 "tasks": {
                     "type": "array",
                     "items": {
@@ -370,7 +394,8 @@ impl Tool for FleetTool {
                             "prompt": { "type": "string", "description": "Standalone instruction for this task (required, non-empty)." },
                             "agent": { "type": "string", "description": "Agent preset override for this task (e.g. \"ask\")." },
                             "name": { "type": "string", "description": "Display-name override for this task's output section." },
-                            "member": { "type": "string", "description": "Configured fleet member name this task targets (must match)." }
+                            "member": { "type": "string", "description": "Configured fleet member name this task targets (must match)." },
+                            "images": { "type": "array", "description": "Optional image attachments for this task (raw base64, max 5, max 5 MB each)." }
                         },
                         "required": ["prompt"]
                     },
@@ -440,27 +465,36 @@ impl Tool for FleetTool {
             );
         }
 
-        // Resolve work items: (member, per-task prompt) pairs.
+        // Resolve work items: (member, per-task prompt, images) triples.
         // Heterogeneous mode ignores broadcast `prompt`/`names`/`agents`;
         // broadcast mode fans one prompt out to the filtered selection.
         // Returns (work, fleet.started properties): broadcast keeps its
         // existing event shape; heterogeneous reports mode + task names.
         let wanted_names = clean_names(args.names);
         let wanted_agents = clean_agents(args.agents);
-        let (work, event_props): (Vec<(crate::config::FleetMember, String)>, Value) = if hetero_mode
+        let (work, event_props): (Vec<(crate::config::FleetMember, String, Vec<crate::session::Part>)>, Value) = if hetero_mode
         {
             let resolved = match resolve_hetero_members(configured, &hetero_tasks) {
                 Ok(w) => w,
                 Err(msg) => return ToolOutput::new(msg, "fleet"),
             };
-            let task_names: Vec<String> = resolved.iter().map(|(m, _)| m.name.clone()).collect();
+            let count = resolved.len();
+            let mut work_items = Vec::with_capacity(count);
+            for (m, p, imgs) in resolved {
+                let parts = match validate_agent_images(imgs) {
+                    Ok(p) => p,
+                    Err(e) => return ToolOutput::new(format!("fleet: {e}"), "fleet"),
+                };
+                work_items.push((m, p, parts));
+            }
+            let task_names: Vec<String> = work_items.iter().map(|(m, _, _)| m.name.clone()).collect();
             let props = json!({
                 "mode": "heterogeneous",
                 "members": task_names.clone(),
                 "tasks": task_names,
-                "count": resolved.len(),
+                "count": count,
             });
-            (resolved, props)
+            (work_items, props)
         } else {
             // Optional subset selection: `names` (exact member name)
             // and/or `agents` (case-insensitive agent preset type). Both
@@ -480,7 +514,11 @@ impl Tool for FleetTool {
                 "names": wanted_names,
                 "agents": wanted_agents,
             });
-            let items = selected.into_iter().map(|m| (m, prompt.clone())).collect();
+            let broadcast_parts = match validate_agent_images(args.images.unwrap_or_default()) {
+                Ok(p) => p,
+                Err(e) => return ToolOutput::new(format!("fleet: {e}"), "fleet"),
+            };
+            let items = selected.into_iter().map(|m| (m, prompt.clone(), broadcast_parts.clone())).collect();
             (items, props)
         };
         if work.is_empty() {
@@ -503,8 +541,8 @@ impl Tool for FleetTool {
         // Fan out concurrently; each task owns an isolated child session.
         let futures: Vec<_> = work
             .iter()
-            .map(|(member, task_prompt)| {
-                run_member(&store, &instance, &parent, &cfg, member, task_prompt, &ctx)
+            .map(|(member, task_prompt, images)| {
+                run_member(&store, &instance, &parent, &cfg, member, task_prompt, images.clone(), &ctx)
             })
             .collect();
         let results: Vec<MemberResult> = futures::future::join_all(futures).await;
@@ -561,6 +599,7 @@ async fn run_member(
     cfg: &crate::config::ResolvedConfig,
     member: &crate::config::FleetMember,
     prompt: &str,
+    images: Vec<crate::session::Part>,
     ctx: &ToolCtx,
 ) -> MemberResult {
     let member_name = member.name.trim();
@@ -632,7 +671,7 @@ async fn run_member(
         }
     };
 
-    if let Err(e) = child.append_user_message(prompt).await {
+    if let Err(e) = child.append_user_message_with_images(prompt, images).await {
         return MemberResult {
             name,
             agent: agent_name.to_string(),
@@ -924,12 +963,14 @@ mod tests {
                 agent: Some(" ask ".into()),
                 name: None,
                 member: None,
+                images: None,
             },
             FleetTask {
                 prompt: "research db".into(),
                 agent: Some("ask".into()),
                 name: Some(" db-task ".into()),
                 member: None,
+                images: None,
             },
         ])
     }
@@ -963,6 +1004,7 @@ mod tests {
             agent: None,
             name: None,
             member: Some("3".into()),
+            images: None,
         }]);
         let cleaned = clean_tasks(raw);
         assert_eq!(cleaned.len(), 1);
@@ -979,6 +1021,7 @@ mod tests {
             agent: Some("ask".into()),
             name: None,
             member: Some("3".into()),
+            images: None,
         }]);
         let cleaned = clean_tasks(raw);
         let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
@@ -994,12 +1037,14 @@ mod tests {
                 agent: Some("ask".into()),
                 name: None,
                 member: None,
+                images: None,
             },
             FleetTask {
                 prompt: String::new(),
                 agent: None,
                 name: None,
                 member: None,
+                images: None,
             },
         ]);
         let cleaned = clean_tasks(raw);
@@ -1016,6 +1061,7 @@ mod tests {
             agent: None,
             name: None,
             member: Some("nope".into()),
+            images: None,
         }]);
         let cleaned = clean_tasks(raw);
         // Sanity: the task above is well-formed so cleaning keeps it.
@@ -1033,6 +1079,7 @@ mod tests {
             agent: None,
             name: None,
             member: None,
+            images: None,
         }]);
         let cleaned = clean_tasks(raw);
         let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
@@ -1055,5 +1102,64 @@ mod tests {
         assert!(desc.contains("research db"), "{desc}");
         assert!(tool.description().contains("research auth"));
         assert!(tool.description().contains("research db"));
+    }
+
+    #[test]
+    fn hetero_images_preserved_through_clean_and_resolve() {
+        let raw = Some(vec![FleetTask {
+            prompt: "look".into(),
+            agent: None,
+            name: None,
+            member: None,
+            images: Some(vec![crate::agent::images::AgentImageInput {
+                media_type: "image/png".into(),
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=".into(),
+                name: None,
+            }]),
+        }]);
+        let cleaned = clean_tasks(raw);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].images.len(), 1);
+        let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
+        assert_eq!(resolved[0].2.len(), 1);
+        let parts = crate::agent::images::validate_agent_images(resolved[0].2.clone()).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(parts[0], crate::session::Part::Image { .. }));
+    }
+
+    #[test]
+    fn hetero_too_many_images_rejected() {
+        let many: Vec<crate::agent::images::AgentImageInput> = (0..6)
+            .map(|_| crate::agent::images::AgentImageInput {
+                media_type: "image/png".into(),
+                data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=".into(),
+                name: None,
+            })
+            .collect();
+        let err = crate::agent::images::validate_agent_images(many).unwrap_err();
+        assert!(err.contains("max 5 images"), "{err}");
+    }
+
+    #[test]
+    fn hetero_bad_mime_rejected() {
+        let bad = vec![crate::agent::images::AgentImageInput {
+            media_type: "image/bmp".into(),
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=".into(),
+            name: None,
+        }];
+        let err = crate::agent::images::validate_agent_images(bad).unwrap_err();
+        assert!(err.contains("unsupported image media_type"), "{err}");
+    }
+
+    #[test]
+    fn schema_documents_images() {
+        let tool = FleetTool {
+            store: Weak::new(),
+            depth: AtomicUsize::new(0),
+            max_depth: 3,
+        };
+        let schema = Tool::parameters_schema(&tool);
+        assert!(schema["properties"]["images"].is_object());
+        assert!(schema["properties"]["tasks"]["items"]["properties"]["images"].is_object());
     }
 }

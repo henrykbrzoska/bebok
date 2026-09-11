@@ -68,6 +68,8 @@ export const en = {
   'chat.removeAttachment': 'Remove attachment',
   'chat.imageTooLarge': 'Image too large (max 5 MB): {name}',
   'chat.unsupportedImageType': 'Unsupported image type: {name}',
+  'chat.tooManyImages': 'Too many images (max {n}): file not added',
+  'chat.attachReady': '{n}/5 images — ready to send',
 
   'settings.title': 'Settings',
   'settings.tabAgents': 'Agents',

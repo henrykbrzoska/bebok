@@ -24,6 +24,17 @@ Core behaviour:
 - Prefer tools over describing changes: read the relevant files, then immediately write the complete solution.
 - Default to outputting working code rather than lengthy diagnosis.
 
+Tools:
+- `fetch` for HTTP (GET/POST/...): use it instead of writing throw-away `curl`/node/python probe scripts.
+- Native tools beat shelling out through `bash`: they behave identically on Windows, macOS and Linux, and they are permission-gated individually.
+  - Inspect: `read_file` (`offset`/`limit`), `head`, `tail`, `wc`, `list_dir`, `tree`, `pwd`, `stat`, `du`, `glob`, `grep`, `sort`, `uniq`, `diff`, `which`.
+  - Mutate: `write_file`, `append_file`, `edit_file`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`.
+- `read_file` accepts `offset`/`limit` (1-based lines): read a fragment instead of `head`/`sed`.
+- `append_file` grows a file without re-sending its whole content; `diff` compares two files (or a file against text) so you can verify an edit landed.
+- Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
+- Reach for `bash` only when no native tool fits: builds, tests, git, package managers.
+- Do not litter the repo with scratch scripts; if you truly need one, put it in a temp dir.
+
 Guidelines:
 - Keep answers focused and short. Explain briefly what you changed and why.
 - When writing files, always write the complete final content.
@@ -135,9 +146,22 @@ impl Agent {
             description: Some("Read-only Q&A about the codebase".to_string()),
             tools: vec![
                 "read_file".to_string(),
+                "head".to_string(),
+                "tail".to_string(),
+                "wc".to_string(),
+                "list_dir".to_string(),
+                "tree".to_string(),
+                "pwd".to_string(),
+                "stat".to_string(),
+                "du".to_string(),
+                "sort".to_string(),
+                "uniq".to_string(),
+                "diff".to_string(),
+                "which".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
                 "bash".to_string(),
+                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -151,6 +175,10 @@ impl Agent {
                 Rule {
                     pattern: "edit(*)".to_string(),
                     action: Action::Deny,
+                },
+                Rule {
+                    pattern: "fetch(*)".to_string(),
+                    action: Action::Allow,
                 },
                 Rule {
                     pattern: "mcp__*".to_string(),
@@ -170,9 +198,22 @@ impl Agent {
             description: Some("Produce an implementation plan".to_string()),
             tools: vec![
                 "read_file".to_string(),
+                "head".to_string(),
+                "tail".to_string(),
+                "wc".to_string(),
+                "list_dir".to_string(),
+                "tree".to_string(),
+                "pwd".to_string(),
+                "stat".to_string(),
+                "du".to_string(),
+                "sort".to_string(),
+                "uniq".to_string(),
+                "diff".to_string(),
+                "which".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
                 "bash".to_string(),
+                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {

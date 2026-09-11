@@ -252,4 +252,6 @@ export const ja: Record<MessageKey, string> = {
   'chat.removeAttachment': '添付を削除',
   'chat.imageTooLarge': '画像が大きすぎます（最大5MB）：{name}',
   'chat.unsupportedImageType': 'サポートされていない画像形式です：{name}',
+  'chat.tooManyImages': '画像が多すぎます（最大{n}）：ファイルは追加されませんでした',
+  'chat.attachReady': '{n}/5 枚の画像 — 送信準備完了',
 };

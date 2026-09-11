@@ -4,18 +4,36 @@
 //! MCP tools both implement it, and the agent loop / permission engine never
 //! know the difference.
 
+pub mod append_file;
 pub mod bash;
+pub mod chmod;
+pub mod cp;
+pub mod diff;
 pub mod docker;
+pub mod du;
 pub mod edit_file;
 pub mod explorer;
+pub mod fetch;
 pub mod glob_tool;
 pub mod grep;
+pub mod head;
 pub mod list_dir;
+pub mod mkdir;
+pub mod mv;
+pub mod pwd;
 pub mod read_file;
 pub mod registry;
+pub mod rm;
 pub mod runtimes;
+pub mod sort;
+pub mod stat;
+pub mod tail;
 pub mod tool;
+pub mod touch;
 pub mod tree;
+pub mod uniq;
+pub mod wc;
+pub mod which;
 pub mod write_file;
 
 pub use docker::{DockerStatus, check_docker};
@@ -26,16 +44,46 @@ pub use tool::{Tool, ToolCtx, ToolOutput};
 
 use std::sync::Arc;
 
-/// All built-in tools available in Milestone 1.
+/// All built-in tools available to the agent.
+///
+/// Besides the read/write/search primitives, this exposes native Rust
+/// equivalents of the most important shell commands so the model can use them
+/// portably instead of shelling out through `bash` (which differs between
+/// `sh` and `cmd`):
+///
+/// * read-only — `pwd`, `head`, `tail`, `wc`, `stat`, `du`, `sort`, `uniq`,
+///   `diff`, `which`;
+/// * mutating — `mkdir`, `touch`, `cp`, `mv`, `rm`, `append_file`, `chmod`.
 pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
     vec![
+        // Read / inspect.
         Arc::new(read_file::ReadFile),
-        Arc::new(write_file::WriteFile),
-        Arc::new(edit_file::EditFile),
-        Arc::new(bash::Bash),
-        Arc::new(glob_tool::Glob),
-        Arc::new(grep::Grep),
+        Arc::new(head::Head),
+        Arc::new(tail::Tail),
+        Arc::new(wc::Wc),
         Arc::new(list_dir::ListDir),
         Arc::new(tree::Tree),
+        Arc::new(pwd::Pwd),
+        Arc::new(stat::Stat),
+        Arc::new(du::Du),
+        Arc::new(glob_tool::Glob),
+        Arc::new(grep::Grep),
+        Arc::new(sort::Sort),
+        Arc::new(uniq::Uniq),
+        Arc::new(diff::Diff),
+        Arc::new(which::Which),
+        Arc::new(fetch::Fetch),
+        // Write / mutate.
+        Arc::new(write_file::WriteFile),
+        Arc::new(append_file::AppendFile),
+        Arc::new(edit_file::EditFile),
+        Arc::new(mkdir::Mkdir),
+        Arc::new(touch::Touch),
+        Arc::new(cp::Cp),
+        Arc::new(mv::Mv),
+        Arc::new(rm::Rm),
+        Arc::new(chmod::Chmod),
+        // Escape hatch.
+        Arc::new(bash::Bash),
     ]
 }

@@ -22,12 +22,11 @@ use super::preset::Agent;
 use super::request::RequestBuilder;
 use crate::error::Result;
 use crate::event::{Event, EventBus};
-use crate::llm_trace::{LLM_TRACE, LlmCall, push_llm_call};
+use crate::llm_trace::{begin_llm_call, complete_llm_call};
 use crate::permission::{CompiledLayer, PermissionEngine};
 use crate::plugin::{Hook, PluginHost, TurnHook};
 use crate::session::{Message, Role};
 use crate::store::SessionState;
-use crate::util::now_ms;
 
 /// Orchestrates one full turn (owns everything `run_turn` took as args).
 pub struct TurnRunner {
@@ -108,11 +107,11 @@ impl TurnRunner {
             // Plugin hook: inspect / mutate the request before it is sent.
             builder.apply_request_hook(&mut req).await;
 
-            // ── LLM trace: capture the full request body before it is consumed ──
-            let trace_ts = now_ms();
-            let trace_model = model.clone();
+            // ── LLM trace: publish the request immediately so the in-flight
+            // (last) call is visible in GET /debug/log while streaming ──
             let trace_request: serde_json::Value = serde_json::to_value(&req)
                 .unwrap_or_else(|_| serde_json::json!({"_serialize_error": true}));
+            let trace_id = begin_llm_call(model.clone(), trace_request);
 
             bus.publish(
                 Event::new("debug.log", state.directory(), &state.id().to_string())
@@ -133,14 +132,11 @@ impl TurnRunner {
             let mut stream = match provider.stream(req).await {
                 Ok(s) => s,
                 Err(err) => {
-                    // ── LLM trace: record the failed call ──
-                    push_llm_call(LlmCall {
-                        id: LLM_TRACE.next_id(),
-                        ts: trace_ts,
-                        model: trace_model,
-                        request: trace_request,
-                        response: serde_json::json!({ "error": err.to_string() }),
-                    });
+                    // ── LLM trace: finish the in-flight call with the error ──
+                    complete_llm_call(
+                        trace_id,
+                        serde_json::json!({ "model": model, "error": err.to_string() }),
+                    );
 
                     // A provider-level failure (e.g. a model that refuses tool
                     // use, invalid request, 5xx): note it in the project config so
@@ -175,11 +171,19 @@ impl TurnRunner {
             state.note_message_index(assistant_idx);
 
             let mut saw_any = false;
+            let mut stream_err: Option<String> = None;
             while let Some(ev) = stream.next().await {
                 if abort.is_cancelled() {
                     break;
                 }
-                match ev? {
+                let ev = match ev {
+                    Ok(ev) => ev,
+                    Err(err) => {
+                        stream_err = Some(err.to_string());
+                        break;
+                    }
+                };
+                match ev {
                     StreamEvent::Text(delta) => {
                         saw_any = true;
                         state
@@ -262,20 +266,38 @@ impl TurnRunner {
             // Drop the stream so the HTTP connection closes promptly.
             drop(stream);
 
-            // ── LLM trace: record the completed call ──
+            // ── LLM trace: finish the in-flight call with the response ──
+            // (runs on every exit path — done, abort, stream error — so the
+            // last request/response pair is never missing from the trace).
             {
                 let messages = state.messages.read().await;
-                if let Some(assistant_msg) = messages.get(assistant_idx) {
-                    push_llm_call(LlmCall {
-                        id: LLM_TRACE.next_id(),
-                        ts: trace_ts,
-                        model: trace_model,
-                        request: trace_request,
-                        response: serde_json::json!({
+                if let Some(err) = stream_err {
+                    complete_llm_call(
+                        trace_id,
+                        serde_json::json!({ "model": model, "error": err }),
+                    );
+                    bus.publish(
+                        Event::new("debug.log", state.directory(), &state.id().to_string())
+                            .with_properties(serde_json::json!({
+                                "source": "llm",
+                                "kind": "error",
+                                "title": format!("llm {model}"),
+                                "detail": err,
+                            })),
+                    );
+                } else if let Some(assistant_msg) = messages.get(assistant_idx) {
+                    complete_llm_call(
+                        trace_id,
+                        serde_json::json!({
                             "model": model,
                             "message": assistant_msg,
                         }),
-                    });
+                    );
+                } else {
+                    complete_llm_call(
+                        trace_id,
+                        serde_json::json!({ "model": model, "error": "no assistant message" }),
+                    );
                 }
             }
 

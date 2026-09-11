@@ -56,6 +56,14 @@ pub trait Tool: Send + Sync {
     fn is_read_only(&self) -> bool {
         false
     }
+
+    /// Per-call refinement of [`Tool::is_read_only`], for tools whose
+    /// mutation-ness depends on their arguments (`fetch` is read-only for GET
+    /// but not for POST). Defaults to the tool-wide answer, so most tools only
+    /// implement [`Tool::is_read_only`].
+    fn is_read_only_for(&self, _args: &Value) -> bool {
+        self.is_read_only()
+    }
 }
 
 /// Convenience constructor for [`ToolCtx`].

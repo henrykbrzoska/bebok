@@ -10,7 +10,7 @@ Orchestrator works AWSOME.
 - **Rust engine + SSE** - axum, tokio; all logic and state live in the engine (the GUI only renders).
 - **Agent loop** - streaming + tool calls across **many providers** (OpenAI, Anthropic, Z.ai/GLM, xAI, DeepSeek, Google, Mistral, Groq, Qwen, OpenRouter, Ollama), selected by model prefix.
 - **Permissions** - `globset` patterns (`tool(args)`), `allow`/`deny`/`ask` verdicts, decision cache, global + project rules.
-- **Built-in tools** - `read_file`, `write_file`, `bash`, `glob`, `grep`, `list_dir`, `tree`.
+- **Built-in tools** - `read_file` (with `offset`/`limit` line ranges), `write_file`, `append_file`, `edit_file`, `bash`, `fetch` (HTTP), plus native Rust ports of the common shell commands (`pwd`, `list_dir`, `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`, `glob`, `grep`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`) so the agent never needs OS-specific scripts.
 - **MCP** - `rmcp` bridge (stdio + streamable HTTP); MCP tools join the shared permission gate as `mcp__<server>__<tool>`.
 - **Agents** - built-in presets (`code`, `ask`, `plan`, `debug`, `orchestrator`) + files in `~/.config/bebok/agent/*.md` and `<project>/.bebok/agent/*.md` with hot reload.
 - **Skills & AGENTS.md** - global/project `AGENTS.md` + `skill/*/SKILL.md` appended to the system prompt (with toggles).
@@ -126,7 +126,7 @@ so the mobile client has no terminal.
 cd engine && cargo test --workspace   # engine
 cd ../client && npm run build         # client (build = type-check)
 ## Configuration
-
+attach
 Configuration is JSONC (comments preserved), loaded in layers:
 global ~/.config/bebok/config.json → project /.bebok/config.json
 (overrides global; providers merge by name). Sections:
@@ -153,7 +153,8 @@ global ~/.config/bebok/config.json → project /.bebok/config.json
   "yolo": false,                     // auto-allow every tool call (dangerous)
 
   "permission": { "rules": [
-    { "pattern": "bash(git *)", "action": "allow" }
+    { "pattern": "bash(git *)", "action": "allow" },
+    { "pattern": "fetch(http://127.0.0.1:*)", "action": "allow" }
   ]},
 
   "mcp": {
@@ -182,6 +183,32 @@ Most of this (model, per-type models, providers + "check available models",
 API key, permission rules, MCP, skills, interpreter paths, Docker check) is
 editable in the GUI: Settings. GUI edits go through JSONC delta writers
 (atomic tmp+rename, comments preserved) + instance reload.
+
+## Tools
+
+The built-ins are the portable primitives the agent should reach for instead of
+writing OS-specific scripts (`bash` runs `cmd /C` on Windows, `sh -c` elsewhere):
+
+- `read_file` - `path` plus optional `offset` (1-based line) / `limit` (lines);
+  returns the raw file when no range is given, and a `[read_file: lines a-b of n]`
+  marker when it slices (so no `head`/`sed`/node one-liners).
+- `fetch` - HTTP request/response as a tool: `url`, `method` (default `GET`),
+  `headers`, `json` (or raw `body`), `max_bytes` (default 64 KiB, max 1 MiB).
+  Streams the body, pretty-prints JSON, honours the turn's abort token.
+  Same behaviour on every OS, so no `curl`/`jq`/node probe scripts.
+- Per-call permission class: `GET`/`HEAD` count as read-only (default `allow`),
+  every other method defaults to `ask`. Rules match on the URL
+  (`fetch(http://127.0.0.1:*)`) because `url` is the canonical arg text.
+- `bash` - `command` only, run through the platform shell. Reach for it only
+  when no native tool fits (builds, tests, git, package managers).
+- File management - native ports of the common shell commands, identical on
+  every OS: `mkdir`, `touch`, `cp`, `mv`, `rm` (a directory needs
+  `recursive: true`), `chmod`, and `append_file` (grows a file without
+  re-sending its whole content).
+- Inspection - `list_dir`, `tree`, `stat` (type/size/mtime/mode), `du` (size
+  breakdown), `head`, `tail`, `wc`, `sort`, `uniq`, `diff` (unified, Myers),
+  `which` (is it installed?), `glob`, `grep`.
+- Read-only tools default to `allow`, mutating ones to `ask` (see Permissions).
 
 ## Endpoints (engine)
 
@@ -219,3 +246,21 @@ engine/crates/bebok-server/src/routes/mod.rs.
 Status semantics: 202 = prompt accepted (turn runs in background),
 409 = session busy, 404 = unknown session/ask/rule, 400 = bad request.
 
+## [windows] — finding the desktop sidecar engine + delegation test (2026-09-11)
+
+bebok-desktop.exe spawns bebok-server.exe with `--port 0`, so the engine port is random.
+Find it with `tasklist | findstr /I bebok` (get the bebok-server.exe PID) then
+`netstat -ano | findstr LISTENING` (match that PID to a 127.0.0.1:PORT line — e.g. PID 5980
+-> 127.0.0.1:64083 on 2026-09-11). Port 8787 applies only to `cd engine && cargo run`.
+Verify with GET /plugins and GET /agent?directory= (both 200 on the sidecar).
+
+Delegation smoke test: create an orchestrator session (POST /session), prompt it
+(POST /session/{id}/prompt -> 202), poll GET /session/{id}/message, then list sessions
+(GET /session?directory=) filtering by parent==parentID to find the ASK child.
+Note: the orchestrator may answer directly without calling the `task` tool unless told
+"You MUST use the `task` tool now ... Do NOT answer directly". Cancelling a child aborts
+the whole parent turn. Unit-level proof without a running engine:
+`cd engine && cargo test -p bebok-core task_` (5 passed).
+
+Cmd gotchas: no head/tail/wc/grep/curl — use findstr/tasklist/netstat; avoid
+`node -e` quoting traps by writing probe .js files and running `node file.js`.

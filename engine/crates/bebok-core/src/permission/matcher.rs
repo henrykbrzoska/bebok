@@ -31,8 +31,9 @@ pub fn call_arg_text(args: &Value) -> String {
     }
     if let Some(map) = args.as_object() {
         // Prefer the single "interesting" string parameter when present so
-        // patterns like `bash(git *)` or `read_file(src/*)` read naturally.
-        for key in ["command", "path", "pattern"] {
+        // patterns like `bash(git *)`, `read_file(src/*)` or
+        // `fetch(http://127.0.0.1:*)` read naturally.
+        for key in ["command", "path", "url", "pattern"] {
             if let Some(s) = map.get(key).and_then(Value::as_str) {
                 return s.to_string();
             }
@@ -50,6 +51,7 @@ pub fn call_string(tool: &str, args: &Value) -> String {
 mod tests {
     use super::super::engine::CompiledLayer;
     use super::super::rule::{Action, Rule};
+    use super::call_arg_text;
 
     #[test]
     fn matches_paren_patterns() {
@@ -100,5 +102,26 @@ mod tests {
         // Deny comes first and must win.
         let (_, action) = layer.first_match("bash(git status)").unwrap();
         assert_eq!(action, Action::Deny);
+    }
+
+    #[test]
+    fn url_is_the_canonical_text_for_fetch_calls() {
+        // `fetch` puts the endpoint in `url`, so a rule reads like
+        // `fetch(http://127.0.0.1:*)` rather than a serialized JSON blob.
+        assert_eq!(
+            call_arg_text(&serde_json::json!({
+                "url": "http://127.0.0.1:8787/session",
+                "method": "GET",
+            })),
+            "http://127.0.0.1:8787/session"
+        );
+        let layer = CompiledLayer::compile(&[Rule {
+            pattern: "fetch(http://127.0.0.1:*)".into(),
+            action: Action::Allow,
+        }]);
+        assert_eq!(
+            layer.first_match("fetch(http://127.0.0.1:8787/session)"),
+            Some(("fetch(http://127.0.0.1:*)".to_string(), Action::Allow))
+        );
     }
 }

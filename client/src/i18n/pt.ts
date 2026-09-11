@@ -253,4 +253,6 @@ export const pt: Record<MessageKey, string> = {
   'chat.removeAttachment': 'Remover anexo',
   'chat.imageTooLarge': 'Imagem muito grande (máx. 5 MB): {name}',
   'chat.unsupportedImageType': 'Tipo de imagem não suportado: {name}',
+  'chat.tooManyImages': 'Imagens demais (máx. {n}): arquivo não adicionado',
+  'chat.attachReady': '{n}/5 imagens — prontas para enviar',
 };
