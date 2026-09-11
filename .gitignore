@@ -34,3 +34,9 @@ Thumbs.db
 
 # ---- Local Android NDK symlinks (machine-specific) ----
 client/.ndk-bin/
+
+# ---- Local probe/test scripts (never commit — use .bebok/ or a separate repo) ----
+/*.js
+/mimo_img.html
+/tmp-out.txt
+/{const
