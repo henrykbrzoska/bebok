@@ -12,6 +12,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterOutlet } from '@angular/router';
 
 import { CommandPalette } from '../command-palette/command-palette';
+import { DirectoryBrowser } from '../directory-browser/directory-browser';
 import { RightDrawer } from '../right-drawer/right-drawer';
 import { Sidebar } from '../sidebar/sidebar';
 import { Topbar } from '../topbar/topbar';
@@ -20,7 +21,7 @@ import { ShellStore } from './shell.store';
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, Sidebar, Topbar, RightDrawer, CommandPalette],
+  imports: [RouterOutlet, Sidebar, Topbar, RightDrawer, CommandPalette, DirectoryBrowser],
   templateUrl: './app-shell.html',
   styleUrl: './app-shell.css',
 })

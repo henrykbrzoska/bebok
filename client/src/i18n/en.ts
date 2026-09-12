@@ -425,6 +425,23 @@ export const en = {
   'drawer.terminalSession': 'Terminal session',
   'drawer.newTerminal': 'New terminal',
   'drawer.noTerminal': 'No terminal running. Press + to start one.',
+
+  'browser.title': 'Choose a directory',
+  'browser.breadcrumb': 'Path breadcrumb',
+  'browser.roots': 'Roots',
+  'browser.filter': 'Filter folders…',
+  'browser.showHidden': 'Show hidden',
+  'browser.hiddenTag': 'hidden',
+  'browser.folders': 'Folders',
+  'browser.loading': 'Loading…',
+  'browser.empty': 'No subfolders here',
+  'browser.pathPlaceholder': 'Type an absolute path',
+  'browser.go': 'Go',
+  'browser.invalidPath': 'That path could not be listed',
+  'browser.unreadable': 'This folder cannot be opened',
+  'browser.selectThis': 'Select this folder',
+  'browser.cancel': 'Cancel',
+  'start.recentProjects': 'Recent projects',
 };
 
 export type MessageKey = keyof typeof en;
