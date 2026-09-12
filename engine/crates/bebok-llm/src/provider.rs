@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -6,6 +7,41 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub type StreamResult<T> = Result<T, LlmError>;
+
+#[derive(Debug, Clone)]
+pub struct AdapterConfig {
+    pub provider_name: String,
+    pub env_var: String,
+    pub endpoint: String,
+    pub api_key: Option<String>,
+    pub headers: Vec<(String, String)>,
+}
+
+pub trait ProviderAdapter: Send + Sync {
+    fn type_name(&self) -> &'static str;
+    fn build(&self, config: AdapterConfig) -> Result<Arc<dyn Provider>, String>;
+}
+
+static OPENAI_CHAT_ADAPTER: crate::OpenAiChatAdapter = crate::OpenAiChatAdapter;
+static ANTHROPIC_MESSAGES_ADAPTER: crate::AnthropicMessagesAdapter =
+    crate::AnthropicMessagesAdapter;
+
+pub fn adapter_for(kind: crate::ProviderKind) -> &'static dyn ProviderAdapter {
+    match kind {
+        crate::ProviderKind::Openai => &OPENAI_CHAT_ADAPTER,
+        crate::ProviderKind::Anthropic => &ANTHROPIC_MESSAGES_ADAPTER,
+    }
+}
+
+pub fn build_provider(
+    spec: &crate::ProviderSpec,
+    fallback_api_key: Option<String>,
+) -> Result<Arc<dyn Provider>, String> {
+    let api_key = crate::resolve_api_key(spec).or(fallback_api_key);
+    let config = crate::adapter_config(spec, api_key);
+    let adapter = adapter_for(spec.kind);
+    adapter.build(config)
+}
 
 /// Errors surfaced by a provider.
 #[derive(Debug, thiserror::Error)]

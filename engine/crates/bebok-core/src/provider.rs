@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use bebok_llm::{AnthropicProvider, OpenAiProvider, Provider, ProviderKind};
+use bebok_llm::Provider;
 
 use crate::config::{ResolvedConfig, provider_from_model};
 use crate::error::CoreError;
@@ -26,23 +26,9 @@ pub fn build_provider(
         .provider_spec(&name)
         .ok_or_else(|| CoreError::ProviderConfig(format!("unknown provider '{name}'")))?;
 
-    let mut key = bebok_llm::resolve_api_key(&spec);
-    if key.is_none() {
-        key = config.api_key.clone().filter(|s| !s.trim().is_empty());
-    }
-
-    match spec.kind {
-        ProviderKind::Anthropic => {
-            let key = key.ok_or_else(|| {
-                CoreError::ProviderConfig(format!(
-                    "no API key for provider '{name}': set its api_key or the {} env var",
-                    spec.env_var()
-                ))
-            })?;
-            Ok(Arc::new(
-                AnthropicProvider::new(key).with_base_url(spec.chat_url()),
-            ))
-        }
-        ProviderKind::Openai => Ok(Arc::new(OpenAiProvider::new(key, spec.chat_url()))),
-    }
+    bebok_llm::build_provider(
+        &spec,
+        config.api_key.clone().filter(|s| !s.trim().is_empty()),
+    )
+    .map_err(CoreError::ProviderConfig)
 }

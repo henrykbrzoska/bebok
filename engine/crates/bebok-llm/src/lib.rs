@@ -8,7 +8,9 @@ mod cache_policy;
 mod cost;
 mod model_catalog;
 mod openai;
+mod protocols;
 mod provider;
+mod providers;
 mod spec;
 mod wire;
 
@@ -19,11 +21,13 @@ pub use model_catalog::{ModelCapabilities, ModelCatalog, ModelPricing};
 pub use openai::{
     OpenAiProvider, openai_body, openai_stream, parse_openai_sse, to_openai_messages,
 };
+pub use protocols::{AnthropicMessagesAdapter, OpenAiChatAdapter};
 pub use provider::{
-    ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider, ProviderErrorKind,
-    StreamEvent, StreamResult, Thinking, ToolCall, ToolDef, ToolResult, Usage, classify_http,
-    retry_after_from_headers,
+    AdapterConfig, ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider,
+    ProviderAdapter, ProviderErrorKind, StreamEvent, StreamResult, Thinking, ToolCall, ToolDef,
+    ToolResult, Usage, adapter_for, build_provider, classify_http, retry_after_from_headers,
 };
+pub use providers::adapter_config;
 pub use spec::{
     ProviderAuth, ProviderExtraField, ProviderFieldType, ProviderKind, ProviderSpec,
     ProviderUiSpec, builtin_provider_specs, find_provider_spec, list_models, provider_catalog,

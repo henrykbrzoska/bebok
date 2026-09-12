@@ -125,6 +125,7 @@ pub struct OpenAiProvider {
     api_key: Option<String>,
     endpoint: String,
     client: reqwest::Client,
+    headers: Vec<(String, String)>,
 }
 
 impl OpenAiProvider {
@@ -133,7 +134,13 @@ impl OpenAiProvider {
             api_key,
             endpoint: endpoint.into(),
             client: reqwest::Client::new(),
+            headers: Vec::new(),
         }
+    }
+
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
+        self
     }
 }
 
@@ -156,6 +163,9 @@ impl Provider for OpenAiProvider {
             .header("content-type", "application/json");
         if let Some(key) = self.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
             request = request.header("authorization", format!("Bearer {key}"));
+        }
+        for (name, value) in &self.headers {
+            request = request.header(name.as_str(), value.as_str());
         }
 
         let resp = request.json(&body).send().await?;
