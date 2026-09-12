@@ -719,9 +719,26 @@ pub async fn run_turn(
     abort: CancellationToken,
     model: &str,
 ) -> Result<()> {
-    TurnRunner::new(state, agent, tools, provider, permission, bus, abort, model)
-        .run()
-        .await
+    let session_id = state.id().to_string();
+    let result = TurnRunner::new(
+        state,
+        agent,
+        tools,
+        provider,
+        permission,
+        bus,
+        abort.clone(),
+        model,
+    )
+    .run()
+    .await;
+    // WP-BROWSER: an aborted turn must not leave the session's headless
+    // browser behind (a finished turn keeps it, so the next prompt can
+    // continue on the same page; the driver's idle reaper covers the rest).
+    if abort.is_cancelled() {
+        bebok_tools::browser::close_session(&session_id).await;
+    }
+    result
 }
 
 #[cfg(test)]

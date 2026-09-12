@@ -144,12 +144,20 @@ pub async fn exec_gated_call(
     let ok = ctx
         .state
         .update_tool_state(ctx.assistant_idx, call_id, |m, name| {
-            m.mark_tool_completed(
+            let ok = m.mark_tool_completed(
                 call_id,
                 text.clone(),
                 name.to_string(),
                 output.structured.clone(),
-            )
+            );
+            // WP-BROWSER: a tool result may carry an image (e.g. a
+            // `browser_screenshot`). It becomes an image part right after the
+            // tool part so the request builder can deliver it to the model
+            // alongside the tool result, and the client can render it.
+            if ok && let Some(image) = &output.image {
+                attach_tool_image(m, call_id, name, &image.media_type, &image.data);
+            }
+            ok
         })
         .await;
     if !ok {
@@ -177,6 +185,36 @@ pub async fn exec_gated_call(
     .await;
     emit_message(ctx.bus, ctx.state, "message.updated", ctx.assistant_idx);
     true
+}
+
+/// Insert an image part produced by tool `name` (call `call_id`) directly
+/// after its tool part. Replaces a previous image of the same call (a retried
+/// completion must not stack duplicates).
+pub fn attach_tool_image(
+    m: &mut crate::session::Message,
+    call_id: &str,
+    name: &str,
+    media_type: &str,
+    data: &str,
+) {
+    use crate::session::Part;
+    let Some(idx) = m.tool_part_index(call_id) else {
+        return;
+    };
+    let image_name = Some(format!("{name}:{call_id}"));
+    if let Some(Part::Image { name: existing, .. }) = m.parts.get(idx + 1)
+        && *existing == image_name
+    {
+        m.parts.remove(idx + 1);
+    }
+    m.parts.insert(
+        idx + 1,
+        Part::Image {
+            media_type: media_type.to_string(),
+            data: data.to_string(),
+            name: image_name,
+        },
+    );
 }
 
 /// Fail a tool part (mark `ToolState::Error`), persist and emit events.
@@ -209,4 +247,67 @@ pub fn emit_llm_response(bus: &EventBus, state: &SessionState, model: &str, deta
             }),
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attach_tool_image;
+    use crate::session::{Message, Part};
+
+    fn message_with_tool(call_id: &str) -> Message {
+        let mut m = Message::assistant_with("code", "m");
+        m.add_tool_call(
+            call_id.to_string(),
+            "browser_screenshot".to_string(),
+            serde_json::json!({}),
+        );
+        assert!(m.mark_tool_completed(
+            call_id,
+            "shot".to_string(),
+            "browser_screenshot".to_string(),
+            None
+        ));
+        m
+    }
+
+    /// WP-BROWSER: the image lands directly after its tool part, tagged with
+    /// the producing call so the client can pair them.
+    #[test]
+    fn tool_image_is_inserted_after_the_tool_part() {
+        let mut m = message_with_tool("c1");
+        m.append_text("done");
+        attach_tool_image(&mut m, "c1", "browser_screenshot", "image/png", "aGVsbG8=");
+        assert_eq!(m.parts.len(), 3);
+        assert!(matches!(&m.parts[0], Part::Tool { id, .. } if id == "c1"));
+        match &m.parts[1] {
+            Part::Image {
+                media_type,
+                data,
+                name,
+            } => {
+                assert_eq!(media_type, "image/png");
+                assert_eq!(data, "aGVsbG8=");
+                assert_eq!(name.as_deref(), Some("browser_screenshot:c1"));
+            }
+            other => panic!("expected image part, got {other:?}"),
+        }
+        assert!(matches!(&m.parts[2], Part::Text { text } if text == "done"));
+        assert_eq!(m.image_parts().len(), 1);
+    }
+
+    #[test]
+    fn tool_image_replaces_a_previous_image_of_the_same_call() {
+        let mut m = message_with_tool("c1");
+        attach_tool_image(&mut m, "c1", "browser_screenshot", "image/png", "AAAA");
+        attach_tool_image(&mut m, "c1", "browser_screenshot", "image/jpeg", "BBBB");
+        assert_eq!(m.image_parts().len(), 1);
+        assert_eq!(m.image_parts()[0].0, "image/jpeg");
+    }
+
+    #[test]
+    fn tool_image_for_unknown_call_is_ignored() {
+        let mut m = message_with_tool("c1");
+        attach_tool_image(&mut m, "nope", "browser_screenshot", "image/png", "AAAA");
+        assert_eq!(m.parts.len(), 1);
+    }
 }

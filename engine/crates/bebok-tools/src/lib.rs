@@ -8,6 +8,7 @@ pub mod append_file;
 pub mod base64;
 pub mod basename;
 pub mod bash;
+pub mod browser;
 pub mod chmod;
 pub mod cp;
 pub mod diff;
@@ -51,7 +52,7 @@ pub use explorer::FsEntry;
 pub use pathguard::resolve_in_root;
 pub use registry::ToolRegistry;
 pub use runtimes::Runtimes;
-pub use tool::{Tool, ToolCtx, ToolOutput};
+pub use tool::{Tool, ToolCtx, ToolImage, ToolOutput};
 
 use std::sync::Arc;
 
@@ -66,9 +67,11 @@ use std::sync::Arc;
 ///   `diff`, `which`, `find`, `realpath`, `basename`, `dirname`, `sha256sum`,
 ///   `base64` (read-only unless `out` is given);
 /// * mutating — `mkdir`, `touch`, `cp`, `mv`, `rm`, `append_file`, `chmod`,
-///   `ln`, `sed`, `gzip`.
+///   `ln`, `sed`, `gzip`;
+/// * browser automation — the `browser_*` family (WP-BROWSER), one headless
+///   Chromium page per session, every call `Ask` by default.
 pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
-    vec![
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
         // Read / inspect.
         Arc::new(read_file::ReadFile),
         Arc::new(head::Head),
@@ -107,5 +110,7 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(gzip::Gzip),
         // Escape hatch.
         Arc::new(bash::Bash),
-    ]
+    ];
+    tools.extend(browser::tools());
+    tools
 }
