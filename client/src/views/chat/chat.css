@@ -435,7 +435,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 
 .active-task-spinner {
@@ -686,4 +686,11 @@ button.small {
 .perm-blocked {
   font-size: var(--fs-12);
   color: var(--warning);
+}
+
+/* WP-DELEGATION: one-line live progress next to each active sub-task. */
+.active-task-progress {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 var(--space-12);
 }

@@ -148,6 +148,14 @@
                       <span class="active-task-desc">{{ task.name || task.agent || task.description || task.taskID }}</span>
                     }
                   </div>
+                  @if (liveTasks.byTaskID(task.taskID); as live) {
+                    <app-task-progress-line
+                      class="active-task-progress"
+                      [status]="live.status"
+                      [progress]="live.progress"
+                      [tokens]="live.tokens.input + live.tokens.output"
+                    />
+                  }
                   <button class="danger small" (click)="abortTask(task.taskID)">
                     {{ t('chat.abortTask') }}
                   </button>

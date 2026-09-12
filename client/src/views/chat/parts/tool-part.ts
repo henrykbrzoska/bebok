@@ -87,7 +87,7 @@ import { safetyLegend } from './safety-legend';
            delegation call is still running (fed by task.progress events). -->
       @for (live of liveChildren(); track live.taskID) {
         <div class="progress-row" data-testid="task-progress-row">
-          @if (liveChildren().length > 1 || !isTask()) {
+          @if (!isTask()) {
             <span class="progress-name">{{ live.name }}</span>
           }
           <app-task-progress-line
@@ -376,18 +376,27 @@ export class ToolPartComponent {
    * `fleet` call (one per turn, never parallel) shows every live child.
    */
   readonly liveChildren = computed<LiveTaskEntry[]>(() => {
+    const sessionID = this.session.meta()?.id;
+    if (this.isTask()) {
+      // A background `task` call completes at once while its child keeps
+      // running: follow the child (by the returned taskID, else by the
+      // call's name/prompt) for as long as it is queued/running.
+      const structured = this.completed()?.structured as TaskLink | undefined;
+      const byId = structured?.taskID ? this.liveTasks.byTaskID(structured.taskID) : null;
+      const match =
+        byId ??
+        this.liveTasks.matchTaskCall(
+          this.state().input as Record<string, unknown> | undefined,
+          sessionID,
+        );
+      return match && (match.status === 'queued' || match.status === 'running') ? [match] : [];
+    }
     if (this.kind() !== 'running') {
       return [];
     }
-    if (this.isTask()) {
-      const match = this.liveTasks.matchTaskCall(
-        this.state().input as Record<string, unknown> | undefined,
-        this.session.meta()?.id,
-      );
-      return match ? [match] : [];
-    }
-    if (this.isFleet()) {
-      const sessionID = this.session.meta()?.id;
+    if (this.isFleet() || this.name() === 'task_wait') {
+      // One fleet call per turn (never parallel) / a blocking wait: every
+      // live child of this session belongs to it.
       return sessionID ? this.liveTasks.liveForSession(sessionID) : [];
     }
     return [];

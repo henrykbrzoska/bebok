@@ -7,7 +7,7 @@ mod tests {
     use crate::permission::{PermissionAnswer, ResolveOutcome};
     use crate::session::Part;
     use crate::session::ToolState;
-    use crate::store::InstanceStore;
+    use crate::store::{InstanceStore, SessionState};
     use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost, Verdict};
     use bebok_llm::{ChatRequest, Provider, StreamEvent, ToolCall, Usage};
     use bebok_mcp::{McpManager, McpServerSpec, McpTransport};
@@ -1306,5 +1306,101 @@ if __name__ == "__main__":
             }
             _ => panic!("expected Completed"),
         }
+    }
+
+    /// WP-DELEGATION: under an active delegation policy a child session gets
+    /// no `task`/`fleet`/`task_*` tool definitions; the main thread keeps
+    /// them; `off` restores the old behaviour for children.
+    #[tokio::test]
+    async fn subagents_get_no_delegation_tools_under_a_policy() {
+        use crate::agent::request::{DELEGATION_TOOLS, RequestBuilder};
+        use crate::config::DelegationMode;
+
+        let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(project.join(".bebok"))
+            .await
+            .unwrap();
+        let data = base.join("data");
+
+        let build = |store: &Arc<InstanceStore>, agent: &'static str| {
+            let store = store.clone();
+            let project = project.clone();
+            async move {
+                let parent = store
+                    .create_session(project.to_str().unwrap(), agent, None)
+                    .await
+                    .unwrap();
+                parent.append_user_message("hi").await.unwrap();
+                let child = store
+                    .create_subagent_session(&parent, "code", None, Some("worker"))
+                    .await
+                    .unwrap();
+                child.append_user_message("do it").await.unwrap();
+                let tools = Arc::new(ToolRegistry::new(builtin_tools()));
+                for t in [
+                    Arc::new(crate::agent::TaskTool::new(Arc::downgrade(&store)))
+                        as Arc<dyn bebok_tools::Tool>,
+                    Arc::new(crate::agent::FleetTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskWaitTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskStatusTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskCancelTool::new(Arc::downgrade(&store))),
+                ] {
+                    tools.register_tool(t);
+                }
+                let preset = Agent::code();
+                let names = |state: &Arc<SessionState>| {
+                    let tools = tools.clone();
+                    let preset = preset.clone();
+                    let state = state.clone();
+                    async move {
+                        let req = RequestBuilder::new(
+                            &state,
+                            &preset,
+                            &tools,
+                            "test/model",
+                            1024,
+                            bebok_llm::Thinking::Off,
+                        )
+                        .build()
+                        .await
+                        .unwrap();
+                        req.tools.into_iter().map(|t| t.name).collect::<Vec<_>>()
+                    }
+                };
+                (names(&parent).await, names(&child).await)
+            }
+        };
+
+        // Default policy (auto): parent has the tools, child does not.
+        let store = InstanceStore::with_data_dir(data.clone());
+        let (parent_tools, child_tools) = build(&store, "code").await;
+        for t in ["task", "task_wait", "task_status", "task_cancel"] {
+            assert!(parent_tools.iter().any(|n| n == t), "parent lacks {t}");
+            assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
+        }
+        assert!(
+            !parent_tools.iter().any(|n| n == "fleet"),
+            "fleet is orchestrator-only"
+        );
+        assert!(child_tools.iter().any(|n| n == "read_file"));
+        assert_eq!(DELEGATION_TOOLS.len(), 5);
+
+        // Policy off: the child gets `task` again (depth guard is the backstop).
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "delegation": { "mode": "off" } }"#,
+        )
+        .unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data2"));
+        let cfg = store
+            .get_or_create_instance(project.to_str().unwrap())
+            .await
+            .unwrap()
+            .config_snapshot();
+        assert_eq!(cfg.delegation.mode, DelegationMode::Off);
+        let (_, child_tools) = build(&store, "code").await;
+        assert!(child_tools.iter().any(|n| n == "task"), "{child_tools:?}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

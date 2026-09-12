@@ -86,8 +86,9 @@ implementation. Only trivial one-shot answers and single small edits are done in
 pub fn subagent_note() -> &'static str {
     "You are a SUB-AGENT working on one delegated part of a larger task. Do exactly the brief \
      you were given, stay within the files/areas it assigns to you, do not delegate further \
-     (do the work directly), and finish with a concise report: what you changed (files), how \
-     you verified it, and anything the coordinating agent still needs to do."
+     (do the work directly, including any workspace inspection you need), and finish with a \
+     concise report: what you changed (files), how you verified it, and anything the \
+     coordinating agent still needs to do."
 }
 
 #[cfg(test)]
