@@ -8,9 +8,9 @@
 //! every OS, no scratch files, no `curl`/`jq` dependency.
 //!
 //! It is intentionally unrestricted (any URL, any method) — the permission
-//! engine is the control point: GET/HEAD count as read-only (default `Allow`),
-//! everything else defaults to `Ask`. Projects that want more can pin rules
-//! such as `fetch(http://127.0.0.1:*)` = allow or `fetch(*)` = ask.
+//! engine is the control point: every request defaults to `Ask`, including
+//! GET/HEAD, because reading local services can expose secrets. Projects may
+//! explicitly allow trusted destinations with rules.
 
 use std::time::Duration;
 
@@ -231,9 +231,7 @@ mod tests {
         assert!(Fetch.is_read_only_for(&json!({ "url": "http://x" })));
         assert!(Fetch.is_read_only_for(&json!({ "url": "http://x", "method": "get" })));
         assert!(Fetch.is_read_only_for(&json!({ "url": "http://x", "method": "HEAD" })));
-        assert!(!Fetch.is_read_only_for(
-            &json!({ "url": "http://x", "method": "post" })
-        ));
+        assert!(!Fetch.is_read_only_for(&json!({ "url": "http://x", "method": "post" })));
         assert!(!Fetch.is_read_only());
     }
 

@@ -1,9 +1,8 @@
-use std::path::{Component, Path, PathBuf};
-
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::fs;
 
+use crate::pathguard::resolve_in_root;
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Replace a literal `old_string` with `new_string` in a file (precise string
@@ -66,18 +65,9 @@ impl Tool for EditFile {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        // Resolve path and guard against escaping the root. `..` components
-        // are rejected lexically: `Path::starts_with` alone would NOT catch
-        // `sub/../../outside` (its components still start with the root).
-        let resolved: PathBuf = {
-            let rel = path.trim().trim_start_matches('/');
-            if Path::new(rel)
-                .components()
-                .any(|c| matches!(c, Component::ParentDir))
-            {
-                return ToolOutput::new("error: path escapes project root", "edit_file");
-            }
-            ctx.root.join(rel)
+        let resolved = match resolve_in_root(&ctx.root, path) {
+            Ok(resolved) => resolved,
+            Err(e) => return ToolOutput::new(format!("error: {e}"), "edit_file"),
         };
 
         if old_string.is_empty() {
@@ -88,10 +78,7 @@ impl Tool for EditFile {
         let content = match fs::read_to_string(&resolved).await {
             Ok(c) => c,
             Err(e) => {
-                return ToolOutput::new(
-                    format!("error: failed to read {path}: {e}"),
-                    "edit_file",
-                );
+                return ToolOutput::new(format!("error: failed to read {path}: {e}"), "edit_file");
             }
         };
 
@@ -150,7 +137,10 @@ impl Tool for EditFile {
         }
 
         ToolOutput::new(
-            format!("edited {path} ({count} replacement{})", if count == 1 { "" } else { "s" }),
+            format!(
+                "edited {path} ({count} replacement{})",
+                if count == 1 { "" } else { "s" }
+            ),
             format!("edit_file {path}"),
         )
     }

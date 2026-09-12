@@ -144,8 +144,9 @@ export class SettingsView implements OnInit {
       const cfg = await this.engine.getConfig(dir);
       this.config.set(cfg);
       this.rulesText.set(this.rulesToText(cfg.config.permission));
-      this.providers.set(cfg.providers ?? []);
-      this.savedProvidersJson = JSON.stringify(cfg.providers ?? []);
+      const providers = (cfg.providers ?? []).map((provider) => ({ ...provider, api_key: null }));
+      this.providers.set(providers);
+      this.savedProvidersJson = JSON.stringify(providers);
       this.typeModels.set({ ...(cfg.config.models ?? {}) });
       this.yolo.set(!!cfg.config.yolo);
       const fleet = cfg.config.fleet;

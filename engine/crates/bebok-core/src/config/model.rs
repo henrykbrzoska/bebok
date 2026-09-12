@@ -110,7 +110,7 @@ pub struct ResolvedConfig {
     pub thinking: bebok_llm::Thinking,
     /// Provider API key. Set from the `api_key` config field; falls back to
     /// the `ZAI_API_KEY` environment variable when absent.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub api_key: Option<String>,
     /// Per-agent-type model overrides (`{ "code": "openai/gpt-4o", ... }`).
     pub models: Value,

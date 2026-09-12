@@ -2,7 +2,8 @@
 //!
 //! Resolution order: YOLO (auto-allow) -> agent overrides -> project ->
 //! global -> default (`Allow` for read-only tools, `Ask` for mutating
-//! tools). Globs are compiled once per instance and recompiled only on rule
+//! tools). A project/global Deny cannot be overridden by an agent Allow.
+//! Globs are compiled once per instance and recompiled only on rule
 //! changes (`always allow`) or an explicit [`PermissionEngine::reload`].
 
 use std::path::{Path, PathBuf};
@@ -104,6 +105,14 @@ impl CompiledLayer {
     pub(crate) fn first_match(&self, call: &str) -> Option<(String, Action)> {
         let idx = self.set.matches(call).into_iter().next()?;
         Some((self.patterns[idx].clone(), self.actions[idx]))
+    }
+
+    fn first_deny(&self, call: &str) -> Option<String> {
+        self.set
+            .matches(call)
+            .into_iter()
+            .find(|&idx| self.actions[idx] == Action::Deny)
+            .map(|idx| self.patterns[idx].clone())
     }
 }
 
@@ -217,6 +226,18 @@ impl PermissionEngine {
         if let Some(layer) = agent
             && let Some((pattern, action)) = layer.first_match(&call)
         {
+            if action == Action::Allow {
+                for configured in [&self.project, &self.global] {
+                    if let Some(denied_pattern) =
+                        configured.read().unwrap().compiled.first_deny(&call)
+                    {
+                        return Evaluation {
+                            verdict: Verdict::Deny,
+                            pattern: denied_pattern,
+                        };
+                    }
+                }
+            }
             return Evaluation {
                 verdict: verdict(action),
                 pattern,
@@ -234,7 +255,7 @@ impl PermissionEngine {
                 pattern,
             };
         }
-        let verdict = if read_only {
+        let verdict = if read_only && tool != "fetch" {
             Verdict::Allow
         } else {
             Verdict::Ask
@@ -360,6 +381,58 @@ mod tests {
         assert_eq!(eval.verdict, Verdict::Ask);
         assert_eq!(eval.pattern, "bash(git status)");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn configured_deny_wins_over_agent_allow() {
+        let dir = tmp_dir("agent-deny-precedence");
+        let agent = CompiledLayer::compile(&[Rule {
+            pattern: "bash(rm *)".into(),
+            action: Action::Allow,
+        }]);
+        let global = dir.join("global.json");
+        std::fs::write(
+            &global,
+            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
+        )
+        .unwrap();
+        let engine = PermissionEngine::load_with_global(&dir, Some(&global));
+        let call = serde_json::json!({ "command": "rm -rf x" });
+        assert_eq!(
+            engine.evaluate(Some(&agent), "bash", &call, false).verdict,
+            Verdict::Deny
+        );
+
+        std::fs::write(&global, "{}").unwrap();
+        let project = dir.join(".bebok/config.json");
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project,
+            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
+        )
+        .unwrap();
+        engine.reload();
+        assert_eq!(
+            engine.evaluate(Some(&agent), "bash", &call, false).verdict,
+            Verdict::Deny
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fetch_defaults_to_ask_even_for_get_and_head() {
+        let dir = tmp_dir("fetch-default");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        for method in ["GET", "HEAD"] {
+            let eval = engine.evaluate(
+                None,
+                "fetch",
+                &serde_json::json!({"url": "http://127.0.0.1:8787/config", "method": method}),
+                true,
+            );
+            assert_eq!(eval.verdict, Verdict::Ask, "{method}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
