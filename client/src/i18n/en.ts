@@ -525,6 +525,29 @@ export const en = {
   'preview.empty': 'No file selected. Open a file from Explorer to preview it.',
   'preview.loading': 'Loading…',
   'preview.cannotPreview': 'Cannot open {path}.',
+
+  // WP-GIT (F6-16): New-session dialog, branch badge, worktree removal offer
+  'newSession.title': 'New session',
+  'newSession.directory': 'Directory',
+  'newSession.agent': 'Agent',
+  'newSession.model': 'Model',
+  'newSession.modelDefault': 'Agent default',
+  'newSession.worktree': 'Run in a git worktree',
+  'newSession.worktreeHint': 'Creates an isolated checkout under .bebok/worktrees/<branch>, so the agent’s edits stay off your working tree.',
+  'newSession.worktreeUnavailable': 'Not a git repository - worktrees are unavailable here.',
+  'newSession.worktreeNoProject': 'Register this directory as a project to use worktrees.',
+  'newSession.gitLoading': 'Checking git…',
+  'newSession.branch': 'Branch',
+  'newSession.baseBranch': 'Base branch',
+  'newSession.branchInvalid': 'Branch names may only contain letters, digits, ".", "_", "-" and "/", and no ".." or leading "-".',
+  'newSession.dirty': '{count} uncommitted change(s) in the project - the worktree starts from the last commit.',
+  'newSession.create': 'Create session',
+  'newSession.creating': 'Creating…',
+  'newSession.cancel': 'Cancel',
+  'session.worktreeBadge': 'git worktree: {branch}',
+  'start.removeWorktreeToo': 'Also remove the git worktree',
+  'start.worktreeRemoved': 'Git worktree removed.',
+  'start.worktreeRemoveFailed': 'Session deleted, but the worktree could not be removed: {error}',
 };
 
 export type MessageKey = keyof typeof en;
