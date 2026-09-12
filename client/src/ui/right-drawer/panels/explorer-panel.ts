@@ -231,6 +231,12 @@ export class ExplorerPanel {
   constructor() {
     effect(() => {
       const dir = this.directory();
+      if (!this.engine.connected()) {
+        // The drawer can mount before the HTTP handshake completes. Retry the
+        // tree load when the engine reconnects instead of keeping a stale error.
+        this.loadedDirectory = null;
+        return;
+      }
       if (dir && dir !== this.loadedDirectory) {
         this.loadedDirectory = dir;
         this.dirs.set({});

@@ -33,6 +33,7 @@ Tools:
 - `append_file` grows a file without re-sending its whole content; `diff` compares two files (or a file against text) so you can verify an edit landed.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
 - Reach for `bash` only when no native tool fits: builds, tests, git, package managers.
+- For a direct coding task, do the implementation yourself. Use `task` only for a substantial, independent subtask that benefits from a separate agent; do not delegate routine workspace inspection.
 - Do not litter the repo with scratch scripts; if you truly need one, put it in a temp dir.
 
 Guidelines:
@@ -60,6 +61,8 @@ pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
 Diagnose the reported problem methodically: reproduce it, gather evidence
 (logs, tests, git status), form and test a hypothesis, and fix the root cause.
 Explain the cause and the fix clearly.
+Investigate and fix a focused bug yourself. Use `task` only for a substantial,
+independent subtask; do not delegate the same diagnosis to another debug agent.
 "#;
 
 pub(crate) const ORCHESTRATOR_PROMPT: &str = r#"You are Bebok in "orchestrator" mode.
@@ -167,7 +170,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -181,10 +183,6 @@ impl Agent {
                 Rule {
                     pattern: "edit(*)".to_string(),
                     action: Action::Deny,
-                },
-                Rule {
-                    pattern: "fetch(*)".to_string(),
-                    action: Action::Allow,
                 },
                 Rule {
                     pattern: "mcp__*".to_string(),
@@ -223,7 +221,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {

@@ -50,12 +50,23 @@ impl Tool for Bash {
         // `sh -c` on Unix, `cmd /c` on Windows (there is no `sh` there).
         let (shell, flag) = shell_command();
 
-        let child = Command::new(&shell)
-            .arg(flag)
-            .arg(command)
-            .current_dir(&ctx.root)
-            .kill_on_drop(true)
-            .output();
+        let mut child = Command::new(&shell);
+        child.arg(flag);
+        #[cfg(windows)]
+        {
+            if flag == "/C" {
+                // cmd.exe does not follow the C runtime argument-quoting rules.
+                // Escaping an entire shell expression with `.arg()` changes
+                // quoted `set "NAME=value"` commands and paths with spaces.
+                use std::os::windows::process::CommandExt;
+                child.as_std_mut().raw_arg(command);
+            } else {
+                child.arg(command);
+            }
+        }
+        #[cfg(not(windows))]
+        child.arg(command);
+        let child = child.current_dir(&ctx.root).kill_on_drop(true).output();
 
         let output = tokio::select! {
             _ = ctx.abort.cancelled() => {
@@ -169,5 +180,20 @@ mod tests {
             "{}",
             output.text
         );
+    }
+
+    #[tokio::test]
+    async fn cmd_preserves_quoted_set_value() {
+        let output = Bash
+            .execute(
+                tool_ctx(
+                    std::env::temp_dir(),
+                    "quoted-set-test".into(),
+                    CancellationToken::new(),
+                ),
+                serde_json::json!({"command": "set \"BEBOK_BASH_QUOTED_VALUE=true\" && set BEBOK_BASH_QUOTED_VALUE"}),
+            )
+            .await;
+        assert_eq!(output.text.trim(), "BEBOK_BASH_QUOTED_VALUE=true");
     }
 }
