@@ -10,8 +10,15 @@
  * `ui/code-highlight` for syntax highlighting (language resolved from the
  * fence hint). That module escapes/tokenizes safely on its own, so this file
  * still never binds raw text.
+ *
+ * F8-3: inline (single-backtick) code spans are further classified by
+ * `core/inline-classify.ts` so a file path, a shell command, an HTTP route,
+ * etc. each get a distinct chip instead of one generic gray one. That
+ * module only ever wraps the already-escaped span text, so it introduces
+ * no new way for raw model text to reach the DOM.
  */
 
+import { renderClassifiedInlineCode } from './inline-classify';
 import { highlightBlockHtml } from '../ui/code-highlight/code-highlight';
 
 interface Block {
@@ -110,7 +117,7 @@ function renderInline(value: string): string {
   // model text such as `<main>` or `Array<string>` arrives as `&lt;main&gt;`
   // and only the markup produced here is real HTML.
   let html = value
-    .replace(/`([^`\n]+)`/g, (_, code: string) => `<code>${code}</code>`)
+    .replace(/`([^`\n]+)`/g, (_, code: string) => renderClassifiedInlineCode(code, { pathLinkClass: 'preview-link' }))
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
       hasUriScheme(href)

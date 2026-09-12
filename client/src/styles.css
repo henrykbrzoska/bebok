@@ -21,6 +21,11 @@
   --text-faint: #6b7280;
   --code-text: #8b93a1;
   --code-text-strong: #c7cbd3;
+  /* F8-3: the palette had no blue. Derived, not picked from a brand -
+   * lightness/saturation land in the same ~55-66% L / ~30-75% S band as
+   * --accent/--success/--warning/--danger above, so a file/dir path chip
+   * reads as another categorical status color rather than a foreign hue. */
+  --path-color: #6fa8dc;
 
   /* --- Accent & status ------------------------------------------------ */
   --accent: #e8935a;
@@ -329,4 +334,119 @@ a {
 .density-compact .agent-list li {
   padding-top: 5px;
   padding-bottom: 5px;
+}
+
+/* --- Inline code chip kinds (F8-3, chat text) ---------------------------
+ * `core/inline-classify.ts` tags each chat inline-code span with a base
+ * `.ic` class plus an `.ic-<kind>` modifier - `.ic` alone (no modifier) is
+ * the unclassified fallback, visually identical to the plain gray chip it
+ * replaces (that look itself stays defined in `text-part.ts`'s pre-existing
+ * `app-text-part .md code` rule; only *color*, and the two structural
+ * exceptions below, are added here).
+ *
+ * `text-part.ts` renders with `ViewEncapsulation.None`, so its `.md`-scoped
+ * rules are already plain global CSS, not shadow-scoped - the selectors
+ * below are qualified with the same `app-text-part .md` prefix purely to
+ * win the specificity needed to layer over that rule (e.g. `.ic-shell`'s
+ * darker background), not because of any encapsulation boundary.
+ */
+.ic {
+  font-family: var(--font-mono);
+}
+/* A `path`-classified span that's clickable (a relative path, wrapped as
+ * `<a class="preview-link ic ic-path">` by `renderClassifiedInlineCode`)
+ * gets the same chip look as `<code>`, since `code, pre` element rules
+ * don't apply to an `<a>`. */
+app-text-part .md a.ic {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+  text-decoration: none;
+}
+app-text-part .md a.ic:hover {
+  text-decoration: underline;
+}
+app-text-part .md .ic-path {
+  color: var(--path-color);
+}
+/* `url` renders as a real `<a target="_blank">`, not a `<code>` chip - see
+ * module header in `inline-classify.ts` - so it reads as an actual link. */
+app-text-part .md .ic-url {
+  color: var(--accent);
+}
+app-text-part .md .ic-route {
+  color: var(--accent);
+}
+app-text-part .md .ic-env {
+  color: var(--warning);
+}
+app-text-part .md .ic-number {
+  color: var(--warning);
+}
+app-text-part .md .ic-identifier {
+  color: var(--accent-hover);
+}
+app-text-part .md .ic-package {
+  color: var(--code-text-strong);
+}
+app-text-part .md .ic-pkg-version {
+  color: var(--text-faint);
+}
+app-text-part .md code.ic-shell {
+  background: var(--terminal-bg);
+  color: var(--code-text-strong);
+}
+app-text-part .md .ic-shell-glyph {
+  color: var(--text-faint);
+  margin-right: 4px;
+  user-select: none;
+}
+app-text-part .md code.ic-http {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+app-text-part .md .ic-method {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+  line-height: 1.5;
+}
+app-text-part .md .ic-method-get {
+  background: rgba(95, 184, 138, 0.22);
+  color: var(--success);
+}
+app-text-part .md .ic-method-post,
+app-text-part .md .ic-method-put,
+app-text-part .md .ic-method-patch {
+  background: rgba(224, 182, 74, 0.22);
+  color: var(--warning);
+}
+app-text-part .md .ic-method-delete {
+  background: rgba(232, 147, 90, 0.22);
+  color: var(--accent);
+}
+app-text-part .md .ic-method-head,
+app-text-part .md .ic-method-options {
+  background: rgba(152, 160, 173, 0.22);
+  color: var(--text-muted);
+}
+app-text-part .md .ic-jt-key {
+  color: var(--code-text-strong);
+  font-weight: 600;
+}
+app-text-part .md .ic-jt-string {
+  color: var(--success);
+}
+app-text-part .md .ic-jt-num {
+  color: var(--warning);
+}
+app-text-part .md .ic-jt-bool {
+  color: var(--accent);
+}
+app-text-part .md .ic-jt-punct {
+  color: var(--text-faint);
 }
