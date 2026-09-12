@@ -448,13 +448,13 @@ if __name__ == "__main__":
             .await
             .unwrap();
         session
-            .append_user_message("print the working directory")
+            .append_user_message("print the project marker")
             .await
             .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
-            tool_step("bash", serde_json::json!({ "command": "pwd" }), 1),
+            tool_step("bash", serde_json::json!({ "command": "echo project" }), 1),
             text_step("done"),
         ]));
         let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
@@ -827,6 +827,20 @@ if __name__ == "__main__":
 
     #[tokio::test]
     async fn mcp_tool_goes_through_permission_gate() {
+        let python = ["python3", "python"].into_iter().find(|command| {
+            std::process::Command::new(command)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && (String::from_utf8_lossy(&output.stdout).starts_with("Python 3")
+                            || String::from_utf8_lossy(&output.stderr).starts_with("Python 3"))
+                })
+        });
+        let Some(python) = python else {
+            eprintln!("skipping MCP gate test: Python 3 is not available");
+            return;
+        };
         let base = std::env::temp_dir().join(format!("bebok-mcp-gate-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
         std::fs::create_dir_all(&project).unwrap();
@@ -850,7 +864,7 @@ if __name__ == "__main__":
         let spec = McpServerSpec {
             name: "test".to_string(),
             transport: McpTransport::Stdio {
-                command: runtimes.python3.clone(),
+                command: python.to_string(),
                 args: vec![script.to_str().unwrap().to_string()],
                 env: Default::default(),
             },
