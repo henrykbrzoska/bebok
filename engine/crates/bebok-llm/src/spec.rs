@@ -143,12 +143,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Anthropic,
             endpoint: Some("https://api.z.ai/api/anthropic/v1".into()),
             api_key: None,
-            models: vec![
-                "glm-5.3-flash".into(),
-                "glm-4.7-flash".into(),
-                "glm-4.6".into(),
-                "glm-4.5-air".into(),
-            ],
+            models: catalog_models("zai"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -156,13 +151,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.openai.com/v1".into()),
             api_key: None,
-            models: vec![
-                "gpt-4.1".into(),
-                "gpt-4.1-mini".into(),
-                "gpt-4o".into(),
-                "gpt-4o-mini".into(),
-                "o3-mini".into(),
-            ],
+            models: catalog_models("openai"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -170,11 +159,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Anthropic,
             endpoint: Some("https://api.anthropic.com/v1".into()),
             api_key: None,
-            models: vec![
-                "claude-opus-4-5".into(),
-                "claude-sonnet-4-5".into(),
-                "claude-haiku-4-5".into(),
-            ],
+            models: catalog_models("anthropic"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -182,7 +167,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.x.ai/v1".into()),
             api_key: None,
-            models: vec!["grok-4.6".into(), "grok-4.3".into()],
+            models: catalog_models("xai"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -190,7 +175,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.deepseek.com/v1".into()),
             api_key: None,
-            models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+            models: catalog_models("deepseek"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -198,7 +183,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://generativelanguage.googleapis.com/v1beta/openai".into()),
             api_key: None,
-            models: vec!["gemini-2.5-pro".into(), "gemini-2.5-flash".into()],
+            models: catalog_models("google"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -206,10 +191,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.mistral.ai/v1".into()),
             api_key: None,
-            models: vec![
-                "mistral-large-latest".into(),
-                "mistral-medium-latest".into(),
-            ],
+            models: catalog_models("mistralai"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -217,7 +199,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.groq.com/openai/v1".into()),
             api_key: None,
-            models: vec!["llama-3.3-70b-versatile".into()],
+            models: catalog_models("groq"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -225,7 +207,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1".into()),
             api_key: None,
-            models: vec!["qwen-plus".into(), "qwen3-235b-a22b".into()],
+            models: catalog_models("qwen"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -233,13 +215,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://openrouter.ai/api/v1".into()),
             api_key: None,
-            models: vec![
-                "openai/gpt-4.1".into(),
-                "anthropic/claude-sonnet-4-5".into(),
-                "google/gemini-2.5-pro".into(),
-                "z-ai/glm-5.3-flash".into(),
-                "deepseek/deepseek-v4-flash".into(),
-            ],
+            models: catalog_models("openrouter"),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -247,10 +223,14 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("http://localhost:11434/v1".into()),
             api_key: None,
-            models: Vec::new(),
+            models: catalog_models("ollama"),
             extra: Map::new(),
         },
     ]
+}
+
+fn catalog_models(provider: &str) -> Vec<String> {
+    crate::ModelCatalog::global().provider_models(provider)
 }
 
 /// How a provider authenticates. Separate from [`ProviderKind`] (the wire

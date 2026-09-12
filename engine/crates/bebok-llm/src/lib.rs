@@ -5,6 +5,7 @@
 
 mod anthropic;
 mod cost;
+mod model_catalog;
 mod openai;
 mod provider;
 mod spec;
@@ -12,6 +13,7 @@ mod wire;
 
 pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider, to_anthropic_messages};
 pub use cost::{Pricing, compute_cost, pricing_for};
+pub use model_catalog::{ModelCapabilities, ModelCatalog, ModelPricing};
 pub use openai::{
     OpenAiProvider, openai_body, openai_stream, parse_openai_sse, to_openai_messages,
 };
