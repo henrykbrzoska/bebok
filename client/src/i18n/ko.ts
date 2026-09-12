@@ -343,4 +343,8 @@ export const ko: Record<MessageKey, string> = {
   'drawer.disabled': '비활성',
   'drawer.yolo': 'YOLO 모드',
   'drawer.yoloHint': '이 디렉터리의 모든 도구 권한 요청을 자동으로 허용합니다.',
+  'drawer.noDirectory': '프로젝트 디렉터리 없음',
+  'drawer.openExplorer': '전체 탐색기 열기',
+  'drawer.loadingTree': '트리 불러오는 중…',
+  'drawer.emptyTree': '빈 디렉터리',
 };

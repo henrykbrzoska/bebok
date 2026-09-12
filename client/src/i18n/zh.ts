@@ -343,4 +343,8 @@ export const zh: Record<MessageKey, string> = {
   'drawer.disabled': '已禁用',
   'drawer.yolo': 'YOLO 模式',
   'drawer.yoloHint': '自动允许此目录中的所有工具权限请求。',
+  'drawer.noDirectory': '没有项目目录',
+  'drawer.openExplorer': '打开完整资源管理器',
+  'drawer.loadingTree': '正在加载目录树…',
+  'drawer.emptyTree': '空目录',
 };

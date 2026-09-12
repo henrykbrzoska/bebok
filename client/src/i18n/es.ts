@@ -344,4 +344,8 @@ export const es: Record<MessageKey, string> = {
   'drawer.disabled': 'desactivado',
   'drawer.yolo': 'Modo YOLO',
   'drawer.yoloHint': 'Permite automáticamente cualquier solicitud de herramienta en este directorio.',
+  'drawer.noDirectory': 'Sin directorio de proyecto',
+  'drawer.openExplorer': 'Abrir el Explorador completo',
+  'drawer.loadingTree': 'Cargando árbol…',
+  'drawer.emptyTree': 'Directorio vacío',
 };

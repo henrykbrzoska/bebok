@@ -344,4 +344,8 @@ export const pl: Record<MessageKey, string> = {
   'drawer.disabled': 'wyłączone',
   'drawer.yolo': 'Tryb YOLO',
   'drawer.yoloHint': 'Automatycznie zezwala na każde żądanie uprawnień narzędzia w tym katalogu.',
+  'drawer.noDirectory': 'Brak katalogu projektu',
+  'drawer.openExplorer': 'Otwórz pełny Eksplorator',
+  'drawer.loadingTree': 'Ładowanie drzewa…',
+  'drawer.emptyTree': 'Pusty katalog',
 };

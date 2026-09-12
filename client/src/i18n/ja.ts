@@ -343,4 +343,8 @@ export const ja: Record<MessageKey, string> = {
   'drawer.disabled': '無効',
   'drawer.yolo': 'YOLO モード',
   'drawer.yoloHint': 'このディレクトリのツール権限要求をすべて自動的に許可します。',
+  'drawer.noDirectory': 'プロジェクトディレクトリがありません',
+  'drawer.openExplorer': 'フルエクスプローラーを開く',
+  'drawer.loadingTree': 'ツリーを読み込み中…',
+  'drawer.emptyTree': '空のディレクトリ',
 };

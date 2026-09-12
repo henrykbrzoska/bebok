@@ -343,4 +343,8 @@ export const hi: Record<MessageKey, string> = {
   'drawer.disabled': 'अक्षम',
   'drawer.yolo': 'YOLO मोड',
   'drawer.yoloHint': 'इस निर्देशिका में हर टूल अनुमति अनुरोध स्वतः स्वीकारें।',
+  'drawer.noDirectory': 'कोई प्रोजेक्ट निर्देशिका नहीं',
+  'drawer.openExplorer': 'पूरा एक्सप्लोरर खोलें',
+  'drawer.loadingTree': 'ट्री लोड हो रहा है…',
+  'drawer.emptyTree': 'खाली निर्देशिका',
 };

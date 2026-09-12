@@ -353,6 +353,10 @@ export const en = {
   'drawer.disabled': 'disabled',
   'drawer.yolo': 'YOLO mode',
   'drawer.yoloHint': 'Auto-allow every tool permission request in this directory.',
+  'drawer.noDirectory': 'No project directory',
+  'drawer.openExplorer': 'Open the full Explorer',
+  'drawer.loadingTree': 'Loading tree…',
+  'drawer.emptyTree': 'Empty directory',
 };
 
 export type MessageKey = keyof typeof en;

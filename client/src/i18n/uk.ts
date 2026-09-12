@@ -344,4 +344,8 @@ export const uk: Record<MessageKey, string> = {
   'drawer.disabled': 'вимкнено',
   'drawer.yolo': 'Режим YOLO',
   'drawer.yoloHint': 'Автоматично дозволяє всі запити дозволів інструментів у цьому каталозі.',
+  'drawer.noDirectory': 'Немає каталогу проєкту',
+  'drawer.openExplorer': 'Відкрити повний Провідник',
+  'drawer.loadingTree': 'Завантаження дерева…',
+  'drawer.emptyTree': 'Порожній каталог',
 };
