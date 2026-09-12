@@ -71,7 +71,8 @@ export class ExplorerView implements OnInit {
 
   readonly selectedName = computed(() => {
     const p = this.selectedPath();
-    return p ? p.split('/').pop() ?? p : null;
+    // Engine paths use the host separator, so split on both (Windows: `a\b`).
+    return p ? p.split(/[\\/]/).pop() || p : null;
   });
 
   readonly isHtmlSelection = computed(() => {

@@ -73,6 +73,8 @@
 
 .head-btn {
   flex: none;
+  /* Also used inside the monospace log body (the diagnostic-off retry). */
+  font-family: var(--font-sans);
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
