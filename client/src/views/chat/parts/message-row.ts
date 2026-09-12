@@ -154,6 +154,7 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
                 >
                   <span class="dot state-{{ item.state }}" aria-hidden="true"></span>
                   <span class="group-count">{{ t('toolGroup.summary', { n: item.rows.length }) }}</span>
+                  <span class="group-sep" aria-hidden="true">·</span>
                   <span class="group-names">{{ item.names }}</span>
                   <span class="chevron" aria-hidden="true">{{ groupOpen(item.key) ? '▾' : '▸' }}</span>
                 </button>
@@ -296,9 +297,14 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
     }
     .group-head .dot.state-running {
       background: var(--accent);
+      animation: tool-dot-pulse 1.4s ease-in-out infinite;
     }
     .group-head .dot.state-error {
       background: var(--danger);
+    }
+    @keyframes tool-dot-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
     }
     .group-count {
       flex: none;
@@ -306,6 +312,11 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
       font-size: var(--fs-12-5);
       font-weight: 600;
       color: var(--text);
+    }
+    .group-sep {
+      flex: none;
+      color: var(--text-faint);
+      font-size: var(--fs-11-5);
     }
     .group-names {
       flex: 1 1 auto;
@@ -350,8 +361,8 @@ export class MessageRowComponent {
   readonly isUser = computed(() => this.message().role === 'user');
 
   /**
-   * Parts plus their tool ordinal (the first tool call of a turn renders
-   * expanded, every later one collapsed - F2-6), with runs of >= 2
+   * Parts plus their tool ordinal (F2-6, now only used for numbering - every
+   * tool call starts collapsed regardless, F6-1b), with runs of >= 2
    * consecutive tool calls folded into collapsible groups (F6-1).
    */
   readonly items = computed<RenderedItem[]>(() => groupParts(this.message().parts));

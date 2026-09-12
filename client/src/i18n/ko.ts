@@ -395,6 +395,7 @@ export const ko: Record<MessageKey, string> = {
   'chat.abortIdle': '실행 중인 턴이 없습니다',
   'chat.assistantLabel': '어시스턴트',
   'thinking.head': '생각 중',
+  'thinking.charCount': '{n}자',
   'diff.mode': 'diff 보기',
   'diff.unified': '통합',
   'diff.split': '분할',
