@@ -1,46 +1,54 @@
 <section class="terminal">
-  <header class="term-head">
-    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-    <h1>{{ t('term.title') }}</h1>
-    <span class="muted dir" [title]="directory() ?? ''">{{ directory() }}</span>
-    <button class="primary new-term" (click)="addTerminal()" [disabled]="loading() || !directory()">
+  <!-- F2-18: 40px tab strip, one tab per engine PTY. -->
+  <div class="tab-strip" role="tablist" [attr.aria-label]="t('term.title')">
+    @for (tab of tabs(); track tab.ptyId) {
+      <div
+        class="tab"
+        role="tab"
+        [class.active]="activePtyId() === tab.ptyId"
+        [attr.aria-selected]="activePtyId() === tab.ptyId"
+        (click)="activate(tab.ptyId)"
+        [title]="tab.title + ' — ' + statusLabel(tab.status)"
+      >
+        <span class="dot" [class]="'tone-' + tab.status" aria-hidden="true"></span>
+        <span class="tab-title">{{ tab.title }}</span>
+        <span class="sr-only">{{ statusLabel(tab.status) }}</span>
+        <button
+          class="tab-close"
+          type="button"
+          [attr.aria-label]="t('term.closeTab')"
+          [title]="t('term.closeTab')"
+          (click)="$event.stopPropagation(); closeTab(tab.ptyId)"
+        >
+          ✕
+        </button>
+      </div>
+    }
+    <button
+      class="new-term"
+      type="button"
+      (click)="addTerminal()"
+      [disabled]="loading() || !directory()"
+    >
       + {{ t('term.new') }}
     </button>
-  </header>
+  </div>
 
   @if (error()) {
     <div class="error-banner">{{ error() }}</div>
   }
 
-  @if (tabs().length > 0) {
-    <div class="tab-bar">
-      @for (tab of tabs(); track tab.ptyId) {
-        <div
-          class="tab"
-          [class.active]="activePtyId() === tab.ptyId"
-          (click)="activate(tab.ptyId)"
-          [title]="tab.title"
-        >
-          <span
-            class="dot"
-            [class.live]="tab.status === 'live'"
-            [class.exited]="tab.status === 'exited'"
-            [class.connecting]="tab.status === 'connecting'"
-            [class.error]="tab.status === 'error'"
-          ></span>
-          <span class="tab-title">{{ tab.title }}</span>
-          <button class="tab-close" (click)="$event.stopPropagation(); closeTab(tab.ptyId)">×</button>
-        </div>
-      }
-    </div>
-  }
-
+  <!-- F2-19: terminal body. -->
   <div class="term-body">
     @if (activePtyId()) {
       <app-terminal-tab [ptyId]="activePtyId()!" (status)="onStatus(activePtyId()!, $event)" />
     } @else if (!loading()) {
-      <div class="placeholder">
-        <p>{{ t('term.empty') }}</p>
+      <div class="term-empty">
+        <div class="prompt-line">
+          <span class="prompt">{{ promptPrefix() }}</span>
+          <span class="cursor" aria-hidden="true">▊</span>
+        </div>
+        <p class="empty-hint">{{ t('term.empty') }}</p>
       </div>
     }
   </div>

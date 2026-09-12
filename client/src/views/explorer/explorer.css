@@ -1,42 +1,57 @@
-.explorer {
+/* Explorer (WP-TOOLS-UI / F2-16, F2-17).
+ *
+ * Values come from the design handoff, section "5. Explorer": a 260px tree with
+ * `▸`/`▾` disclosure triangles and a `--surface-3` selected row, next to a
+ * content pane with a 44px header (filename + monospace path + Edit).
+ */
+
+:host {
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  gap: 12px;
-}
-
-.explorer-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.explorer-head h1 {
-  font-size: 18px;
-  margin: 0;
-}
-
-.explorer-head .dir {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.explorer-body {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(220px, 340px) 1fr;
-  gap: 12px;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
+.explorer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.error-banner {
+  flex: none;
+  margin: 10px 18px 0;
+  padding: 8px 12px;
+  font-size: var(--fs-12);
+  color: var(--danger);
+  background: rgba(226, 100, 95, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+}
+
+.explorer-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --- File tree (F2-16) ------------------------------------------------- */
+
 .tree {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  width: 260px;
+  flex: none;
+  border-right: 1px solid var(--border);
   overflow-y: auto;
-  padding: 8px;
+  padding: var(--space-12) var(--space-8);
+  font-size: var(--fs-12-5);
+}
+
+.tree-note {
+  margin: 0;
+  padding: var(--space-8);
+  color: var(--text-faint);
+  font-size: var(--fs-12);
 }
 
 .tree-list {
@@ -49,104 +64,233 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  border-radius: var(--radius-control-sm);
+  border: 1px solid transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
   user-select: none;
+  white-space: nowrap;
 }
 
 .tree-row:hover {
-  background: var(--bg-raised);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
-.tree-row .icon {
+/* Expanded folders keep a quiet highlight so the open branch reads as a group. */
+.tree-row.is-dir.is-open {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.tree-row.is-selected {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tree-row .twisty {
   width: 14px;
+  flex: none;
   text-align: center;
-  color: var(--fg-muted);
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+
+.tree-row.is-selected .twisty,
+.tree-row.is-dir.is-open .twisty {
+  color: var(--text-muted);
 }
 
 .tree-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Content pane (F2-17) ---------------------------------------------- */
+
+.pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-head {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-18);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-head .file-name {
+  font-size: var(--fs-13);
+  font-weight: 600;
   white-space: nowrap;
 }
 
-.tree-row.dir .name {
-  font-weight: 600;
-}
-
-.preview {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.preview-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-}
-
-.preview-head .path {
+.pane-head .file-path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
-.preview-head .spacer {
+.pane-head .spacer {
   flex: 1 1 auto;
 }
 
-.file-editor {
-  flex: 1;
-  margin: 0;
-  padding: 12px;
-  border: none;
-  resize: none;
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--fg);
-  background: var(--bg);
-  outline: none;
-  white-space: pre;
+.pane-btn {
+  flex: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control-sm);
+  padding: 5px 12px;
+  font-size: var(--fs-12);
+}
+
+.pane-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.pane-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.file-body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  padding: 22px 28px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  line-height: 1.75;
+  color: var(--code-text-strong);
 }
 
 .file-content {
-  flex: 1;
   margin: 0;
-  padding: 12px;
-  overflow: auto;
-  font-size: 12.5px;
-  line-height: 1.5;
+  max-width: none;
   white-space: pre;
 }
 
-/* Task 6: sandboxed HTML preview fills the preview pane. */
-.html-preview-wrap {
-  flex: 1;
+.file-editor {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
+  margin: 0;
+  padding: 22px 28px;
+  border: none;
+  border-radius: 0;
+  resize: none;
+  background: var(--bg);
+  color: var(--code-text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  line-height: 1.75;
+  white-space: pre;
+  overflow: auto;
+  outline: none;
 }
 
-.mono {
-  font-family: var(--mono);
+.file-editor:focus {
+  border: none;
+}
+
+/* Markdown reading view: Inter headings over the monospace body. */
+.markdown {
+  max-width: 760px;
+}
+
+.md-h1 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-20);
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: var(--space-10);
+}
+
+.md-h2 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--text);
+  margin-top: var(--space-12);
+}
+
+.md-h3 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: var(--space-10);
+}
+
+.md-bullet {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.md-bullet .md-mark {
+  color: var(--text-faint);
+  margin-right: 6px;
+}
+
+.md-keyword {
+  color: var(--diff-add-text);
+}
+
+.md-sep {
+  color: var(--text-faint);
+  white-space: pre;
+}
+
+.md-quote {
+  border-left: 2px solid var(--border-strong);
+  padding-left: var(--space-10);
+  color: var(--text-muted);
+}
+
+.md-code {
+  background: var(--terminal-bg);
+  border-left: 2px solid var(--border);
+  padding: 0 var(--space-10);
+  color: var(--code-text);
+  white-space: pre-wrap;
+}
+
+.md-blank {
+  height: 0.75em;
+}
+
+.md-text {
+  white-space: pre-wrap;
+}
+
+/* Task 6: sandboxed HTML preview fills the pane. */
+.html-preview-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-12);
 }
 
 .placeholder {
-  padding: 24px;
-  color: var(--fg-muted);
-  text-align: center;
-}
-
-.empty {
-  padding: 12px;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: var(--fs-12-5);
 }
