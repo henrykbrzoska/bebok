@@ -82,6 +82,26 @@ pub fn env_flag(name: &str) -> bool {
     }
 }
 
+/// Replace the value of any `token=` query parameter in a request line with
+/// `<redacted>`. The `?token=` fallback would otherwise end up verbatim in the
+/// access log — which is written to `debug.log` on disk and served by
+/// `GET /debug/log`. Strings without a `?` are returned unchanged.
+pub fn scrub_token_query(line: &str) -> String {
+    let Some(cut) = line.find('?') else {
+        return line.to_string();
+    };
+    let (head, query) = line.split_at(cut + 1);
+    let scrubbed = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((k, _)) if k.eq_ignore_ascii_case("token") => format!("{k}=<redacted>"),
+            _ => pair.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{head}{scrubbed}")
+}
+
 /// Length-checked, branch-free string compare (no early exit on the first
 /// differing byte, so a caller cannot time-probe the token prefix).
 fn ct_eq(a: &str, b: &str) -> bool {
@@ -438,6 +458,103 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status(req).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn scrub_token_query_hides_only_the_token() {
+        assert_eq!(scrub_token_query("GET /session"), "GET /session");
+        assert_eq!(
+            scrub_token_query("GET /fs/tree?directory=C:/p&token=deadbeef"),
+            "GET /fs/tree?directory=C:/p&token=<redacted>"
+        );
+        assert_eq!(scrub_token_query("?TOKEN=abc"), "?TOKEN=<redacted>");
+    }
+
+    /// F0-6, end to end: `/debug/log` is token-protected AND off by default;
+    /// with `BEBOK_DIAGNOSTIC=1` it answers 200 with redacted content.
+    ///
+    /// One test, not three: it mutates the process environment (`unsafe` since
+    /// edition 2024), so it must not interleave with a second test reading the
+    /// same variable. Everything that reads the environment lazily is forced
+    /// first, and the app + temp dirs are built before the mutation.
+    #[tokio::test]
+    async fn debug_log_is_gated_and_redacted() {
+        let _ = token();
+        let _ = disabled();
+        let app_off = test_app();
+        let app_on = test_app();
+
+        // Default: the token layer answers first, then the diagnostic gate.
+        assert_eq!(
+            app_off
+                .clone()
+                .oneshot(get("/debug/log"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            app_off
+                .oneshot(get_auth("/debug/log"))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "diagnostics must be off unless BEBOK_DIAGNOSTIC is set"
+        );
+
+        // A traced call with content in every field a prompt could hide in.
+        bebok_core::LLM_TRACE.clear();
+        bebok_core::push_llm_call(bebok_core::LlmCall {
+            id: 1,
+            ts: 42,
+            model: "claude-x".to_string(),
+            request: serde_json::json!({
+                "model": "claude-x",
+                "system": "SECRET-SYSTEM-PROMPT",
+                "messages": [{ "role": "user", "content": "my password is hunter2" }],
+            }),
+            response: serde_json::json!({
+                "model": "claude-x",
+                "usage": { "input_tokens": 11 },
+                "message": { "role": "assistant", "content": "LEAKED-ANSWER" },
+            }),
+        });
+
+        // SAFETY: see the doc comment - no other test reads this variable, and
+        // the lazily-read ones above are already initialised.
+        unsafe { std::env::set_var("BEBOK_DIAGNOSTIC", "1") };
+        let res = app_on.oneshot(get_auth("/debug/log")).await.unwrap();
+        let status = res.status();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        unsafe { std::env::remove_var("BEBOK_DIAGNOSTIC") };
+        bebok_core::LLM_TRACE.clear();
+
+        assert_eq!(status, StatusCode::OK);
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        for leak in ["SECRET-SYSTEM-PROMPT", "hunter2", "LEAKED-ANSWER"] {
+            assert!(
+                !body.contains(leak),
+                "{leak} leaked from /debug/log: {body}"
+            );
+        }
+        // Structure survives: ids, timestamps, model, roles, usage counters.
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let call = &json["calls"][0];
+        assert_eq!(call["id"], 1);
+        assert_eq!(call["ts"], 42);
+        assert_eq!(call["model"], "claude-x");
+        assert_eq!(call["request"]["messages"][0]["role"], "user");
+        assert_eq!(call["response"]["usage"]["input_tokens"], 11);
+        assert!(
+            call["request"]["system"]
+                .as_str()
+                .unwrap()
+                .starts_with("<redacted:")
+        );
     }
 
     /// Percent-encoded `?token=` values decode before comparison.
