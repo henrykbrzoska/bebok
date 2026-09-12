@@ -508,4 +508,12 @@ export const fr: Record<MessageKey, string> = {
   'changes.close': 'Fermer',
   'changes.loadingDiff': 'Chargement du diff…',
   'changes.noDiff': 'Aucune différence par rapport à la base',
+  // F6-10/F6-11: panneau Aperçu (markdown/tableaux/liens + Explorateur et chat)
+  'drawer.preview': 'Aperçu',
+  'explorer.openInPreview': 'Ouvrir dans l’aperçu',
+  'preview.back': 'Précédent',
+  'preview.forward': 'Suivant',
+  'preview.empty': 'Aucun fichier sélectionné. Ouvrez un fichier dans l’Explorateur pour le prévisualiser.',
+  'preview.loading': 'Chargement…',
+  'preview.cannotPreview': 'Impossible d’ouvrir {path}.',
 };

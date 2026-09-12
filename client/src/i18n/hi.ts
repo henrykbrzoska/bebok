@@ -507,4 +507,12 @@ export const hi: Record<MessageKey, string> = {
   'changes.close': 'बंद करें',
   'changes.loadingDiff': 'डिफ़ लोड हो रहा है…',
   'changes.noDiff': 'आधार की तुलना में कोई अंतर नहीं',
+  // F6-10/F6-11: पूर्वावलोकन पैनल (markdown/तालिकाएँ/लिंक + एक्सप्लोरर और चैट)
+  'drawer.preview': 'पूर्वावलोकन',
+  'explorer.openInPreview': 'पूर्वावलोकन में खोलें',
+  'preview.back': 'पीछे',
+  'preview.forward': 'आगे',
+  'preview.empty': 'कोई फ़ाइल चयनित नहीं है। पूर्वावलोकन के लिए एक्सप्लोरर में कोई फ़ाइल खोलें।',
+  'preview.loading': 'लोड हो रहा है…',
+  'preview.cannotPreview': '{path} नहीं खोला जा सका।',
 };

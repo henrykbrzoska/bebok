@@ -517,6 +517,14 @@ export const en = {
   'changes.close': 'Close',
   'changes.loadingDiff': 'Loading diff…',
   'changes.noDiff': 'No differences against the baseline',
+  // F6-10/F6-11: Preview panel (markdown/table/link preview + Explorer & chat links)
+  'drawer.preview': 'Preview',
+  'explorer.openInPreview': 'Open in preview',
+  'preview.back': 'Back',
+  'preview.forward': 'Forward',
+  'preview.empty': 'No file selected. Open a file from Explorer to preview it.',
+  'preview.loading': 'Loading…',
+  'preview.cannotPreview': 'Cannot open {path}.',
 };
 
 export type MessageKey = keyof typeof en;

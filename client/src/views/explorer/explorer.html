@@ -56,6 +56,7 @@
                 {{ t('htmlPreview.preview') }}
               </button>
             }
+            <button class="pane-btn" (click)="openInPreview()">{{ t('explorer.openInPreview') }}</button>
             <button class="pane-btn" (click)="startEdit()">{{ t('explorer.edit') }}</button>
           } @else {
             <button class="pane-btn" (click)="cancelEdit()">{{ t('explorer.cancel') }}</button>

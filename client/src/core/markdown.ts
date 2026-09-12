@@ -59,16 +59,57 @@ function tokenize(text: string): Block[] {
   return out;
 }
 
+/** True for an absolute URL (`http:`, `mailto:`, ...) - anything with a scheme. */
+function hasUriScheme(href: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href);
+}
+
+/**
+ * F6-11: a bare `docs/plan.md`-looking token in plain text (not already part
+ * of `[label](url)` syntax) is linkified too, so a relative path an assistant
+ * just mentions in prose is still clickable. Matched only outside any tag
+ * already produced by `renderInline` (skipping `<a>…</a>` and `<code>…</code>`
+ * spans) so an already-linked or code-quoted path is never double-wrapped.
+ */
+const BARE_MD_PATH = /(^|[\s([])((?:\.{1,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.(?:md|markdown))\b/g;
+
+function linkifyBarePaths(html: string): string {
+  const segments = html.split(/(<[^>]+>)/g);
+  let skipDepth = 0;
+  return segments
+    .map((segment) => {
+      if (segment.startsWith('<')) {
+        const lower = segment.toLowerCase();
+        if (/^<(a|code)\b/.test(lower)) {
+          skipDepth += 1;
+        } else if (/^<\/(a|code)>/.test(lower)) {
+          skipDepth = Math.max(0, skipDepth - 1);
+        }
+        return segment;
+      }
+      if (skipDepth > 0) {
+        return segment;
+      }
+      return segment.replace(
+        BARE_MD_PATH,
+        (_, pre: string, path: string) => `${pre}<a href="${path}" data-preview-href="${path}">${path}</a>`,
+      );
+    })
+    .join('');
+}
+
 function renderInline(value: string): string {
   // value is already HTML-escaped; apply text-level formatting on top.
   let html = value
     .replace(/`([^`\n]+)`/g, (_, code: string) => `<code>${code}</code>`)
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
-    .replace(
-      /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
-      (_, label: string, href: string) =>
-        `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`,
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
+      hasUriScheme(href)
+        ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`
+        : `<a href="${href}" data-preview-href="${href}">${label}</a>`,
     );
+  // F6-11: a plain-looking relative `.md` path gets the same treatment.
+  html = linkifyBarePaths(html);
   // <br> inside block paragraphs from escaped newlines.
   html = html.replace(/\n/g, '<br>');
   return html;

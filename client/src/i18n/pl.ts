@@ -508,4 +508,12 @@ export const pl: Record<MessageKey, string> = {
   'changes.close': 'Zamknij',
   'changes.loadingDiff': 'Wczytywanie diffu…',
   'changes.noDiff': 'Brak różnic względem wersji bazowej',
+  // F6-10/F6-11: panel Podglądu (markdown/tabele/linki + Eksplorator i czat)
+  'drawer.preview': 'Podgląd',
+  'explorer.openInPreview': 'Otwórz w podglądzie',
+  'preview.back': 'Wstecz',
+  'preview.forward': 'Dalej',
+  'preview.empty': 'Nie wybrano pliku. Otwórz plik w Eksploratorze, aby go zobaczyć.',
+  'preview.loading': 'Ładowanie…',
+  'preview.cannotPreview': 'Nie można otworzyć {path}.',
 };

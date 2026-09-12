@@ -507,4 +507,12 @@ export const zh: Record<MessageKey, string> = {
   'changes.close': '关闭',
   'changes.loadingDiff': '正在加载差异…',
   'changes.noDiff': '与基线没有差异',
+  // F6-10/F6-11: 预览面板(markdown/表格/链接 + 资源管理器和聊天)
+  'drawer.preview': '预览',
+  'explorer.openInPreview': '在预览中打开',
+  'preview.back': '后退',
+  'preview.forward': '前进',
+  'preview.empty': '未选择文件。请在资源管理器中打开一个文件以预览。',
+  'preview.loading': '加载中…',
+  'preview.cannotPreview': '无法打开 {path}。',
 };

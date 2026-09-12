@@ -508,4 +508,12 @@ export const uk: Record<MessageKey, string> = {
   'changes.close': 'Закрити',
   'changes.loadingDiff': 'Завантаження diff…',
   'changes.noDiff': 'Немає відмінностей від базової версії',
+  // F6-10/F6-11: панель Перегляду (markdown/таблиці/посилання + Провідник і чат)
+  'drawer.preview': 'Перегляд',
+  'explorer.openInPreview': 'Відкрити в перегляді',
+  'preview.back': 'Назад',
+  'preview.forward': 'Вперед',
+  'preview.empty': 'Файл не вибрано. Відкрийте файл у Провіднику, щоб переглянути його.',
+  'preview.loading': 'Завантаження…',
+  'preview.cannotPreview': 'Не вдалося відкрити {path}.',
 };

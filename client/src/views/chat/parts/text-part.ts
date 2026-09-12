@@ -4,6 +4,9 @@ import { Part, TextPart } from '../../../core/engine.dtos';
 import { renderMarkdown } from '../../../core/markdown';
 import { I18nService } from '../../../i18n/i18n.service';
 import { HtmlPreviewComponent } from '../../../ui/html-preview/html-preview';
+import { ExplorerSelectionStore } from '../../../ui/right-drawer/panels/explorer-selection.store';
+import { ShellStore } from '../../../ui/shell/shell.store';
+import { ChatSessionStore } from '../chat-session.store';
 
 /** Extract fenced ```html blocks from raw markdown (untrusted source). */
 function extractHtmlBlocks(source: string): string[] {
@@ -39,6 +42,7 @@ function extractHtmlBlocks(source: string): string[] {
       class="md"
       [innerHTML]="html()"
       (contextmenu)="onContextMenu($event)"
+      (click)="onClick($event)"
       [title]="t('htmlPreview.rightClickHint')"
     ></div>
     @if (previewHtml() !== null) {
@@ -126,6 +130,9 @@ function extractHtmlBlocks(source: string): string[] {
 })
 export class TextPartComponent {
   private readonly i18n = inject(I18nService);
+  private readonly session = inject(ChatSessionStore);
+  private readonly selection = inject(ExplorerSelectionStore);
+  private readonly shell = inject(ShellStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
@@ -148,5 +155,35 @@ export class TextPartComponent {
     }
     event.preventDefault();
     this.previewHtml.set(blocks[0] ?? null);
+  }
+
+  /**
+   * F6-11: a scheme-less link (`data-preview-href`, set by `core/markdown.ts`
+   * for a relative path or a bare `.md` mention) opens the Preview panel
+   * instead of navigating the browser away. A normal `http(s)://` link (no
+   * such attribute) is left completely alone.
+   */
+  onClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest?.('a[data-preview-href]') as HTMLAnchorElement | null;
+    if (!anchor) {
+      return;
+    }
+    const dir = this.session.directory();
+    const href = anchor.getAttribute('data-preview-href');
+    if (!dir || !href) {
+      return;
+    }
+    event.preventDefault();
+    // Chat text is not itself "a file", so a relative mention is resolved
+    // against the project root - the same paths the engine's own tools use.
+    const path = href.replace(/^\.\//, '').replace(/^\/+/, '');
+    this.selection.openInPreview(dir, path);
+    if (!this.shell.rightDrawerPanels().preview) {
+      this.shell.toggleRightDrawerPanel('preview');
+    }
+    if (!this.shell.rightDrawerOpen()) {
+      this.shell.toggleRightDrawer();
+    }
   }
 }

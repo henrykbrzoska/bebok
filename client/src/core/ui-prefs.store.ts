@@ -45,6 +45,8 @@ export interface RightDrawerPanels {
   agents: boolean;
   /** WP-CHANGES (F6-9): engine-tracked file changes. */
   changes: boolean;
+  /** F6-10: markdown/table/link file preview, closed by default. */
+  preview: boolean;
 }
 
 const DEFAULT_PANELS: RightDrawerPanels = {
@@ -53,6 +55,7 @@ const DEFAULT_PANELS: RightDrawerPanels = {
   terminal: false,
   agents: false,
   changes: false,
+  preview: false,
 };
 
 function readBool(key: string, fallback: boolean): boolean {
@@ -119,6 +122,7 @@ function readPanels(): RightDrawerPanels {
       agents: typeof parsed['agents'] === 'boolean' ? parsed['agents'] : DEFAULT_PANELS.agents,
       changes:
         typeof parsed['changes'] === 'boolean' ? parsed['changes'] : DEFAULT_PANELS.changes,
+      preview: typeof parsed['preview'] === 'boolean' ? parsed['preview'] : DEFAULT_PANELS.preview,
     };
   } catch {
     return { ...DEFAULT_PANELS };

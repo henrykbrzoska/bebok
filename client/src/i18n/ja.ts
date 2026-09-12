@@ -507,4 +507,12 @@ export const ja: Record<MessageKey, string> = {
   'changes.close': '閉じる',
   'changes.loadingDiff': '差分を読み込み中…',
   'changes.noDiff': 'ベースラインとの差分はありません',
+  // F6-10/F6-11: プレビューパネル(markdown/表/リンク + エクスプローラーとチャット)
+  'drawer.preview': 'プレビュー',
+  'explorer.openInPreview': 'プレビューで開く',
+  'preview.back': '戻る',
+  'preview.forward': '進む',
+  'preview.empty': 'ファイルが選択されていません。エクスプローラーでファイルを開いてプレビューしてください。',
+  'preview.loading': '読み込み中…',
+  'preview.cannotPreview': '{path} を開けません。',
 };

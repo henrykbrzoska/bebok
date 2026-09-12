@@ -508,4 +508,12 @@ export const it: Record<MessageKey, string> = {
   'changes.close': 'Chiudi',
   'changes.loadingDiff': 'Caricamento diff…',
   'changes.noDiff': 'Nessuna differenza rispetto alla base',
+  // F6-10/F6-11: pannello Anteprima (markdown/tabelle/link + Esplora risorse e chat)
+  'drawer.preview': 'Anteprima',
+  'explorer.openInPreview': 'Apri in anteprima',
+  'preview.back': 'Indietro',
+  'preview.forward': 'Avanti',
+  'preview.empty': 'Nessun file selezionato. Apri un file da Esplora risorse per vederne l’anteprima.',
+  'preview.loading': 'Caricamento…',
+  'preview.cannotPreview': 'Impossibile aprire {path}.',
 };

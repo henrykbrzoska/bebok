@@ -508,4 +508,12 @@ export const pt: Record<MessageKey, string> = {
   'changes.close': 'Fechar',
   'changes.loadingDiff': 'Carregando diff…',
   'changes.noDiff': 'Sem diferenças em relação à base',
+  // F6-10/F6-11: painel de Pré-visualização (markdown/tabelas/links + Explorador e chat)
+  'drawer.preview': 'Pré-visualização',
+  'explorer.openInPreview': 'Abrir na pré-visualização',
+  'preview.back': 'Voltar',
+  'preview.forward': 'Avançar',
+  'preview.empty': 'Nenhum arquivo selecionado. Abra um arquivo no Explorador para pré-visualizá-lo.',
+  'preview.loading': 'Carregando…',
+  'preview.cannotPreview': 'Não é possível abrir {path}.',
 };
