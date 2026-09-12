@@ -11,6 +11,7 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, stream};
 use serde_json::Value;
 
+use crate::CachePolicy;
 use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
     retry_after_from_headers,
@@ -84,12 +85,15 @@ impl Provider for AnthropicProvider {
 /// Build the Anthropic Messages request body.
 pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
     let tools: Vec<Value> = map_tools(&req.tools, Protocol::Anthropic);
+    let policy = CachePolicy::for_model(&req.model);
+    let mut messages = to_anthropic_messages(&req.messages);
+    policy.apply_to_messages(&req.system, &mut messages);
 
     let mut body = serde_json::json!({
         "model": model,
         "max_tokens": req.max_tokens,
-        "system": req.system,
-        "messages": to_anthropic_messages(&req.messages),
+        "system": policy.system_value(&req.system),
+        "messages": messages,
         "tools": tools,
         "stream": true,
     });
@@ -355,7 +359,7 @@ impl AnthropicParser {
 #[cfg(test)]
 mod tests {
     use super::anthropic_body;
-    use crate::provider::{ChatMessage, ChatRequest, Thinking};
+    use crate::provider::{ChatMessage, ChatRequest, ChatRole, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {
@@ -379,6 +383,46 @@ mod tests {
 
         let max = anthropic_body(&req(Thinking::Max), "claude-sonnet");
         assert_eq!(max["thinking"]["budget_tokens"], 8192);
+    }
+
+    #[test]
+    fn cache_capable_model_marks_long_system_and_stable_history() {
+        let mut request = req(Thinking::Off);
+        request.model = "anthropic/claude-sonnet-4-5".into();
+        request.system = "stable system ".repeat(1_300);
+        request.messages = vec![
+            ChatMessage::user("stable first user message"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: "stable answer".into(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                content_parts: Vec::new(),
+            },
+            ChatMessage::user("new varying question"),
+        ];
+
+        let body = anthropic_body(&request, "claude-sonnet-4-5");
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(
+            body["messages"][2]["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn non_cache_model_emits_no_cache_control() {
+        let mut request = req(Thinking::Off);
+        request.model = "xai/grok-4.6".into();
+        request.system = "large system ".repeat(2_000);
+        request.messages.push(ChatMessage::user("new question"));
+        let body = anthropic_body(&request, "grok-4.6");
+        assert!(!body.to_string().contains("cache_control"));
     }
 }
 

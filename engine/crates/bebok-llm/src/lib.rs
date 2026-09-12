@@ -4,6 +4,7 @@
 //! provider parses its own SSE format (there is no shared event format).
 
 mod anthropic;
+mod cache_policy;
 mod cost;
 mod model_catalog;
 mod openai;
@@ -12,6 +13,7 @@ mod spec;
 mod wire;
 
 pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider, to_anthropic_messages};
+pub use cache_policy::{CachePolicy, MIN_CACHE_PREFIX_BYTES};
 pub use cost::{Pricing, compute_cost, pricing_for};
 pub use model_catalog::{ModelCapabilities, ModelCatalog, ModelPricing};
 pub use openai::{
