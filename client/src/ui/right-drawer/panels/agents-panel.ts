@@ -271,6 +271,7 @@ export class AgentsPanel {
   private readonly sessionId = computed(() => this.session.meta()?.id ?? null);
   private refreshTimer: number | undefined;
   private loadedFor: string | null = null;
+  private lastReconnectVersion = this.events.reconnectVersion();
 
   constructor() {
     effect(() => {
@@ -284,9 +285,14 @@ export class AgentsPanel {
         void this.refresh(id);
       }
     });
-    // A transcript-level reconnect may have swallowed task events.
+    // A transcript-level reconnect may have swallowed task events. Skip the
+    // initial run: the effect above already fetched for the current session.
     effect(() => {
-      this.events.reconnectVersion();
+      const version = this.events.reconnectVersion();
+      if (version === this.lastReconnectVersion) {
+        return;
+      }
+      this.lastReconnectVersion = version;
       const id = this.sessionId();
       if (id) {
         this.scheduleRefresh();

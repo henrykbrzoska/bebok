@@ -121,7 +121,7 @@ export class MarkdownViewComponent {
 
   onClick(event: MouseEvent): void {
     const target = event.target as HTMLElement | null;
-    const anchor = target?.closest?.('a[data-relative]') as HTMLAnchorElement | null;
+    const anchor = target?.closest?.('a.relative-link') as HTMLAnchorElement | null;
     if (!anchor) {
       return;
     }

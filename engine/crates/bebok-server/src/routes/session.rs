@@ -585,24 +585,24 @@ mod tests {
         let plain: CreateSession =
             serde_json::from_str(r#"{"directory":"/p","agent":"code"}"#).unwrap();
         assert!(plain.worktree.is_none());
-        let with: CreateSession = serde_json::from_str(
-            r#"{"directory":"/p","worktree":{"branch":"bebok/session-1"}}"#,
-        )
-        .unwrap();
+        let with: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","worktree":{"branch":"bebok/session-1"}}"#)
+                .unwrap();
         let spec = with.worktree.unwrap();
         assert_eq!(spec.branch, "bebok/session-1");
         assert!(spec.base.is_none());
-        let with_base: CreateSession = serde_json::from_str(
-            r#"{"directory":"/p","worktree":{"branch":"x","base":"main"}}"#,
-        )
-        .unwrap();
+        let with_base: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","worktree":{"branch":"x","base":"main"}}"#)
+                .unwrap();
         assert_eq!(with_base.worktree.unwrap().base.as_deref(), Some("main"));
     }
 
     #[test]
     fn attach_worktree_derives_the_branch_from_the_directory() {
         let root = std::env::temp_dir().join("proj");
-        let wt = bebok_core::git::worktrees_dir(&root).join("bebok").join("feat");
+        let wt = bebok_core::git::worktrees_dir(&root)
+            .join("bebok")
+            .join("feat");
         let session = bebok_core::session::Session::new(wt.to_string_lossy().to_string(), "code");
         let mut value = serde_json::json!({});
         attach_worktree(&mut value, &session);

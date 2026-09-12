@@ -11,7 +11,8 @@
  * Supported: headings (h1-h6), fenced code blocks, blockquotes, bullet/
  * numbered lists, pipe tables (`| a | b |` + a `| --- | --- |` divider - the
  * common case, not full GFM), inline `code`/`**bold**`/`*italic*`, and links.
- * A link with no URI scheme (a relative path) is marked `data-relative="1"`
+ * A link with no URI scheme (a relative path) is marked `class="relative-link"`
+ * (Angular's `[innerHTML]` sanitizer keeps `class` but strips `data-*`)
  * so the host component can intercept the click and resolve it against the
  * document's own path instead of letting the browser navigate away.
  */
@@ -210,7 +211,7 @@ function renderInline(escaped: string): string {
     if (hasUriScheme(href)) {
       return `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
     }
-    return `<a href="${href}" data-relative="1">${label}</a>`;
+    return `<a href="${href}" class="relative-link">${label}</a>`;
   });
   return html;
 }

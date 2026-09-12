@@ -64,7 +64,7 @@ function screenshotMessage(url: string, data = PNG, id = 'c2'): Message {
           input: {},
           output: `Screenshot of ${url}`,
           title: 'browser_screenshot',
-          structured: { url, title: 'Example', media_type: 'image/png' } as never,
+          structured: { url, title: 'Example Domain', media_type: 'image/png' } as never,
         },
       },
       { type: 'image', media_type: 'image/png', data, name: `browser_screenshot:${id}` },

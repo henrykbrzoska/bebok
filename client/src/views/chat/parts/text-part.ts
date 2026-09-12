@@ -158,19 +158,21 @@ export class TextPartComponent {
   }
 
   /**
-   * F6-11: a scheme-less link (`data-preview-href`, set by `core/markdown.ts`
+   * F6-11: a scheme-less link (`class="preview-link"`, set by `core/markdown.ts`
    * for a relative path or a bare `.md` mention) opens the Preview panel
    * instead of navigating the browser away. A normal `http(s)://` link (no
-   * such attribute) is left completely alone.
+   * such class) is left completely alone. The marker is a class rather than
+   * a `data-*` attribute because Angular's `[innerHTML]` sanitizer strips the
+   * latter.
    */
   onClick(event: MouseEvent): void {
     const target = event.target as HTMLElement | null;
-    const anchor = target?.closest?.('a[data-preview-href]') as HTMLAnchorElement | null;
+    const anchor = target?.closest?.('a.preview-link') as HTMLAnchorElement | null;
     if (!anchor) {
       return;
     }
     const dir = this.session.directory();
-    const href = anchor.getAttribute('data-preview-href');
+    const href = anchor.getAttribute('href');
     if (!dir || !href) {
       return;
     }

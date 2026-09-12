@@ -92,7 +92,7 @@ function linkifyBarePaths(html: string): string {
       }
       return segment.replace(
         BARE_MD_PATH,
-        (_, pre: string, path: string) => `${pre}<a href="${path}" data-preview-href="${path}">${path}</a>`,
+        (_, pre: string, path: string) => `${pre}<a href="${path}" class="preview-link">${path}</a>`,
       );
     })
     .join('');
@@ -106,7 +106,7 @@ function renderInline(value: string): string {
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
       hasUriScheme(href)
         ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`
-        : `<a href="${href}" data-preview-href="${href}">${label}</a>`,
+        : `<a href="${href}" class="preview-link">${label}</a>`,
     );
   // F6-11: a plain-looking relative `.md` path gets the same treatment.
   html = linkifyBarePaths(html);

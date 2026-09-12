@@ -38,7 +38,7 @@ describe('renderMarkdownView', () => {
 
   it('marks a relative link for click interception, leaves absolute links alone', () => {
     const html = renderMarkdownView('[see](./other.md) and [site](https://example.com)');
-    expect(html).toContain('<a href="./other.md" data-relative="1">see</a>');
+    expect(html).toContain('<a href="./other.md" class="relative-link">see</a>');
     expect(html).toContain('<a href="https://example.com" target="_blank" rel="noreferrer">site</a>');
   });
 

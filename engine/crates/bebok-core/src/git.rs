@@ -413,11 +413,10 @@ pub async fn remove_worktree(root: &Path, path: &Path) -> Result<PathBuf, GitErr
     let out = run(root, &["worktree", "remove", "--force", &path_arg])
         .await
         .ok_or(GitError::Unavailable)?;
-    if !out.success {
-        if resolved.exists() {
-            return Err(GitError::Failed(stderr_summary(&out)));
-        }
-        // Not registered with git any more: nothing to do.
+    // A failure for a path git no longer knows (already pruned) is fine: the
+    // directory is removed from disk below.
+    if !out.success && resolved.exists() {
+        return Err(GitError::Failed(stderr_summary(&out)));
     }
     if resolved.exists() {
         std::fs::remove_dir_all(&resolved).map_err(|e| GitError::Io(e.to_string()))?;
@@ -438,7 +437,9 @@ fn validate_ref(base: &str) -> Result<(), GitError> {
     if trimmed.is_empty() {
         return Err(GitError::InvalidInput("base ref is empty".to_string()));
     }
-    if trimmed.starts_with('-') || trimmed.contains("..") || trimmed.chars().any(char::is_whitespace)
+    if trimmed.starts_with('-')
+        || trimmed.contains("..")
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err(GitError::InvalidInput(format!(
             "invalid base ref: {trimmed}"
@@ -525,7 +526,8 @@ mod tests {
 
     impl Fixture {
         fn new(tag: &str) -> Self {
-            let base = std::env::temp_dir().join(format!("bebok-git-{tag}-{}", uuid::Uuid::new_v4()));
+            let base =
+                std::env::temp_dir().join(format!("bebok-git-{tag}-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&base).unwrap();
             Self { base }
         }
@@ -588,8 +590,8 @@ mod tests {
             assert!(validate_branch(ok).is_ok(), "{ok}");
         }
         for bad in [
-            "", "-x", ".hidden", "a/../b", "a//b", "a/", "/a", "a b", "a\\b", "a.lock",
-            "a/.git", "x@{1}", "ü",
+            "", "-x", ".hidden", "a/../b", "a//b", "a/", "/a", "a b", "a\\b", "a.lock", "a/.git",
+            "x@{1}", "ü",
         ] {
             assert!(validate_branch(bad).is_err(), "{bad}");
         }
@@ -647,7 +649,9 @@ mod tests {
         assert!(validate_worktree_removal(&root, &root).is_err());
         assert!(validate_worktree_removal(&root, &worktrees_dir(&root)).is_err());
         assert!(validate_worktree_removal(&root, Path::new("relative/path")).is_err());
-        assert!(validate_worktree_removal(&root, &worktrees_dir(&root).join("..").join("x")).is_err());
+        assert!(
+            validate_worktree_removal(&root, &worktrees_dir(&root).join("..").join("x")).is_err()
+        );
         // A genuine (even not-yet-existing) worktree path is accepted.
         let wt = worktrees_dir(&root).join("bebok").join("feat");
         assert!(validate_worktree_removal(&root, &wt).is_ok());
@@ -683,7 +687,12 @@ mod tests {
 
         git_ok(
             &repo,
-            &["remote", "add", "origin", "https://github.com/acme/widgets.git"],
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/widgets.git",
+            ],
         )
         .await;
         std::fs::write(repo.join("README.md"), "changed\n").unwrap();
@@ -717,8 +726,14 @@ mod tests {
         let path = add_worktree(&repo, "bebok/session-1", None).await.unwrap();
         assert_eq!(path, worktrees_dir(&repo).join("bebok").join("session-1"));
         assert!(path.join("README.md").is_file(), "checkout materialised");
-        assert!(path.join(".bebok").join("config.json").is_file(), "config seeded");
-        assert_eq!(inspect(&path).await.branch.as_deref(), Some("bebok/session-1"));
+        assert!(
+            path.join(".bebok").join("config.json").is_file(),
+            "config seeded"
+        );
+        assert_eq!(
+            inspect(&path).await.branch.as_deref(),
+            Some("bebok/session-1")
+        );
         // The main checkout stays clean: `.bebok/worktrees` is ignored.
         let main = inspect(&repo).await;
         assert_eq!(main.branch.as_deref(), Some("main"));
@@ -735,8 +750,16 @@ mod tests {
             Err(GitError::InvalidInput(_))
         ));
         // A bad base ref is refused.
-        assert!(add_worktree(&repo, "bebok/other", Some("--bad")).await.is_err());
-        assert!(add_worktree(&repo, "bebok/other", Some("no-such-ref")).await.is_err());
+        assert!(
+            add_worktree(&repo, "bebok/other", Some("--bad"))
+                .await
+                .is_err()
+        );
+        assert!(
+            add_worktree(&repo, "bebok/other", Some("no-such-ref"))
+                .await
+                .is_err()
+        );
 
         // Removal only accepts paths inside `.bebok/worktrees`.
         assert!(remove_worktree(&repo, &repo).await.is_err());
@@ -755,7 +778,9 @@ mod tests {
                 .contains("bebok/session-1")
         );
         // Re-adding an existing branch checks it out again (base ignored).
-        let again = add_worktree(&repo, "bebok/session-1", Some("main")).await.unwrap();
+        let again = add_worktree(&repo, "bebok/session-1", Some("main"))
+            .await
+            .unwrap();
         assert!(again.join("README.md").is_file());
     }
 
