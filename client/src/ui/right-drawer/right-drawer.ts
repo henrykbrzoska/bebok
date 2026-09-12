@@ -17,15 +17,16 @@ import { ShellStore } from '../shell/shell.store';
 import { AgentsPanel } from './panels/agents-panel';
 import { ChangesPanel } from './panels/changes-panel';
 import { ExplorerPanel } from './panels/explorer-panel';
+import { PreviewPanel } from './panels/preview-panel';
 import { SessionPanel } from './panels/session-panel';
 import { TerminalPanel } from './panels/terminal-panel';
 
-type PanelId = 'session' | 'explorer' | 'terminal' | 'agents' | 'changes';
+type PanelId = 'session' | 'explorer' | 'terminal' | 'agents' | 'changes' | 'preview';
 
 @Component({
   selector: 'app-right-drawer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SessionPanel, ExplorerPanel, TerminalPanel, AgentsPanel, ChangesPanel],
+  imports: [SessionPanel, ExplorerPanel, TerminalPanel, AgentsPanel, ChangesPanel, PreviewPanel],
   templateUrl: './right-drawer.html',
   styleUrl: './right-drawer.css',
 })
@@ -44,13 +45,15 @@ export class RightDrawer {
       | 'drawer.explorer'
       | 'drawer.terminal'
       | 'drawer.agents'
-      | 'drawer.changes';
+      | 'drawer.changes'
+      | 'drawer.preview';
   }[] = [
     { id: 'session', labelKey: 'drawer.session' },
     { id: 'explorer', labelKey: 'drawer.explorer' },
     { id: 'terminal', labelKey: 'drawer.terminal' },
     { id: 'agents', labelKey: 'drawer.agents' },
     { id: 'changes', labelKey: 'drawer.changes' },
+    { id: 'preview', labelKey: 'drawer.preview' },
   ];
 
   private dragPointerId: number | null = null;

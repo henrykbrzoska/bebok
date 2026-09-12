@@ -508,4 +508,12 @@ export const es: Record<MessageKey, string> = {
   'changes.close': 'Cerrar',
   'changes.loadingDiff': 'Cargando diff…',
   'changes.noDiff': 'Sin diferencias respecto a la base',
+  // F6-10/F6-11: panel de vista previa (markdown/tablas/enlaces + Explorador y chat)
+  'drawer.preview': 'Vista previa',
+  'explorer.openInPreview': 'Abrir en vista previa',
+  'preview.back': 'Atrás',
+  'preview.forward': 'Adelante',
+  'preview.empty': 'Ningún archivo seleccionado. Abre un archivo en el Explorador para verlo.',
+  'preview.loading': 'Cargando…',
+  'preview.cannotPreview': 'No se puede abrir {path}.',
 };

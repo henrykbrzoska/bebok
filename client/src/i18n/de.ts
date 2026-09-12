@@ -508,4 +508,12 @@ export const de: Record<MessageKey, string> = {
   'changes.close': 'Schließen',
   'changes.loadingDiff': 'Diff wird geladen…',
   'changes.noDiff': 'Keine Unterschiede zur Ausgangsversion',
+  // F6-10/F6-11: Vorschau-Panel (Markdown/Tabellen/Links + Explorer und Chat)
+  'drawer.preview': 'Vorschau',
+  'explorer.openInPreview': 'In Vorschau öffnen',
+  'preview.back': 'Zurück',
+  'preview.forward': 'Vorwärts',
+  'preview.empty': 'Keine Datei ausgewählt. Öffne eine Datei im Explorer, um sie anzuzeigen.',
+  'preview.loading': 'Wird geladen…',
+  'preview.cannotPreview': '{path} kann nicht geöffnet werden.',
 };

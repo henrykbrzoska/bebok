@@ -507,4 +507,12 @@ export const ko: Record<MessageKey, string> = {
   'changes.close': '닫기',
   'changes.loadingDiff': 'diff 불러오는 중…',
   'changes.noDiff': '기준과 차이가 없습니다',
+  // F6-10/F6-11: 미리보기 패널 (markdown/표/링크 + 탐색기 및 채팅)
+  'drawer.preview': '미리보기',
+  'explorer.openInPreview': '미리보기에서 열기',
+  'preview.back': '뒤로',
+  'preview.forward': '앞으로',
+  'preview.empty': '선택된 파일이 없습니다. 탐색기에서 파일을 열어 미리 보세요.',
+  'preview.loading': '불러오는 중…',
+  'preview.cannotPreview': '{path}을(를) 열 수 없습니다.',
 };
