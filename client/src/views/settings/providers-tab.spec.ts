@@ -92,6 +92,31 @@ describe('ProvidersTab', () => {
     expect(engine.putConfig).toHaveBeenCalled();
   });
 
+  it('F3-5: the kind select is disabled for a built-in provider', async () => {
+    component.select('openai');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const select = (fixture.nativeElement as HTMLElement).querySelector(
+      'select.kind-select',
+    ) as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(select.disabled).withContext('built-in providers keep their kind').toBeTrue();
+  });
+
+  it('F3-5: the kind select is editable for a custom provider', async () => {
+    component.select('mycorp');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const select = (fixture.nativeElement as HTMLElement).querySelector(
+      'select.kind-select',
+    ) as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(select.disabled).toBeFalse();
+    expect(select.options.length).withContext('both protocols offered').toBe(2);
+  });
+
   it('the stored API key is never bound into the DOM', async () => {
     component.store.updateProvider('openai', { api_key: 'sk-secret-from-engine' });
     component.select('openai');

@@ -212,6 +212,7 @@ export const de: Record<MessageKey, string> = {
   'settings.addProvider': '+ Anbieter hinzufügen',
   'settings.addProviderTitle': 'Neuer Anbieter',
   'settings.addProviderHint': 'Der Name ist das Modellpräfix, z. B. wählt „mycorp“ mycorp/gpt-4o.',
+  'settings.kindFixed': 'Eingebauter Anbieter — die Art gibt die Engine vor.',
   'settings.providerKind': 'Art',
   'settings.cancel': 'Abbrechen',
   'settings.providerKeyless': 'kein Schlüssel nötig',

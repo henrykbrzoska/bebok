@@ -211,6 +211,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.addProvider': '+ プロバイダーを追加',
   'settings.addProviderTitle': '新しいプロバイダー',
   'settings.addProviderHint': '名前はモデルの接頭辞です。例:「mycorp」は mycorp/gpt-4o を選びます。',
+  'settings.kindFixed': '組み込みプロバイダー — 種類はエンジンが決めます。',
   'settings.providerKind': '種類',
   'settings.cancel': 'キャンセル',
   'settings.providerKeyless': 'キー不要',

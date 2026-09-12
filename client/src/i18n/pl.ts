@@ -212,6 +212,7 @@ export const pl: Record<MessageKey, string> = {
   'settings.addProvider': '+ Dodaj dostawcę',
   'settings.addProviderTitle': 'Nowy dostawca',
   'settings.addProviderHint': 'Nazwa jest prefiksem modelu, np. „mycorp” wybiera mycorp/gpt-4o.',
+  'settings.kindFixed': 'Wbudowany dostawca — rodzaj ustala silnik.',
   'settings.providerKind': 'Rodzaj',
   'settings.cancel': 'Anuluj',
   'settings.providerKeyless': 'klucz niepotrzebny',

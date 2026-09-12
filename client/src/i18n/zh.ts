@@ -211,6 +211,7 @@ export const zh: Record<MessageKey, string> = {
   'settings.addProvider': '+ 添加提供商',
   'settings.addProviderTitle': '新提供商',
   'settings.addProviderHint': '名称即模型前缀，例如“mycorp”对应 mycorp/gpt-4o。',
+  'settings.kindFixed': '内置提供商 — 类型由引擎固定。',
   'settings.providerKind': '类型',
   'settings.cancel': '取消',
   'settings.providerKeyless': '无需密钥',

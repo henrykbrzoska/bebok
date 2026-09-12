@@ -64,10 +64,16 @@
             class="kind-select"
             [ngModel]="provider.kind"
             (ngModelChange)="store.updateProvider(provider.name, { kind: $event })"
+            [disabled]="isBuiltin(provider)"
+            [attr.aria-readonly]="isBuiltin(provider)"
           >
-            <option value="openai">openai</option>
-            <option value="anthropic">anthropic</option>
+            @for (kind of allowedKinds(provider); track kind) {
+              <option [value]="kind">{{ kind }}</option>
+            }
           </select>
+          @if (isBuiltin(provider)) {
+            <span class="small faint">{{ t('settings.kindFixed') }}</span>
+          }
         </label>
 
         <label class="field">

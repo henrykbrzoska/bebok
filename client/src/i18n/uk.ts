@@ -212,6 +212,7 @@ export const uk: Record<MessageKey, string> = {
   'settings.addProvider': '+ Додати провайдера',
   'settings.addProviderTitle': 'Новий провайдер',
   'settings.addProviderHint': 'Назва — це префікс моделі, напр. «mycorp» обирає mycorp/gpt-4o.',
+  'settings.kindFixed': 'Вбудований провайдер — тип задає рушій.',
   'settings.providerKind': 'Тип',
   'settings.cancel': 'Скасувати',
   'settings.providerKeyless': 'ключ не потрібен',

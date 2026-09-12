@@ -211,6 +211,7 @@ export const ko: Record<MessageKey, string> = {
   'settings.addProvider': '+ 공급자 추가',
   'settings.addProviderTitle': '새 공급자',
   'settings.addProviderHint': '이름은 모델 접두사입니다. 예: "mycorp"는 mycorp/gpt-4o를 선택합니다.',
+  'settings.kindFixed': '내장 공급자 — 종류는 엔진이 고정합니다.',
   'settings.providerKind': '종류',
   'settings.cancel': '취소',
   'settings.providerKeyless': '키 불필요',

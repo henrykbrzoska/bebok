@@ -170,6 +170,7 @@ export const en = {
   'settings.addProvider': '+ Add provider',
   'settings.addProviderTitle': 'New provider',
   'settings.addProviderHint': 'The name is the model prefix, e.g. "mycorp" selects mycorp/gpt-4o.',
+  'settings.kindFixed': 'Built-in provider — the kind is fixed by the engine.',
   'settings.providerKind': 'Kind',
   'settings.cancel': 'Cancel',
   'settings.providerKeyless': 'no key needed',

@@ -111,6 +111,20 @@ export class ProvidersTab {
     );
   }
 
+  /**
+   * F3-5: a built-in provider's wire protocol is fixed by the engine, so the
+   * `kind` select is read-only for it and editable only for custom providers.
+   */
+  isBuiltin(provider: ProviderDraft): boolean {
+    return this.catalog.isBuiltin(provider.name);
+  }
+
+  /** Kinds offered by the select (always including the configured one). */
+  allowedKinds(provider: ProviderDraft): Array<'openai' | 'anthropic'> {
+    const kinds = this.catalog.allowedKinds(provider.name);
+    return kinds.includes(provider.kind) ? kinds : [...kinds, provider.kind];
+  }
+
   /** Draft key typed for a provider (the stored key is never rendered). */
   keyDraft(name: string): string {
     return this.store.keyDrafts()[name] ?? '';

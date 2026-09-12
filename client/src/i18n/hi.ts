@@ -211,6 +211,7 @@ export const hi: Record<MessageKey, string> = {
   'settings.addProvider': '+ प्रदाता जोड़ें',
   'settings.addProviderTitle': 'नया प्रदाता',
   'settings.addProviderHint': 'नाम ही मॉडल उपसर्ग है, जैसे "mycorp" से mycorp/gpt-4o चुना जाता है।',
+  'settings.kindFixed': 'अंतर्निहित प्रदाता — प्रकार इंजन तय करता है।',
   'settings.providerKind': 'प्रकार',
   'settings.cancel': 'रद्द करें',
   'settings.providerKeyless': 'कुंजी आवश्यक नहीं',
