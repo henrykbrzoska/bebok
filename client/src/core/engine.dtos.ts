@@ -319,6 +319,8 @@ export interface ProviderSpec {
   models: string[];
   /** True when an API key is resolvable (explicit or env var). */
   has_key?: boolean;
+  /** Provider-specific extra fields declared by the catalog (WP-LLM F3-2). */
+  extra?: Record<string, string>;
 }
 
 /** Executable paths for language runtimes (resolved with defaults). */
