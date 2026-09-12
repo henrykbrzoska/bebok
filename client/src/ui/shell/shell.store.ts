@@ -6,9 +6,10 @@
  * router - each route carries `data.screen` (see `app.routes.ts`) - rather
  * than being a hand-rolled parallel signal, so deep links keep working.
  *
- * Layout preferences (sidebar/drawer/density) live in `UiPrefsStore` so they
- * persist to localStorage; this store re-exports them so components have one
- * place to read shell state from.
+ * Layout preferences (sidebar/drawer) live in `UiPrefsStore` so they persist
+ * to localStorage; this store re-exports them so components have one place
+ * to read shell state from. The density toggle that used to live here was
+ * removed in F7-2 - compact spacing is now the app's only layout.
  */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
@@ -46,7 +47,6 @@ export class ShellStore {
   readonly rightDrawerOpen = this.prefs.rightDrawerOpen;
   readonly rightDrawerPanels = this.prefs.rightDrawerPanels;
   readonly rightDrawerWidth = this.prefs.rightDrawerWidth;
-  readonly density = this.prefs.density;
 
   /** Command palette (ephemeral, never persisted). */
   readonly commandPaletteOpen = signal(false);
@@ -102,10 +102,6 @@ export class ShellStore {
 
   setRightDrawerWidth(px: number): void {
     this.prefs.setRightDrawerWidth(px);
-  }
-
-  toggleDensity(): void {
-    this.prefs.toggleDensity();
   }
 
   /** Walk to the deepest activated route and read its `data.screen`. */

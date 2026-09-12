@@ -484,11 +484,11 @@ export const en = {
   'drawer.contextNone': 'No turn yet',
 
   // F6-4: compaction
-  'chat.compact': 'Compact',
+  'chat.compact': 'Compact context',
   'chat.compacting': 'Compacting…',
   'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
   'chat.compactIdle': 'Compaction needs an idle session with a few messages',
-  'palette.compactSession': 'Compact context now',
+  'palette.compactSession': 'Compact context',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'No pricing known for the model(s) used in this session',

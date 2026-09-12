@@ -476,11 +476,11 @@ export const uk: Record<MessageKey, string> = {
   'drawer.contextNone': 'Ще немає ходів',
 
   // F6-4: compaction
-  'chat.compact': 'Стиснути',
+  'chat.compact': 'Стиснути контекст',
   'chat.compacting': 'Стискання…',
   'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
   'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
-  'palette.compactSession': 'Стиснути контекст зараз',
+  'palette.compactSession': 'Стиснути контекст',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Ціни для моделей, використаних у цій сесії, невідомі',

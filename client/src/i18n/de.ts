@@ -476,11 +476,11 @@ export const de: Record<MessageKey, string> = {
   'drawer.contextNone': 'Noch kein Durchlauf',
 
   // F6-4: compaction
-  'chat.compact': 'Verdichten',
+  'chat.compact': 'Kontext verdichten',
   'chat.compacting': 'Verdichte…',
   'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
   'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
-  'palette.compactSession': 'Kontext jetzt verdichten',
+  'palette.compactSession': 'Kontext verdichten',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Für die in dieser Sitzung verwendeten Modelle sind keine Preise bekannt',

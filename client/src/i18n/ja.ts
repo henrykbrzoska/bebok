@@ -475,11 +475,11 @@ export const ja: Record<MessageKey, string> = {
   'drawer.contextNone': 'まだターンがありません',
 
   // F6-4: compaction
-  'chat.compact': '圧縮',
+  'chat.compact': 'コンテキストを圧縮',
   'chat.compacting': '圧縮中…',
   'chat.compactTitle': '古いメッセージを要約して新しいセッションにまとめる（コンテキスト圧縮）',
   'chat.compactIdle': '圧縮にはメッセージが数件ある待機中のセッションが必要です',
-  'palette.compactSession': '今すぐコンテキストを圧縮',
+  'palette.compactSession': 'コンテキストを圧縮',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'このセッションで使用したモデルの料金は不明です',

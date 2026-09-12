@@ -476,11 +476,11 @@ export const fr: Record<MessageKey, string> = {
   'drawer.contextNone': 'Aucun tour pour l\'instant',
 
   // F6-4: compaction
-  'chat.compact': 'Compacter',
+  'chat.compact': 'Compacter le contexte',
   'chat.compacting': 'Compactage…',
   'chat.compactTitle': 'Résumer les anciens messages dans une nouvelle session (compactage du contexte)',
   'chat.compactIdle': 'Le compactage nécessite une session inactive avec quelques messages',
-  'palette.compactSession': 'Compacter le contexte maintenant',
+  'palette.compactSession': 'Compacter le contexte',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Tarif inconnu pour les modèles utilisés dans cette session',

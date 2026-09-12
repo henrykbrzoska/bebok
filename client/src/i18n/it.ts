@@ -476,11 +476,11 @@ export const it: Record<MessageKey, string> = {
   'drawer.contextNone': 'Nessun turno ancora',
 
   // F6-4: compaction
-  'chat.compact': 'Compatta',
+  'chat.compact': 'Compatta contesto',
   'chat.compacting': 'Compattazione…',
   'chat.compactTitle': 'Riassumi i messaggi precedenti in una nuova sessione (compattazione del contesto)',
   'chat.compactIdle': 'La compattazione richiede una sessione inattiva con alcuni messaggi',
-  'palette.compactSession': 'Compatta il contesto ora',
+  'palette.compactSession': 'Compatta contesto',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Prezzo sconosciuto per i modelli usati in questa sessione',

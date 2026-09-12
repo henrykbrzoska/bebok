@@ -4,22 +4,6 @@
 </div>
 
 <div class="card">
-  <h3>{{ t('settings.densityTitle') }}</h3>
-  <p class="card-sub">{{ t('settings.densityHint') }}</p>
-  <div class="segmented" role="radiogroup" [attr.aria-label]="t('settings.densityTitle')">
-    @for (option of densities; track option) {
-      <button
-        type="button"
-        role="radio"
-        [attr.aria-checked]="density() === option"
-        [class.active]="density() === option"
-        (click)="setDensity(option)"
-      >{{ densityLabel(option) }}</button>
-    }
-  </div>
-</div>
-
-<div class="card">
   <h3>{{ t('settings.toolCallsTitle') }}</h3>
   <p class="card-sub">{{ t('settings.toolCallsHint') }}</p>
   <label class="toggle-row">
