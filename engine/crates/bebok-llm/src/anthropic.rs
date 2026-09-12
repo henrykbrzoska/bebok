@@ -97,13 +97,13 @@ pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
         "tools": tools,
         "stream": true,
     });
-    if let Some(budget) = req.thinking.anthropic_budget() {
-        if let Value::Object(map) = &mut body {
-            map.insert(
-                "thinking".to_string(),
-                serde_json::json!({ "type": "enabled", "budget_tokens": budget }),
-            );
-        }
+    if let Some(budget) = req.thinking.anthropic_budget()
+        && let Value::Object(map) = &mut body
+    {
+        map.insert(
+            "thinking".to_string(),
+            serde_json::json!({ "type": "enabled", "budget_tokens": budget }),
+        );
     }
     body
 }

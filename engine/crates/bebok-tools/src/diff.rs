@@ -1,4 +1,4 @@
-﻿use async_trait::async_trait;
+use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::tool::{Tool, ToolCtx, ToolOutput};
@@ -240,8 +240,16 @@ fn unified(ops: &[Op<'_>], label_a: &str, label_b: &str, context: usize) -> Stri
             .count();
 
         // Unified diff uses the line *before* the range when the range is empty.
-        let old_start = if old_count == 0 { old_before } else { old_before + 1 };
-        let new_start = if new_count == 0 { new_before } else { new_before + 1 };
+        let old_start = if old_count == 0 {
+            old_before
+        } else {
+            old_before + 1
+        };
+        let new_start = if new_count == 0 {
+            new_before
+        } else {
+            new_before + 1
+        };
 
         out.push_str(&format!(
             "@@ -{old_start},{old_count} +{new_start},{new_count} @@\n"

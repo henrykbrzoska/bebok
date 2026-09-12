@@ -432,4 +432,13 @@ export const zh: Record<MessageKey, string> = {
   'browser.selectThis': '选择此文件夹',
   'browser.cancel': '取消',
   'start.recentProjects': '最近的项目',
+  'projectSwitcher.title': '项目',
+  'projectSwitcher.add': '添加项目…',
+  'projectSwitcher.empty': '尚无已注册的项目。',
+  'projectSwitcher.lastOpened': '上次打开于 {time}',
+  'projectSwitcher.never': '从未',
+  'projectSwitcher.pin': '固定项目',
+  'projectSwitcher.unpin': '取消固定项目',
+  'projectSwitcher.remove': '移除项目',
+  'projectSwitcher.removeConfirm': '从项目注册表中移除 {name}？不会删除磁盘上的文件。',
 };

@@ -147,10 +147,10 @@ impl InstanceStore {
 
         // Drop the on-disk session directory (session.json + msg-*.json).
         let disk_dir = state.disk_dir().to_path_buf();
-        if disk_dir.exists() {
-            if let Err(e) = tokio::fs::remove_dir_all(&disk_dir).await {
-                tracing::error!("failed to remove session dir {}: {e}", disk_dir.display());
-            }
+        if disk_dir.exists()
+            && let Err(e) = tokio::fs::remove_dir_all(&disk_dir).await
+        {
+            tracing::error!("failed to remove session dir {}: {e}", disk_dir.display());
         }
 
         // Append-only index entry so the deletion itself is auditable.

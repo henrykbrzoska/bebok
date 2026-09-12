@@ -31,7 +31,10 @@ fn echo_command() -> CommandSpec {
 fn streamed_echo_command() -> CommandSpec {
     CommandSpec {
         program: "cmd".to_string(),
-        args: vec!["/c".to_string(), "timeout /t 1 /nobreak >nul & echo hello".to_string()],
+        args: vec![
+            "/c".to_string(),
+            "timeout /t 1 /nobreak >nul & echo hello".to_string(),
+        ],
     }
 }
 

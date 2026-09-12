@@ -89,17 +89,20 @@ impl Tool for Stat {
         out.push_str(&format!("type:      {kind}{target_note}\n"));
         out.push_str(&format!("size:      {} bytes\n", meta.len()));
         out.push_str(&format!("modified:  {modified}\n"));
-        if modified != "unknown" {
-            if let Ok(m) = modified.parse::<u64>() {
-                out.push_str(&format!("age:       {}s ago\n", now.saturating_sub(m)));
-            }
+        if modified != "unknown"
+            && let Ok(m) = modified.parse::<u64>()
+        {
+            out.push_str(&format!("age:       {}s ago\n", now.saturating_sub(m)));
         }
         out.push_str(&format!("readonly:  {}\n", meta.permissions().readonly()));
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            out.push_str(&format!("mode:      {:o}\n", meta.permissions().mode() & 0o7777));
+            out.push_str(&format!(
+                "mode:      {:o}\n",
+                meta.permissions().mode() & 0o7777
+            ));
         }
 
         ToolOutput::new(out.trim_end().to_string(), format!("stat {path}"))

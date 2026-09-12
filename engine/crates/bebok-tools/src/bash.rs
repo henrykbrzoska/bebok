@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::process::Command;
+use tokio::time::{Duration, timeout};
 
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
@@ -24,6 +25,12 @@ impl Tool for Bash {
                 "command": {
                     "type": "string",
                     "description": "The shell command to execute (passed to `sh -c` on Unix, `cmd /c` on Windows)."
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Maximum execution time in milliseconds (default 120000, maximum 600000).",
+                    "minimum": 1000,
+                    "maximum": 600000
                 }
             },
             "required": ["command"]
@@ -34,6 +41,11 @@ impl Tool for Bash {
         let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
             return ToolOutput::new("error: missing required parameter 'command'", "bash");
         };
+        let timeout_ms = args
+            .get("timeout")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000)
+            .clamp(1_000, 600_000);
 
         // `sh -c` on Unix, `cmd /c` on Windows (there is no `sh` there).
         let (shell, flag) = shell_command();
@@ -49,7 +61,13 @@ impl Tool for Bash {
             _ = ctx.abort.cancelled() => {
                 return ToolOutput::new("aborted", "bash");
             }
-            out = child => out,
+            out = timeout(Duration::from_millis(timeout_ms), child) => match out {
+                Ok(out) => out,
+                Err(_) => return ToolOutput::new(
+                    format!("command timed out after {timeout_ms} ms"),
+                    "bash",
+                ),
+            },
         };
 
         match output {
@@ -70,7 +88,7 @@ impl Tool for Bash {
                     let code = out.status.code().unwrap_or(-1);
                     text = format!("command failed (exit code {code}):\n{text}");
                 } else if text.is_empty() {
-                    text = format!("(exit code 0)");
+                    text = "(exit code 0)".to_string();
                 }
                 ToolOutput::new(text, format!("bash {command}"))
             }
@@ -110,8 +128,10 @@ fn shell_command() -> (String, &'static str) {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::shell_command;
+    use super::{Bash, shell_command};
+    use crate::tool::{Tool, tool_ctx};
     use std::sync::{Mutex, OnceLock};
+    use tokio_util::sync::CancellationToken;
 
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -125,5 +145,29 @@ mod tests {
             Some(value) => unsafe { std::env::set_var("BEBOK_SHELL", value) },
             None => unsafe { std::env::remove_var("BEBOK_SHELL") },
         }
+    }
+
+    #[tokio::test]
+    async fn command_timeout_is_enforced() {
+        let command = if cfg!(windows) {
+            "ping -n 5 127.0.0.1 >NUL"
+        } else {
+            "sleep 4"
+        };
+        let output = Bash
+            .execute(
+                tool_ctx(
+                    std::env::temp_dir(),
+                    "timeout-test".into(),
+                    CancellationToken::new(),
+                ),
+                serde_json::json!({"command": command, "timeout": 1000}),
+            )
+            .await;
+        assert!(
+            output.text.contains("timed out after 1000 ms"),
+            "{}",
+            output.text
+        );
     }
 }

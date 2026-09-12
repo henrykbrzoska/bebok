@@ -38,13 +38,10 @@ impl Tool for Touch {
         };
 
         let full = ctx.root.join(path);
-        if let Some(parent) = full.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return ToolOutput::new(
-                    format!("error: failed to create parent dir: {e}"),
-                    "touch",
-                );
-            }
+        if let Some(parent) = full.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return ToolOutput::new(format!("error: failed to create parent dir: {e}"), "touch");
         }
 
         // `create` + `append` opens without truncating an existing file.

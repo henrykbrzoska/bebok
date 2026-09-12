@@ -433,4 +433,13 @@ export const pl: Record<MessageKey, string> = {
   'browser.selectThis': 'Wybierz ten folder',
   'browser.cancel': 'Anuluj',
   'start.recentProjects': 'Ostatnie projekty',
+  'projectSwitcher.title': 'Projekty',
+  'projectSwitcher.add': 'Dodaj projekt…',
+  'projectSwitcher.empty': 'Brak zarejestrowanych projektów.',
+  'projectSwitcher.lastOpened': 'ostatnio otwarty {time}',
+  'projectSwitcher.never': 'nigdy',
+  'projectSwitcher.pin': 'Przypnij projekt',
+  'projectSwitcher.unpin': 'Odepnij projekt',
+  'projectSwitcher.remove': 'Usuń projekt',
+  'projectSwitcher.removeConfirm': 'Usunąć {name} z rejestru projektów? Pliki na dysku nie zostaną usunięte.',
 };

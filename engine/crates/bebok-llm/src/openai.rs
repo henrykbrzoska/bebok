@@ -29,15 +29,29 @@ pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
         "tools": tools,
         "stream": true,
         "stream_options": { "include_usage": true },
-        "max_tokens": req.max_tokens,
     });
-    if let Some(effort) = req.thinking.openai_effort() {
-        if let Value::Object(map) = &mut body {
-            map.insert(
-                "reasoning_effort".to_string(),
-                Value::String(effort.to_string()),
-            );
-        }
+    // The official OpenAI Chat Completions endpoint uses
+    // `max_completion_tokens` for current models. Keep `max_tokens` for the
+    // other OpenAI-compatible servers, which may not support the newer field.
+    let token_limit_key = if req.model.starts_with("openai/")
+        || model.starts_with("gpt-5")
+        || model.starts_with("gpt-6")
+        || ["o1", "o3", "o4"]
+            .iter()
+            .any(|prefix| model.starts_with(prefix))
+    {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
+    body[token_limit_key] = serde_json::json!(req.max_tokens);
+    if let Some(effort) = req.thinking.openai_effort()
+        && let Value::Object(map) = &mut body
+    {
+        map.insert(
+            "reasoning_effort".to_string(),
+            Value::String(effort.to_string()),
+        );
     }
     body
 }
@@ -142,6 +156,41 @@ impl OpenAiProvider {
         self.headers = headers;
         self
     }
+
+    fn request(&self, body: &Value) -> reqwest::RequestBuilder {
+        let mut request = self
+            .client
+            .post(&self.endpoint)
+            .header("content-type", "application/json");
+        if let Some(key) = self.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
+            request = request.header("authorization", format!("Bearer {key}"));
+        }
+        for (name, value) in &self.headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        request.json(body)
+    }
+}
+
+/// Some Chat Completions models reject reasoning with function tools. Their
+/// 400 response explicitly asks for `reasoning_effort: none` or Responses API.
+/// Retry that rejected request once so tool-enabled agents can still run.
+fn needs_tools_without_reasoning_retry(status: u16, response: &str, request: &Value) -> bool {
+    if status != 400
+        || request["reasoning_effort"] == "none"
+        || !request["tools"]
+            .as_array()
+            .is_some_and(|tools| !tools.is_empty())
+    {
+        return false;
+    }
+    let Ok(error) = serde_json::from_str::<Value>(response) else {
+        return false;
+    };
+    error["error"]["param"] == "reasoning_effort"
+        && error["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Function tools with reasoning_effort"))
 }
 
 #[async_trait]
@@ -155,20 +204,23 @@ impl Provider for OpenAiProvider {
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
         let model = model_name(&req.model).to_string();
-        let body = openai_body(&req, &model);
-
-        let mut request = self
-            .client
-            .post(&self.endpoint)
-            .header("content-type", "application/json");
-        if let Some(key) = self.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
-            request = request.header("authorization", format!("Bearer {key}"));
+        let mut body = openai_body(&req, &model);
+        let mut resp = self.request(&body).send().await?;
+        if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+            let retry_after = retry_after_from_headers(resp.headers());
+            let text = resp.text().await.unwrap_or_default();
+            if needs_tools_without_reasoning_retry(400, &text, &body) {
+                tracing::warn!(model = %model, "Chat Completions rejected reasoning with tools; retrying with reasoning_effort=none");
+                body["reasoning_effort"] = Value::String("none".to_string());
+                resp = self.request(&body).send().await?;
+            } else {
+                return Err(LlmError::Http {
+                    status: 400,
+                    body: text,
+                    retry_after,
+                });
+            }
         }
-        for (name, value) in &self.headers {
-            request = request.header(name.as_str(), value.as_str());
-        }
-
-        let resp = request.json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let retry_after = retry_after_from_headers(resp.headers());
@@ -430,11 +482,11 @@ impl OpenAiParser {
         let delta = choice.get("delta").cloned().unwrap_or(Value::Null);
         let finish = choice.get("finish_reason").and_then(|x| x.as_str());
 
-        if let Some(content) = delta.get("content").and_then(|x| x.as_str()) {
-            if !content.is_empty() {
-                self.ready
-                    .push_back(Ok(StreamEvent::Text(content.to_string())));
-            }
+        if let Some(content) = delta.get("content").and_then(|x| x.as_str())
+            && !content.is_empty()
+        {
+            self.ready
+                .push_back(Ok(StreamEvent::Text(content.to_string())));
         }
 
         // Reasoning content (DeepSeek / some OpenAI-compatible models).
@@ -442,11 +494,10 @@ impl OpenAiParser {
             .get("reasoning_content")
             .and_then(|x| x.as_str())
             .or_else(|| delta.get("reasoning").and_then(|x| x.as_str()))
+            && !reasoning.is_empty()
         {
-            if !reasoning.is_empty() {
-                self.ready
-                    .push_back(Ok(StreamEvent::Thinking(reasoning.to_string())));
-            }
+            self.ready
+                .push_back(Ok(StreamEvent::Thinking(reasoning.to_string())));
         }
 
         if let Some(calls) = delta.get("tool_calls").and_then(|x| x.as_array()) {
@@ -488,7 +539,7 @@ impl OpenAiParser {
 
 #[cfg(test)]
 mod tests {
-    use super::openai_body;
+    use super::{needs_tools_without_reasoning_retry, openai_body};
     use crate::provider::{ChatMessage, ChatRequest, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
@@ -515,6 +566,58 @@ mod tests {
 
         let max = openai_body(&req(Thinking::Max), "gpt-5");
         assert_eq!(max["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn body_uses_completion_token_limit_for_openai_models() {
+        let mut request = req(Thinking::Off);
+        request.model = "openai/gpt-5.6-luna".to_string();
+        let body = openai_body(&request, "gpt-5.6-luna");
+        assert_eq!(body["max_completion_tokens"], 128);
+        assert!(body.get("max_tokens").is_none());
+
+        request.model = "openai/gpt-4o".to_string();
+        let body = openai_body(&request, "gpt-4o");
+        assert_eq!(body["max_completion_tokens"], 128);
+        assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn body_keeps_legacy_token_limit_for_compatible_providers() {
+        let mut request = req(Thinking::Off);
+        request.model = "ollama/llama3".to_string();
+        let body = openai_body(&request, "llama3");
+        assert_eq!(body["max_tokens"], 128);
+        assert!(body.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn retries_only_the_specific_reasoning_with_tools_rejection() {
+        let request = serde_json::json!({
+            "tools": [{"type": "function"}],
+            "reasoning_effort": "high",
+        });
+        let rejection = serde_json::json!({"error": {
+            "message": "Function tools with reasoning_effort are not supported for gpt-5.6-luna in /v1/chat/completions.",
+            "param": "reasoning_effort",
+        }})
+        .to_string();
+        assert!(needs_tools_without_reasoning_retry(
+            400, &rejection, &request
+        ));
+        assert!(!needs_tools_without_reasoning_retry(
+            401, &rejection, &request
+        ));
+        assert!(!needs_tools_without_reasoning_retry(
+            400,
+            &rejection,
+            &serde_json::json!({"tools": []}),
+        ));
+        assert!(!needs_tools_without_reasoning_retry(
+            400,
+            &rejection,
+            &serde_json::json!({"tools": [{"type": "function"}], "reasoning_effort": "none"}),
+        ));
     }
 }
 

@@ -442,6 +442,15 @@ export const en = {
   'browser.selectThis': 'Select this folder',
   'browser.cancel': 'Cancel',
   'start.recentProjects': 'Recent projects',
+  'projectSwitcher.title': 'Projects',
+  'projectSwitcher.add': 'Add project…',
+  'projectSwitcher.empty': 'No registered projects yet.',
+  'projectSwitcher.lastOpened': 'last opened {time}',
+  'projectSwitcher.never': 'never',
+  'projectSwitcher.pin': 'Pin project',
+  'projectSwitcher.unpin': 'Unpin project',
+  'projectSwitcher.remove': 'Remove project',
+  'projectSwitcher.removeConfirm': 'Remove {name} from the project registry? Files on disk are not deleted.',
 };
 
 export type MessageKey = keyof typeof en;

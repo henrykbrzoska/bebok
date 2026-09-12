@@ -163,17 +163,16 @@ fn parse_scalar(s: &str) -> Value {
         return Value::Null;
     }
     // JSON-ish values: quoted strings, arrays, objects, bools, numbers.
-    if t.starts_with('"')
+    if (t.starts_with('"')
         || t.starts_with('[')
         || t.starts_with('{')
         || t == "true"
         || t == "false"
         || t == "null"
-        || t.parse::<f64>().is_ok()
+        || t.parse::<f64>().is_ok())
+        && let Ok(v) = serde_json::from_str(t)
     {
-        if let Ok(v) = serde_json::from_str(t) {
-            return v;
-        }
+        return v;
     }
     Value::String(t.to_string())
 }

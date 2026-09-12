@@ -288,6 +288,7 @@ export class PermissionPopup implements OnDestroy {
   private readonly allowBtn = viewChild<ElementRef<HTMLButtonElement>>('allowBtn');
 
   private unsubscribe: () => void;
+  private readonly resolvedIds = new Set<string>();
 
   constructor() {
     this.unsubscribe = this.events.onEvent((event: EngineEvent) => this.handle(event));
@@ -295,8 +296,12 @@ export class PermissionPopup implements OnDestroy {
     // asks from the previous one. Within the same directory we keep asks so
     // sub-agent (child-session) prompts survive parent tab switches.
     effect(() => {
-      this.directory();
+      const directory = this.directory();
       this.asks.set([]);
+      this.resolvedIds.clear();
+      if (directory) {
+        void this.restorePending(directory);
+      }
     });
     // A new prompt takes focus so keyboard users land on Allow (B15).
     effect(() => {
@@ -313,6 +318,37 @@ export class PermissionPopup implements OnDestroy {
 
   ngOnDestroy(): void {
     this.unsubscribe();
+  }
+
+  private async restorePending(directory: string): Promise<void> {
+    try {
+      const pending = await this.engine.pendingPermissions(directory);
+      if (this.directory() !== directory) {
+        return;
+      }
+      this.asks.update((list) => {
+        const seen = new Set(list.map((item) => item.requestID));
+        const restored = [...list];
+        for (const raw of pending) {
+          const asked = parseAsked(raw as unknown as Record<string, unknown>);
+          if (!asked || !raw.sessionID || seen.has(asked.requestID)
+              || this.resolvedIds.has(asked.requestID)) {
+            continue;
+          }
+          seen.add(asked.requestID);
+          restored.push({
+            ...asked,
+            sessionID: raw.sessionID,
+            inputText: prettyJson(asked.input),
+            askedAt: Date.now(),
+            busy: false,
+          });
+        }
+        return restored;
+      });
+    } catch {
+      // The live SSE path remains usable if a reconnect snapshot fails.
+    }
   }
 
   /** Focus trap + Escape (= Deny), keeping the prompt keyboard-complete. */
@@ -379,6 +415,7 @@ export class PermissionPopup implements OnDestroy {
     } else if (event.type === 'permission.resolved') {
       const requestID = event.properties?.['requestID'];
       if (typeof requestID === 'string') {
+        this.resolvedIds.add(requestID);
         this.asks.update((list) => list.filter((a) => a.requestID !== requestID));
       }
     }
@@ -399,6 +436,7 @@ export class PermissionPopup implements OnDestroy {
     } catch (err) {
       console.error('permission decision failed', err);
     } finally {
+      this.resolvedIds.add(item.requestID);
       this.asks.update((list) => list.filter((a) => a.requestID !== item.requestID));
     }
   }

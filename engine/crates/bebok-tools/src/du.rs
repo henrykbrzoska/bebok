@@ -72,7 +72,7 @@ impl Tool for Du {
             Err(e) => return ToolOutput::new(format!("error: {e}"), "du"),
         };
 
-        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        rows.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         let mut out = String::new();
         out.push_str(&format!("{}  {path} (total)\n", human(total)));

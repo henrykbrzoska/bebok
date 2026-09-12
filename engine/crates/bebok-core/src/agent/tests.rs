@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::agent::{run_turn, spawn_agent_watcher};
     use crate::event::Event;
@@ -1024,9 +1025,9 @@ if __name__ == "__main__":
         // turn, then unregister so no other test sees it.
         let host = PluginHost::global();
         host.register(Arc::new(VetoBash)).await;
-        let result = {
+        {
             session.try_begin_turn();
-            let out = tokio::time::timeout(
+            tokio::time::timeout(
                 Duration::from_secs(10),
                 run_turn(
                     session.clone(),
@@ -1043,9 +1044,7 @@ if __name__ == "__main__":
             .expect("turn must finish")
             .unwrap();
             session.end_turn();
-            out
         };
-        let _ = result;
         host.unregister("test-veto-bash").await;
 
         // The plugin vetoed the call before execution: file untouched, part is

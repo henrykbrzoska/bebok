@@ -31,7 +31,11 @@ pub async fn log_http(
         let status = response.status();
         state.debug.log(
             "http",
-            if status.is_success() { "response" } else { "error" },
+            if status.is_success() {
+                "response"
+            } else {
+                "error"
+            },
             format!("{method} {path}{query}"),
             format!("{} ({}ms)", status.as_u16(), start.elapsed().as_millis()),
         );

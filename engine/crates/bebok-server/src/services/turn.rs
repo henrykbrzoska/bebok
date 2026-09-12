@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use axum::http::StatusCode;
 use axum::Json;
+use axum::http::StatusCode;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -110,18 +110,13 @@ pub async fn prompt_turn(
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     // Validate image attachments before claiming the turn slot.
     let image_parts = validate_images(body.images)?;
-    let session = state
-        .store
-        .open_session(id)
-        .await
-        .map_err(ApiError::from)?;
+    let session = state.store.open_session(id).await.map_err(ApiError::from)?;
 
     // One turn per session: synchronously claim the slot -> 409 otherwise.
     // TurnSlot is an RAII guard: if any of the fallible steps below return
     // early the slot is automatically released.
-    let mut slot = TurnSlot::new(session.clone()).ok_or_else(|| {
-        ApiError::conflict("session busy: a turn is already running")
-    })?;
+    let mut slot = TurnSlot::new(session.clone())
+        .ok_or_else(|| ApiError::conflict("session busy: a turn is already running"))?;
 
     let instance = state
         .store
@@ -133,10 +128,10 @@ pub async fn prompt_turn(
 
     // The user may switch the agent mid-chat: an explicit `agent` on the prompt
     // wins and is persisted for subsequent turns.
-    if let Some(agent) = body.agent.as_deref().filter(|a| !a.trim().is_empty()) {
-        if agent != meta.agent {
-            session.set_agent(agent).await;
-        }
+    if let Some(agent) = body.agent.as_deref().filter(|a| !a.trim().is_empty())
+        && agent != meta.agent
+    {
+        session.set_agent(agent).await;
     }
     let effective_agent = body
         .agent
@@ -250,7 +245,7 @@ pub async fn prompt_turn(
                 };
                 // Unstick GUI clients: the normal end-of-turn `session.updated`
                 // never fires on this path (SPEC §3.11 fan-out).
-                let _ = bus.publish(
+                bus.publish(
                     bebok_core::event::Event::new(
                         "session.updated",
                         task_state.directory(),
@@ -291,8 +286,7 @@ fn assemble_prompt(
     // Surface mid-chat environment changes (MCP/skill/yolo toggles) to the model.
     let notes = instance.take_context_notes();
     if !notes.is_empty() {
-        let mut block =
-            "Recent environment changes during this conversation:\n".to_string();
+        let mut block = "Recent environment changes during this conversation:\n".to_string();
         for note in &notes {
             block.push_str(&format!("- {note}\n"));
         }
@@ -312,7 +306,6 @@ fn _keep_core_error(_: &CoreError) {}
 /// Image limits live in `bebok_core::agent::images` (single source of truth,
 /// shared with the `task`/`fleet` tools); this module only adapts them to
 /// the HTTP layer (`ImageInput` -> `AgentImageInput`, `String` -> `ApiError`).
-
 /// Validate prompt image attachments -> session `Part::Image` list.
 ///
 /// Delegates to the shared `bebok_core::agent::images` validator (single
@@ -360,7 +353,12 @@ mod tests {
     #[test]
     fn five_images_ok_sixth_is_400() {
         let five: Vec<ImageInput> = (0..5).map(|_| img("image/png", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")).collect();
-        assert_eq!(validate_images(five).unwrap_or_else(|e| panic!("{}", msg(e))).len(), 5);
+        assert_eq!(
+            validate_images(five)
+                .unwrap_or_else(|e| panic!("{}", msg(e)))
+                .len(),
+            5
+        );
         let six: Vec<ImageInput> = (0..6).map(|_| img("image/png", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")).collect();
         let err = match validate_images(six) {
             Ok(_) => panic!("expected too-many-images error"),
@@ -371,7 +369,10 @@ mod tests {
 
     #[test]
     fn bad_mime_is_400() {
-        let err = match validate_images(vec![img("image/bmp", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")]) {
+        let err = match validate_images(vec![img(
+            "image/bmp",
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        )]) {
             Ok(_) => panic!("expected bad-mime error"),
             Err(e) => msg(e),
         };

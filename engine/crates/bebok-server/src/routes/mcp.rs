@@ -1,7 +1,7 @@
 //! MCP routes: `GET /mcp` + `POST /mcp/{name}/toggle`.
 
-use axum::extract::{Path, Query, State};
 use axum::Json;
+use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
@@ -96,5 +96,7 @@ pub async fn toggle_mcp(
         .await
         .map_err(|e| err_response(&e))?;
     let servers = instance.mcp.status();
-    Ok(Json(serde_json::json!({ "name": name, "enabled": enabled, "servers": servers })))
+    Ok(Json(
+        serde_json::json!({ "name": name, "enabled": enabled, "servers": servers }),
+    ))
 }

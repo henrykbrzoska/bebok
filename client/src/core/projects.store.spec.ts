@@ -99,6 +99,17 @@ describe('DirectoryPicker (F5-4)', () => {
     expect(picker.request()).toBeNull();
   });
 
+  it('falls back to the in-app picker when the Tauri dialog is unavailable', async () => {
+    const picker = setup('tauri');
+    const engine = TestBed.inject(EngineClient) as unknown as { pickDirectory: jasmine.Spy };
+    engine.pickDirectory.and.returnValue(Promise.reject(new Error('dialog capability unavailable')));
+    const pending = picker.pick('title');
+    await Promise.resolve();
+    expect(picker.request()?.title).toBe('title');
+    picker.resolve('  C:\\work  ');
+    await expectAsync(pending).toBeResolvedTo('C:\\work');
+  });
+
   it('resolves with the path the in-app browser confirms elsewhere', async () => {
     const picker = setup('http');
     const pending = picker.pick('title');

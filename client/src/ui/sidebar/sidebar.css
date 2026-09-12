@@ -26,22 +26,22 @@
   align-items: center;
   gap: var(--space-9);
   padding: var(--space-14) var(--space-14) var(--space-10);
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, var(--surface)), var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
   flex: none;
 }
 
 .logo {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-control-sm);
-  background: var(--accent);
+  width: 27px;
+  height: 27px;
   flex: none;
+  filter: drop-shadow(0 2px 4px #e8935a55);
 }
 
 .brand {
   font-weight: 700;
-  font-size: var(--fs-14);
-  letter-spacing: -0.01em;
+  font-size: 15px;
+  letter-spacing: -0.025em;
   white-space: nowrap;
 }
 

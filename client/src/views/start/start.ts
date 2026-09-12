@@ -179,9 +179,14 @@ export class StartView implements OnInit, OnDestroy {
     if (!picked) {
       return;
     }
-    this.directory.set(picked);
-    await this.projects.add(picked);
-    await this.project.select(picked, true);
+    const added = await this.projects.add(picked);
+    if (!added) {
+      this.error.set(this.projects.error() ?? this.t('browser.invalidPath'));
+      return;
+    }
+    const path = (await this.projects.open(added.id)) ?? added.path;
+    this.directory.set(path);
+    await this.project.select(path, true);
   }
 
   /** A recent-project chip: fill the input and load that directory at once. */

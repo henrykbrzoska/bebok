@@ -288,8 +288,7 @@ pub fn prune_for_budget(
             break;
         }
         if let ContentPart::Image { media_type, .. } = &chat[i].content_parts[j] {
-            let marker =
-                format!("[image omitted to fit the context budget: {media_type}]");
+            let marker = format!("[image omitted to fit the context budget: {media_type}]");
             tokens = tokens.saturating_sub(crate::context::IMAGE_TOKENS_PER_IMAGE)
                 + crate::context::estimate_tokens(&marker);
             chat[i].content_parts[j] = ContentPart::Text { text: marker };
@@ -409,10 +408,7 @@ mod image_tests {
             }],
         }];
         let out = prune_for_budget(msgs, "", 100_000);
-        assert!(matches!(
-            out[0].content_parts[0],
-            ContentPart::Image { .. }
-        ));
+        assert!(matches!(out[0].content_parts[0], ContentPart::Image { .. }));
     }
 
     #[test]
@@ -538,10 +534,7 @@ mod image_tests {
         // Anthropic Messages shape: two image blocks followed by the text block.
         let anthropic = bebok_llm::to_anthropic_messages(&req.messages);
         let blocks = anthropic[0]["content"].as_array().unwrap();
-        let types: Vec<&str> = blocks
-            .iter()
-            .filter_map(|b| b["type"].as_str())
-            .collect();
+        let types: Vec<&str> = blocks.iter().filter_map(|b| b["type"].as_str()).collect();
         assert_eq!(types, vec!["image", "image", "text"], "{anthropic:?}");
         assert_eq!(blocks[0]["source"]["media_type"], "image/png");
         assert_eq!(blocks[0]["source"]["data"], PNG_1X1);

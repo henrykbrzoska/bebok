@@ -51,6 +51,7 @@
             <div class="placeholder">{{ t('chat.loading') }}</div>
           } @else if (filteredMessages().length === 0 && pending().length === 0) {
             <div class="placeholder empty-state">
+              <img class="empty-logo" src="/logo.svg" alt="" aria-hidden="true" />
               <p class="placeholder-title">{{ t('chat.noMessages') }}</p>
               <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
             </div>
@@ -116,7 +117,7 @@
 
           @if (running() && !loading()) {
             <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
-              <span class="typing-dot" aria-hidden="true"></span>
+              <img class="typing-logo" src="/logo.svg" alt="" aria-hidden="true" />
               <span class="typing-text">{{ t('chat.typing') }}</span>
               <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
             </div>

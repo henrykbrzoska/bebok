@@ -121,6 +121,12 @@ The mobile client connects to a remote engine over LAN (see the connect
 screen). The PTY surface (/pty*) is compiled out of Android engine builds,
 so the mobile client has no terminal.
 
+## Projects
+
+A project is a registered directory with a friendly name. Bebok stores the registry in
+`~/.config/bebok/config.json` under the `projects` key. Desktop uses the native directory
+dialog; browser and Capacitor clients use Bebok's in-app directory browser.
+
 ### Tests
 
 cd engine && cargo test --workspace   # engine

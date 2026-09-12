@@ -36,7 +36,10 @@ pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
 pub use exec::{ToolOutcome, fail_tool};
 pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};
-pub use images::{AgentImageInput, ALLOWED_IMAGE_TYPES, MAX_IMAGES_PER_PROMPT, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES, model_supports_images, validate_agent_images};
+pub use images::{
+    ALLOWED_IMAGE_TYPES, AgentImageInput, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES,
+    MAX_IMAGES_PER_PROMPT, model_supports_images, validate_agent_images,
+};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
 pub use prompt_env::host_os_note;

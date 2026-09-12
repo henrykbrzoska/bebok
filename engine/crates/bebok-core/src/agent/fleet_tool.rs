@@ -472,8 +472,14 @@ impl Tool for FleetTool {
         // existing event shape; heterogeneous reports mode + task names.
         let wanted_names = clean_names(args.names);
         let wanted_agents = clean_agents(args.agents);
-        let (work, event_props): (Vec<(crate::config::FleetMember, String, Vec<crate::session::Part>)>, Value) = if hetero_mode
-        {
+        let (work, event_props): (
+            Vec<(
+                crate::config::FleetMember,
+                String,
+                Vec<crate::session::Part>,
+            )>,
+            Value,
+        ) = if hetero_mode {
             let resolved = match resolve_hetero_members(configured, &hetero_tasks) {
                 Ok(w) => w,
                 Err(msg) => return ToolOutput::new(msg, "fleet"),
@@ -487,7 +493,8 @@ impl Tool for FleetTool {
                 };
                 work_items.push((m, p, parts));
             }
-            let task_names: Vec<String> = work_items.iter().map(|(m, _, _)| m.name.clone()).collect();
+            let task_names: Vec<String> =
+                work_items.iter().map(|(m, _, _)| m.name.clone()).collect();
             let props = json!({
                 "mode": "heterogeneous",
                 "members": task_names.clone(),
@@ -518,7 +525,10 @@ impl Tool for FleetTool {
                 Ok(p) => p,
                 Err(e) => return ToolOutput::new(format!("fleet: {e}"), "fleet"),
             };
-            let items = selected.into_iter().map(|m| (m, prompt.clone(), broadcast_parts.clone())).collect();
+            let items = selected
+                .into_iter()
+                .map(|m| (m, prompt.clone(), broadcast_parts.clone()))
+                .collect();
             (items, props)
         };
         if work.is_empty() {
@@ -542,7 +552,16 @@ impl Tool for FleetTool {
         let futures: Vec<_> = work
             .iter()
             .map(|(member, task_prompt, images)| {
-                run_member(&store, &instance, &parent, &cfg, member, task_prompt, images.clone(), &ctx)
+                run_member(
+                    &store,
+                    &instance,
+                    &parent,
+                    &cfg,
+                    member,
+                    task_prompt,
+                    images.clone(),
+                    &ctx,
+                )
             })
             .collect();
         let results: Vec<MemberResult> = futures::future::join_all(futures).await;
@@ -709,12 +728,8 @@ async fn run_member(
         )
         .await;
     bus.publish(
-        crate::event::Event::new(
-            "task.started",
-            &child.directory().to_string(),
-            &ctx.session_id,
-        )
-        .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
+        crate::event::Event::new("task.started", child.directory(), &ctx.session_id)
+            .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
     );
 
     let result = run_turn(
@@ -758,18 +773,15 @@ async fn run_member(
 
     parent.unregister_child_task(&task_id).await;
     bus.publish(
-        crate::event::Event::new(
-            "task.ended",
-            &child.directory().to_string(),
-            &ctx.session_id,
-        )
-        .with_properties(json!({
-            "taskID": task_id,
-            "status": status,
-            "error": error_msg,
-            "childSessionID": child_session_id,
-            "name": name,
-        })),
+        crate::event::Event::new("task.ended", child.directory(), &ctx.session_id).with_properties(
+            json!({
+                "taskID": task_id,
+                "status": status,
+                "error": error_msg,
+                "childSessionID": child_session_id,
+                "name": name,
+            }),
+        ),
     );
 
     if abort.is_cancelled() {

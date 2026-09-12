@@ -1,10 +1,14 @@
 <section class="start">
   <div class="card connect-card" [class.error]="phase() === 'error'">
-    <h2>{{ t('start.connectTitle') }}</h2>
-    <p class="card-hint">
-      {{ t('start.connectHint') }}
-      <code>http://127.0.0.1:8787</code>).
-    </p>
+    <h2 class="branded-title"><img src="/logo.svg" alt="" aria-hidden="true" />{{ isTauri() ? t('start.localEngine') : t('start.connectTitle') }}</h2>
+    @if (isTauri()) {
+      <p class="card-hint">{{ t('start.localHint') }}</p>
+    } @else {
+      <p class="card-hint">
+        {{ t('start.connectHint') }}
+        <code>http://127.0.0.1:8787</code>).
+      </p>
+    }
 
     @if (showAddressForm() && !isTauri()) {
       <label class="field">

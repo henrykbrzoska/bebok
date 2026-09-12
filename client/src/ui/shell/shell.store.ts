@@ -56,6 +56,8 @@ export class ShellStore {
 
   /** Command palette (ephemeral, never persisted). */
   readonly commandPaletteOpen = signal(false);
+  /** Registered-project switcher (ephemeral, never persisted). */
+  readonly projectSwitcherOpen = signal(false);
 
   constructor() {
     this.refresh();
@@ -76,6 +78,18 @@ export class ShellStore {
 
   toggleCommandPalette(): void {
     this.commandPaletteOpen.update((open) => !open);
+  }
+
+  openProjectSwitcher(): void {
+    this.projectSwitcherOpen.set(true);
+  }
+
+  closeProjectSwitcher(): void {
+    this.projectSwitcherOpen.set(false);
+  }
+
+  toggleProjectSwitcher(): void {
+    this.projectSwitcherOpen.update((open) => !open);
   }
 
   toggleSidebar(): void {

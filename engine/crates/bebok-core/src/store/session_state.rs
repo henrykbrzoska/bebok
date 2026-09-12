@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -26,6 +27,11 @@ pub struct ChildTask {
     pub agent: String,
 }
 
+struct PendingPermissionRequest {
+    sender: oneshot::Sender<PermissionAnswer>,
+    properties: Value,
+}
+
 /// Per-session runtime state (metadata + transcript + turn lock).
 pub struct SessionState {
     id: Uuid,
@@ -42,7 +48,7 @@ pub struct SessionState {
     running: AtomicBool,
     abort: Mutex<Option<CancellationToken>>,
     /// Pending `ask` permission requests awaiting a client decision (M2).
-    pending_asks: Mutex<HashMap<String, oneshot::Sender<PermissionAnswer>>>,
+    pending_asks: Mutex<HashMap<String, PendingPermissionRequest>>,
     /// Session-scoped decision cache: identical `(tool, pattern)` is not asked
     /// twice within one session (M2).
     decision_cache: Mutex<HashMap<DecisionKey, CachedDecision>>,
@@ -411,11 +417,22 @@ impl SessionState {
         &self,
         request_id: &str,
         sender: oneshot::Sender<PermissionAnswer>,
+        properties: Value,
     ) {
+        self.pending_asks.lock().await.insert(
+            request_id.to_string(),
+            PendingPermissionRequest { sender, properties },
+        );
+    }
+
+    /// Snapshot unresolved asks for clients reconnecting after lost SSE events.
+    pub async fn pending_permission_requests(&self) -> Vec<Value> {
         self.pending_asks
             .lock()
             .await
-            .insert(request_id.to_string(), sender);
+            .values()
+            .map(|request| request.properties.clone())
+            .collect()
     }
 
     /// Drop a pending permission request (the turn moved on / aborted).
@@ -432,10 +449,10 @@ impl SessionState {
     ) -> ResolveOutcome {
         let sender = self.pending_asks.lock().await.remove(request_id);
         match sender {
-            Some(sender) => {
+            Some(request) => {
                 // If the turn ended/aborted in the meantime the receiver is
                 // gone and the answer is dropped silently.
-                let _ = sender.send(answer);
+                let _ = request.sender.send(answer);
                 ResolveOutcome::Resolved
             }
             None => ResolveOutcome::NotFound,

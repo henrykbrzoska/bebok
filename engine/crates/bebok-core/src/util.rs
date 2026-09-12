@@ -148,7 +148,7 @@ fn strip_ansi(text: &str) -> String {
             } else if chars.peek() == Some(&']') {
                 // OSC: ESC ] ... BEL or ESC \
                 chars.next(); // consume ']'
-                while let Some(ch) = chars.next() {
+                for ch in chars.by_ref() {
                     if ch == '\x07' || ch == '\x1b' {
                         break;
                     }

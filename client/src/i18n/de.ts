@@ -433,4 +433,13 @@ export const de: Record<MessageKey, string> = {
   'browser.selectThis': 'Diesen Ordner wählen',
   'browser.cancel': 'Abbrechen',
   'start.recentProjects': 'Zuletzt verwendete Projekte',
+  'projectSwitcher.title': 'Projekte',
+  'projectSwitcher.add': 'Projekt hinzufügen…',
+  'projectSwitcher.empty': 'Noch keine Projekte registriert.',
+  'projectSwitcher.lastOpened': 'zuletzt geöffnet {time}',
+  'projectSwitcher.never': 'nie',
+  'projectSwitcher.pin': 'Projekt anheften',
+  'projectSwitcher.unpin': 'Projekt lösen',
+  'projectSwitcher.remove': 'Projekt entfernen',
+  'projectSwitcher.removeConfirm': '{name} aus der Projektliste entfernen? Dateien auf dem Datenträger werden nicht gelöscht.',
 };

@@ -47,7 +47,10 @@ impl Tool for Uniq {
         let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
             return ToolOutput::new("error: missing required parameter 'path'", "uniq");
         };
-        let counts = args.get("counts").and_then(|v| v.as_bool()).unwrap_or(false);
+        let counts = args
+            .get("counts")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let full = ctx.root.join(path);
         let text = match tokio::fs::read_to_string(&full).await {

@@ -65,7 +65,10 @@ impl Tool for Sed {
             Err(e) => return ToolOutput::new(format!("error: {e}"), "sed"),
         };
 
-        let re = match RegexBuilder::new(&pattern).case_insensitive(ignore_case).build() {
+        let re = match RegexBuilder::new(&pattern)
+            .case_insensitive(ignore_case)
+            .build()
+        {
             Ok(r) => r,
             Err(e) => return ToolOutput::new(format!("error: invalid regex: {e}"), "sed"),
         };
@@ -107,7 +110,10 @@ impl Tool for Sed {
 
         let applied = if global { count } else { 1.min(count) };
         ToolOutput::new(
-            format!("edited {path} ({applied} substitution{})", if applied == 1 { "" } else { "s" }),
+            format!(
+                "edited {path} ({applied} substitution{})",
+                if applied == 1 { "" } else { "s" }
+            ),
             title,
         )
     }

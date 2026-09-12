@@ -52,10 +52,7 @@ impl Tool for Which {
             if is_executable(&direct) {
                 return ToolOutput::new(direct.to_string_lossy().to_string(), title);
             }
-            return ToolOutput::new(
-                format!("(not found) {command} is not an executable"),
-                title,
-            );
+            return ToolOutput::new(format!("(not found) {command} is not an executable"), title);
         }
 
         let mut found: Vec<String> = Vec::new();

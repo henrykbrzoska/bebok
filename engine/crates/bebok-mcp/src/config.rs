@@ -69,10 +69,7 @@ impl McpServerSpec {
         let enabled = obj.get("enabled").and_then(Value::as_bool).unwrap_or(false);
         let transport = match obj.get("transport").and_then(Value::as_str) {
             Some("stdio") => McpTransport::Stdio {
-                command: obj
-                    .get("command")
-                    .and_then(Value::as_str)?
-                    .to_string(),
+                command: obj.get("command").and_then(Value::as_str)?.to_string(),
                 args: string_array(obj.get("args")).unwrap_or_default(),
                 env: string_map(obj.get("env")).unwrap_or_default(),
             },

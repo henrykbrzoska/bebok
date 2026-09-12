@@ -120,7 +120,10 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
     if crate::auth::disabled() {
         println!("BEBOK_READY http://{actual}");
     } else {
-        println!("BEBOK_READY http://{actual}/?token={}", crate::auth::token());
+        println!(
+            "BEBOK_READY http://{actual}/?token={}",
+            crate::auth::token()
+        );
     }
     use std::io::Write as _;
     let _ = std::io::stdout().flush();

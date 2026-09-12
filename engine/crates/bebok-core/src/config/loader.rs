@@ -234,10 +234,7 @@ pub fn global_config_path() -> PathBuf {
 /// file is missing). Returns `None` only when the file exists but is invalid.
 pub fn read_layer_json(path: &Path) -> Option<Value> {
     match std::fs::read_to_string(path) {
-        Ok(text) => match jsonc::parse(&text) {
-            Ok(v) => Some(v),
-            Err(_) => None,
-        },
+        Ok(text) => jsonc::parse(&text).ok(),
         Err(_) => Some(Value::Null),
     }
 }

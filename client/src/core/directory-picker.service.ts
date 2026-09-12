@@ -10,8 +10,8 @@
  * reaching for that API.
  *
  * Strategies:
- * - Tauri desktop -> the native OS dialog (`EngineClient.pickDirectory`,
- *   already implemented; unchanged here).
+ * - Tauri desktop -> the native OS dialog (`EngineClient.pickDirectory`),
+ *   with the in-app browser as a fallback if that capability is unavailable.
  * - Browser and Capacitor -> the engine-backed `DirectoryBrowser` modal
  *   (F5-5), which lists directories over `GET /fs/browse`.
  *
@@ -41,12 +41,21 @@ export class DirectoryPicker {
   /** Resolve with an absolute path, or null when the user cancels. */
   async pick(title: string): Promise<string | null> {
     if (this.engine.platform === 'tauri') {
-      return this.engine.pickDirectory(title);
+      try {
+        return normalize(await this.engine.pickDirectory(title));
+      } catch {
+        // A desktop build without the dialog capability can still use the
+        // engine-backed picker. This keeps selection usable on both OSes.
+      }
     }
+    return this.pickInApp(title);
+  }
+
+  private pickInApp(title: string): Promise<string | null> {
     // Only one picker at a time: a second call cancels the pending one.
     this.request()?.resolve(null);
     return new Promise<string | null>((resolve) => {
-      this.request.set({ title, resolve });
+      this.request.set({ title, resolve: (path) => resolve(normalize(path)) });
     });
   }
 
@@ -56,4 +65,9 @@ export class DirectoryPicker {
     this.request.set(null);
     pending?.resolve(path);
   }
+}
+
+function normalize(path: string | null): string | null {
+  const value = path?.trim();
+  return value ? value : null;
 }

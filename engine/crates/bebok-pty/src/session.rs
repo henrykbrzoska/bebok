@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(windows)]
 use std::time::Duration;
 
@@ -17,8 +17,8 @@ use portable_pty::{Child, MasterPty, PtySize};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
-use crate::scrollback::Scrollback;
 use crate::PtyError;
+use crate::scrollback::Scrollback;
 
 #[cfg(windows)]
 use crate::win::JobObject;
@@ -71,7 +71,11 @@ impl PtySession {
 
     /// Child process id (diagnostics / tests).
     pub fn process_id(&self) -> Option<u32> {
-        self.child.lock().unwrap().as_ref().and_then(|c| c.process_id())
+        self.child
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|c| c.process_id())
     }
 
     /// Subscribe to the exit signal (`None` while running, then the exit code).
@@ -331,9 +335,7 @@ pub(crate) fn spawn(
     child: Box<dyn Child + Send + Sync>,
     scrollback: Scrollback,
 ) -> Arc<PtySession> {
-    let reader = master
-        .try_clone_reader()
-        .expect("clone pty reader");
+    let reader = master.try_clone_reader().expect("clone pty reader");
     let writer = master.take_writer().expect("take pty writer");
 
     // Windows: assign the child to a Job Object (KILL_ON_JOB_CLOSE) as soon as

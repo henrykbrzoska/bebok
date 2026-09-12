@@ -43,6 +43,7 @@ pub struct TurnRunner {
 }
 
 impl TurnRunner {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         state: Arc<SessionState>,
         agent: Agent,
@@ -698,6 +699,7 @@ where
 }
 
 /// Compat shim: the old 8-argument entry point delegates to `TurnRunner`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_turn(
     state: Arc<SessionState>,
     agent: Agent,

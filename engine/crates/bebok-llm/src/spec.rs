@@ -16,18 +16,14 @@ pub(crate) fn model_name(model: &str) -> &str {
 /// How a provider speaks to its models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProviderKind {
     /// OpenAI Chat Completions compatible (OpenAI, xAI, DeepSeek, OpenRouter,
     /// Ollama, and most self-hosted OpenAI-compatible servers).
+    #[default]
     Openai,
     /// Anthropic Messages API (Anthropic, Z.ai's Anthropic endpoint).
     Anthropic,
-}
-
-impl Default for ProviderKind {
-    fn default() -> Self {
-        Self::Openai
-    }
 }
 
 /// One named provider. `api_key` is intentionally plain (empty = not given /
@@ -499,16 +495,16 @@ pub fn parse_models(value: &serde_json::Value) -> Result<Vec<String>, LlmError> 
             .to_string();
         return Err(LlmError::Provider(msg));
     }
-    if let Some(err) = value.get("error") {
-        if !err.is_null() {
-            let msg = err
-                .get("message")
-                .and_then(|m| m.as_str())
-                .or_else(|| err.as_str())
-                .unwrap_or("unknown error")
-                .to_string();
-            return Err(LlmError::Provider(msg));
-        }
+    if let Some(err) = value.get("error")
+        && !err.is_null()
+    {
+        let msg = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .or_else(|| err.as_str())
+            .unwrap_or("unknown error")
+            .to_string();
+        return Err(LlmError::Provider(msg));
     }
 
     if let Some(data) = value.get("data").and_then(|d| d.as_array()) {

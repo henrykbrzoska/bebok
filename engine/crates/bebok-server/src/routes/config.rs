@@ -242,7 +242,7 @@ fn skills_diff_notes(old: &serde_json::Value, new: &serde_json::Value) -> Vec<St
     let new_map = new.as_object();
     let keys: BTreeSet<String> = old_map
         .into_iter()
-        .chain(new_map.into_iter())
+        .chain(new_map)
         .flat_map(|m| m.keys().cloned())
         .collect();
     let mut notes = Vec::new();

@@ -18,7 +18,7 @@ pub fn default_shell() -> String {
         {
             return shell;
         }
-        return "powershell.exe".to_string();
+        "powershell.exe".to_string()
     }
 
     #[cfg(not(windows))]

@@ -230,7 +230,7 @@ impl InstanceStore {
         // Load the transcript (msg-000000.json, msg-000001.json, ...).
         let mut messages = Vec::new();
         loop {
-            let path = persist::message_path(&state.disk_dir(), messages.len());
+            let path = persist::message_path(state.disk_dir(), messages.len());
             match persist::load_message(&path) {
                 Some(m) => messages.push(m),
                 None => break,
@@ -293,10 +293,90 @@ impl InstanceStore {
             .cloned()
             .ok_or_else(|| CoreError::SessionNotFound(id.to_string()))
     }
+
+    /// Return unresolved permission requests for all live sessions in a directory,
+    /// including delegated child sessions whose asks appear in the parent UI.
+    pub async fn pending_permissions(&self, directory: &str) -> Vec<serde_json::Value> {
+        let normalized = normalize_path(Path::new(directory));
+        let sessions: Vec<Arc<SessionState>> = self
+            .sessions
+            .read()
+            .await
+            .values()
+            .filter(|session| session.directory() == normalized)
+            .cloned()
+            .collect();
+        let mut asks = Vec::new();
+        for session in sessions {
+            for mut ask in session.pending_permission_requests().await {
+                ask["sessionID"] = serde_json::json!(session.id().to_string());
+                ask["directory"] = serde_json::json!(session.directory());
+                asks.push(ask);
+            }
+        }
+        asks
+    }
 }
 
 impl Default for InstanceStore {
     fn default() -> Self {
         Self::build_with(data_root())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InstanceStore;
+    use crate::permission::{PermissionAnswer, ResolveOutcome};
+
+    #[tokio::test]
+    async fn pending_permissions_include_child_sessions_and_disappear_after_resolution() {
+        let base = std::env::temp_dir().join(format!("bebok-permissions-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let parent = store
+            .create_session(project.to_str().unwrap(), "orchestrator", None)
+            .await
+            .unwrap();
+        let child = store
+            .create_subagent_session(&parent, "code", None, Some("test"))
+            .await
+            .unwrap();
+        let (sender, _receiver) = tokio::sync::oneshot::channel();
+        child
+            .register_permission_request(
+                "ask-1",
+                sender,
+                serde_json::json!({"requestID": "ask-1", "tool": "bash", "input": {"command": "echo ok"}}),
+            )
+            .await;
+
+        let asks = store.pending_permissions(project.to_str().unwrap()).await;
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0]["requestID"], "ask-1");
+        assert_eq!(asks[0]["sessionID"], child.id().to_string());
+        assert_eq!(asks[0]["directory"], child.directory());
+        assert_eq!(asks[0]["tool"], "bash");
+
+        assert_eq!(
+            child
+                .resolve_permission_request(
+                    "ask-1",
+                    PermissionAnswer {
+                        allow: true,
+                        always: false
+                    }
+                )
+                .await,
+            ResolveOutcome::Resolved
+        );
+        assert!(
+            store
+                .pending_permissions(project.to_str().unwrap())
+                .await
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

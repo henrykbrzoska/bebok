@@ -432,4 +432,13 @@ export const ja: Record<MessageKey, string> = {
   'browser.selectThis': 'このフォルダーを選択',
   'browser.cancel': 'キャンセル',
   'start.recentProjects': '最近のプロジェクト',
+  'projectSwitcher.title': 'プロジェクト',
+  'projectSwitcher.add': 'プロジェクトを追加…',
+  'projectSwitcher.empty': '登録済みのプロジェクトはありません。',
+  'projectSwitcher.lastOpened': '最後に開いた日時: {time}',
+  'projectSwitcher.never': 'なし',
+  'projectSwitcher.pin': 'プロジェクトを固定',
+  'projectSwitcher.unpin': 'プロジェクトの固定を解除',
+  'projectSwitcher.remove': 'プロジェクトを削除',
+  'projectSwitcher.removeConfirm': 'プロジェクト登録から {name} を削除しますか？ ディスク上のファイルは削除されません。',
 };

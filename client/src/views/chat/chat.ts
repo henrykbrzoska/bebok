@@ -239,6 +239,8 @@ export class ChatView implements OnInit, OnDestroy {
   /** Per-session queued prompts + optimistic echoes (survive tab switches). */
   private readonly queuedBySession = new Map<string, QueuedPrompt[]>();
   private readonly pendingBySession = new Map<string, PendingPrompt[]>();
+  /** Attachments restored only when retrying a prompt in a newly forked session. */
+  private readonly retryAttachmentsBySession = new Map<string, StagedAttachment[]>();
   /** Local running flag per session (fallback when activity store missed it). */
   private readonly runningBySession = new Map<string, boolean>();
   private readonly unsubscribeEvents: () => void;
@@ -384,7 +386,8 @@ export class ChatView implements OnInit, OnDestroy {
     // Restore this tab's queued prompts + optimistic echoes (not cleared).
     this.pending.set(this.pendingBySession.get(nextID) ?? []);
     this.queue.set(this.queuedBySession.get(nextID) ?? []);
-    this.attachments.set([]);
+    this.attachments.set(this.retryAttachmentsBySession.get(nextID) ?? []);
+    this.retryAttachmentsBySession.delete(nextID);
     this.attachError.set(null);
     this.activeTasks.set([]);
     this.error.set(null);
@@ -428,6 +431,9 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.meta.set(meta);
       this.messages.set(messages);
+      // SSE events are ephemeral. The metadata snapshot restores Abort after
+      // a reload or tab switch while a tool call is still in progress.
+      this.running.set(meta.running === true || this.activity.isRunning(sessionID));
       this.directory.set(meta.directory);
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
@@ -826,33 +832,42 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   /**
-   * Roll back to just before this user prompt: rewind the *current* session in
-   * place, keeping every message before this prompt (index 0..index-1) and
-   * erasing this prompt and the turn after it. Stays on the same session - no
-   * fork, no new session. The composer keeps any unsent draft for re-editing.
+   * Retry a user prompt from an independent branch. The original transcript
+   * remains intact, while the branch opens with the prompt's text and images
+   * restored in the composer for editing.
    */
   async rollbackTo(messageID: string): Promise<void> {
     const index = this.messages().findIndex((m) => m.id === messageID);
-    // Nothing meaningful before the very first prompt -> nothing to rewind to.
-    if (index < 1 || this.sending()) {
+    if (index < 0 || this.sending() || this.loading()) {
       return;
     }
     const sessionID = this.sessionID();
+    const source = this.messages()[index];
+    const directory = this.directory();
+    if (!source || source.role !== 'user' || !directory) {
+      return;
+    }
     this.error.set(null);
     try {
-      // Stop any running turn first: truncation is refused while busy.
-      try {
-        await this.engine.abort(sessionID);
-      } catch {
-        /* best-effort */
-      }
-      await this.engine.truncateSession(sessionID, index);
+      // The fork endpoint is inclusive. A first prompt has no prior message,
+      // so start an equivalent empty session instead.
+      const created = index === 0
+        ? await this.engine.createSession(
+            directory,
+            this.meta()?.agent ?? this.selectedAgent(),
+            this.meta()?.model ?? undefined,
+          )
+        : await this.engine.forkSession(directory, sessionID, index - 1);
       if (sessionID !== this.sessionID()) {
         return;
       }
-      this.running.set(false);
-      // Re-sync the transcript (message list is shorter now).
-      await this.refreshFull();
+      const draft = retryDraft(source);
+      this.drafts[created.sessionID] = draft.text;
+      persistDrafts(this.drafts);
+      if (draft.attachments.length > 0) {
+        this.retryAttachmentsBySession.set(created.sessionID, draft.attachments);
+      }
+      await this.router.navigate(['/chat', created.sessionID]);
     } catch (err) {
       if (sessionID !== this.sessionID()) {
         return;
@@ -1109,6 +1124,29 @@ export class ChatView implements OnInit, OnDestroy {
   removeAttachment(id: string): void {
     this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
+}
+
+/** Recover a user prompt into the composer when opening its retry branch. */
+export function retryDraft(message: Message): {
+  text: string;
+  attachments: StagedAttachment[];
+} {
+  const text = message.parts.find((part) => part.type === 'text');
+  const attachments = message.parts.flatMap((part) => {
+    if (part.type !== 'image') {
+      return [];
+    }
+    const base64 = part.data;
+    return [{
+      id: `retry-attachment-${++attachmentSeq}`,
+      media_type: part.media_type,
+      dataUrl: `data:${part.media_type};base64,${base64}`,
+      base64,
+      name: part.name ?? '',
+      size: part.bytes ?? Math.floor((base64.length * 3) / 4),
+    }];
+  });
+  return { text: text?.type === 'text' ? text.text : '', attachments };
 }
 
 /** Read a file as a `data:<mime>;base64,...` URL. */

@@ -432,4 +432,13 @@ export const ko: Record<MessageKey, string> = {
   'browser.selectThis': '이 폴더 선택',
   'browser.cancel': '취소',
   'start.recentProjects': '최근 프로젝트',
+  'projectSwitcher.title': '프로젝트',
+  'projectSwitcher.add': '프로젝트 추가…',
+  'projectSwitcher.empty': '등록된 프로젝트가 아직 없습니다.',
+  'projectSwitcher.lastOpened': '마지막으로 연 시간: {time}',
+  'projectSwitcher.never': '없음',
+  'projectSwitcher.pin': '프로젝트 고정',
+  'projectSwitcher.unpin': '프로젝트 고정 해제',
+  'projectSwitcher.remove': '프로젝트 제거',
+  'projectSwitcher.removeConfirm': '프로젝트 레지스트리에서 {name}을(를) 제거할까요? 디스크의 파일은 삭제되지 않습니다.',
 };

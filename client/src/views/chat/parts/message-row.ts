@@ -15,9 +15,8 @@ interface RenderedPart {
 /**
  * One message in the transcript (F2-4).
  *
- * User turns are right-aligned `--accent` bubbles (radius 12/12/3/12, max-width
- * 70%); assistant turns have no bubble at all - just an `ASSISTANT` micro-label
- * above a 13.5px/1.6 body, left aligned.
+ * User turns are right-aligned, compact `--accent` bubbles; assistant turns have
+ * no bubble at all - just an `ASSISTANT` micro-label above a readable body.
  */
 @Component({
   selector: 'app-message-row',
@@ -81,13 +80,13 @@ interface RenderedPart {
       gap: var(--space-6);
     }
     .bubble {
-      max-width: 70%;
-      padding: var(--space-10) var(--space-14);
-      background: var(--accent);
-      color: var(--bg);
+      max-width: min(68%, 620px);
+      padding: 5px 9px;
+      background: color-mix(in srgb, var(--accent) 16%, var(--surface-3));
+      color: var(--text);
       border-radius: var(--radius-bubble) var(--radius-bubble) 3px var(--radius-bubble);
-      font-size: var(--fs-13-5);
-      line-height: var(--lh-body);
+      font-size: 13px;
+      line-height: 1.4;
       overflow-wrap: anywhere;
     }
     .rollback {
@@ -116,7 +115,7 @@ interface RenderedPart {
     .assistant-row {
       display: flex;
       flex-direction: column;
-      gap: var(--space-6);
+      gap: 3px;
       max-width: 100%;
     }
     .label-row {
@@ -138,13 +137,19 @@ interface RenderedPart {
       color: var(--text-faint);
     }
     .body {
-      font-size: var(--fs-13-5);
-      line-height: var(--lh-body);
+      font-size: 13px;
+      line-height: 1.45;
       color: var(--text);
       display: flex;
       flex-direction: column;
-      gap: var(--space-6);
+      gap: var(--space-4);
       overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 700px) {
+      .bubble {
+        max-width: 86%;
+      }
     }
   `,
 })

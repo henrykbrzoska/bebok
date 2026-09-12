@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use ::base64::{Engine as _, engine::general_purpose::STANDARD};
+use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::tool::{Tool, ToolCtx, ToolOutput};
@@ -93,7 +93,13 @@ impl Tool for Base64 {
                 match STANDARD.decode(cleaned.as_bytes()) {
                     Ok(decoded) => {
                         let shown = match String::from_utf8(decoded.clone()) {
-                            Ok(s) if s.chars().all(|c| !c.is_control() || c == '\n' || c == '\t' || c == '\r') => s,
+                            Ok(s)
+                                if s.chars().all(|c| {
+                                    !c.is_control() || c == '\n' || c == '\t' || c == '\r'
+                                }) =>
+                            {
+                                s
+                            }
                             _ => format!("({} decoded bytes; binary/not UTF-8)", decoded.len()),
                         };
                         (decoded, shown)
@@ -111,10 +117,10 @@ impl Tool for Base64 {
 
         if let Some(out) = args.get("out").and_then(|v| v.as_str()) {
             let full = ctx.root.join(out.trim());
-            if let Some(parent) = full.parent() {
-                if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                    return ToolOutput::new(format!("error: cannot create parent dir: {e}"), title);
-                }
+            if let Some(parent) = full.parent()
+                && let Err(e) = tokio::fs::create_dir_all(parent).await
+            {
+                return ToolOutput::new(format!("error: cannot create parent dir: {e}"), title);
             }
             if let Err(e) = tokio::fs::write(&full, &out_bytes).await {
                 return ToolOutput::new(format!("error: failed to write {out}: {e}"), title);
@@ -154,6 +160,10 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_base64() {
         let out = run(json!({ "action": "decode", "text": "!!!not-base64!!!" })).await;
-        assert!(out.text.starts_with("error: invalid base64"), "{}", out.text);
+        assert!(
+            out.text.starts_with("error: invalid base64"),
+            "{}",
+            out.text
+        );
     }
 }

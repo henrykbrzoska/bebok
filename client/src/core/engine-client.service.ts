@@ -31,6 +31,7 @@ import {
   MessageListResponse,
   ModelsResponse,
   PermissionResponse,
+  PendingPermissionSnapshot,
   ProjectEntry,
   ProjectPatch,
   ProjectsListResponse,
@@ -134,6 +135,22 @@ export class EngineClient {
       directory,
       agent: agent ?? 'code',
       ...(model ? { model } : {}),
+    });
+  }
+
+  /**
+   * Create an independent branch of a session, retaining messages through
+   * `messageIndex`. Callers that need the state before a message pass its
+   * preceding index.
+   */
+  forkSession(
+    directory: string,
+    sessionID: string,
+    messageIndex: number,
+  ): Promise<CreateSessionResult> {
+    return this.request<CreateSessionResult>('POST', '/session', {
+      directory,
+      forkOf: { sessionID, messageIndex },
     });
   }
 
@@ -261,6 +278,13 @@ export class EngineClient {
       }
       throw err;
     }
+  }
+
+  pendingPermissions(directory: string): Promise<PendingPermissionSnapshot[]> {
+    return this.request<{ asks: PendingPermissionSnapshot[] }>(
+      'GET',
+      `/permission?directory=${encodeURIComponent(directory)}`,
+    ).then((response) => response.asks);
   }
 
   /** Absolute URL of the global SSE stream (used by `EventsStore`). */

@@ -432,4 +432,13 @@ export const hi: Record<MessageKey, string> = {
   'browser.selectThis': 'यह फ़ोल्डर चुनें',
   'browser.cancel': 'रद्द करें',
   'start.recentProjects': 'हाल के प्रोजेक्ट',
+  'projectSwitcher.title': 'प्रोजेक्ट',
+  'projectSwitcher.add': 'प्रोजेक्ट जोड़ें…',
+  'projectSwitcher.empty': 'अभी कोई पंजीकृत प्रोजेक्ट नहीं है।',
+  'projectSwitcher.lastOpened': 'अंतिम बार खोला गया {time}',
+  'projectSwitcher.never': 'कभी नहीं',
+  'projectSwitcher.pin': 'प्रोजेक्ट पिन करें',
+  'projectSwitcher.unpin': 'प्रोजेक्ट अनपिन करें',
+  'projectSwitcher.remove': 'प्रोजेक्ट हटाएँ',
+  'projectSwitcher.removeConfirm': 'प्रोजेक्ट रजिस्ट्री से {name} हटाएँ? डिस्क की फ़ाइलें नहीं हटेंगी।',
 };

@@ -30,6 +30,18 @@
   font-weight: 600;
 }
 
+.branded-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.branded-title img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
 .card-hint {
   margin: 0 0 var(--space-16);
   font-size: var(--fs-12-5);

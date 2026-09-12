@@ -433,4 +433,13 @@ export const uk: Record<MessageKey, string> = {
   'browser.selectThis': 'Вибрати цю теку',
   'browser.cancel': 'Скасувати',
   'start.recentProjects': 'Останні проєкти',
+  'projectSwitcher.title': 'Проєкти',
+  'projectSwitcher.add': 'Додати проєкт…',
+  'projectSwitcher.empty': 'Зареєстрованих проєктів ще немає.',
+  'projectSwitcher.lastOpened': 'останнє відкриття: {time}',
+  'projectSwitcher.never': 'ніколи',
+  'projectSwitcher.pin': 'Закріпити проєкт',
+  'projectSwitcher.unpin': 'Відкріпити проєкт',
+  'projectSwitcher.remove': 'Видалити проєкт',
+  'projectSwitcher.removeConfirm': 'Видалити {name} з реєстру проєктів? Файли на диску не буде видалено.',
 };

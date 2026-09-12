@@ -104,6 +104,8 @@ export interface UsageTotals {
 
 export interface SessionMeta {
   id: string;
+  /** Current engine turn state, also available after a page reload. */
+  running?: boolean;
   /** Normalized working directory the session is bound to. */
   directory: string;
   title?: string | null;
@@ -115,6 +117,11 @@ export interface SessionMeta {
   updated_at: number;
   usage: UsageTotals;
   share?: unknown;
+}
+
+export interface PendingPermissionSnapshot extends PermissionAsked {
+  sessionID: string;
+  directory: string;
 }
 
 export interface CreateSessionResponse {

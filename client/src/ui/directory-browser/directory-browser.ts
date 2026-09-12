@@ -52,6 +52,7 @@ export class DirectoryBrowser {
   /** Free-text path box, validated by attempting to list it. */
   readonly manualPath = signal('');
   readonly highlighted = signal(0);
+  private loadVersion = 0;
 
   readonly visible = computed<FsBrowseEntry[]>(() => {
     const needle = this.filter().trim().toLowerCase();
@@ -59,29 +60,8 @@ export class DirectoryBrowser {
     return needle ? rows.filter((e) => e.name.toLowerCase().includes(needle)) : rows;
   });
 
-  /**
-   * Breadcrumb segments of the current path. The engine returns the path in
-   * the host's own form, so the separator is detected rather than assumed
-   * (`\` on Windows, `/` on Unix) - the client never hard-codes one.
-   */
-  readonly crumbs = computed<{ label: string; path: string }[]>(() => {
-    const path = this.currentPath();
-    if (!path) {
-      return [];
-    }
-    const separator = path.includes('\\') ? '\\' : '/';
-    const parts = path.split(separator).filter((p) => p.length > 0);
-    const crumbs: { label: string; path: string }[] = [];
-    let accumulated = path.startsWith(separator) ? separator : '';
-    parts.forEach((part, index) => {
-      accumulated =
-        index === 0 ? `${accumulated}${part}` : `${accumulated}${separator}${part}`;
-      // A bare Windows drive ("C:") is only a directory with its separator.
-      const target = /^[A-Za-z]:$/.test(accumulated) ? `${accumulated}${separator}` : accumulated;
-      crumbs.push({ label: part, path: target });
-    });
-    return crumbs;
-  });
+  /** Breadcrumbs also drive the parent-directory action, so keep parsing in one tested helper. */
+  readonly crumbs = computed(() => pathCrumbs(this.currentPath()));
 
   constructor() {
     effect(() => {
@@ -132,19 +112,27 @@ export class DirectoryBrowser {
 
   /** List a directory (null lists the host roots). */
   async load(path: string | null): Promise<void> {
+    const version = ++this.loadVersion;
     this.loading.set(true);
     this.error.set(null);
     try {
       const response = await this.engine.browseDirectory(path, this.showHidden());
+      if (version !== this.loadVersion) {
+        return;
+      }
       this.currentPath.set(response.path);
       this.entries.set(response.entries);
       this.manualPath.set(response.path ?? '');
       this.highlighted.set(0);
       this.filter.set('');
     } catch (err) {
-      this.error.set(err instanceof Error ? err.message : String(err));
+      if (version === this.loadVersion) {
+        this.error.set(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      this.loading.set(false);
+      if (version === this.loadVersion) {
+        this.loading.set(false);
+      }
     }
   }
 
@@ -174,20 +162,11 @@ export class DirectoryBrowser {
       return;
     }
     const before = this.currentPath();
-    this.loading.set(true);
-    this.error.set(null);
-    try {
-      const response = await this.engine.browseDirectory(value, this.showHidden());
-      this.currentPath.set(response.path);
-      this.entries.set(response.entries);
-      this.highlighted.set(0);
-      this.filter.set('');
-    } catch {
-      // Stay where we were and explain, rather than navigating nowhere.
+    await this.load(value);
+    // Stay where we were and explain, rather than navigating nowhere.
+    if (this.error()) {
       this.currentPath.set(before);
       this.error.set(this.t('browser.invalidPath'));
-    } finally {
-      this.loading.set(false);
     }
   }
 
@@ -216,4 +195,55 @@ export class DirectoryBrowser {
     const next = Math.min(Math.max(this.highlighted() + delta, 0), rows.length - 1);
     this.highlighted.set(next);
   }
+}
+
+export interface PathCrumb {
+  label: string;
+  path: string;
+}
+
+/**
+ * Turn an engine-normalised absolute path into navigable ancestors. Windows
+ * UNC shares need special handling: `\\server\\share` is their root, while a
+ * drive root and Unix `/` are each a single root segment.
+ */
+export function pathCrumbs(path: string | null): PathCrumb[] {
+  if (!path) {
+    return [];
+  }
+
+  if (path.startsWith('\\\\')) {
+    const parts = path.slice(2).split('\\').filter(Boolean);
+    if (parts.length < 2) {
+      return [];
+    }
+    const share = `\\\\${parts[0]}\\${parts[1]}`;
+    const crumbs: PathCrumb[] = [{ label: share, path: share }];
+    let accumulated = share;
+    for (const part of parts.slice(2)) {
+      accumulated = `${accumulated}\\${part}`;
+      crumbs.push({ label: part, path: accumulated });
+    }
+    return crumbs;
+  }
+
+  if (path.startsWith('/')) {
+    const crumbs: PathCrumb[] = [{ label: '/', path: '/' }];
+    let accumulated = '';
+    for (const part of path.split('/').filter(Boolean)) {
+      accumulated = `${accumulated}/${part}`;
+      crumbs.push({ label: part, path: accumulated });
+    }
+    return crumbs;
+  }
+
+  const parts = path.split('\\').filter(Boolean);
+  const crumbs: PathCrumb[] = [];
+  let accumulated = '';
+  parts.forEach((part, index) => {
+    accumulated = index === 0 ? part : `${accumulated}\\${part}`;
+    const target = /^[A-Za-z]:$/.test(accumulated) ? `${accumulated}\\` : accumulated;
+    crumbs.push({ label: part, path: target });
+  });
+  return crumbs;
 }

@@ -15,8 +15,8 @@ pub(crate) const CODE_PROMPT: &str = r#"You are Bebok, a local-first coding agen
 You help the user with software engineering tasks in their project directory.
 Use the provided tools to read, write and search files, and to run shell commands.
 
-- Avoid building applications yourself. Avoid executing long-running commands yourself. Instead, have the user perform them.
-- Avoid translating, i18n untill user ask you for it.
+- When the user asks for an application or feature, implement it in the project and run the relevant build or tests yourself. Set a bounded timeout for package managers and builds.
+- Avoid translating or adding i18n unless the user asks for it.
 
 Core behaviour:
 - Prefer action over analysis. Don't spend many turns just searching or explaining the problem.
@@ -43,15 +43,17 @@ Guidelines:
 "#;
 
 pub(crate) const ASK_PROMPT: &str = r#"You are Bebok in "ask" mode: a read-only assistant.
-Answer questions about the codebase. You may read, search and run read-only
-shell commands, but you must never modify files. Prefer quoting the relevant
-code over describing it; cite file paths.
+Answer questions about the codebase. Read and search with native tools; do not
+modify files or run shell commands. Prefer quoting the relevant code over
+describing it; cite file paths. Verify path existence with `stat` or `list_dir`
+instead of guessing from a shell error.
 "#;
 
 pub(crate) const PLAN_PROMPT: &str = r#"You are Bebok in "plan" mode.
 Produce a clear, step-by-step implementation plan for the user's goal. Read and
 search the codebase to ground the plan in the actual code. Do not modify files;
-write any plan documents under the project's `.bebok/plans/` directory.
+return the plan in your answer. Use native `stat` or `list_dir` to verify paths;
+do not run shell commands or infer that a path is absent from a command error.
 "#;
 
 pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
@@ -165,7 +167,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "bash".to_string(),
                 "fetch".to_string(),
             ],
             permissions: vec![
@@ -222,7 +223,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "bash".to_string(),
                 "fetch".to_string(),
             ],
             permissions: vec![

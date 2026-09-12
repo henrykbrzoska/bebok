@@ -100,11 +100,11 @@ fn trim(entries: &mut Vec<DebugEntry>) {
         entries.remove(0);
     }
     // A single oversized entry: truncate its detail.
-    if let Some(first) = entries.first_mut() {
-        if size_of(first) > DEBUG_LOG_MAX_CHARS {
-            let allowed = DEBUG_LOG_MAX_CHARS.saturating_sub(first.title.len() + 24);
-            first.detail = crate::util::truncate_chars(&first.detail, allowed).to_owned();
-        }
+    if let Some(first) = entries.first_mut()
+        && size_of(first) > DEBUG_LOG_MAX_CHARS
+    {
+        let allowed = DEBUG_LOG_MAX_CHARS.saturating_sub(first.title.len() + 24);
+        first.detail = crate::util::truncate_chars(&first.detail, allowed).to_owned();
     }
 }
 

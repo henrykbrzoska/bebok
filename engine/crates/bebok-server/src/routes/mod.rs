@@ -23,21 +23,27 @@ pub mod providers;
 pub mod pty;
 pub mod session;
 
-
 /// Build all API routes (same paths/methods as before; only module paths
 /// changed). The caller adds middleware/CORS/state (see `server.rs`).
 pub fn build_api_router() -> Router<AppState> {
     #[allow(unused_mut)]
     let mut router = Router::new()
-        .route("/session", post(session::create_session).get(session::list_sessions))
+        .route(
+            "/session",
+            post(session::create_session).get(session::list_sessions),
+        )
         .route(
             "/session/{id}",
             get(session::get_session).delete(session::delete_session),
         )
         .route("/session/{id}/message", get(session::get_messages))
+        .route("/permission", get(session::pending_permissions))
         .route("/session/{id}/prompt", post(session::prompt))
         .route("/session/{id}/abort", post(session::abort))
-        .route("/session/{id}/task/{taskID}/abort", post(session::abort_task))
+        .route(
+            "/session/{id}/task/{taskID}/abort",
+            post(session::abort_task),
+        )
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/truncate", post(session::truncate_session))

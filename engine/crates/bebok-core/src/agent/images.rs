@@ -27,8 +27,7 @@ pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 /// materialized as `Vec<u8>` (the authoritative limit is `MAX_IMAGE_BYTES`).
 pub const MAX_IMAGE_BASE64_LEN: usize = 6_990_508;
 /// Allowed image MIME types (client `ACCEPTED_IMAGE_TYPES` mirrors this).
-pub const ALLOWED_IMAGE_TYPES: &[&str] =
-    &["image/png", "image/jpeg", "image/webp", "image/gif"];
+pub const ALLOWED_IMAGE_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 /// One raw image attachment (wire shape shared by prompt/task/fleet).
 #[derive(Debug, Clone, Deserialize)]
@@ -59,7 +58,7 @@ fn squeeze(input: &str) -> String {
 /// Hand-rolled to avoid a new dependency for one call site.
 fn decode_base64(input: &str) -> Option<Vec<u8>> {
     let bytes = input.as_bytes();
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return None;
     }
     let val = |c: u8| -> Option<u32> {
@@ -102,9 +101,8 @@ fn decode_base64(input: &str) -> Option<Vec<u8>> {
 /// Base64-encode a byte slice (standard alphabet with `=` padding).
 /// Hand-rolled to stay dependency-free.
 fn encode_base64(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
@@ -165,7 +163,7 @@ fn strip_png_metadata(png: &[u8]) -> Option<Vec<u8>> {
     if png.len() < 8 {
         return None;
     }
-    if &png[..8] != &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+    if png[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
         return None;
     }
 
@@ -183,7 +181,9 @@ fn strip_png_metadata(png: &[u8]) -> Option<Vec<u8>> {
             return None; // truncated chunk
         }
 
-        let is_critical = CRITICAL_PNG_CHUNKS.iter().any(|c| c.as_slice() == chunk_type);
+        let is_critical = CRITICAL_PNG_CHUNKS
+            .iter()
+            .any(|c| c.as_slice() == chunk_type);
 
         if is_critical {
             out.extend_from_slice(&png[pos..end]);
@@ -222,16 +222,20 @@ fn count_idat_chunks(png: &[u8]) -> usize {
 #[cfg(test)]
 fn crc32(data: &[u8]) -> u32 {
     let mut table = [0u32; 256];
-    for i in 0..256 {
+    for (i, slot) in table.iter_mut().enumerate() {
         let mut c = i as u32;
         for _ in 0..8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0xEDB88320 } else { c >> 1 };
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0xEDB88320
+            } else {
+                c >> 1
+            };
         }
-        table[i] = c;
+        *slot = c;
     }
-    data.iter()
-        .fold(0xFFFFFFFF, |crc, &b| (crc >> 8) ^ table[((crc ^ b as u32) & 0xFF) as usize])
-        ^ 0xFFFFFFFF
+    data.iter().fold(0xFFFFFFFF, |crc, &b| {
+        (crc >> 8) ^ table[((crc ^ b as u32) & 0xFF) as usize]
+    }) ^ 0xFFFFFFFF
 }
 
 #[cfg(test)]
@@ -280,16 +284,16 @@ pub fn validate_agent_images(
     for mut img in images {
         let mut data = img.data.trim().to_string();
         // Accept a data: URL prefix: data:<mime>;base64,<payload>.
-        if let Some(rest) = data.strip_prefix("data:") {
-            if let Some(comma) = rest.find(',') {
-                let (meta, payload) = rest.split_at(comma);
-                let payload = payload[1..].trim().to_string();
-                // Adopt the MIME from the prefix when the field is empty.
-                if img.media_type.trim().is_empty() {
-                    img.media_type = meta.split(';').next().unwrap_or("").trim().to_string();
-                }
-                data = payload;
+        if let Some(rest) = data.strip_prefix("data:")
+            && let Some(comma) = rest.find(',')
+        {
+            let (meta, payload) = rest.split_at(comma);
+            let payload = payload[1..].trim().to_string();
+            // Adopt the MIME from the prefix when the field is empty.
+            if img.media_type.trim().is_empty() {
+                img.media_type = meta.split(';').next().unwrap_or("").trim().to_string();
             }
+            data = payload;
         }
         data = squeeze(&data);
         if data.is_empty() {
@@ -317,8 +321,8 @@ pub fn validate_agent_images(
                 data.len()
             ));
         }
-        let decoded = decode_base64(&data)
-            .ok_or_else(|| format!("image '{name}' is not valid base64"))?;
+        let decoded =
+            decode_base64(&data).ok_or_else(|| format!("image '{name}' is not valid base64"))?;
         if decoded.len() > MAX_IMAGE_BYTES {
             return Err(format!(
                 "image '{name}' too large: {} bytes decoded (max 5 MB)",
@@ -365,13 +369,11 @@ pub fn validate_agent_images(
 #[cfg(test)]
 pub mod fixtures {
     /// 1x1 PNG (68 bytes, valid PNG signature).
-    pub const PNG_1X1: &str =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+    pub const PNG_1X1: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
     /// Minimal JPEG: SOI + APP0/JFIF header + EOI (22 bytes).
     pub const JPEG_MIN: &str = "/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==";
     /// Minimal GIF89a header + trailer (44 bytes).
-    pub const GIF_MIN: &str =
-        "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+    pub const GIF_MIN: &str = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
     /// Minimal RIFF/WEBP header (18 bytes).
     pub const WEBP_MIN: &str = "UklGRhoAAABXRUJQVlA4IA==";
 }
@@ -433,7 +435,9 @@ mod tests {
         let out = validate_agent_images(vec![raw]).unwrap();
         assert_eq!(out.len(), 1);
         match &out[0] {
-            crate::session::Part::Image { media_type, data, .. } => {
+            crate::session::Part::Image {
+                media_type, data, ..
+            } => {
                 assert_eq!(media_type, "image/png");
                 // data may differ from original if metadata was stripped
                 assert!(!data.is_empty());
@@ -481,7 +485,10 @@ mod tests {
     fn non_image_payload_rejected() {
         // "eA==" decodes to the single byte 'x' - valid base64, not an image.
         let err = validate_agent_images(vec![img("image/png", "eA==")]).unwrap_err();
-        assert!(err.contains("not a valid png/jpeg/webp/gif payload"), "{err}");
+        assert!(
+            err.contains("not a valid png/jpeg/webp/gif payload"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -503,10 +510,22 @@ mod tests {
 
     #[test]
     fn magic_bytes_recognized() {
-        assert_eq!(detect_image_type(&decode_base64(PNG_1X1).unwrap()), Some("image/png"));
-        assert_eq!(detect_image_type(&decode_base64(JPEG_MIN).unwrap()), Some("image/jpeg"));
-        assert_eq!(detect_image_type(&decode_base64(GIF_MIN).unwrap()), Some("image/gif"));
-        assert_eq!(detect_image_type(&decode_base64(WEBP_MIN).unwrap()), Some("image/webp"));
+        assert_eq!(
+            detect_image_type(&decode_base64(PNG_1X1).unwrap()),
+            Some("image/png")
+        );
+        assert_eq!(
+            detect_image_type(&decode_base64(JPEG_MIN).unwrap()),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            detect_image_type(&decode_base64(GIF_MIN).unwrap()),
+            Some("image/gif")
+        );
+        assert_eq!(
+            detect_image_type(&decode_base64(WEBP_MIN).unwrap()),
+            Some("image/webp")
+        );
         assert_eq!(detect_image_type(b"plain text"), None);
     }
 
@@ -575,12 +594,24 @@ mod tests {
         assert!(cleaned.len() < original_len, "cleaned should be shorter");
 
         // IHDR, IDAT, IEND should still be present.
-        assert!(cleaned.windows(4).any(|w| w == b"IHDR"), "IHDR must be present");
-        assert!(cleaned.windows(4).any(|w| w == b"IDAT"), "IDAT must be present");
-        assert!(cleaned.windows(4).any(|w| w == b"IEND"), "IEND must be present");
+        assert!(
+            cleaned.windows(4).any(|w| w == b"IHDR"),
+            "IHDR must be present"
+        );
+        assert!(
+            cleaned.windows(4).any(|w| w == b"IDAT"),
+            "IDAT must be present"
+        );
+        assert!(
+            cleaned.windows(4).any(|w| w == b"IEND"),
+            "IEND must be present"
+        );
 
         // tEXt should be gone.
-        assert!(!cleaned.windows(4).any(|w| w == b"tEXt"), "tEXt must be stripped");
+        assert!(
+            !cleaned.windows(4).any(|w| w == b"tEXt"),
+            "tEXt must be stripped"
+        );
     }
 
     #[test]
@@ -642,8 +673,10 @@ mod tests {
                 assert_ne!(data, &original_b64, "base64 should differ after stripping");
                 // The output should decode to a valid PNG without tEXt.
                 let decoded = decode_base64(data).unwrap();
-                assert!(!decoded.windows(4).any(|w| w == b"tEXt"),
-                    "output PNG must not contain tEXt chunks");
+                assert!(
+                    !decoded.windows(4).any(|w| w == b"tEXt"),
+                    "output PNG must not contain tEXt chunks"
+                );
             }
             other => panic!("expected image part, got {other:?}"),
         }

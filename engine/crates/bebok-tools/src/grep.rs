@@ -147,8 +147,8 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> std::io::Result<()>
 
 fn is_likely_text(name: &str) -> bool {
     let binary_exts = [
-        "png", "jpg", "jpeg", "gif", "ico", "pdf", "zip", "gz", "tar", "exe", "dll", "so",
-        "dylib", "class", "jar", "woff", "woff2", "ttf", "eot", "bin", "lock",
+        "png", "jpg", "jpeg", "gif", "ico", "pdf", "zip", "gz", "tar", "exe", "dll", "so", "dylib",
+        "class", "jar", "woff", "woff2", "ttf", "eot", "bin", "lock",
     ];
     let Some(ext) = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) else {
         return true;

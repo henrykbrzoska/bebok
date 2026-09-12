@@ -134,7 +134,7 @@ export class CommandPalette {
         await this.newSession(directory);
         return;
       case 'switchProject':
-        await this.router.navigate(['/']);
+        this.shell.openProjectSwitcher();
         return;
       case 'openExplorer':
         await this.router.navigate(['/explorer'], { queryParams });

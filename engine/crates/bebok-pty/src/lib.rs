@@ -13,8 +13,8 @@
 //! - `resize` and `kill` go through the master/child handles behind mutexes.
 
 mod scrollback;
-mod shell;
 mod session;
+mod shell;
 mod ticket;
 
 #[cfg(windows)]

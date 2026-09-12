@@ -9,8 +9,8 @@
   align-items: center;
   padding: 0 var(--space-16);
   gap: var(--space-14);
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, var(--bg)), var(--bg) 42%);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
 }
 
 .crumbs {

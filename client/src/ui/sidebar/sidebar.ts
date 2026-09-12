@@ -202,9 +202,9 @@ export class Sidebar {
     void this.router.navigateByUrl(path);
   }
 
-  /** The project switcher navigates to Start, which owns directory picking. */
+  /** Open the registered-project switcher without leaving the current screen. */
   switchProject(): void {
-    void this.router.navigate(['/']);
+    this.shell.openProjectSwitcher();
   }
 
   setLanguage(lang: Language): void {
