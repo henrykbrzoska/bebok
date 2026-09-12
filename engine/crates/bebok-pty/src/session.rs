@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+#[cfg(windows)]
+use std::time::Duration;
 
 use bytes::Bytes;
 use portable_pty::{Child, MasterPty, PtySize};
@@ -48,6 +50,7 @@ pub struct PtySession {
     #[cfg(windows)]
     job: Mutex<Option<JobObject>>,
     exited: AtomicBool,
+    exit_claimed: AtomicBool,
     exit_code: Mutex<Option<u32>>,
     exit_tx: watch::Sender<Option<i32>>,
     next_client_id: AtomicU64,
@@ -150,6 +153,9 @@ impl PtySession {
 
     /// Called by the reader thread once the master end hits EOF (child exit).
     fn mark_exited(&self) {
+        if self.exit_claimed.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let code = {
             // Take the child out so we don't hold the lock during the blocking
             // `wait()` (which reaps the process and yields its exit code).
@@ -224,6 +230,35 @@ pub(crate) fn spawn_threads(
             .name(format!("pty-writer-{}", session.id))
             .spawn(move || writer_loop(writer, input_rx))
             .expect("spawn pty writer thread");
+    }
+    // ConPTY may leave the master read blocked even after the child exits.
+    // Observe the process separately so exit status and reconnect state do
+    // not depend on receiving EOF from the pseudo-console.
+    #[cfg(windows)]
+    {
+        let session = Arc::clone(&session);
+        std::thread::Builder::new()
+            .name(format!("pty-exit-{}", session.id))
+            .spawn(move || {
+                loop {
+                    let finished = {
+                        let mut child = session.child.lock().unwrap();
+                        match child.as_mut() {
+                            Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+                            None => return,
+                        }
+                    };
+                    if finished {
+                        // Give the reader time to drain the final ConPTY bytes
+                        // into scrollback before closing live consumers.
+                        std::thread::sleep(Duration::from_millis(250));
+                        session.mark_exited();
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            })
+            .expect("spawn pty exit watcher");
     }
 }
 
@@ -323,6 +358,7 @@ pub(crate) fn spawn(
         #[cfg(windows)]
         job: Mutex::new(job),
         exited: AtomicBool::new(false),
+        exit_claimed: AtomicBool::new(false),
         exit_code: Mutex::new(None),
         exit_tx,
         next_client_id: AtomicU64::new(1),
