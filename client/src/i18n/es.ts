@@ -326,4 +326,6 @@ export const es: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': 'Permitir siempre esta herramienta',
   'perm.blocksSend': 'Responde a la solicitud de permiso antes de enviar otro mensaje.',
   'chat.typing': 'El asistente está escribiendo',
+  'chat.mic': 'Dictar',
+  'chat.micUnsupported': 'El dictado no está disponible en este navegador',
 };

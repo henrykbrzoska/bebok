@@ -325,4 +325,6 @@ export const ja: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': 'このツールを常に許可',
   'perm.blocksSend': '権限リクエストに回答してから次のメッセージを送信してください。',
   'chat.typing': 'アシスタントが入力中',
+  'chat.mic': '音声入力',
+  'chat.micUnsupported': 'このブラウザでは音声入力を利用できません',
 };

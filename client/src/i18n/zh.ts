@@ -325,4 +325,6 @@ export const zh: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': '始终允许此工具',
   'perm.blocksSend': '请先回应权限请求，然后再发送新消息。',
   'chat.typing': '助手正在输入',
+  'chat.mic': '语音输入',
+  'chat.micUnsupported': '此浏览器不支持语音输入',
 };

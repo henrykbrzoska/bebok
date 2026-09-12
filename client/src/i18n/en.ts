@@ -335,6 +335,8 @@ export const en = {
   'perm.allowAlwaysTool': 'Always allow this tool',
   'perm.blocksSend': 'Answer the permission request before sending another message.',
   'chat.typing': 'Assistant is typing',
+  'chat.mic': 'Dictate',
+  'chat.micUnsupported': 'Dictation is not available in this browser',
 };
 
 export type MessageKey = keyof typeof en;

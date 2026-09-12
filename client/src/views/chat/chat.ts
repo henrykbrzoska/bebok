@@ -46,8 +46,37 @@ const IMAGE_MAX_EDGE = 2048;
 const IMAGE_DOWNSCALE_THRESHOLD = 1 * 1024 * 1024;
 /** Decoded-byte target after downscaling (~2 MiB); the engine's 5 MiB is the hard cap. */
 const IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
+/** Tallest the auto-growing composer gets before it scrolls (F2-10). */
+const COMPOSER_MAX_HEIGHT = 200;
 let pendingSeq = 0;
 let attachmentSeq = 0;
+
+/** Minimal shape of the (non-standard) Web Speech API we rely on. */
+interface SpeechRecognitionResultLike {
+  readonly length: number;
+  [index: number]: { transcript: string };
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [index: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+/** `SpeechRecognition` / `webkitSpeechRecognition`, when the host has it. */
+function speechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  const ctor = scope['SpeechRecognition'] ?? scope['webkitSpeechRecognition'];
+  return typeof ctor === 'function' ? (ctor as new () => SpeechRecognitionLike) : null;
+}
 
 /** A user prompt echoed locally while waiting for the engine to reflect it. */
 interface PendingPrompt {
@@ -894,6 +923,60 @@ export class ChatView implements OnInit, OnDestroy {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void this.sendPrompt();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Composer (F2-10): auto-grow textarea + optional dictation.
+  // ---------------------------------------------------------------------------
+
+  /** Grow the textarea with its content, up to `COMPOSER_MAX_HEIGHT`. */
+  autoGrow(el: HTMLTextAreaElement): void {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }
+
+  /** Speech recognition is a browser extra: absent in most webviews. */
+  readonly micSupported = signal(speechRecognitionCtor() !== null);
+  readonly dictating = signal(false);
+  private recognition: SpeechRecognitionLike | null = null;
+
+  /** Toggle dictation; recognized text is appended to the current draft. */
+  toggleDictation(): void {
+    if (this.dictating()) {
+      this.recognition?.stop();
+      this.dictating.set(false);
+      return;
+    }
+    const Ctor = speechRecognitionCtor();
+    if (!Ctor) {
+      return;
+    }
+    try {
+      const recognition = new Ctor();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
+        let text = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          text += event.results[i][0]?.transcript ?? '';
+        }
+        if (!text) {
+          return;
+        }
+        const next = this.draft() ? `${this.draft()} ${text.trim()}` : text.trim();
+        this.draft.set(next);
+        this.saveDraft(next);
+      };
+      recognition.onend = () => this.dictating.set(false);
+      recognition.onerror = () => this.dictating.set(false);
+      recognition.start();
+      this.recognition = recognition;
+      this.dictating.set(true);
+    } catch {
+      this.micSupported.set(false);
+      this.dictating.set(false);
     }
   }
 

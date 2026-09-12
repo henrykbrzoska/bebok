@@ -325,4 +325,6 @@ export const hi: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': 'इस टूल को हमेशा अनुमति दें',
   'perm.blocksSend': 'दूसरा संदेश भेजने से पहले अनुमति अनुरोध का उत्तर दें।',
   'chat.typing': 'सहायक लिख रहा है',
+  'chat.mic': 'बोलकर लिखें',
+  'chat.micUnsupported': 'इस ब्राउज़र में डिक्टेशन उपलब्ध नहीं है',
 };

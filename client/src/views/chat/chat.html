@@ -186,10 +186,13 @@
           <div class="perm-blocked" role="status">{{ t('perm.blocksSend') }}</div>
         }
         <textarea
-          rows="3"
+          #composerInput
+          rows="1"
+          class="composer-input"
           [placeholder]="t('chat.composerPlaceholder')"
+          [attr.aria-label]="t('chat.composerPlaceholder')"
           [ngModel]="draft()"
-          (ngModelChange)="draft.set($event); saveDraft($event)"
+          (ngModelChange)="draft.set($event); saveDraft($event); autoGrow(composerInput)"
           (keydown)="onComposerKeydown($event)"
           [disabled]="loading()"
         ></textarea>
@@ -224,16 +227,28 @@
         }
 
         <div class="composer-actions">
-          <button
-            class="attach-btn"
-            (click)="filePicker.click()"
-            [title]="t('chat.attachImage')"
-            [disabled]="loading() || attachments().length >= 5"
-          >📎</button>
           <label class="follow-toggle">
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
             {{ t('chat.follow') }}
           </label>
+          <button
+            class="icon-action"
+            type="button"
+            (click)="filePicker.click()"
+            [title]="t('chat.attachImage')"
+            [attr.aria-label]="t('chat.attachImage')"
+            [disabled]="loading() || attachments().length >= 5"
+          >📎</button>
+          <button
+            class="icon-action mic"
+            type="button"
+            [class.on]="dictating()"
+            (click)="toggleDictation()"
+            [title]="micSupported() ? t('chat.mic') : t('chat.micUnsupported')"
+            [attr.aria-label]="t('chat.mic')"
+            [attr.aria-pressed]="dictating()"
+            [disabled]="!micSupported() || loading()"
+          >🎙</button>
           @if (queue().length > 0) {
             <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
           }

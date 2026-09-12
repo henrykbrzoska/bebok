@@ -325,4 +325,6 @@ export const ko: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': '이 도구를 항상 허용',
   'perm.blocksSend': '다른 메시지를 보내기 전에 권한 요청에 응답하세요.',
   'chat.typing': '어시스턴트가 입력 중',
+  'chat.mic': '받아쓰기',
+  'chat.micUnsupported': '이 브라우저에서는 받아쓰기를 사용할 수 없습니다',
 };

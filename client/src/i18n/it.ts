@@ -326,4 +326,6 @@ export const it: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': 'Consenti sempre questo strumento',
   'perm.blocksSend': 'Rispondi alla richiesta di permesso prima di inviare un altro messaggio.',
   'chat.typing': 'L\'assistente sta scrivendo',
+  'chat.mic': 'Detta',
+  'chat.micUnsupported': 'La dettatura non è disponibile in questo browser',
 };

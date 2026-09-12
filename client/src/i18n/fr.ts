@@ -326,4 +326,6 @@ export const fr: Record<MessageKey, string> = {
   'perm.allowAlwaysTool': 'Toujours autoriser cet outil',
   'perm.blocksSend': 'Répondez à la demande d\'autorisation avant d\'envoyer un autre message.',
   'chat.typing': 'L\'assistant écrit',
+  'chat.mic': 'Dicter',
+  'chat.micUnsupported': 'La dictée n\'est pas disponible dans ce navigateur',
 };
