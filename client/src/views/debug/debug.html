@@ -1,15 +1,31 @@
 <section class="debug">
+  <!-- F2-20: 44px header. -->
   <header class="debug-head">
-    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-    <h1>{{ t('debug.title') }}</h1>
-    <span class="muted">max {{ maxChars() }}</span>
+    <span class="title">{{ t('debug.title') }}</span>
+    <span class="cap">{{ maxCharsLabel() }}</span>
     <div class="actions">
+      <input
+        type="text"
+        class="filter"
+        [ngModel]="filter()"
+        (ngModelChange)="filter.set($event)"
+        [placeholder]="t('debug.filterPlaceholder')"
+        [attr.aria-label]="t('debug.filterPlaceholder')"
+      />
       <label class="auto">
-        <input type="checkbox" [checked]="autoRefresh()" (change)="autoRefresh.set(!autoRefresh())" />
+        <input
+          type="checkbox"
+          [checked]="autoRefresh()"
+          (change)="autoRefresh.set(!autoRefresh())"
+        />
         {{ t('debug.autoRefresh') }}
       </label>
-      <button (click)="refresh()">{{ t('debug.refresh') }}</button>
-      <button (click)="clear()">{{ t('debug.clear') }}</button>
+      <button class="head-btn" type="button" (click)="togglePause()">
+        {{ paused() ? t('debug.resume') : t('debug.pause') }}
+      </button>
+      <button class="head-btn danger-text" type="button" (click)="clear()">
+        {{ t('debug.clear') }}
+      </button>
     </div>
   </header>
 
@@ -18,26 +34,26 @@
   }
 
   @if (calls().length > 0) {
-    <h2 class="section-title">{{ t('debug.lastCalls') }}</h2>
     <div class="calls">
+      <div class="calls-title">{{ t('debug.lastCalls') }}</div>
       @for (call of calls(); track call.id) {
         <div class="call">
           <div class="call-head">
-            <span class="ts mono">{{ formatTime(call.ts) }}</span>
-            <span class="badge">#{{ call.id }}</span>
-            <span class="title mono">{{ call.model }}</span>
-            <button class="expand" (click)="toggle(call.id)">
+            <span class="ts">{{ formatTime(call.ts) }}</span>
+            <span class="pill tone-accent">#{{ call.id }}</span>
+            <span class="call-model">{{ call.model }}</span>
+            <button class="expand" type="button" (click)="toggle(call.id)">
               {{ isExpanded(call.id) ? t('debug.hideJson') : t('debug.showJson') }}
             </button>
           </div>
           @if (isExpanded(call.id)) {
             <details open>
               <summary>{{ t('debug.requestJson') }}</summary>
-              <pre class="mono"><code>{{ jsonText(call.request) }}</code></pre>
+              <pre><code>{{ jsonText(call.request) }}</code></pre>
             </details>
             <details open>
               <summary>{{ t('debug.responseJson') }}</summary>
-              <pre class="mono"><code>{{ jsonText(call.response) }}</code></pre>
+              <pre><code>{{ jsonText(call.response) }}</code></pre>
             </details>
           }
         </div>
@@ -45,24 +61,27 @@
     </div>
   }
 
+  <!-- F2-21: scrollable list of bordered rows. -->
   <div class="log">
-    @if (entries().length === 0) {
-      <div class="placeholder">{{ t('debug.empty') }}</div>
-    }
-    @for (entry of entries(); track $index) {
-      <div
-        class="entry"
-        [class.llm]="entry.source === 'llm'"
-        [class.error]="entry.kind === 'error'"
-      >
-        <div class="entry-head">
-          <span class="ts mono">{{ formatTime(entry.ts) }}</span>
-          <span class="badge source-{{ entry.source }}">{{ entry.source }}</span>
-          <span class="badge kind-{{ entry.kind }}">{{ entry.kind }}</span>
-          <span class="title mono">{{ entry.title }}</span>
-        </div>
-        <div class="detail mono">{{ entry.detail }}</div>
+    @if (diagnosticOff()) {
+      <div class="notice">
+        <p class="notice-text">{{ t('debug.diagnosticOff') }}</p>
+        <button class="head-btn" type="button" (click)="refresh()">{{ t('debug.refresh') }}</button>
       </div>
+    } @else if (visible().length === 0) {
+      <div class="notice">
+        <p class="notice-text">
+          {{ filter().trim() ? t('debug.noMatches') : t('debug.empty') }}
+        </p>
+      </div>
+    } @else {
+      @for (entry of visible(); track $index) {
+        <div class="row">
+          <span class="ts">{{ formatTime(entry.ts) }}</span>
+          <span class="path">{{ entry.title }}</span>
+          <span class="meta">{{ entry.detail }}</span>
+        </div>
+      }
     }
   </div>
 </section>

@@ -7,10 +7,17 @@
  * On top of the flat log, the engine keeps the last 2 full LLM
  * request/response JSON payloads (memory-only ring, never written to disk).
  * They are shown as collapsible panels below.
+ *
+ * WP-TOOLS-UI (F2-20/F2-21) restyles this to the design handoff section 7:
+ * a 44px header (title, cap note, filter, auto refresh, Pause/Clear) over a
+ * scrollable list of bordered rows. Since WP-AUTH (F0-6) the endpoint is gated
+ * behind `BEBOK_DIAGNOSTIC` and answers 404 when it is off - that case shows a
+ * friendly explanation instead of a raw error. The capability token lives in
+ * the Authorization header and is never read or rendered here.
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { prettyJson } from '../../core/format';
@@ -21,7 +28,7 @@ const MAX_JSON_CHARS = 50000;
 
 @Component({
   selector: 'app-debug',
-  imports: [RouterLink],
+  imports: [FormsModule],
   templateUrl: './debug.html',
   styleUrl: './debug.css',
 })
@@ -36,10 +43,29 @@ export class DebugView implements OnInit, OnDestroy {
   readonly maxChars = signal(10000);
   readonly error = signal<string | null>(null);
   readonly autoRefresh = signal(true);
+  /** Pause freezes the view: no polling and no new entries are applied. */
+  readonly paused = signal(false);
+  readonly filter = signal('');
+  /** `/debug/log` answered 404 -> the engine runs without BEBOK_DIAGNOSTIC. */
+  readonly diagnosticOff = signal(false);
   /** Ids of LLM calls whose JSON panel is expanded. */
   readonly expanded = signal<Set<number>>(new Set());
 
   private timer?: number;
+
+  /** "10 000" - grouped like the handoff's "max 10 000 chars" note. */
+  readonly maxCharsLabel = computed(() =>
+    this.i18n.t('debug.maxChars', {
+      n: this.maxChars().toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '),
+    }),
+  );
+
+  /** Newest first, filtered by the header's filter input. */
+  readonly visible = computed<DebugEntry[]>(() => {
+    const needle = this.filter().trim().toLowerCase();
+    const entries = [...this.entries()].reverse();
+    return needle ? entries.filter((e) => this.matches(e, needle)) : entries;
+  });
 
   async ngOnInit(): Promise<void> {
     if (!this.engine.connected()) {
@@ -52,7 +78,7 @@ export class DebugView implements OnInit, OnDestroy {
     }
     await this.refresh();
     this.timer = window.setInterval(() => {
-      if (this.autoRefresh()) {
+      if (this.autoRefresh() && !this.paused() && !this.diagnosticOff()) {
         void this.refresh();
       }
     }, 2000);
@@ -67,11 +93,23 @@ export class DebugView implements OnInit, OnDestroy {
   async refresh(): Promise<void> {
     try {
       const res = await this.engine.debugLog();
+      this.diagnosticOff.set(false);
+      this.error.set(null);
       this.entries.set(res.entries);
       this.calls.set(res.calls ?? []);
       this.maxChars.set(res.maxChars);
     } catch (err) {
-      this.error.set(this.describe(err));
+      const message = this.describe(err);
+      // F0-6: the endpoint is gone (404) unless the engine runs with
+      // BEBOK_DIAGNOSTIC=1 - explain that instead of showing a raw error.
+      if (/->\s*404\b/.test(message)) {
+        this.diagnosticOff.set(true);
+        this.error.set(null);
+        this.entries.set([]);
+        this.calls.set([]);
+        return;
+      }
+      this.error.set(message);
     }
   }
 
@@ -82,7 +120,20 @@ export class DebugView implements OnInit, OnDestroy {
       this.calls.set([]);
       this.expanded.set(new Set());
     } catch (err) {
-      this.error.set(this.describe(err));
+      const message = this.describe(err);
+      if (/->\s*404\b/.test(message)) {
+        this.diagnosticOff.set(true);
+        return;
+      }
+      this.error.set(message);
+    }
+  }
+
+  togglePause(): void {
+    const next = !this.paused();
+    this.paused.set(next);
+    if (!next) {
+      void this.refresh();
     }
   }
 
@@ -117,5 +168,14 @@ export class DebugView implements OnInit, OnDestroy {
 
   describe(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
+  }
+
+  private matches(entry: DebugEntry, needle: string): boolean {
+    return (
+      entry.title.toLowerCase().includes(needle) ||
+      entry.detail.toLowerCase().includes(needle) ||
+      entry.source.toLowerCase().includes(needle) ||
+      entry.kind.toLowerCase().includes(needle)
+    );
   }
 }
