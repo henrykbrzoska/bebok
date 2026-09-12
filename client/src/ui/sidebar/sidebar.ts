@@ -79,10 +79,26 @@ export class Sidebar {
 
   /** Bottom nav rail entries; `rail` is the 2-letter collapsed glyph. */
   readonly navItems: { screen: Screen; path: string; labelKey: NavLabelKey; railKey: RailKey }[] = [
-    { screen: 'explorer', path: '/explorer', labelKey: 'nav.explorer', railKey: 'sidebar.railExplorer' },
-    { screen: 'terminal', path: '/terminal', labelKey: 'nav.terminal', railKey: 'sidebar.railTerminal' },
+    {
+      screen: 'explorer',
+      path: '/explorer',
+      labelKey: 'nav.explorer',
+      railKey: 'sidebar.railExplorer',
+    },
+    {
+      screen: 'terminal',
+      path: '/terminal',
+      labelKey: 'nav.terminal',
+      railKey: 'sidebar.railTerminal',
+    },
     { screen: 'debug', path: '/debug', labelKey: 'nav.debugLog', railKey: 'sidebar.railDebug' },
-    { screen: 'settings', path: '/settings', labelKey: 'nav.settings', railKey: 'sidebar.railSettings' },
+    { screen: 'stats', path: '/stats', labelKey: 'nav.stats', railKey: 'sidebar.railStats' },
+    {
+      screen: 'settings',
+      path: '/settings',
+      labelKey: 'nav.settings',
+      railKey: 'sidebar.railSettings',
+    },
   ];
 
   /** Engine status: color is never used alone - `statusLabel()` goes with it. */
@@ -157,7 +173,11 @@ export class Sidebar {
   readonly hasSessions = computed(() => this.project.sessions().length > 0);
 
   sessionTitle(session: SessionMeta): string {
-    return session.alias?.trim() || session.title?.trim() || `${session.id.slice(0, 8)} — ${this.t('start.untitled')}`;
+    return (
+      session.alias?.trim() ||
+      session.title?.trim() ||
+      `${session.id.slice(0, 8)} — ${this.t('start.untitled')}`
+    );
   }
 
   /** `agent · Nk tok · time` - monospace meta line under the title. */
@@ -214,11 +234,12 @@ export class Sidebar {
   }
 }
 
-type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.settings';
+type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.stats' | 'nav.settings';
 type RailKey =
   | 'sidebar.railExplorer'
   | 'sidebar.railTerminal'
   | 'sidebar.railDebug'
+  | 'sidebar.railStats'
   | 'sidebar.railSettings';
 
 interface SessionGroup {
