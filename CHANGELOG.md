@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1 — 2026-09-12
+
+- Lista sesji natychmiast pokazuje aktualny tytuł i użycie tokenów; przełączenie projektu czyści poprzednie sesje i odrzuca spóźnione odpowiedzi.
+- Wiadomości oczekujące w kolejce zachowują agenta i model wybrane przy wysłaniu.
+- Dostosowano dwa testy ścieżek do krótkiej postaci katalogu tymczasowego Windows; dodano trzy anglojęzyczne zrzuty aplikacji do README.
+
 ## 1.4.0 — 2026-09-12
 
 - Poprawiono wybór katalogu projektu w aplikacji przeglądarkowej i Tauri, z uwzględnieniem ścieżek Windows i Linux oraz ponownego połączenia eksploratora po zmianie projektu.

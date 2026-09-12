@@ -1,4 +1,4 @@
-# Bebok 1.4.0
+# Bebok 1.4.1
 
 Bebok is a local-first AI coding agent built from scratch with a Rust engine and an Angular client. The engine owns sessions, tools, permissions and configuration, while the client provides the desktop and browser interface.
 
