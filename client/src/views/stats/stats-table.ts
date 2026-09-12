@@ -64,8 +64,13 @@ export function formatNumber(value: number): string {
                   [class.num]="isNumeric(col)"
                   [class.mono]="col.kind === 'mono'"
                   [class.muted]="isEmpty(row, col)"
+                  [attr.title]="col.kind === 'mono' ? cell(row, col) : null"
                 >
-                  {{ cell(row, col) }}
+                  @if (col.kind === 'mono') {
+                    <span class="clip">{{ cell(row, col) }}</span>
+                  } @else {
+                    {{ cell(row, col) }}
+                  }
                 </td>
               }
             </tr>
@@ -85,6 +90,10 @@ export function formatNumber(value: number): string {
     }
     .table-wrap {
       overflow-x: auto;
+      /* Keep the scrollbar visible on the dark theme so an overflowing table
+         is obviously scrollable (E2E R11). */
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
     }
     .stats-table {
       width: 100%;
@@ -140,7 +149,13 @@ export function formatNumber(value: number): string {
       font-family: var(--font-mono);
       font-size: var(--fs-12);
       color: var(--code-text-strong);
-      max-width: 420px;
+    }
+    /* Long keys (project paths, session titles) used to push the table past
+       the card so the last column was cut off; max-width on a td is ignored
+       by auto table layout, so clip an inner block instead (R11). */
+    td.mono .clip {
+      display: block;
+      max-width: 320px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
