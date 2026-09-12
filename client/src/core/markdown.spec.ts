@@ -22,9 +22,11 @@ describe('renderMarkdown', () => {
   });
 
   it('escapes tags inside inline code and list items', () => {
+    // F8-3: none of these classify as anything special, so they keep the
+    // plain fallback chip (`class="ic"`, no kind modifier).
     const html = renderMarkdown('- uses a real `<main>`, `<header>`\n- and `<nav>`');
-    expect(html).toContain('<ul><li>uses a real <code>&lt;main&gt;</code>, <code>&lt;header&gt;</code></li>');
-    expect(html).toContain('<li>and <code>&lt;nav&gt;</code></li></ul>');
+    expect(html).toContain('<ul><li>uses a real <code class="ic">&lt;main&gt;</code>, <code class="ic">&lt;header&gt;</code></li>');
+    expect(html).toContain('<li>and <code class="ic">&lt;nav&gt;</code></li></ul>');
     expect(html).not.toMatch(/<(main|header|nav)>/);
   });
 
@@ -72,5 +74,48 @@ describe('renderMarkdown', () => {
 
   it('leaves a lone # that is not a heading alone', () => {
     expect(renderMarkdown('#hashtag and C# code')).toBe('<p>#hashtag and C# code</p>');
+  });
+
+  describe('F8-3 inline code classification', () => {
+    it('gives a file path its own chip and makes a relative one clickable', () => {
+      const html = renderMarkdown('see `apps/api`');
+      expect(html).toContain('<a href="apps/api" class="preview-link ic ic-path">apps/api</a>');
+    });
+
+    it('does not linkify a Windows absolute path, only colors it', () => {
+      const html = renderMarkdown('open `C:\\projects\\bebok\\README.md`');
+      expect(html).toContain('<code class="ic ic-path">C:\\projects\\bebok\\README.md</code>');
+      expect(html).not.toContain('<a href="C:');
+    });
+
+    it('badges an HTTP method + route', () => {
+      const html = renderMarkdown('call `GET /api/health`');
+      expect(html).toContain(
+        '<code class="ic ic-http"><span class="ic-method ic-method-get">GET</span> /api/health</code>',
+      );
+    });
+
+    it('renders a shell command as a terminal-like chip', () => {
+      const html = renderMarkdown('run `npm exec nx -- generate lib`');
+      expect(html).toContain('<code class="ic ic-shell"><span class="ic-shell-glyph">$</span>npm exec nx -- generate lib</code>');
+    });
+
+    it('tokenizes an inline JSON object', () => {
+      const html = renderMarkdown('returns `{"status":"ok"}`');
+      expect(html).toContain('<code class="ic ic-json">');
+      expect(html).toContain('<span class="ic-jt-key">&quot;status&quot;</span>');
+      expect(html).toContain('<span class="ic-jt-string">&quot;ok&quot;</span>');
+    });
+
+    it('splits a package@version chip into name and faint version', () => {
+      const html = renderMarkdown('needs `@nx/angular@23.2.1`');
+      expect(html).toContain('<code class="ic ic-package">@nx/angular<span class="ic-pkg-version">@23.2.1</span></code>');
+    });
+
+    it('keeps everything HTML-escaped no matter the classified kind', () => {
+      const html = renderMarkdown('`<script>alert(1)</script>`');
+      expect(html).not.toContain('<script>');
+      expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
   });
 });
