@@ -1,6 +1,7 @@
 import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
 
-import { Message, Part, ToolStateKind } from '../../../core/engine.dtos';
+import { Message, Part, SafetyResolver, ToolStateKind } from '../../../core/engine.dtos';
+import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
@@ -22,7 +23,7 @@ export interface ToolGroup {
   state: ToolStateKind;
   /** "read ×3, edit ×2" - tool names by first appearance with their counts. */
   names: string;
-  /** F7-1 per-level safety counts for the group header's dot cluster. */
+  /** F7-7 per-category safety counts for the group header's dot cluster. */
   safety: SafetyCounts;
 }
 
@@ -35,7 +36,7 @@ export type RenderedItem = RenderedPart | ToolGroup;
  * into a single `ToolGroup`. A lone tool call - one with no tool neighbour -
  * stays an ungrouped `RenderedPart`, exactly as before grouping existed.
  */
-export function groupParts(parts: readonly Part[]): RenderedItem[] {
+export function groupParts(parts: readonly Part[], resolve?: SafetyResolver): RenderedItem[] {
   const items: RenderedItem[] = [];
   let toolIndex = -1;
   let run: RenderedPart[] = [];
@@ -43,7 +44,7 @@ export function groupParts(parts: readonly Part[]): RenderedItem[] {
 
   const flush = (): void => {
     if (run.length >= 2) {
-      items.push(makeGroup(runStart, run));
+      items.push(makeGroup(runStart, run, resolve));
     } else if (run.length === 1) {
       items.push(run[0]);
     }
@@ -67,8 +68,8 @@ export function groupParts(parts: readonly Part[]): RenderedItem[] {
   return items;
 }
 
-function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
-  const { state, names, safety } = summarizeToolRun(rows);
+function makeGroup(key: number, rows: RenderedPart[], resolve?: SafetyResolver): ToolGroup {
+  const { state, names, safety } = summarizeToolRun(rows, resolve);
   return { kind: 'group', key, rows, state, names, safety };
 }
 
@@ -235,6 +236,7 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
 export class MessageRowComponent {
   private readonly i18n = inject(I18nService);
   private readonly prefs = inject(UiPrefsStore);
+  private readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly message = input.required<Message>();
   readonly rollbackEnabled = input(false);
@@ -249,7 +251,9 @@ export class MessageRowComponent {
    * tool call starts collapsed regardless, F6-1b), with runs of >= 2
    * consecutive tool calls folded into collapsible groups (F6-1).
    */
-  readonly items = computed<RenderedItem[]>(() => groupParts(this.message().parts));
+  readonly items = computed<RenderedItem[]>(() =>
+    groupParts(this.message().parts, (name) => this.toolSafety.categoryOf(name)),
+  );
 
   /**
    * Per-group open/closed overrides (keyed by `ToolGroup.key`). Reset whenever

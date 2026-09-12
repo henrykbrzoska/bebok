@@ -137,6 +137,11 @@ pub struct ResolvedConfig {
     /// Toggleable parallel-agents fleet.
     #[serde(default)]
     pub fleet: FleetConfig,
+    /// WP-CHAT4 (F7-7): explicit per-tool safety categories,
+    /// `{ "<tool name or glob>": "safe" | "caution" | "dangerous" | "uncategorized" }`.
+    /// Merged per key (global, then project overrides). Informational only -
+    /// parsed by `crate::tool_safety`, never consulted by the permission engine.
+    pub tool_safety: Value,
 }
 
 impl Default for ResolvedConfig {
@@ -160,6 +165,7 @@ impl Default for ResolvedConfig {
             browser: Value::Object(serde_json::Map::new()),
             ui: UiConfig::default(),
             fleet: FleetConfig::default(),
+            tool_safety: Value::Object(serde_json::Map::new()),
         }
     }
 }
@@ -301,6 +307,11 @@ impl ResolvedConfigBuilder {
 
     pub fn runtimes(mut self, v: Value) -> Self {
         self.inner.runtimes = v;
+        self
+    }
+
+    pub fn tool_safety(mut self, v: Value) -> Self {
+        self.inner.tool_safety = v;
         self
     }
 

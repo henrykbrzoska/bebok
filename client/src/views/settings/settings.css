@@ -58,6 +58,22 @@
   font-weight: 500;
 }
 
+/* F7-7: "N uncategorized tools" badge on the Permissions entry. */
+.rail-badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: var(--space-8);
+  padding: 0 6px;
+  border-radius: 20px;
+  background: var(--warning);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
 .rail-dir {
   margin-top: auto;
   padding: var(--space-12) var(--space-8) 0;

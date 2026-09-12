@@ -221,17 +221,17 @@ fn wrap(spec: &McpServerSpec, running: Running, tools: &[McpToolInfo]) -> Server
             .map(|d| d.into_owned())
             .unwrap_or_default();
         let input_schema = serde_json::Value::Object((*t.input_schema).clone());
-        let read_only = t
-            .annotations
-            .as_ref()
-            .and_then(|a| a.read_only_hint)
-            .unwrap_or(false);
-        wrapped.push(McpTool::new(
+        let read_only_hint = t.annotations.as_ref().and_then(|a| a.read_only_hint);
+        let destructive_hint = t.annotations.as_ref().and_then(|a| a.destructive_hint);
+        let read_only = read_only_hint.unwrap_or(false);
+        wrapped.push(McpTool::with_hints(
             &spec.name,
             raw_name,
             description,
             input_schema,
             read_only,
+            read_only_hint,
+            destructive_hint,
             peer.clone(),
         ));
     }

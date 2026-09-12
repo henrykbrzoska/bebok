@@ -93,6 +93,22 @@ pub trait Tool: Send + Sync {
     fn is_read_only_for(&self, _args: &Value) -> bool {
         self.is_read_only()
     }
+
+    /// Whether the tool *declares* itself destructive (F7-7). `Some(true)`
+    /// only for an explicit annotation (an MCP `destructiveHint: true`);
+    /// `None` when the tool says nothing. Purely informational: it feeds the
+    /// default safety category shown in the UI, never the permission gate.
+    fn destructive_hint(&self) -> Option<bool> {
+        None
+    }
+
+    /// Whether the tool *declares* itself read-only (F7-7), as opposed to
+    /// [`Tool::is_read_only`] which is the engine's own classification.
+    /// `Some(true)` only for an explicit annotation (an MCP
+    /// `readOnlyHint: true`). Informational only, like `destructive_hint`.
+    fn read_only_hint(&self) -> Option<bool> {
+        None
+    }
 }
 
 /// Convenience constructor for [`ToolCtx`].

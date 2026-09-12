@@ -98,6 +98,17 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
             *field = section.clone();
         }
     }
+    // F7-7: tool safety categories merge per key (project wins per tool),
+    // so a project can re-categorize one tool without repeating the global map.
+    if let Some(map) = v.get("tool_safety").and_then(|x| x.as_object()) {
+        if let Some(existing) = cfg.tool_safety.as_object_mut() {
+            for (k, val) in map {
+                existing.insert(k.clone(), val.clone());
+            }
+        } else {
+            cfg.tool_safety = Value::Object(map.clone());
+        }
+    }
     // UI overrides (client-only custom CSS, plain text, never executed here).
     // Layer order: defaults -> global -> project. `customCss` overwrites per
     // layer (project non-empty wins; an explicit empty string clears);

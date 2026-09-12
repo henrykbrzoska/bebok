@@ -62,6 +62,132 @@
   </div>
 </div>
 
+<div class="card" data-testid="tool-safety-card">
+  <h3>{{ t('settings.toolSafetyTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.toolSafetyHint') }}</p>
+
+  @if (toolSafety.loading() && toolSafety.entries().length === 0) {
+    <p class="empty">{{ t('settings.toolSafetyLoading') }}</p>
+  } @else if (toolSafety.entries().length === 0) {
+    <p class="empty">{{ t('settings.toolSafetyEmpty') }}</p>
+  } @else {
+    <!-- Uncategorized first: the one place a new tool gets its category. -->
+    <div class="safety-section uncategorized" data-testid="tool-safety-uncategorized">
+      <h4 class="safety-heading">
+        <span class="safety-swatch safety-uncategorized" aria-hidden="true"></span>
+        {{ t('settings.toolSafetyUncategorized', { n: uncategorizedTools().length }) }}
+      </h4>
+      @if (uncategorizedTools().length === 0) {
+        <p class="empty">{{ t('settings.toolSafetyNoneUncategorized') }}</p>
+      } @else {
+        <p class="card-sub">{{ t('settings.toolSafetyUncategorizedHint') }}</p>
+        <table class="safety-table">
+          <thead>
+            <tr>
+              <th class="micro-label">{{ t('settings.toolSafetyTool') }}</th>
+              <th class="micro-label">{{ t('settings.toolSafetySource') }}</th>
+              <th class="micro-label">{{ t('settings.toolSafetyCategory') }}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (tool of uncategorizedTools(); track tool.name) {
+              <tr [attr.data-tool]="tool.name">
+                <td class="mono tool-name">{{ tool.name }}</td>
+                <td class="source">{{ sourceLabel(tool.source) }}</td>
+                <td>
+                  <select
+                    class="category category-{{ tool.category }}"
+                    [attr.data-testid]="'safety-select-' + tool.name"
+                    [ngModel]="tool.category"
+                    (ngModelChange)="setToolCategory(tool.name, $event)"
+                    [disabled]="toolSafety.saving()"
+                  >
+                    @for (c of safetyCategories; track c) {
+                      <option [value]="c">{{ safetyLabel(c) }}</option>
+                    }
+                  </select>
+                </td>
+                <td class="shrink">
+                  @if (tool.is_override) {
+                    <button type="button" (click)="resetToolCategory(tool.name)" [disabled]="toolSafety.saving()">
+                      {{ t('settings.toolSafetyReset') }}
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+
+    <!-- Every tool, grouped by its effective category. -->
+    @for (group of safetyGroups(); track group.category) {
+      <div class="safety-section" [attr.data-testid]="'tool-safety-group-' + group.category">
+        <h4 class="safety-heading">
+          <span class="safety-swatch safety-{{ group.category }}" aria-hidden="true"></span>
+          {{ safetyLabel(group.category) }}
+          <span class="count">{{ group.tools.length }}</span>
+        </h4>
+        <table class="safety-table">
+          <thead>
+            <tr>
+              <th class="micro-label">{{ t('settings.toolSafetyTool') }}</th>
+              <th class="micro-label">{{ t('settings.toolSafetySource') }}</th>
+              <th class="micro-label">{{ t('settings.toolSafetyCategory') }}</th>
+              <th class="micro-label">{{ t('settings.toolSafetyDefault') }}</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (tool of group.tools; track tool.name) {
+              <tr [attr.data-tool]="tool.name" [class.overridden]="tool.is_override">
+                <td class="mono tool-name">{{ tool.name }}</td>
+                <td class="source">{{ sourceLabel(tool.source) }}</td>
+                <td>
+                  <select
+                    class="category category-{{ tool.category }}"
+                    [ngModel]="tool.category"
+                    (ngModelChange)="setToolCategory(tool.name, $event)"
+                    [disabled]="toolSafety.saving()"
+                  >
+                    @for (c of safetyCategories; track c) {
+                      <option [value]="c">{{ safetyLabel(c) }}</option>
+                    }
+                  </select>
+                </td>
+                <td class="default">
+                  <span class="safety-swatch safety-{{ tool.default_category }}" aria-hidden="true"></span>
+                  {{ safetyLabel(tool.default_category) }}
+                  @if (tool.is_override) {
+                    <span
+                      class="override-badge"
+                      [title]="tool.override_pattern ?? ''"
+                    >{{ toolSafety.overrideScope(tool.name) === 'project' ? t('settings.toolSafetyProjectOverride') : t('settings.toolSafetyOverride') }}</span>
+                  }
+                </td>
+                <td class="shrink">
+                  @if (tool.is_override) {
+                    <button
+                      type="button"
+                      [attr.data-testid]="'safety-reset-' + tool.name"
+                      (click)="resetToolCategory(tool.name)"
+                      [disabled]="toolSafety.saving()"
+                    >
+                      {{ t('settings.toolSafetyReset') }}
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  }
+</div>
+
 <div class="card" data-testid="browser-display-card">
   <h3>{{ t('settings.browserDisplayTitle') }}</h3>
   <p class="card-sub">{{ t('settings.browserDisplayHint') }}</p>

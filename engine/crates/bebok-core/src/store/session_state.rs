@@ -46,6 +46,12 @@ pub struct SessionState {
     pub(crate) instance_dir: PathBuf,
     disk_dir: PathBuf,
     config: ResolvedConfig,
+    /// The owning instance's *live* config (F7-7), so a tool-safety
+    /// re-categorization saved in Settings applies to the next call of an
+    /// already-open session without reopening it. `None` only in unit tests
+    /// that build a bare state; `config` above stays the per-session snapshot
+    /// everything else reads.
+    live_config: Option<std::sync::Arc<std::sync::RwLock<ResolvedConfig>>>,
     pub(crate) meta: RwLock<Session>,
     pub(crate) messages: RwLock<Vec<Message>>,
     pub(crate) max_message_index: AtomicUsize,
@@ -80,6 +86,7 @@ impl SessionState {
             instance_dir,
             disk_dir,
             config,
+            live_config: None,
             meta: RwLock::new(meta),
             messages: RwLock::new(Vec::new()),
             max_message_index: AtomicUsize::new(0),
@@ -108,6 +115,25 @@ impl SessionState {
 
     pub fn config_snapshot(&self) -> ResolvedConfig {
         self.config.clone()
+    }
+
+    /// Attach the owning instance's live config (see `live_config`).
+    pub(crate) fn with_live_config(
+        mut self,
+        live: std::sync::Arc<std::sync::RwLock<ResolvedConfig>>,
+    ) -> Self {
+        self.live_config = Some(live);
+        self
+    }
+
+    /// The current `tool_safety` overrides (F7-7): the instance's live config
+    /// when attached, else this session's snapshot.
+    pub fn tool_safety_overrides(&self) -> crate::tool_safety::SafetyOverrides {
+        let section = match &self.live_config {
+            Some(live) => live.read().unwrap().tool_safety.clone(),
+            None => self.config.tool_safety.clone(),
+        };
+        crate::tool_safety::SafetyOverrides::parse(&section)
     }
 
     pub async fn meta_snapshot(&self) -> Session {

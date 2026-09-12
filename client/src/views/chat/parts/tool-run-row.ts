@@ -1,8 +1,9 @@
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
 
-import { Message, ToolStateKind } from '../../../core/engine.dtos';
+import { Message, SafetyResolver, ToolStateKind } from '../../../core/engine.dtos';
 import { formatMs } from '../../../core/format';
 import { I18nService } from '../../../i18n/i18n.service';
+import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import {
   GroupRow,
@@ -20,7 +21,7 @@ export interface ToolRunSummary {
   state: ToolStateKind;
   names: string;
   count: number;
-  /** F7-1 per-level safety counts for the group header's dot cluster. */
+  /** F7-7 per-category safety counts for the group header's dot cluster. */
   safety: SafetyCounts;
   tokensIn: number;
   tokensOut: number;
@@ -41,7 +42,10 @@ export interface ToolRunSummary {
  * consistency with `groupParts`; it no longer affects any default open state
  * (F6-1b - every call starts collapsed regardless).
  */
-export function buildToolRun(messages: readonly Message[]): ToolRunSummary {
+export function buildToolRun(
+  messages: readonly Message[],
+  resolve?: SafetyResolver,
+): ToolRunSummary {
   const rows: GroupRow[] = [];
   const toolRows: RenderedPart[] = [];
   let tokensIn = 0;
@@ -78,7 +82,7 @@ export function buildToolRun(messages: readonly Message[]): ToolRunSummary {
     tokensOut += turnOut;
   }
 
-  const { state, names, safety } = summarizeToolRun(toolRows);
+  const { state, names, safety } = summarizeToolRun(toolRows, resolve);
   return {
     key: messages[0]?.id ?? '',
     rows,
@@ -195,13 +199,16 @@ export function buildToolRun(messages: readonly Message[]): ToolRunSummary {
 export class ToolRunRowComponent {
   private readonly i18n = inject(I18nService);
   private readonly prefs = inject(UiPrefsStore);
+  private readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly rowId = input('');
   readonly messages = input.required<Message[]>();
   readonly taskLinks = input<Map<string, string>>(new Map());
 
-  readonly summary = computed<ToolRunSummary>(() => buildToolRun(this.messages()));
+  readonly summary = computed<ToolRunSummary>(() =>
+    buildToolRun(this.messages(), (name) => this.toolSafety.categoryOf(name)),
+  );
 
   /**
    * Single open/closed override for the whole run. Reset when the run's

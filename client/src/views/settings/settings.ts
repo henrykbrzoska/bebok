@@ -19,6 +19,7 @@ import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { MessageKey } from '../../i18n';
+import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { ProviderCatalog } from './provider-catalog';
 import { SETTINGS_TABS, SettingsStore, SettingsTab } from './settings.store';
 import { ProvidersTab } from './providers-tab';
@@ -66,6 +67,8 @@ export class SettingsView implements OnInit {
   private readonly catalog = inject(ProviderCatalog);
 
   readonly store = inject(SettingsStore);
+  /** F7-7: the Permissions rail entry carries an uncategorized-tools badge. */
+  readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly tabs = SETTINGS_TABS;
 
@@ -94,6 +97,7 @@ export class SettingsView implements OnInit {
     }
     this.events.start();
     void this.catalog.load();
+    void this.toolSafety.ensure(directory);
     await this.store.load(directory);
   }
 

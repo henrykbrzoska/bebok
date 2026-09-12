@@ -4,17 +4,19 @@ import { RouterLink } from '@angular/router';
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
 import {
   Part,
-  SafetyLevel,
+  SafetyCategory,
   TaskLink,
   ToolPart,
   ToolState,
   ToolStateCompleted,
   ToolStateError,
-  safetyLevel,
+  safetyCategory,
 } from '../../../core/engine.dtos';
 import { formatBytes, prettyJson, toolCallPreview } from '../../../core/format';
+import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
+import { safetyLegend } from './safety-legend';
 
 /**
  * Tool-call block (F2-6 / F2-9).
@@ -48,14 +50,11 @@ import { I18nService } from '../../../i18n/i18n.service';
         [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
       >
         <span
-          class="dot"
-          [class.safety-green]="safety() === 'green'"
-          [class.safety-yellow]="safety() === 'yellow'"
-          [class.safety-orange]="safety() === 'orange'"
-          [class.state-unknown]="safety() === null"
+          class="dot safety-{{ safety() }}"
           [class.pulse]="kind() === 'running'"
           [class.ring-failed]="kind() === 'error'"
-          [title]="safetyLabel()"
+          [title]="safetyTitle()"
+          [attr.data-safety]="safety()"
           aria-hidden="true"
         ></span>
         <span class="tool-name">{{ name() }}</span>
@@ -150,9 +149,9 @@ import { I18nService } from '../../../i18n/i18n.service';
       min-height: 28px;
     }
 
-    /* F7-1: the dot's fill is the safety tier (allow/ask/mutating), not the
-       run state - the state stays visible as the uppercase text label next
-       to it. state-unknown covers parts persisted before F7-1. */
+    /* F7-7: the dot's fill is the tool's explicit safety category
+       (safe / caution / dangerous / uncategorized), not the run state - the
+       state stays visible as the uppercase text label next to it. */
     .dot {
       width: 7px;
       height: 7px;
@@ -160,14 +159,17 @@ import { I18nService } from '../../../i18n/i18n.service';
       flex: none;
       background: var(--text-faint);
     }
-    .dot.safety-green {
+    .dot.safety-safe {
       background: var(--success);
     }
-    .dot.safety-yellow {
+    .dot.safety-caution {
       background: var(--warning);
     }
-    .dot.safety-orange {
+    .dot.safety-dangerous {
       background: var(--accent);
+    }
+    .dot.safety-uncategorized {
+      background: var(--text-faint);
     }
     .dot.pulse {
       animation: tool-dot-pulse 1.4s ease-in-out infinite;
@@ -298,6 +300,7 @@ import { I18nService } from '../../../i18n/i18n.service';
 export class ToolPartComponent {
   private readonly i18n = inject(I18nService);
   private readonly prefs = inject(UiPrefsStore);
+  private readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
@@ -364,21 +367,16 @@ export class ToolPartComponent {
     return typeof path === 'string' ? path : '';
   });
 
-  /** F7-1 safety tier for the header dot; `null` while unresolved or on a
-   *  part persisted before this field existed. */
-  readonly safety = computed<SafetyLevel | null>(() => safetyLevel(this.toolPart()));
-  readonly safetyLabel = computed(() => {
-    switch (this.safety()) {
-      case 'green':
-        return this.t('tool.safetyAllow');
-      case 'yellow':
-        return this.t('tool.safetyAsk');
-      case 'orange':
-        return this.t('tool.safetyMutating');
-      default:
-        return '';
-    }
-  });
+  /**
+   * F7-7 safety category for the header dot: the engine-stamped category,
+   * else (historical part) the category the engine reports for the tool
+   * name now, else `uncategorized`.
+   */
+  readonly safety = computed<SafetyCategory>(() =>
+    safetyCategory(this.toolPart(), (name) => this.toolSafety.categoryOf(name)),
+  );
+  /** "<category label> · <legend>" tooltip on the dot. */
+  readonly safetyTitle = computed(() => safetyLegend(this.t, this.safety()));
 
   readonly inputText = computed(() => prettyJson(this.state().input));
   readonly summary = computed(() => toolCallPreview(this.name(), this.state().input));

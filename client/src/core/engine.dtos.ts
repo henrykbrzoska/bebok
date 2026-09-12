@@ -58,16 +58,40 @@ export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted
  */
 export type PermissionLevel = 'allow' | 'ask' | 'deny';
 
+/**
+ * Explicit safety category of a tool (F7-7): `safe` (green) / `caution`
+ * (yellow) / `dangerous` (orange) / `uncategorized` (gray). Resolved by the
+ * engine from its built-in default table plus the `tool_safety` config map;
+ * purely informational (never changes an allow/ask/deny verdict).
+ */
+export type SafetyCategory = 'safe' | 'caution' | 'dangerous' | 'uncategorized';
+
+export const SAFETY_CATEGORIES: readonly SafetyCategory[] = [
+  'safe',
+  'caution',
+  'dangerous',
+  'uncategorized',
+];
+
+export function isSafetyCategory(value: unknown): value is SafetyCategory {
+  return typeof value === 'string' && (SAFETY_CATEGORIES as readonly string[]).includes(value);
+}
+
 export interface ToolPart {
   type: 'tool';
   id: string;
   name: string;
   state: ToolState;
-  /** Verdict the permission gate applied to this call (F7-1). */
+  /** Verdict the permission gate applied to this call (F7-1, kept for
+   *  backward compatibility; no longer drives the dot colour). */
   permission?: PermissionLevel;
   /** Whether the call is mutating/dangerous, independent of the verdict
-   *  actually applied (F7-1). */
+   *  actually applied (F7-1, kept for backward compatibility). */
   mutating?: boolean;
+  /** Explicit safety category stamped by the engine (F7-7). Absent on
+   *  parts persisted before this field existed - derive it from the tool
+   *  name via `GET /tools/safety` then (`ToolSafetyStore.categoryOf`). */
+  safety?: SafetyCategory;
 }
 
 export interface UsagePart {
@@ -286,28 +310,48 @@ export function toolStateKind(state: ToolState): ToolStateKind {
 }
 
 /**
- * Safety-dot colour for a tool call (F7-1): `green` = auto-allowed and
- * read-only, `yellow` = required "ask" and was approved, `orange` =
- * mutating/dangerous (or the call matched a deny). `mutating` wins over the
- * verdict, so a project rule that auto-allows a mutating tool still reads as
- * orange. `null` when the tier hasn't been resolved yet (the call is still
- * `pending` and the gate hasn't run) or the part was persisted before this
- * field existed.
+ * Resolver used for tool parts that carry no stamped `safety` field
+ * (historical sessions): maps a tool name to its current category, or
+ * `null` when the name is unknown to the client.
  */
-export type SafetyLevel = 'green' | 'yellow' | 'orange';
+export type SafetyResolver = (toolName: string) => SafetyCategory | null;
 
-export function safetyLevel(part: ToolPart): SafetyLevel | null {
-  const { permission, mutating } = part;
-  if (permission === undefined || mutating === undefined) {
-    return null;
+/**
+ * Safety-dot colour for a tool call (F7-7): the explicit category stamped
+ * by the engine when the call was gated; for a part persisted before the
+ * field existed, the category the engine reports for that tool name *now*
+ * (via `resolve`, backed by `GET /tools/safety`); `uncategorized` (gray)
+ * when neither is known. The old F7-1 `permission`/`mutating` fields are
+ * deliberately ignored - the runtime verdict is not a safety category.
+ */
+export function safetyCategory(part: ToolPart, resolve?: SafetyResolver): SafetyCategory {
+  if (isSafetyCategory(part.safety)) {
+    return part.safety;
   }
-  if (permission === 'deny' || mutating) {
-    return 'orange';
-  }
-  if (permission === 'ask') {
-    return 'yellow';
-  }
-  return 'green';
+  const derived = resolve?.(part.name) ?? null;
+  return derived ?? 'uncategorized';
+}
+
+/** One row of `GET /tools/safety` (F7-7). */
+export interface ToolSafetyEntry {
+  name: string;
+  /** `built-in`, `mcp:<server>` or `plugin`. */
+  source: string;
+  category: SafetyCategory;
+  default_category: SafetyCategory;
+  is_override: boolean;
+  /** The `tool_safety` key that produced the override (name or glob). */
+  override_pattern?: string;
+}
+
+/** `GET /tools/safety` / `PUT /tools/safety` payload (F7-7). */
+export interface ToolSafetyResponse {
+  tools: ToolSafetyEntry[];
+  /** Number of tools currently `uncategorized`. */
+  uncategorized: number;
+  categories: SafetyCategory[];
+  /** Raw `tool_safety` maps of each config layer. */
+  overrides: { global: Record<string, string>; project: Record<string, string> };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +434,8 @@ export interface ResolvedConfig {
   ui?: UiConfig;
   /** WP-BROWSER2 (F7-6): how the agent's browser is shown. */
   browser?: BrowserConfig;
+  /** F7-7: `{ "<tool name or glob>": SafetyCategory }` (merged global + project). */
+  tool_safety?: Record<string, string>;
 }
 
 /** `browser` config section (WP-BROWSER2 / F7-6). */
