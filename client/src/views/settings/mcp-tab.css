@@ -1,0 +1,70 @@
+/* MCP tab (F2-25): stacked server rows + a detail card below. */
+
+.server-list {
+  list-style: none;
+  margin: 0 0 var(--space-14);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  padding: 0 var(--space-12) 0 0;
+}
+
+.server-row.selected {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.server-row.dim {
+  opacity: 0.55;
+}
+
+.server-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: var(--space-10) var(--space-12);
+  text-align: left;
+  color: var(--text);
+  font-size: var(--fs-13);
+}
+
+.server-main:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+.server-name {
+  font-weight: 500;
+  flex: none;
+}
+
+.server-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enabled-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
