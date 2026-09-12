@@ -1,0 +1,36 @@
+@if (open()) {
+  <div
+    class="backdrop"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="t('palette.placeholder')"
+    (click)="close()"
+  >
+    <div class="card" (click)="$event.stopPropagation()">
+      <input
+        #searchInput
+        type="text"
+        class="search"
+        [ngModel]="query()"
+        (ngModelChange)="query.set($event)"
+        (keydown.enter)="runFirst()"
+        [placeholder]="t('palette.placeholder')"
+        [attr.aria-label]="t('palette.placeholder')"
+        spellcheck="false"
+      />
+      <div class="actions">
+        @for (action of actions(); track action.id) {
+          <button type="button" class="action" (click)="run(action)">
+            <span class="action-label">{{ t(action.labelKey) }}</span>
+            @if (action.hint) {
+              <span class="action-hint" aria-hidden="true">{{ action.hint }}</span>
+            }
+          </button>
+        }
+        @if (actions().length === 0) {
+          <div class="empty">{{ t('palette.noResults') }}</div>
+        }
+      </div>
+    </div>
+  </div>
+}

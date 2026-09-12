@@ -1,0 +1,426 @@
+:host {
+  display: block;
+  flex: none;
+  height: 100%;
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  transition: width var(--shell-transition);
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+/* --- Header ----------------------------------------------------------- */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  padding: var(--space-14) var(--space-14) var(--space-10);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.logo {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-control-sm);
+  background: var(--accent);
+  flex: none;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: var(--fs-14);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.palette-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  cursor: pointer;
+  flex: none;
+}
+
+.palette-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.palette-btn .cmd {
+  width: 14px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.collapse {
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  font-size: var(--fs-13);
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+  margin-left: var(--space-6);
+}
+
+.sidebar.collapsed .collapse {
+  margin-left: auto;
+}
+
+.collapse:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+/* --- Collapsed icon rail ---------------------------------------------- */
+
+.rail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-12) 0;
+  gap: var(--space-10);
+  min-height: 0;
+}
+
+.rail-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+
+.rail-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rail-btn.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.rail-status {
+  margin-top: auto;
+  display: flex;
+  position: relative;
+}
+
+/* --- Project switcher -------------------------------------------------- */
+
+.project-block {
+  padding: var(--space-12) var(--space-12) var(--space-8);
+  flex: none;
+}
+
+.project-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-10);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+}
+
+.project-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.micro-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  line-height: 1.4;
+}
+
+.project-path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  flex: none;
+  margin-left: var(--space-6);
+}
+
+/* --- Search / new session --------------------------------------------- */
+
+.search-block {
+  padding: 0 var(--space-12) var(--space-8);
+  flex: none;
+}
+
+.search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  padding: 7px var(--space-9);
+  font-size: var(--fs-12-5);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.new-block {
+  padding: 0 var(--space-12) var(--space-10);
+  display: flex;
+  gap: var(--space-8);
+  flex: none;
+}
+
+.agent-select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  padding: 7px var(--space-8);
+  font-size: var(--fs-12);
+  outline: none;
+}
+
+.new-btn {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-12);
+  font-size: var(--fs-12-5);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+
+.new-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* --- Session list ------------------------------------------------------ */
+
+.session-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px var(--space-8) var(--space-8);
+}
+
+.group-label {
+  padding: var(--space-10) var(--space-6) 4px;
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.group-label:first-child {
+  padding-top: var(--space-6);
+}
+
+.session-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-8);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.session-row:hover {
+  background: var(--surface-2);
+}
+
+.session-row.active {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.session-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.session-dot {
+  flex: none;
+}
+
+.session-title {
+  font-size: var(--fs-12-5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.session-row.active .session-title {
+  font-weight: 600;
+}
+
+.session-meta {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--code-text);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-empty {
+  padding: var(--space-12) var(--space-6);
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+}
+
+/* --- Bottom nav rail + footer ------------------------------------------ */
+
+.nav-rail {
+  border-top: 1px solid var(--border);
+  padding: var(--space-6);
+  flex: none;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  width: 100%;
+  padding: var(--space-8);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  text-align: left;
+}
+
+.nav-row:hover {
+  background: var(--surface-2);
+}
+
+.nav-row.active {
+  background: var(--surface-3);
+}
+
+.nav-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.nav-row.active .nav-dot {
+  background: var(--accent);
+}
+
+.nav-label {
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.nav-row.active .nav-label {
+  color: var(--text);
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding: var(--space-9) var(--space-12);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-11-5);
+  flex: none;
+}
+
+.lang-select {
+  margin-left: auto;
+  font: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-control-sm);
+  padding: 4px var(--space-6);
+  font-size: var(--fs-11);
+  outline: none;
+  max-width: 110px;
+}
+
+/* Density: compact tightens the vertical rhythm of the lists (F1-12). */
+:host-context(.density-compact) .session-row {
+  padding: 5px var(--space-8);
+}
+
+:host-context(.density-compact) .session-meta {
+  margin-top: 1px;
+}
+
+:host-context(.density-compact) .nav-row {
+  padding: 5px var(--space-8);
+}
+
+:host-context(.density-compact) .group-label {
+  padding-top: var(--space-6);
+}

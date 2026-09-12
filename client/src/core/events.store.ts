@@ -15,7 +15,13 @@ import { authFetch } from './auth.interceptor';
 import { EngineClient } from './engine-client.service';
 import { EngineEvent } from './engine.dtos';
 
-export type SseState = 'idle' | 'connecting' | 'live' | 'reconnecting';
+/**
+ * `error` (F0-1) is the explicit "we tried and could not reach the engine"
+ * state: the client always attempts to connect at startup, so a silent `idle`
+ * would hide a real failure from the user. The store keeps retrying in the
+ * background and moves to `reconnecting` once a stream that was live drops.
+ */
+export type SseState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error';
 
 const RECONNECT_DELAY_MS = 1500;
 
@@ -34,6 +40,8 @@ export class EventsStore {
   private stopped = false;
   private running = false;
   private controller: AbortController | null = null;
+  /** True once a stream was established at least once in this session. */
+  private everLive = false;
 
   /** Subscribe to the global event stream. Returns an unsubscribe function. */
   onEvent(listener: Listener): () => void {
@@ -65,6 +73,8 @@ export class EventsStore {
   restart(): void {
     this.stop();
     this.started = false;
+    // A new target address: past success says nothing about the new one.
+    this.everLive = false;
     this.start();
   }
 
@@ -76,7 +86,8 @@ export class EventsStore {
         try {
           connection = await this.engine.connect();
         } catch (err) {
-          this.state.set('reconnecting');
+          // Never reached the engine at all -> surface an error, keep retrying.
+          this.state.set(this.everLive ? 'reconnecting' : 'error');
           await this.sleep(RECONNECT_DELAY_MS);
           continue;
         }
@@ -97,6 +108,7 @@ export class EventsStore {
         }
 
         this.state.set('live');
+        this.everLive = true;
         this.reconnectVersion.update((v) => v + 1);
         await this.readStream(res.body, controller.signal);
 
@@ -105,7 +117,7 @@ export class EventsStore {
         if (this.stopped || controller.signal.aborted) {
           break;
         }
-        this.state.set('reconnecting');
+        this.state.set(this.everLive ? 'reconnecting' : 'error');
       } finally {
         this.controller = null;
       }
