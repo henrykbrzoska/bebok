@@ -280,9 +280,7 @@ impl PermissionEngine {
         // defaults to `Allow` instead — except `browser_eval`, which runs
         // arbitrary JavaScript and keeps asking. Only the *default* arm is
         // affected: any explicit rule above already returned.
-        let verdict = if self.browser_auto.load(Ordering::Relaxed)
-            && browser_auto_allowed(tool)
-        {
+        let verdict = if self.browser_auto.load(Ordering::Relaxed) && browser_auto_allowed(tool) {
             Verdict::Allow
         } else if is_mutating(tool, read_only) {
             Verdict::Ask
@@ -547,13 +545,28 @@ mod tests {
             }
         }
         // Unrelated defaults are unchanged: mutating tools still ask, fetch still asks.
-        let eval = engine.evaluate(None, "write_file", &serde_json::json!({ "path": "x" }), false);
+        let eval = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "x" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
-        let eval = engine.evaluate(None, "fetch", &serde_json::json!({ "url": "http://x/" }), true);
+        let eval = engine.evaluate(
+            None,
+            "fetch",
+            &serde_json::json!({ "url": "http://x/" }),
+            true,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
         // Reversible.
         engine.set_browser_auto(false);
-        let eval = engine.evaluate(None, "browser_open", &serde_json::json!({ "url": "http://x/" }), false);
+        let eval = engine.evaluate(
+            None,
+            "browser_open",
+            &serde_json::json!({ "url": "http://x/" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Ask);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -576,16 +589,31 @@ mod tests {
         .unwrap();
         let engine = PermissionEngine::load_with_global(&dir, None);
         engine.set_browser_auto(true);
-        let eval = engine.evaluate(None, "browser_open", &serde_json::json!({ "url": "http://x/" }), false);
+        let eval = engine.evaluate(
+            None,
+            "browser_open",
+            &serde_json::json!({ "url": "http://x/" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Deny);
         assert_eq!(eval.pattern, "browser_open(*)");
         let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
         assert_eq!(eval.verdict, Verdict::Ask);
         // ...and an explicit allow on eval beats the eval carve-out.
-        let eval = engine.evaluate(None, "browser_eval", &serde_json::json!({ "js": "1" }), false);
+        let eval = engine.evaluate(
+            None,
+            "browser_eval",
+            &serde_json::json!({ "js": "1" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Allow);
         // Tools without a rule get the auto default.
-        let eval = engine.evaluate(None, "browser_click", &serde_json::json!({ "selector": "a" }), false);
+        let eval = engine.evaluate(
+            None,
+            "browser_click",
+            &serde_json::json!({ "selector": "a" }),
+            false,
+        );
         assert_eq!(eval.verdict, Verdict::Allow);
         let _ = std::fs::remove_dir_all(dir);
     }

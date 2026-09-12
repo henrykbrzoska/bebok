@@ -53,7 +53,9 @@ describe('renderMarkdown', () => {
     const html = renderMarkdown('```ts\nconst a = <b>1</b>;\n```');
     expect(html).toContain('<pre><code class="hljs language-typescript">');
     expect(html).not.toContain('<b>1</b>');
-    expect(html).toContain('&lt;b&gt;1&lt;/b&gt;');
+    // Once the `xml` grammar is registered (by any earlier spec), TypeScript
+    // tokenizes `<b>` as embedded markup; compare the text between the spans.
+    expect(html.replace(/<\/?span[^>]*>/g, '')).toContain('&lt;b&gt;1&lt;/b&gt;');
     expect(html).toContain('hljs-keyword');
   });
 

@@ -347,6 +347,10 @@ describe('BrowserView (F7-6)', () => {
     setup();
     await init();
     engine.browserState.and.returnValue(Promise.resolve(state({ open: false, headed: null })));
+    // After `close` the engine has no page: `GET /browser/frame` is a 404.
+    engine.browserFrame.and.returnValue(
+      Promise.reject(new Error('engine GET /session/s1/browser/frame -> 404: no page')),
+    );
     await component.closeBrowser();
     expect(engine.browserAction).toHaveBeenCalledWith(SID, 'close', {});
     expect(component.frame()).toBeNull();

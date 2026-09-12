@@ -395,6 +395,30 @@ impl Default for InstanceStore {
     }
 }
 
+/// WP-BROWSER2 (F7-6): hand the instance's `browser` config section to the
+/// browser driver (display mode + window position; applied at the next launch).
+fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
+    bebok_tools::browser::configure(
+        root,
+        bebok_tools::browser::BrowserSettings::from_config(&cfg.browser),
+    );
+}
+
+/// WP-BROWSER2 (F7-6): every streamed browser frame becomes a `browser.frame`
+/// event on the bus (`properties` = the frame: url, title, media_type, data,
+/// width, height, seq, headed). The client's viewer window renders them; the
+/// chat view ignores the type.
+fn install_browser_frame_sink(bus: EventBus) {
+    bebok_tools::browser::set_frame_sink(Arc::new(move |frame: bebok_tools::browser::Frame| {
+        let (directory, session_id) = (frame.directory.clone(), frame.session_id.clone());
+        let properties = serde_json::to_value(&frame).unwrap_or(serde_json::Value::Null);
+        bus.publish(
+            crate::event::Event::new("browser.frame", &directory, &session_id)
+                .with_properties(properties),
+        );
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::InstanceStore;
@@ -562,28 +586,4 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&base);
     }
-}
-
-/// WP-BROWSER2 (F7-6): hand the instance's `browser` config section to the
-/// browser driver (display mode + window position; applied at the next launch).
-fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
-    bebok_tools::browser::configure(
-        root,
-        bebok_tools::browser::BrowserSettings::from_config(&cfg.browser),
-    );
-}
-
-/// WP-BROWSER2 (F7-6): every streamed browser frame becomes a `browser.frame`
-/// event on the bus (`properties` = the frame: url, title, media_type, data,
-/// width, height, seq, headed). The client's viewer window renders them; the
-/// chat view ignores the type.
-fn install_browser_frame_sink(bus: EventBus) {
-    bebok_tools::browser::set_frame_sink(Arc::new(move |frame: bebok_tools::browser::Frame| {
-        let (directory, session_id) = (frame.directory.clone(), frame.session_id.clone());
-        let properties = serde_json::to_value(&frame).unwrap_or(serde_json::Value::Null);
-        bus.publish(
-            crate::event::Event::new("browser.frame", &directory, &session_id)
-                .with_properties(properties),
-        );
-    }));
 }

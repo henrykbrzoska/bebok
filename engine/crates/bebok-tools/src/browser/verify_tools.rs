@@ -77,7 +77,12 @@ impl Tool for BrowserConsole {
             let page = page_for(&driver, &ctx).await?;
             let (entries, total, dropped, counts) = {
                 let buf = console.lock().unwrap();
-                (buf.snapshot(min_level), buf.len(), buf.dropped(), buf.counts())
+                (
+                    buf.snapshot(min_level),
+                    buf.len(),
+                    buf.dropped(),
+                    buf.counts(),
+                )
             };
             Ok::<_, String>((entries, total, dropped, counts, page_state(&page).await))
         };
@@ -292,7 +297,11 @@ impl Tool for BrowserWait {
                         unmet.push(format!(
                             "selector '{}' {} ({n} element(s) match, {})",
                             a.selector.as_deref().unwrap_or(""),
-                            if a.hidden { "still visible" } else { "not visible" },
+                            if a.hidden {
+                                "still visible"
+                            } else {
+                                "not visible"
+                            },
                             if a.hidden {
                                 "at least one is visible"
                             } else {
@@ -445,7 +454,13 @@ fn find_js(a: &FindArgs) -> String {
 
 fn render_item(i: usize, item: &Value) -> String {
     let s = |k: &str| item.get(k).and_then(Value::as_str).unwrap_or("");
-    let mut line = format!("{}. {} \"{}\" -> {}", i + 1, s("role"), s("name"), s("selector"));
+    let mut line = format!(
+        "{}. {} \"{}\" -> {}",
+        i + 1,
+        s("role"),
+        s("name"),
+        s("selector")
+    );
     let mut extras = Vec::new();
     if let (Some(x), Some(y)) = (
         item.get("x").and_then(Value::as_i64),
@@ -636,11 +651,19 @@ mod tests {
         let out = BrowserConsole { driver: d.clone() }
             .execute(ctx(), json!({ "level": "loud" }))
             .await;
-        assert!(out.text.starts_with("error: unsupported level"), "{}", out.text);
+        assert!(
+            out.text.starts_with("error: unsupported level"),
+            "{}",
+            out.text
+        );
         let out = BrowserWait { driver: d.clone() }
             .execute(ctx(), json!({}))
             .await;
-        assert!(out.text.starts_with("error: nothing to wait for"), "{}", out.text);
+        assert!(
+            out.text.starts_with("error: nothing to wait for"),
+            "{}",
+            out.text
+        );
         let out = BrowserFind { driver: d.clone() }
             .execute(ctx(), json!({ "within": "a\u{0}b" }))
             .await;
@@ -669,8 +692,10 @@ mod tests {
 
     #[test]
     fn wait_probe_embeds_conditions_as_json() {
-        let a = args::parse_wait(&json!({ "selector": ".a\"b", "text": "Low Stock", "network_idle": true }))
-            .unwrap();
+        let a = args::parse_wait(
+            &json!({ "selector": ".a\"b", "text": "Low Stock", "network_idle": true }),
+        )
+        .unwrap();
         let js = wait_probe_js(&a);
         assert!(js.contains(r#"const sel = ".a\"b";"#), "{js}");
         assert!(js.contains(r#"const want = "low stock";"#), "{js}");
@@ -683,8 +708,10 @@ mod tests {
 
     #[test]
     fn describe_conditions_reads_naturally() {
-        let a = args::parse_wait(&json!({ "selector": "#s", "hidden": true, "text": "Done", "network_idle": true }))
-            .unwrap();
+        let a = args::parse_wait(
+            &json!({ "selector": "#s", "hidden": true, "text": "Done", "network_idle": true }),
+        )
+        .unwrap();
         assert_eq!(
             describe_conditions(&a),
             "'#s' hidden and text \"Done\" and network idle"

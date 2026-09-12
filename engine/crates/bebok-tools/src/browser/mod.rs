@@ -40,11 +40,11 @@ pub mod verify_tools;
 
 use std::sync::Arc;
 
+pub use console::{ConsoleEntry, ConsoleLevel, ConsoleSource};
 pub use driver::{
     ActivityGuard, BrowserDriver, BrowserInfo, HistoryAction, close_all, close_session, configure,
     resolve_executable, set_frame_sink,
 };
-pub use console::{ConsoleEntry, ConsoleLevel, ConsoleSource};
 pub use frames::{Frame, FrameSink};
 pub use settings::{BrowserDisplay, BrowserSettings};
 
@@ -167,7 +167,10 @@ mod tests {
 
         // WP-AUTOVERIFY (F8-1): the verification trio on the same page.
         let out = by_name("browser_wait")
-            .execute(ctx(), json!({ "selector": "#b", "text": "idle", "network_idle": true }))
+            .execute(
+                ctx(),
+                json!({ "selector": "#b", "text": "idle", "network_idle": true }),
+            )
             .await;
         assert!(out.text.starts_with("Condition met"), "{}", out.text);
         assert_eq!(out.structured.as_ref().unwrap()["met"], true);
@@ -183,12 +186,20 @@ mod tests {
         let out = by_name("browser_find")
             .execute(ctx(), json!({ "query": "go" }))
             .await;
-        assert!(out.text.starts_with("1 interactive element(s)"), "{}", out.text);
+        assert!(
+            out.text.starts_with("1 interactive element(s)"),
+            "{}",
+            out.text
+        );
 
         let out = by_name("browser_console")
             .execute(ctx(), json!({ "level": "warning" }))
             .await;
-        assert!(out.text.contains("[warning] fixture warning"), "{}", out.text);
+        assert!(
+            out.text.contains("[warning] fixture warning"),
+            "{}",
+            out.text
+        );
         assert!(out.text.contains("[error] uncaught"), "{}", out.text);
         assert!(out.text.contains("fixture boom"), "{}", out.text);
         assert_eq!(out.structured.as_ref().unwrap()["counts"]["errors"], 1);
@@ -237,10 +248,23 @@ mod tests {
         assert!(out.text.contains("(no console output)"), "{}", out.text);
 
         // A refused localhost connection is explained, not dumped as net::ERR_*.
+        // Port 1 is on Chrome's unsafe-port list (ERR_UNSAFE_PORT, no connection
+        // attempt), so take an ephemeral port the OS just handed out and released.
+        let closed_port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
         let out = by_name("browser_open")
-            .execute(ctx(), json!({ "url": "http://127.0.0.1:1/", "wait_ms": 0 }))
+            .execute(
+                ctx(),
+                json!({ "url": format!("http://127.0.0.1:{closed_port}/"), "wait_ms": 0 }),
+            )
             .await;
-        assert!(out.text.contains("Start the dev server first"), "{}", out.text);
+        assert!(
+            out.text.contains("Start the dev server first"),
+            "{}",
+            out.text
+        );
         let out = by_name("browser_open")
             .execute(ctx(), json!({ "url": url, "wait_ms": 100 }))
             .await;

@@ -72,10 +72,10 @@ impl BrowserSettings {
         let Some(obj) = value.as_object() else {
             return out;
         };
-        if let Some(display) = obj.get("display").and_then(Value::as_str) {
-            if let Some(mode) = BrowserDisplay::parse(display) {
-                out.display = mode;
-            }
+        if let Some(display) = obj.get("display").and_then(Value::as_str)
+            && let Some(mode) = BrowserDisplay::parse(display)
+        {
+            out.display = mode;
         }
         let pos = obj
             .get("windowPosition")

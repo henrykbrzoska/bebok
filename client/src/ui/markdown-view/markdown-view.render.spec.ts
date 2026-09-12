@@ -21,7 +21,9 @@ describe('renderMarkdownView', () => {
     expect(html).toContain('<pre><code class="hljs language-typescript">');
     // Never a raw, unescaped `<b>` - highlight.js escapes as it tokenizes.
     expect(html).not.toContain('<b>1</b>');
-    expect(html).toContain('&lt;b&gt;1&lt;/b&gt;');
+    // Once the `xml` grammar is registered (by any earlier spec), TypeScript
+    // tokenizes `<b>` as embedded markup; compare the text between the spans.
+    expect(html.replace(/<\/?span[^>]*>/g, '')).toContain('&lt;b&gt;1&lt;/b&gt;');
     // Actually tokenized, not just escaped verbatim.
     expect(html).toContain('hljs-keyword');
   });

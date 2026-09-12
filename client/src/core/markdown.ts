@@ -131,9 +131,39 @@ function renderInline(value: string): string {
   return html;
 }
 
-/** Render a paragraph; simple all-bullet / all-numbered blocks become lists. */
+/** ATX heading line: `#`..`######`, a space, then the text (`#hashtag` is not one). */
+const HEADING = /^(#{1,6})\s+(.+)$/;
+
+/**
+ * Render a paragraph: heading lines become `<h2>`..`<h6>` (clamped to h2+ so
+ * model output never competes with the view's own title); the runs of lines
+ * between them go through `renderLines`.
+ */
 function renderParagraph(value: string): string {
-  const lines = value.split('\n');
+  const out: string[] = [];
+  let run: string[] = [];
+  const flush = (): void => {
+    if (run.length > 0) {
+      out.push(renderLines(run));
+      run = [];
+    }
+  };
+  for (const line of value.split('\n')) {
+    const heading = HEADING.exec(line);
+    if (!heading) {
+      run.push(line);
+      continue;
+    }
+    flush();
+    const level = Math.min(6, Math.max(2, heading[1].length));
+    out.push(`<h${level}>${renderInline(heading[2].trim())}</h${level}>`);
+  }
+  flush();
+  return out.join('');
+}
+
+/** Render a run of lines; simple all-bullet / all-numbered runs become lists. */
+function renderLines(lines: string[]): string {
   const bullets = /^[-*+]\s+/;
   const numbers = /^\d+[.)]\s+/;
   if (lines.length > 0 && lines.every((l) => bullets.test(l))) {
@@ -148,7 +178,7 @@ function renderParagraph(value: string): string {
       .join('');
     return `<ol>${items}</ol>`;
   }
-  return `<p>${renderInline(value)}</p>`;
+  return `<p>${renderInline(lines.join('\n'))}</p>`;
 }
 
 export function renderMarkdown(source: string): string {

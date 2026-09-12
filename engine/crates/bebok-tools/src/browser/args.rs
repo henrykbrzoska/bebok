@@ -553,7 +553,10 @@ mod tests {
         assert_eq!(a.min_level, None);
         assert_eq!(a.max, DEFAULT_CONSOLE_MAX);
         let a = parse_console(&json!({ "level": "error", "max": 5 })).unwrap();
-        assert_eq!(a.min_level, Some(super::super::console::ConsoleLevel::Error));
+        assert_eq!(
+            a.min_level,
+            Some(super::super::console::ConsoleLevel::Error)
+        );
         assert_eq!(a.max, 5);
         let a = parse_console(&json!({ "level": "all", "max": 10_000 })).unwrap();
         assert_eq!(a.min_level, None);
