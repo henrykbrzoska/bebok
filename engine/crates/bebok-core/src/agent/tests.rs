@@ -334,7 +334,7 @@ if __name__ == "__main__":
 
         // And the transcript opens.
         let s = store.open_session(id).await.unwrap();
-        assert_eq!(s.directory(), project.to_str().unwrap());
+        assert_eq!(s.directory(), crate::util::normalize_path(&project));
 
         let _ = std::fs::remove_dir_all(&base);
     }

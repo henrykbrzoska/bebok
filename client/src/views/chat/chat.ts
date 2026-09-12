@@ -19,6 +19,7 @@ import {
   AgentInfo,
   EngineEvent,
   Message,
+  PromptBody,
   PromptImage,
   SessionMeta,
 } from '../../core/engine.dtos';
@@ -93,6 +94,36 @@ interface PendingPrompt {
 export interface QueuedPrompt {
   text: string;
   images: PromptImage[];
+  /** Agent selected when this message was queued. */
+  agent: string;
+  /** Explicit model selected when this message was queued, if any. */
+  model?: string;
+}
+
+/** Freeze the composer settings together with the message that will use them. */
+export function queuePrompt(
+  text: string,
+  images: PromptImage[],
+  agent: string,
+  selectedModel: string,
+): QueuedPrompt {
+  const model = selectedModel.trim();
+  return {
+    text,
+    images,
+    agent,
+    ...(model ? { model } : {}),
+  };
+}
+
+/** Build the exact engine request from the settings frozen at queue time. */
+export function queuedPromptBody(prompt: QueuedPrompt): PromptBody {
+  return {
+    message: prompt.text,
+    agent: prompt.agent,
+    ...(prompt.model ? { model: prompt.model } : {}),
+    ...(prompt.images.length ? { images: prompt.images } : {}),
+  };
 }
 
 /** An image staged in the composer (dataUrl for preview, base64 for sending). */
@@ -716,7 +747,14 @@ export class ChatView implements OnInit, OnDestroy {
     this.attachments.set([]);
     this.attachError.set(null);
     // Always enqueue; sends immediately when idle, otherwise waits for the turn.
-    this.queue.update((q) => [...q, { text, images }]);
+    // Preserve the dispatch settings with the message. A queued prompt may
+    // wait for a running turn, and reading these controls in `drainQueue()`
+    // would otherwise send it using whichever model happens to be selected
+    // later rather than the model the user chose before pressing Send.
+    this.queue.update((q) => [
+      ...q,
+      queuePrompt(text, images, this.selectedAgent(), this.selectedModel()),
+    ]);
     this.pending.update((p) => [
       ...p,
       {
@@ -756,12 +794,7 @@ export class ChatView implements OnInit, OnDestroy {
     try {
       await this.engine.prompt(
         sessionID,
-        {
-          message: head.text,
-          agent: this.selectedAgent(),
-          ...(this.selectedModel() ? { model: this.selectedModel() } : {}),
-          ...(head.images.length ? { images: head.images } : {}),
-        },
+        queuedPromptBody(head),
       );
       // Tab switched while the POST was in flight: leave the new tab alone.
       if (sessionID !== this.sessionID()) {

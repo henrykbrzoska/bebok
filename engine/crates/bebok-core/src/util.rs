@@ -62,7 +62,12 @@ mod path_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let normalized = normalize_path(&dir);
         assert!(!normalized.starts_with(r"\\?\"), "{normalized}");
-        assert_eq!(Path::new(&normalized), dir);
+        // CI's Windows TEMP may use an 8.3 path (RUNNER~1), while
+        // canonicalize expands it to the long spelling (runneradmin).
+        assert_eq!(
+            std::fs::canonicalize(&normalized).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

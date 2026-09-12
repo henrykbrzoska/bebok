@@ -266,7 +266,8 @@ impl InstanceStore {
         self.spawn_session(&instance, session).await
     }
 
-    /// List session metadata for a directory (restart-safe: from the scan).
+    /// List session metadata for a directory. The startup scan supplies closed
+    /// sessions; open sessions contribute their current title, usage and time.
     pub async fn list_sessions(&self, directory: &str) -> Vec<Session> {
         let normalized = normalize_path(Path::new(directory));
         let mut sessions: Vec<Session> = self
@@ -277,6 +278,22 @@ impl InstanceStore {
             .filter(|s| s.directory == normalized)
             .cloned()
             .collect();
+        // The startup/creation index is not rewritten after every turn. Take
+        // live snapshots without holding the map lock across an await, or the
+        // sidebar would keep showing the original title and zero usage until
+        // the engine restarts.
+        let live = {
+            let states = self.sessions.read().await;
+            sessions
+                .iter()
+                .map(|session| states.get(&session.id).cloned())
+                .collect::<Vec<_>>()
+        };
+        for (session, state) in sessions.iter_mut().zip(live) {
+            if let Some(state) = state {
+                *session = state.meta_snapshot().await;
+            }
+        }
         sessions.sort_by_key(|s| std::cmp::Reverse(s.created_at));
         sessions
     }
@@ -328,6 +345,32 @@ impl Default for InstanceStore {
 mod tests {
     use super::InstanceStore;
     use crate::permission::{PermissionAnswer, ResolveOutcome};
+
+    #[tokio::test]
+    async fn list_sessions_uses_current_metadata_and_survives_restart() {
+        let base = std::env::temp_dir().join(format!("bebok-list-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let data = base.join("data");
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.set_title_if_empty("Build Studio Board").await;
+        session.touch().await;
+        session.add_usage(17, 3, None, None, None).await;
+
+        for store in [store, InstanceStore::with_data_dir(data)] {
+            let listed = store.list_sessions(project.to_str().unwrap()).await;
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].title.as_deref(), Some("Build Studio Board"));
+            assert_eq!(listed[0].usage.input_tokens, 17);
+            assert_eq!(listed[0].usage.output_tokens, 3);
+        }
+
+        let _ = std::fs::remove_dir_all(base);
+    }
 
     #[tokio::test]
     async fn pending_permissions_include_child_sessions_and_disappear_after_resolution() {

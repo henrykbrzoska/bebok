@@ -8,7 +8,7 @@
  * reconnects.
  */
 
-import { Injectable, effect, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
@@ -26,6 +26,12 @@ export class ProjectSessionsStore {
   readonly error = signal<string | null>(null);
 
   private lastLoaded: string | null = null;
+  /**
+   * Monotonically increasing request marker.  A directory switch can happen
+   * while the previous project's list request is still in flight; only the
+   * most recent request is allowed to update the shared sidebar cache.
+   */
+  private refreshVersion = 0;
 
   constructor() {
     // Engine-side session changes (create/delete/title) invalidate the cache.
@@ -37,7 +43,10 @@ export class ProjectSessionsStore {
     // A (re)connect means the previous list may be stale or was never loaded.
     effect(() => {
       void this.events.reconnectVersion();
-      const dir = this.directory();
+      // Selection itself calls `refresh()`. Reading the directory untracked
+      // here keeps a change of project from starting a duplicate request;
+      // this effect is only for SSE reconnects.
+      const dir = untracked(() => this.directory());
       if (dir) {
         void this.refresh();
       }
@@ -48,6 +57,17 @@ export class ProjectSessionsStore {
   async select(directory: string | null, force = false): Promise<void> {
     if (!force && directory === this.directory() && this.lastLoaded === directory) {
       return;
+    }
+    const changedDirectory = directory !== this.directory();
+    // Clear synchronously, before the new directory's request completes. This
+    // keeps sessions from another project out of the sidebar during loading.
+    if (changedDirectory) {
+      this.refreshVersion += 1;
+      this.sessions.set([]);
+      this.agents.set([]);
+      this.lastLoaded = null;
+      this.loading.set(false);
+      this.error.set(null);
     }
     this.directory.set(directory);
     if (directory) {
@@ -64,6 +84,7 @@ export class ProjectSessionsStore {
     if (!dir || !this.engine.connected()) {
       return;
     }
+    const version = ++this.refreshVersion;
     this.loading.set(true);
     this.error.set(null);
     try {
@@ -71,13 +92,24 @@ export class ProjectSessionsStore {
         this.engine.listSessions(dir),
         this.engine.listAgents(dir),
       ]);
+      // Ignore a response for an older selection (or an older refresh of the
+      // same selection). Without this guard a slow request can put Project A
+      // sessions back into the sidebar after the user chose Project B.
+      if (version !== this.refreshVersion || dir !== this.directory()) {
+        return;
+      }
       this.sessions.set(sessions);
       this.agents.set(agents);
       this.lastLoaded = dir;
     } catch (err) {
+      if (version !== this.refreshVersion || dir !== this.directory()) {
+        return;
+      }
       this.error.set(err instanceof Error ? err.message : String(err));
     } finally {
-      this.loading.set(false);
+      if (version === this.refreshVersion && dir === this.directory()) {
+        this.loading.set(false);
+      }
     }
   }
 
