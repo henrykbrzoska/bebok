@@ -322,9 +322,12 @@ mod tests {
             .replace('\\', "%5C")
             .replace(':', "%3A")
             .replace('/', "%2F");
+        // The API router carries the capability-token layer (F0-5): present the
+        // engine token so the assertions below exercise redaction, not auth.
+        let auth = crate::auth::token();
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
         let request = format!(
-            "GET /config?directory={directory} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "GET /config?directory={directory} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\n\r\n"
         );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut response = Vec::new();
@@ -341,7 +344,7 @@ mod tests {
         assert!(response.contains("has_key"));
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
         let request = format!(
-            "GET /fs/file?directory={directory}&path=.bebok%2Fconfig.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "GET /fs/file?directory={directory}&path=.bebok%2Fconfig.json HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\n\r\n"
         );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut response = Vec::new();

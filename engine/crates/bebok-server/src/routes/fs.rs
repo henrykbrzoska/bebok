@@ -54,12 +54,11 @@ pub async fn fs_file(
     if let (Ok(target), Ok(config_path)) = (
         std::fs::canonicalize(target),
         std::fs::canonicalize(config_path),
-    ) {
-        if target == config_path {
-            return Err(
-                ApiError::forbidden("use /config to inspect project configuration").into_response(),
-            );
-        }
+    ) && target == config_path
+    {
+        return Err(
+            ApiError::forbidden("use /config to inspect project configuration").into_response(),
+        );
     }
     match bebok_core::explorer::read_file_text(&instance.root, rel) {
         Ok(text) => Ok(Json(serde_json::json!({ "path": rel, "content": text }))),
@@ -123,9 +122,13 @@ mod tests {
             .replace('\\', "%5C")
             .replace(':', "%3A")
             .replace('/', "%2F");
+        // The API router carries the capability-token layer (F0-5), so the raw
+        // request must present the engine token - otherwise this would assert
+        // the traversal guard while really only observing a 401.
+        let auth = crate::auth::token();
         let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
         let request = format!(
-            "GET /fs/file?directory={directory}&path=..%5C..%5CWindows%5Cwin.ini HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "GET /fs/file?directory={directory}&path=..%5C..%5CWindows%5Cwin.ini HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {auth}\r\nConnection: close\r\n\r\n"
         );
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut response = Vec::new();
