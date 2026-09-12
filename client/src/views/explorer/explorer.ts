@@ -7,7 +7,7 @@
 
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
@@ -19,6 +19,8 @@ interface FsNode {
   path: string;
   is_dir: boolean;
   depth: number;
+  /** Directories only: drives the `▾`/`▸` disclosure triangle. */
+  expanded: boolean;
 }
 
 interface DirState {
@@ -29,7 +31,7 @@ interface DirState {
 
 @Component({
   selector: 'app-explorer',
-  imports: [RouterLink, FormsModule, HtmlPreviewComponent],
+  imports: [FormsModule, HtmlPreviewComponent],
   templateUrl: './explorer.html',
   styleUrl: './explorer.css',
 })
@@ -222,7 +224,13 @@ export class ExplorerView implements OnInit {
       return;
     }
     for (const child of state.entries) {
-      out.push({ name: child.name, path: child.path, is_dir: child.is_dir, depth });
+      out.push({
+        name: child.name,
+        path: child.path,
+        is_dir: child.is_dir,
+        depth,
+        expanded: child.is_dir ? dirs[child.path]?.expanded === true : false,
+      });
       if (child.is_dir && dirs[child.path]?.expanded) {
         this.flatten(dirs, child.path, depth + 1, out);
       }

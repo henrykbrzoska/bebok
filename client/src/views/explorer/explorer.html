@@ -1,82 +1,91 @@
 <section class="explorer">
-  <header class="explorer-head">
-    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-    <h1>{{ t('explorer.title') }}</h1>
-    <span class="muted dir" title="{{ directory() }}">{{ directory() }}</span>
-  </header>
-
-  @if (loading() && rows().length === 0) {
-    <div class="placeholder">{{ t('explorer.loading') }}</div>
-  } @else {
-    <div class="explorer-body">
-      <aside class="tree">
-        @if (rows().length === 0) {
-          <p class="muted empty">{{ t('explorer.empty') }}</p>
-        }
-        <ul class="tree-list">
-          @for (row of rows(); track row.path) {
-            <li
-              class="tree-row"
-              [class.dir]="row.is_dir"
-              [style.padding-left.px]="8 + row.depth * 16"
-              (click)="toggle(row)"
-              (contextmenu)="onRowContextMenu($event, row)"
-              [title]="t('htmlPreview.rightClickHint')"
-            >
-              <span class="icon">{{ row.is_dir ? '▸' : '·' }}</span>
-              <span class="name">{{ row.name }}</span>
-            </li>
-          }
-        </ul>
-      </aside>
-
-      <main class="preview">
-        @if (!selectedPath()) {
-          <div class="placeholder">{{ t('explorer.selectHint') }}</div>
-        } @else {
-          <header
-            class="preview-head"
-            (contextmenu)="onPreviewContextMenu($event)"
-            [title]="isHtmlSelection() ? t('htmlPreview.rightClickHint') : ''"
-          >
-            <span class="mono">{{ selectedName() }}</span>
-            <span class="muted mono path">{{ selectedPath() }}</span>
-            <span class="spacer"></span>
-            @if (!editing()) {
-              <button (click)="startEdit()">{{ t('explorer.edit') }}</button>
-              @if (isHtmlSelection()) {
-                <button (click)="htmlPreview.set(htmlPreview() === null ? fileContent() : null)">
-                  {{ t('htmlPreview.preview') }}
-                </button>
-              }
-            } @else {
-              <button class="primary" (click)="saveEdit()" [disabled]="saving()">
-                {{ saving() ? t('explorer.saving') : t('explorer.save') }}
-              </button>
-              <button (click)="cancelEdit()">{{ t('explorer.cancel') }}</button>
-            }
-          </header>
-          @if (fileLoading()) {
-            <div class="placeholder">{{ t('explorer.loading') }}</div>
-          } @else if (editing()) {
-            <textarea class="file-editor" [ngModel]="draftContent()" (ngModelChange)="draftContent.set($event)" spellcheck="false"></textarea>
-          } @else if (htmlPreview() !== null) {
-            <div class="html-preview-wrap">
-              <app-html-preview
-                [html]="htmlPreview() ?? ''"
-                [label]="selectedName() ?? ''"
-                (closed)="htmlPreview.set(null)"
-              />
-            </div>
-          } @else {
-            <pre class="file-content"><code>{{ fileContent() }}</code></pre>
-          }
-        }
-      </main>
-    </div>
-  }
-
   @if (error()) {
     <div class="error-banner">{{ error() }}</div>
   }
+
+  <div class="explorer-body">
+    <!-- F2-16: 260px lazy, gitignore-aware tree (engine `GET /fs/tree`). -->
+    <aside class="tree" [attr.aria-label]="t('explorer.title')">
+      @if (loading() && rows().length === 0) {
+        <p class="tree-note">{{ t('explorer.loading') }}</p>
+      } @else if (rows().length === 0) {
+        <p class="tree-note">{{ t('explorer.empty') }}</p>
+      }
+      <ul class="tree-list">
+        @for (row of rows(); track row.path) {
+          <li
+            class="tree-row"
+            [class.is-dir]="row.is_dir"
+            [class.is-open]="row.is_dir && row.expanded"
+            [class.is-selected]="!row.is_dir && selectedPath() === row.path"
+            [style.padding-left.px]="8 + row.depth * 14"
+            [attr.aria-expanded]="row.is_dir ? row.expanded : null"
+            [attr.aria-current]="!row.is_dir && selectedPath() === row.path ? 'true' : null"
+            (click)="toggle(row)"
+            (contextmenu)="onRowContextMenu($event, row)"
+            [title]="row.path"
+          >
+            <span class="twisty" aria-hidden="true">{{
+              row.is_dir ? (row.expanded ? '▾' : '▸') : '📄'
+            }}</span>
+            <span class="name">{{ row.name }}</span>
+          </li>
+        }
+      </ul>
+    </aside>
+
+    <!-- F2-17: content pane - 44px header + body/editor. -->
+    <main class="pane">
+      @if (!selectedPath()) {
+        <div class="placeholder">{{ t('explorer.selectHint') }}</div>
+      } @else {
+        <header
+          class="pane-head"
+          (contextmenu)="onPreviewContextMenu($event)"
+          [title]="isHtmlSelection() ? t('htmlPreview.rightClickHint') : ''"
+        >
+          <span class="file-name">{{ selectedName() }}</span>
+          <span class="file-path">{{ selectedPath() }}</span>
+          <span class="spacer"></span>
+          @if (!editing()) {
+            @if (isHtmlSelection()) {
+              <button
+                class="pane-btn"
+                (click)="htmlPreview.set(htmlPreview() === null ? fileContent() : null)"
+              >
+                {{ t('htmlPreview.preview') }}
+              </button>
+            }
+            <button class="pane-btn" (click)="startEdit()">{{ t('explorer.edit') }}</button>
+          } @else {
+            <button class="pane-btn" (click)="cancelEdit()">{{ t('explorer.cancel') }}</button>
+            <button class="pane-btn primary" (click)="saveEdit()" [disabled]="saving()">
+              {{ saving() ? t('explorer.saving') : t('explorer.save') }}
+            </button>
+          }
+        </header>
+
+        @if (fileLoading()) {
+          <div class="placeholder">{{ t('explorer.loading') }}</div>
+        } @else if (editing()) {
+          <textarea
+            class="file-editor"
+            [ngModel]="draftContent()"
+            (ngModelChange)="draftContent.set($event)"
+            spellcheck="false"
+          ></textarea>
+        } @else if (htmlPreview() !== null) {
+          <div class="html-preview-wrap">
+            <app-html-preview
+              [html]="htmlPreview() ?? ''"
+              [label]="selectedName() ?? ''"
+              (closed)="htmlPreview.set(null)"
+            />
+          </div>
+        } @else {
+          <pre class="file-body file-content"><code>{{ fileContent() }}</code></pre>
+        }
+      }
+    </main>
+  </div>
 </section>
