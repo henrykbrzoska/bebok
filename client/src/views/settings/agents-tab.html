@@ -1,0 +1,133 @@
+<div class="tab-head">
+  <h2>{{ t('settings.agentsTitle') }}</h2>
+  <p>{{ t('settings.agentsHint') }}</p>
+</div>
+
+<div class="split">
+  <div class="side">
+    @for (agent of agents(); track agent.name) {
+      <button
+        type="button"
+        class="row-btn"
+        [class.selected]="store.selectedAgent() === agent.name"
+        (click)="select(agent.name)"
+      >
+        <span class="dot" [class.ok]="agent.builtin" [class.idle]="!agent.builtin" aria-hidden="true"></span>
+        <span class="row-name mono">{{ agent.name }}</span>
+        <span class="row-kind small faint">{{ agent.builtin ? t('settings.builtin') : t('settings.file') }}</span>
+      </button>
+    }
+    <button type="button" class="dashed-btn" (click)="addFromFile()">
+      {{ t('settings.addAgentFile') }}
+    </button>
+  </div>
+
+  <div class="pane">
+    @if (selected(); as agent) {
+      <div class="card">
+        <h3 class="mono">{{ agent.name }}</h3>
+        <p class="card-sub">{{ agent.description ?? t('settings.noDescription') }}</p>
+
+        <label class="field">
+          <span class="micro-label">{{ t('settings.modelOverride') }}</span>
+          <select [ngModel]="modelOverride()" (ngModelChange)="setModelOverride($event)" class="mono">
+            <option value="">{{ t('settings.defaultOption') }}</option>
+            @if (modelOverride() && !store.availableModels().includes(modelOverride())) {
+              <option [value]="modelOverride()">{{ modelOverride() }}</option>
+            }
+            @for (model of store.availableModels(); track model) {
+              <option [value]="model">{{ model }}</option>
+            }
+          </select>
+          @if (agent.model) {
+            <span class="small faint mono">{{ t('settings.effectiveModel', { model: agent.model }) }}</span>
+          }
+        </label>
+
+        <label class="field">
+          <span class="micro-label">{{ t('settings.systemPrompt') }}</span>
+          <textarea
+            class="mono prompt-editor"
+            rows="10"
+            [ngModel]="promptText()"
+            (ngModelChange)="promptText.set($event)"
+            spellcheck="false"
+            [attr.placeholder]="t('settings.systemPromptPlaceholder')"
+          ></textarea>
+          <span class="small faint mono">{{ agentFilePath(agent.name) }}</span>
+        </label>
+
+        <div class="actions">
+          <button type="button" class="primary" (click)="saveAgent()" [disabled]="store.saving()">
+            {{ t('settings.saveAgent') }}
+          </button>
+        </div>
+      </div>
+
+      @if (agent.name === 'orchestrator') {
+        <div class="card">
+          <h3>{{ t('settings.fleetTitle') }}</h3>
+          <p class="card-sub">{{ t('settings.fleetHint') }}</p>
+          <label class="check">
+            <input
+              type="checkbox"
+              [checked]="store.fleetEnabled()"
+              (change)="store.toggleFleet(!store.fleetEnabled())"
+              [disabled]="store.saving()"
+            />
+            {{ t('settings.fleetEnabled') }}
+          </label>
+
+          <ul class="fleet-list">
+            @for (member of store.fleetMembers(); track $index; let i = $index) {
+              <li class="fleet-row">
+                <input
+                  type="text"
+                  class="mono"
+                  [ngModel]="member.name"
+                  (ngModelChange)="store.updateFleetMember(i, 'name', $event)"
+                  [attr.placeholder]="t('settings.fleetName')"
+                  spellcheck="false"
+                />
+                <select
+                  [ngModel]="member.agent"
+                  (ngModelChange)="store.updateFleetMember(i, 'agent', $event)"
+                  class="mono"
+                >
+                  @for (a of agents(); track a.name) {
+                    <option [value]="a.name">{{ a.name }}</option>
+                  }
+                </select>
+                <select
+                  [ngModel]="member.model"
+                  (ngModelChange)="store.updateFleetMember(i, 'model', $event)"
+                  class="mono"
+                >
+                  <option value="">{{ t('settings.defaultOption') }}</option>
+                  @if (member.model && !store.availableModels().includes(member.model)) {
+                    <option [value]="member.model">{{ member.model }}</option>
+                  }
+                  @for (model of store.availableModels(); track model) {
+                    <option [value]="model">{{ model }}</option>
+                  }
+                </select>
+                <button type="button" (click)="store.removeFleetMember(i)">
+                  {{ t('settings.fleetRemove') }}
+                </button>
+              </li>
+            }
+          </ul>
+
+          <div class="actions spread">
+            <button type="button" (click)="store.addFleetMember()">{{ t('settings.fleetAdd') }}</button>
+            <button type="button" class="primary" (click)="store.saveFleet()" [disabled]="store.saving()">
+              {{ t('settings.fleetSave') }}
+            </button>
+          </div>
+        </div>
+      }
+    } @else {
+      <div class="card empty">{{ t('settings.noAgentSelected') }}</div>
+    }
+  </div>
+</div>
