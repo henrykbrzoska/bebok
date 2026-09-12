@@ -413,11 +413,10 @@ pub async fn remove_worktree(root: &Path, path: &Path) -> Result<PathBuf, GitErr
     let out = run(root, &["worktree", "remove", "--force", &path_arg])
         .await
         .ok_or(GitError::Unavailable)?;
-    if !out.success {
-        if resolved.exists() {
-            return Err(GitError::Failed(stderr_summary(&out)));
-        }
-        // Not registered with git any more: nothing to do.
+    // A failure for a path git no longer knows (already pruned) is fine: the
+    // directory is removed from disk below.
+    if !out.success && resolved.exists() {
+        return Err(GitError::Failed(stderr_summary(&out)));
     }
     if resolved.exists() {
         std::fs::remove_dir_all(&resolved).map_err(|e| GitError::Io(e.to_string()))?;
