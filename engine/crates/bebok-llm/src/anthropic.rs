@@ -418,10 +418,12 @@ mod tests {
     #[test]
     fn non_cache_model_emits_no_cache_control() {
         let mut request = req(Thinking::Off);
-        request.model = "xai/grok-4.6".into();
+        // `prompt_cache: false` in the vendored snapshot (grok-4.x gained
+        // cache pricing in the 2026-09 refresh, so it no longer qualifies).
+        request.model = "mistralai/mistral-large-latest".into();
         request.system = "large system ".repeat(2_000);
         request.messages.push(ChatMessage::user("new question"));
-        let body = anthropic_body(&request, "grok-4.6");
+        let body = anthropic_body(&request, "mistral-large-latest");
         assert!(!body.to_string().contains("cache_control"));
     }
 }

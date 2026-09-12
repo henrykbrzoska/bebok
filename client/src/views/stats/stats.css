@@ -209,6 +209,10 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* `.body` is a scrolling flex column: without this the first card (the
+     daily chart) is squeezed to its header once the page is taller than the
+     viewport (E2E B2). */
+  flex-shrink: 0;
   overflow: hidden;
 }
 

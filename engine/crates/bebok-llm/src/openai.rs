@@ -5,7 +5,8 @@
 //! the standard `data: {...}` / `data: [DONE]` SSE stream; tool calls arrive as
 //! deltas accumulated across chunks.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -193,6 +194,46 @@ fn needs_tools_without_reasoning_retry(status: u16, response: &str, request: &Va
             .is_some_and(|message| message.contains("Function tools with reasoning_effort"))
 }
 
+/// `endpoint + model` pairs that answered the "Function tools with
+/// reasoning_effort are not supported" rejection. The rejection is
+/// deterministic for a model, so once seen the request is built without
+/// reasoning up front instead of paying a wasted 400 round-trip on every
+/// call (E2E R7: 34/34 calls were made twice). Process-wide because a fresh
+/// provider is built for every turn.
+fn tools_without_reasoning_models() -> &'static Mutex<HashSet<String>> {
+    static KNOWN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    KNOWN.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn tools_without_reasoning_key(endpoint: &str, model: &str) -> String {
+    format!("{endpoint}\n{model}")
+}
+
+fn remember_tools_without_reasoning(endpoint: &str, model: &str) {
+    if let Ok(mut known) = tools_without_reasoning_models().lock() {
+        known.insert(tools_without_reasoning_key(endpoint, model));
+    }
+}
+
+fn is_known_tools_without_reasoning(endpoint: &str, model: &str) -> bool {
+    tools_without_reasoning_models()
+        .lock()
+        .is_ok_and(|known| known.contains(&tools_without_reasoning_key(endpoint, model)))
+}
+
+/// Downgrade `reasoning_effort` to `none` for a tool-enabled request when the
+/// model is already known to reject the combination. Returns whether the body
+/// was changed.
+fn apply_known_tools_without_reasoning(body: &mut Value, endpoint: &str, model: &str) -> bool {
+    let has_tools = body["tools"].as_array().is_some_and(|t| !t.is_empty());
+    let has_reasoning = body.get("reasoning_effort").is_some_and(|e| e != "none");
+    if !has_tools || !has_reasoning || !is_known_tools_without_reasoning(endpoint, model) {
+        return false;
+    }
+    body["reasoning_effort"] = Value::String("none".to_string());
+    true
+}
+
 #[async_trait]
 impl Provider for OpenAiProvider {
     fn name(&self) -> &str {
@@ -205,12 +246,16 @@ impl Provider for OpenAiProvider {
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
         let model = model_name(&req.model).to_string();
         let mut body = openai_body(&req, &model);
+        if apply_known_tools_without_reasoning(&mut body, &self.endpoint, &model) {
+            tracing::debug!(model = %model, "Chat Completions: sending reasoning_effort=none with tools (model rejected reasoning with tools earlier)");
+        }
         let mut resp = self.request(&body).send().await?;
         if resp.status() == reqwest::StatusCode::BAD_REQUEST {
             let retry_after = retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
             if needs_tools_without_reasoning_retry(400, &text, &body) {
-                tracing::warn!(model = %model, "Chat Completions rejected reasoning with tools; retrying with reasoning_effort=none");
+                tracing::warn!(model = %model, "Chat Completions rejected reasoning with tools; retrying with reasoning_effort=none (remembered for this model)");
+                remember_tools_without_reasoning(&self.endpoint, &model);
                 body["reasoning_effort"] = Value::String("none".to_string());
                 resp = self.request(&body).send().await?;
             } else {
@@ -539,7 +584,10 @@ impl OpenAiParser {
 
 #[cfg(test)]
 mod tests {
-    use super::{needs_tools_without_reasoning_retry, openai_body};
+    use super::{
+        apply_known_tools_without_reasoning, needs_tools_without_reasoning_retry, openai_body,
+        remember_tools_without_reasoning,
+    };
     use crate::provider::{ChatMessage, ChatRequest, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
@@ -617,6 +665,45 @@ mod tests {
             400,
             &rejection,
             &serde_json::json!({"tools": [{"type": "function"}], "reasoning_effort": "none"}),
+        ));
+    }
+
+    /// E2E R7: once a model has rejected reasoning with tools, later requests
+    /// for the same endpoint+model are built with `reasoning_effort: none`
+    /// up front instead of repeating the 400 round-trip on every call.
+    #[test]
+    fn remembers_models_that_reject_reasoning_with_tools() {
+        let endpoint = "https://example.test/v1/chat/completions";
+        let model = "gpt-5.6-luna-memo-test";
+        let fresh = || {
+            serde_json::json!({
+                "tools": [{"type": "function"}],
+                "reasoning_effort": "high",
+            })
+        };
+
+        let mut body = fresh();
+        assert!(!apply_known_tools_without_reasoning(&mut body, endpoint, model));
+        assert_eq!(body["reasoning_effort"], "high", "unknown model: untouched");
+
+        remember_tools_without_reasoning(endpoint, model);
+        let mut body = fresh();
+        assert!(apply_known_tools_without_reasoning(&mut body, endpoint, model));
+        assert_eq!(body["reasoning_effort"], "none");
+
+        // Only tool-enabled requests are affected; plain chat keeps reasoning.
+        let mut no_tools = serde_json::json!({"tools": [], "reasoning_effort": "high"});
+        assert!(!apply_known_tools_without_reasoning(&mut no_tools, endpoint, model));
+        assert_eq!(no_tools["reasoning_effort"], "high");
+
+        // A different model or endpoint is not tainted.
+        let mut other = fresh();
+        assert!(!apply_known_tools_without_reasoning(&mut other, endpoint, "gpt-4.1"));
+        let mut other_endpoint = fresh();
+        assert!(!apply_known_tools_without_reasoning(
+            &mut other_endpoint,
+            "https://other.test/v1",
+            model
         ));
     }
 }

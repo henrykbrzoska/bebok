@@ -68,7 +68,10 @@ const REFRESH_DEBOUNCE_MS = 400;
                   [title]="file.path"
                   data-testid="change-row"
                 >
-                  <span class="file-path">{{ file.path }}</span>
+                  <span class="file-path"
+                    ><span class="file-dir">{{ dirOf(file.path) }}</span
+                    ><span class="file-name">{{ nameOf(file.path) }}</span></span
+                  >
                   <span class="plus">+{{ file.added }}</span>
                   <span class="minus">-{{ file.removed }}</span>
                 </button>
@@ -179,13 +182,26 @@ const REFRESH_DEBOUNCE_MS = 400;
         color: var(--text-faint);
       }
 
+      /* E2E R10: the directory part truncates, the basename never does, so
+         two files in the same deep folder stay distinguishable. */
       .file-path {
         flex: 1 1 auto;
         min-width: 0;
+        display: flex;
         color: var(--code-text-strong);
+        white-space: nowrap;
+      }
+
+      .file-dir {
+        flex: 0 1 auto;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        color: var(--text-muted);
+      }
+
+      .file-name {
+        flex: 0 0 auto;
       }
 
       .plus {
@@ -252,6 +268,17 @@ export class ChangesPanel {
     if (id) {
       void this.load(id);
     }
+  }
+
+  /** Directory part of a path including the trailing `/` ('' for a root file). */
+  dirOf(path: string): string {
+    const i = path.lastIndexOf('/');
+    return i < 0 ? '' : path.slice(0, i + 1);
+  }
+
+  /** Basename of a path. */
+  nameOf(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1);
   }
 
   open(file: ChangeEntry): void {

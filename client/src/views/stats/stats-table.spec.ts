@@ -122,6 +122,10 @@ describe('StatsTable (F7-5)', () => {
 
     const monoCell = fixture.nativeElement.querySelector('tbody tr td.mono') as HTMLElement;
     expect(monoCell).withContext('model ids render in the monospace cell class').not.toBeNull();
+    // R11: long keys are clipped inside the cell (not by the card) and the
+    // full value stays reachable through the tooltip.
+    expect(monoCell.querySelector('.clip')?.textContent?.trim()).toBe('anthropic/claude-sonnet');
+    expect(monoCell.getAttribute('title')).toBe('anthropic/claude-sonnet');
     const numCells = fixture.nativeElement.querySelectorAll('tbody tr td.num');
     expect(numCells.length).toBe(ROWS.length * 2);
   });

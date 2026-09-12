@@ -110,6 +110,7 @@ export class Sidebar {
       case 'reconnecting':
         return 'warning';
       case 'error':
+      case 'unauthorized':
         return 'danger';
       default:
         return 'idle';
@@ -126,6 +127,8 @@ export class Sidebar {
         return this.t('status.reconnecting');
       case 'error':
         return this.t('status.error');
+      case 'unauthorized':
+        return this.t('status.unauthorized');
       default:
         return this.t('status.idle');
     }

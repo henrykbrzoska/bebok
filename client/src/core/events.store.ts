@@ -21,7 +21,7 @@ import { EngineEvent } from './engine.dtos';
  * would hide a real failure from the user. The store keeps retrying in the
  * background and moves to `reconnecting` once a stream that was live drops.
  */
-export type SseState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error';
+export type SseState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unauthorized';
 
 const RECONNECT_DELAY_MS = 1500;
 
@@ -103,6 +103,14 @@ export class EventsStore {
           headers: { Accept: 'text/event-stream' },
           signal: controller.signal,
         });
+        if (res.status === 401) {
+          // Our token is not the running engine's token: retrying cannot
+          // help until the user supplies the new address. Park the stream
+          // (`restart()` after `EngineClient.reconnect()` resumes it).
+          this.state.set('unauthorized');
+          this.started = false;
+          break;
+        }
         if (!res.ok || !res.body) {
           throw new Error(`SSE /event -> ${res.status}`);
         }

@@ -103,6 +103,9 @@ describe('ChangesPanel (F6-9)', () => {
     expect(list[0].textContent).toContain('-1');
     expect(list[1].textContent).toContain('docs/new.md');
     expect(list[1].textContent).toContain('+12');
+    // E2E R10: the basename is rendered in its own, non-truncating span.
+    expect(list[0].querySelector('.file-dir')?.textContent).toBe('src/');
+    expect(list[0].querySelector('.file-name')?.textContent).toBe('a.ts');
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Tracked files: 2');
   });
 

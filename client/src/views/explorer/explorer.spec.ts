@@ -195,6 +195,35 @@ describe('ExplorerView "open in Explorer" request (F7-3)', () => {
     expect(selection.openRequest()).toBeNull();
   });
 
+  it('expands the tree down to the requested file (E2E R9)', async () => {
+    makeFixture('/proj');
+    const fsTree = jasmine.createSpy('fsTree').and.callFake((_dir: string, path?: string) => {
+      const rel = path ?? '';
+      const entries =
+        rel === ''
+          ? [{ name: 'apps', path: 'apps', is_dir: true }]
+          : rel === 'apps'
+            ? [{ name: 'web', path: 'apps/web', is_dir: true }]
+            : rel === 'apps/web'
+              ? [{ name: 'a.ts', path: 'apps/web/a.ts', is_dir: false }]
+              : [];
+      return Promise.resolve({ path: rel, entries });
+    });
+    (TestBed.inject(EngineClient) as unknown as { fsTree: unknown }).fsTree = fsTree;
+    selection.openInExplorer('/proj', 'apps/web/a.ts');
+
+    await view.ngOnInit();
+    await fixture.whenStable();
+    await view.revealPath('apps/web/a.ts');
+
+    expect(fsTree).toHaveBeenCalledWith('/proj', 'apps');
+    expect(fsTree).toHaveBeenCalledWith('/proj', 'apps/web');
+    const paths = view.rows().map((r) => r.path);
+    expect(paths).toEqual(['apps', 'apps/web', 'apps/web/a.ts']);
+    expect(view.rows().filter((r) => r.is_dir).every((r) => r.expanded)).toBeTrue();
+    expect(view.selectedPath()).toBe('apps/web/a.ts');
+  });
+
   it('ignores a request for a different directory than the one being viewed', async () => {
     makeFixture('/other');
     selection.openInExplorer('/proj', 'src/a.ts');

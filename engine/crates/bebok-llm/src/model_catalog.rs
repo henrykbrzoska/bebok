@@ -230,6 +230,33 @@ mod tests {
         assert!(deepseek.supports_tools);
     }
 
+    /// E2E R4: the snapshot used to stop at gpt-4.1/o3-mini, so every
+    /// gpt-5.x fell back to the 64k window and had no price.
+    #[test]
+    fn current_generation_models_are_in_the_snapshot() {
+        let catalog = ModelCatalog::global();
+        for model in [
+            "openai/gpt-5.6-luna",
+            "openai/gpt-5.6-terra",
+            "openai/gpt-5.4",
+            "anthropic/claude-opus-5",
+            "anthropic/claude-sonnet-4-6",
+            "google/gemini-3.1-pro-preview",
+            "xai/grok-4.6",
+            "deepseek/deepseek-v4-pro",
+            "zai/glm-5.3",
+        ] {
+            let caps = catalog.get(model);
+            assert!(caps.context_window > 64_000, "{model}: {caps:?}");
+            assert!(caps.supports_tools, "{model}");
+            let price = catalog.pricing(model).unwrap_or_else(|| panic!("{model}: no pricing"));
+            assert!(price.input > 0.0 && price.output > 0.0, "{model}");
+        }
+        let luna = catalog.get("openai/gpt-5.6-luna");
+        assert_eq!(luna.context_window, 1_050_000);
+        assert_eq!(luna.max_output, 128_000);
+    }
+
     #[test]
     fn unknown_model_uses_sensible_fallback() {
         let capabilities = ModelCatalog::global().get("custom/unknown-model");

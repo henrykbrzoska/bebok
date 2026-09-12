@@ -7,7 +7,7 @@
 
 import { Injectable, computed, signal } from '@angular/core';
 
-import { authFetch } from './auth.interceptor';
+import { authFetch, onEngineUnauthorized } from './auth.interceptor';
 import {
   AbortResponse,
   AbortTaskResponse,
@@ -77,6 +77,18 @@ export class EngineClient {
    * succeeds, so the start view must know the platform before that.
    */
   readonly isTauri = signal(this.transport.platform === 'tauri');
+  /**
+   * True once the engine rejected our capability token (401): the engine was
+   * restarted (new per-launch token) or the address changed. Every request
+   * keeps failing until the user hands us the new `BEBOK_READY` address (or,
+   * on the desktop shell, we re-read it from the sidecar), so the shell shows
+   * a blocking reconnect prompt while this is set. Cleared by `reconnect()`.
+   */
+  readonly unauthorized = signal(false);
+
+  constructor() {
+    onEngineUnauthorized(() => this.unauthorized.set(true));
+  }
 
   get platform(): TransportStrategy['platform'] {
     return this.transport.platform;
@@ -105,6 +117,31 @@ export class EngineClient {
    */
   reconfigure(conn: EngineConnection): void {
     this.connection.set(this.transport.adoptRemote(conn));
+  }
+
+  /**
+   * Recover from a rejected token. Browser/remote mode: `rawUrl` is the new
+   * `BEBOK_READY http://host:port/?token=…` line (a plain URL keeps the saved
+   * token). Desktop shell: re-reads the sidecar's current address. Resolves
+   * once a probe gets through; rejects (leaving `unauthorized` set) when the
+   * engine still answers 401 or is unreachable.
+   */
+  async reconnect(rawUrl?: string): Promise<void> {
+    if (rawUrl !== undefined) {
+      const normalized = rawUrl.trim().replace(/\/+$/, '');
+      if (!normalized) {
+        throw new Error('engine address is empty');
+      }
+      this.reconfigure({ kind: 'http', baseUrl: normalized });
+    } else {
+      this.connection.set(null);
+      await this.connect();
+    }
+    this.unauthorized.set(false);
+    await this.ping();
+    if (this.unauthorized()) {
+      throw new Error('engine rejected the token (401)');
+    }
   }
 
   /**

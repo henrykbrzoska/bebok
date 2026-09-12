@@ -4,7 +4,7 @@
  * The input is first HTML-escaped, then structural markup is applied from the
  * escaped text. Raw HTML is never passed through, so this stays safe to inject
  * with `[innerHTML]`. Scope is intentionally small (M3): paragraphs, fenced
- * code blocks, inline code/bold/links and simple lists.
+ * code blocks, headings, inline code/bold/links and simple lists.
  *
  * F7-4: fenced code blocks are additionally run through
  * `ui/code-highlight` for syntax highlighting (language resolved from the
@@ -106,7 +106,9 @@ function linkifyBarePaths(html: string): string {
 }
 
 function renderInline(value: string): string {
-  // value is already HTML-escaped; apply text-level formatting on top.
+  // `value` is already HTML-escaped by `renderMarkdown` (see `escapeHtml`), so
+  // model text such as `<main>` or `Array<string>` arrives as `&lt;main&gt;`
+  // and only the markup produced here is real HTML.
   let html = value
     .replace(/`([^`\n]+)`/g, (_, code: string) => `<code>${code}</code>`)
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
@@ -149,7 +151,10 @@ export function renderMarkdown(source: string): string {
       if (block.kind === 'code') {
         return highlightBlockHtml(block.code ?? '', { language: block.lang || null });
       }
-      const paragraphs = (block.text ?? '')
+      // Escape once, up front: every transform below only ever sees
+      // entity-encoded text, so raw `<tag>`s from the model can never reach
+      // the DOM. Fenced code is escaped by `highlightBlockHtml` itself.
+      const paragraphs = escapeHtml(block.text ?? '')
         .split(/\n{2,}/)
         .map((p) => p.trim())
         .filter((p) => p.length > 0);
