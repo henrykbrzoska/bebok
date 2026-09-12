@@ -13,7 +13,9 @@ mod zai;
 
 pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider, to_anthropic_messages};
 pub use cost::{Pricing, compute_cost, pricing_for};
-pub use openai::{OpenAiProvider, openai_body, openai_stream, to_openai_messages};
+pub use openai::{
+    OpenAiProvider, openai_body, openai_stream, parse_openai_sse, to_openai_messages,
+};
 pub use provider::{
     ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider, ProviderErrorKind,
     StreamEvent, StreamResult, Thinking, ToolCall, ToolDef, ToolResult, Usage, classify_http,

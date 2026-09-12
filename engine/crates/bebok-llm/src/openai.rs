@@ -188,6 +188,11 @@ pub fn openai_stream(resp: reqwest::Response) -> impl Stream<Item = StreamResult
                 if let Some(item) = parser.next_ready() {
                     return Some((item, (byte_stream, parser)));
                 }
+                // EOF already handled and everything drained: end the stream
+                // (and never poll the byte stream past its own end).
+                if parser.is_finished() {
+                    return None;
+                }
                 match byte_stream.next().await {
                     Some(Ok(bytes)) => parser.feed(&bytes),
                     Some(Err(e)) => {
@@ -195,16 +200,41 @@ pub fn openai_stream(resp: reqwest::Response) -> impl Stream<Item = StreamResult
                         return Some((err, (byte_stream, parser)));
                     }
                     None => {
-                        // Flush any pending tool calls at EOF.
-                        if let Some(item) = parser.finish() {
-                            return Some((item, (byte_stream, parser)));
-                        }
-                        return None;
+                        // EOF: flush anything still pending (unterminated line,
+                        // tool calls that never got a finish_reason) and make
+                        // sure exactly one `Done` was emitted for this stream.
+                        parser.finish();
                     }
                 }
             }
         },
     )
+}
+
+/// Parse a complete (already buffered) OpenAI-compatible SSE body into typed
+/// events, running the exact same state machine as [`openai_stream`] including
+/// end-of-stream finalisation.
+///
+/// This is the transport-free entry point used by the parser tests over
+/// recorded SSE fixtures; `chunk_size` splits the body into byte chunks so a
+/// test can prove the parser is insensitive to where the network happened to
+/// cut the stream (`None` = feed it all at once).
+pub fn parse_openai_sse(body: &str, chunk_size: Option<usize>) -> Vec<StreamResult<StreamEvent>> {
+    let mut parser = OpenAiParser::new();
+    let bytes = body.as_bytes();
+    let step = chunk_size.unwrap_or(bytes.len()).max(1);
+    let mut out = Vec::new();
+    for chunk in bytes.chunks(step) {
+        parser.feed(chunk);
+        while let Some(ev) = parser.next_ready() {
+            out.push(ev);
+        }
+    }
+    parser.finish();
+    while let Some(ev) = parser.next_ready() {
+        out.push(ev);
+    }
+    out
 }
 
 /// Accumulated state for one in-flight tool call.
@@ -215,6 +245,14 @@ struct PendingTool {
     arguments: String,
 }
 
+/// Incremental parser for an OpenAI-compatible SSE stream.
+///
+/// Finalisation contract (bug B13): **every** stream emits exactly one
+/// [`StreamEvent::Done`] - never zero (the agent loop books tokens/cost only on
+/// `Done`, so a missing one silently zeroes a session's usage), never two (that
+/// would double-count). The `Done` carries real usage when the provider sent a
+/// usage chunk, and zeroed best-effort usage when the stream ended without one
+/// (e.g. cut off right after a tool call).
 struct OpenAiParser {
     line_buf: Vec<u8>,
     /// Buffered parsed events waiting to be yielded.
@@ -222,6 +260,14 @@ struct OpenAiParser {
     tools: HashMap<usize, PendingTool>,
     usage_in: u64,
     usage_out: u64,
+    /// A `usage` object was seen (so the counters are authoritative).
+    usage_seen: bool,
+    /// A `finish_reason` was seen (the completion is logically over).
+    finish_seen: bool,
+    /// `Done` has already been queued; never queue a second one.
+    done_emitted: bool,
+    /// `finish()` already ran (EOF handling is idempotent).
+    finished: bool,
 }
 
 impl OpenAiParser {
@@ -232,6 +278,10 @@ impl OpenAiParser {
             tools: HashMap::new(),
             usage_in: 0,
             usage_out: 0,
+            usage_seen: false,
+            finish_seen: false,
+            done_emitted: false,
+            finished: false,
         }
     }
 
@@ -239,8 +289,70 @@ impl OpenAiParser {
         self.ready.pop_front()
     }
 
-    fn finish(&mut self) -> Option<StreamResult<StreamEvent>> {
-        None
+    /// True once [`OpenAiParser::finish`] has run (EOF seen and finalised).
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Queue the single `Done` for this stream (no-op once emitted).
+    fn emit_done(&mut self) {
+        if self.done_emitted {
+            return;
+        }
+        self.done_emitted = true;
+        self.ready.push_back(Ok(StreamEvent::Done(Usage {
+            input_tokens: self.usage_in,
+            output_tokens: self.usage_out,
+            cost: None,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        })));
+    }
+
+    /// Flush the accumulated tool calls (on `finish_reason` or at EOF).
+    fn flush_tools(&mut self) {
+        if self.tools.is_empty() {
+            return;
+        }
+        let mut indices: Vec<usize> = self.tools.keys().copied().collect();
+        indices.sort_unstable();
+        for index in indices {
+            let slot = self.tools.remove(&index).unwrap_or_default();
+            if slot.id.is_empty() {
+                continue;
+            }
+            let input = if slot.arguments.trim().is_empty() {
+                Value::Object(serde_json::Map::new())
+            } else {
+                serde_json::from_str(&slot.arguments).unwrap_or(Value::String(slot.arguments))
+            };
+            self.ready.push_back(Ok(StreamEvent::ToolCall(ToolCall {
+                id: slot.id,
+                name: slot.name,
+                input,
+            })));
+        }
+    }
+
+    /// End-of-stream handling. Flushes a trailing line without a newline, any
+    /// tool calls that never saw a `finish_reason`, and guarantees the `Done`.
+    /// Returns `true` when it queued something new to yield.
+    fn finish(&mut self) -> bool {
+        if self.finished {
+            return false;
+        }
+
+        self.finished = true;
+        if !self.line_buf.is_empty() {
+            let line = String::from_utf8_lossy(&self.line_buf).to_string();
+            self.line_buf.clear();
+            self.handle_line(line.trim_end_matches('\r'));
+        }
+        // A stream truncated right after a tool call still owes us the call
+        // and a Done - with zeroed usage if the usage chunk never arrived.
+        self.flush_tools();
+        self.emit_done();
+        !self.ready.is_empty()
     }
 
     fn feed(&mut self, bytes: &[u8]) {
@@ -260,7 +372,16 @@ impl OpenAiParser {
             return;
         };
         let data = data.trim_start();
-        if data.is_empty() || data == "[DONE]" {
+        if data.is_empty() {
+            return;
+        }
+        // `[DONE]` terminates the stream: flush tool calls that never saw a
+        // finish_reason, then emit the single Done (previously this line was
+        // dropped, which is how streams ending in `usage` + `[DONE]` produced
+        // no Done at all and lost their token/cost accounting).
+        if data == "[DONE]" {
+            self.flush_tools();
+            self.emit_done();
             return;
         }
         let v: Value = match serde_json::from_str(data) {
@@ -273,7 +394,7 @@ impl OpenAiParser {
         };
 
         // Usage chunk (stream_options.include_usage) has empty choices + usage.
-        if let Some(usage) = v.get("usage") {
+        if let Some(usage) = v.get("usage").filter(|u| !u.is_null()) {
             self.usage_in = usage
                 .get("prompt_tokens")
                 .and_then(|x| x.as_u64())
@@ -282,6 +403,7 @@ impl OpenAiParser {
                 .get("completion_tokens")
                 .and_then(|x| x.as_u64())
                 .unwrap_or(0);
+            self.usage_seen = true;
         }
 
         let Some(choice) = v
@@ -289,6 +411,13 @@ impl OpenAiParser {
             .and_then(|c| c.as_array())
             .and_then(|c| c.first())
         else {
+            // The canonical final chunk: `usage` with an empty `choices` array.
+            // The completion is already finished, so this is the moment the
+            // real usage becomes available - emit the Done here.
+            if self.usage_seen && self.finish_seen {
+                self.flush_tools();
+                self.emit_done();
+            }
             return;
         };
         let delta = choice.get("delta").cloned().unwrap_or(Value::Null);
@@ -338,37 +467,14 @@ impl OpenAiParser {
         }
 
         // A finish_reason closes the current tool-call accumulation.
-        if finish.is_some() && !self.tools.is_empty() {
-            let mut indices: Vec<usize> = self.tools.keys().copied().collect();
-            indices.sort_unstable();
-            for index in indices {
-                let slot = self.tools.remove(&index).unwrap_or_default();
-                if slot.id.is_empty() {
-                    continue;
-                }
-                let input = if slot.arguments.trim().is_empty() {
-                    Value::Object(serde_json::Map::new())
-                } else {
-                    serde_json::from_str(&slot.arguments).unwrap_or(Value::String(slot.arguments))
-                };
-                self.ready.push_back(Ok(StreamEvent::ToolCall(ToolCall {
-                    id: slot.id,
-                    name: slot.name,
-                    input,
-                })));
+        if finish.is_some() {
+            self.finish_seen = true;
+            self.flush_tools();
+            // Usage already in hand (some servers put it on the finishing
+            // chunk, or sent it earlier): this is the last chunk that matters.
+            if self.usage_seen {
+                self.emit_done();
             }
-        }
-
-        // Some servers send a final `[DONE]`-less completion; if finish_reason is
-        // set and no tool calls, emit Done when the usage was seen.
-        if finish.is_some() && self.tools.is_empty() && (self.usage_in > 0 || self.usage_out > 0) {
-            self.ready.push_back(Ok(StreamEvent::Done(Usage {
-                input_tokens: self.usage_in,
-                output_tokens: self.usage_out,
-                cost: None,
-                cache_read_input_tokens: None,
-                cache_creation_input_tokens: None,
-            })));
         }
     }
 }
