@@ -322,4 +322,6 @@ export const hi: Record<MessageKey, string> = {
   'diff.mode': 'डिफ़ लेआउट',
   'diff.unified': 'एकीकृत',
   'diff.split': 'विभाजित',
+  'perm.allowAlwaysTool': 'इस टूल को हमेशा अनुमति दें',
+  'perm.blocksSend': 'दूसरा संदेश भेजने से पहले अनुमति अनुरोध का उत्तर दें।',
 };

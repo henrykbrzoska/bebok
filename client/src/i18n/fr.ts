@@ -323,4 +323,6 @@ export const fr: Record<MessageKey, string> = {
   'diff.mode': 'Affichage du diff',
   'diff.unified': 'Unifié',
   'diff.split': 'Côte à côte',
+  'perm.allowAlwaysTool': 'Toujours autoriser cet outil',
+  'perm.blocksSend': 'Répondez à la demande d\'autorisation avant d\'envoyer un autre message.',
 };

@@ -322,4 +322,6 @@ export const zh: Record<MessageKey, string> = {
   'diff.mode': '差异布局',
   'diff.unified': '统一',
   'diff.split': '分栏',
+  'perm.allowAlwaysTool': '始终允许此工具',
+  'perm.blocksSend': '请先回应权限请求，然后再发送新消息。',
 };

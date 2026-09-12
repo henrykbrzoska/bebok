@@ -113,6 +113,12 @@
               }
             </div>
           }
+
+          <app-permission-popup
+            #permission
+            [activeSessionID]="sessionID()"
+            [directory]="meta()?.directory"
+          />
           </div>
         </div>
 
@@ -167,6 +173,9 @@
         }
         @if (attachError()) {
           <div class="attach-error">{{ attachError() }}</div>
+        }
+        @if (permissionBlocked()) {
+          <div class="perm-blocked" role="status">{{ t('perm.blocksSend') }}</div>
         }
         <textarea
           rows="3"
@@ -223,7 +232,8 @@
           <button
             class="primary send"
             (click)="sendPrompt()"
-            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading()"
+            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading() || permissionBlocked()"
+            [title]="permissionBlocked() ? t('perm.blocksSend') : t('chat.send')"
           >
             {{ sending() ? t('chat.sending') : t('chat.send') }}
           </button>
@@ -231,6 +241,4 @@
       </footer>
     </div>
   </div>
-
-  <app-permission-popup [activeSessionID]="sessionID()" [directory]="meta()?.directory" />
 </div>

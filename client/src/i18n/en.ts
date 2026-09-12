@@ -332,6 +332,8 @@ export const en = {
   'diff.mode': 'Diff layout',
   'diff.unified': 'Unified',
   'diff.split': 'Split',
+  'perm.allowAlwaysTool': 'Always allow this tool',
+  'perm.blocksSend': 'Answer the permission request before sending another message.',
 };
 
 export type MessageKey = keyof typeof en;

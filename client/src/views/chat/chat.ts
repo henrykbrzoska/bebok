@@ -206,6 +206,13 @@ export class ChatView implements OnInit, OnDestroy {
 
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
   readonly minimap = viewChild(ScrollMinimapComponent);
+  /** Inline permission prompt (F2-8) - blocks sending while unresolved. */
+  readonly permission = viewChild(PermissionPopup);
+
+  /** True while a permission decision is outstanding (F2-8, bug B15). */
+  readonly permissionBlocked = computed(
+    () => (this.permission()?.asks().length ?? 0) > 0,
+  );
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
@@ -660,6 +667,10 @@ export class ChatView implements OnInit, OnDestroy {
     const text = this.draft().trim();
     const staged = this.attachments();
     if ((!text && staged.length === 0) || this.loading()) {
+      return;
+    }
+    // A pending permission prompt blocks turn progress (F2-8).
+    if (this.permissionBlocked()) {
       return;
     }
     this.draft.set('');

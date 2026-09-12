@@ -323,4 +323,6 @@ export const pt: Record<MessageKey, string> = {
   'diff.mode': 'Vista de diferenças',
   'diff.unified': 'Unificado',
   'diff.split': 'Dividido',
+  'perm.allowAlwaysTool': 'Permitir sempre esta ferramenta',
+  'perm.blocksSend': 'Responda ao pedido de permissão antes de enviar outra mensagem.',
 };

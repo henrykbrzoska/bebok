@@ -323,4 +323,6 @@ export const uk: Record<MessageKey, string> = {
   'diff.mode': 'Вигляд різниці',
   'diff.unified': 'Об\'єднаний',
   'diff.split': 'Роздільний',
+  'perm.allowAlwaysTool': 'Завжди дозволяти цей інструмент',
+  'perm.blocksSend': 'Дайте відповідь на запит дозволу, перш ніж надсилати нове повідомлення.',
 };

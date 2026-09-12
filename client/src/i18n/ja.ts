@@ -322,4 +322,6 @@ export const ja: Record<MessageKey, string> = {
   'diff.mode': '差分の表示',
   'diff.unified': '統合',
   'diff.split': '分割',
+  'perm.allowAlwaysTool': 'このツールを常に許可',
+  'perm.blocksSend': '権限リクエストに回答してから次のメッセージを送信してください。',
 };
