@@ -1,25 +1,109 @@
-/* Bebok client - global styles (design tokens + shared primitives). */
+/* Bebok client - global styles (design tokens + shared primitives).
+ *
+ * Tokens follow `analysis/mockups/design_handoff_bebok_redesign/README.md`
+ * (WP-SHELL / F1-1). Dark only - this redesign has no light theme.
+ */
 
 :root {
   color-scheme: dark;
 
-  --bg: #121418;
-  --bg-surface: #1a1d24;
-  --bg-raised: #22262f;
-  --bg-hover: #2a2f3a;
-  --border: #2e3440;
-  --fg: #e6e9ef;
-  --fg-muted: #9aa4b2;
-  --accent: #5b8cff;
-  --accent-strong: #3f6fe0;
-  --ok: #4caf7d;
-  --warn: #d9a13b;
-  --err: #e05260;
+  /* --- Surfaces ------------------------------------------------------- */
+  --bg: #15161a;
+  --surface: #1c1e24;
+  --surface-2: #22242b;
+  --surface-3: #2a2d35;
+  --border: #2b2e37;
+  --border-strong: #3a3e4a;
 
-  --radius: 8px;
-  --radius-sm: 5px;
-  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* --- Text ----------------------------------------------------------- */
+  --text: #eceef2;
+  --text-muted: #98a0ad;
+  --text-faint: #6b7280;
+  --code-text: #8b93a1;
+  --code-text-strong: #c7cbd3;
+
+  /* --- Accent & status ------------------------------------------------ */
+  --accent: #e8935a;
+  --accent-hover: #f2a86f;
+  --success: #5fb88a;
+  --warning: #e0b64a;
+  --danger: #e2645f;
+
+  /* --- Code / terminal / diff ----------------------------------------- */
+  --terminal-bg: #0f1013;
+  --diff-add-bg: #1e2a22;
+  --diff-add-text: #8fd4ab;
+  --diff-remove-bg: #2a1e1e;
+  --diff-remove-text: #e2938f;
+
+  /* --- Typography ------------------------------------------------------
+   * Inter / JetBrains Mono are used when installed on the host (desktop and
+   * Tauri builds may run offline, so no Google Fonts <link>); otherwise the
+   * stack degrades to the platform UI / monospace faces.
+   */
+  --font-sans: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+
+  --fs-11: 11px;
+  --fs-11-5: 11.5px;
+  --fs-12: 12px;
+  --fs-12-5: 12.5px;
+  --fs-13: 13px;
+  --fs-13-5: 13.5px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-label: 10.5px;
+
+  --lh-body: 1.6;
+  --label-tracking: 0.05em;
+
+  /* --- Spacing (8px based scale) --------------------------------------- */
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-9: 9px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-24: 24px;
+
+  /* --- Shape ----------------------------------------------------------- */
+  --radius-control: 7px;
+  --radius-control-sm: 6px;
+  --radius-card: 10px;
+  --radius-panel: 8px;
+  --radius-bubble: 12px;
+
+  /* --- Shell metrics ---------------------------------------------------- */
+  --sidebar-width: 252px;
+  --sidebar-collapsed-width: 60px;
+  --drawer-width: 280px;
+  --topbar-height: 46px;
+  --shell-transition: 150ms ease;
+
+  /* --- Legacy aliases ---------------------------------------------------
+   * Views owned by other work packages (chat/explorer/terminal/debug/
+   * settings/config) still reference the pre-redesign names. They now resolve
+   * to the new palette so the whole app re-skins at once; the old hex values
+   * (#121418 & co.) are gone.
+   */
+  --bg-surface: var(--surface);
+  --bg-raised: var(--surface-2);
+  --bg-hover: var(--surface-3);
+  --fg: var(--text);
+  --fg-muted: var(--text-muted);
+  --ok: var(--success);
+  --warn: var(--warning);
+  --err: var(--danger);
+  --accent-strong: var(--accent-hover);
+  --radius: var(--radius-card);
+  --radius-sm: var(--radius-control-sm);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
 }
 
 * {
@@ -34,31 +118,31 @@ body {
 }
 
 body {
-  font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13-5);
+  line-height: var(--lh-body);
+  color: var(--text);
   background: var(--bg);
 }
 
 ::selection {
-  background: rgba(91, 140, 255, 0.35);
+  background: rgba(232, 147, 90, 0.32);
 }
 
 /* Shared controls */
 button {
   font: inherit;
-  color: var(--fg);
-  background: var(--bg-raised);
+  color: var(--text);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control-sm);
   padding: 6px 14px;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
 button:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--surface-3);
 }
 
 button:disabled {
@@ -67,23 +151,25 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 button.danger {
   background: transparent;
-  border-color: var(--err);
-  color: var(--err);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 button.danger:hover:not(:disabled) {
-  background: rgba(224, 82, 96, 0.12);
+  background: rgba(226, 100, 95, 0.12);
 }
 
 button.ghost {
@@ -94,10 +180,10 @@ input[type='text'],
 input[type='password'],
 textarea {
   font: inherit;
-  color: var(--fg);
-  background: var(--bg-raised);
+  color: var(--text);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control-sm);
   padding: 7px 10px;
   outline: none;
 }
@@ -109,7 +195,7 @@ textarea:focus {
 
 code,
 pre {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
 }
 
 a {
@@ -117,5 +203,5 @@ a {
 }
 
 .muted {
-  color: var(--fg-muted);
+  color: var(--text-muted);
 }
