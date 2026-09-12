@@ -15,6 +15,10 @@
  * (Angular's `[innerHTML]` sanitizer keeps `class` but strips `data-*`)
  * so the host component can intercept the click and resolve it against the
  * document's own path instead of letting the browser navigate away.
+ *
+ * Also supported: a standalone image line `![alt](src)` (F8-4, for the "What
+ * is Bebok?" page's illustrations) - rendered as its own `<img>` block, never
+ * intercepted as a relative link (images are static assets, not documents).
  */
 
 import { highlightBlockHtml } from '../code-highlight/code-highlight';
@@ -26,7 +30,11 @@ type Block =
   | { kind: 'quote'; lines: string[] }
   | { kind: 'list'; ordered: boolean; items: string[] }
   | { kind: 'table'; header: string[]; align: Align[]; rows: string[][] }
+  | { kind: 'image'; alt: string; src: string }
   | { kind: 'paragraph'; text: string };
+
+/** A line that is *only* `![alt](src)` - block-level, not inline. */
+const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/;
 
 type Align = 'left' | 'center' | 'right' | null;
 
@@ -130,6 +138,13 @@ function parseBlocks(source: string): Block[] {
       continue;
     }
 
+    const image = IMAGE_LINE.exec(line.trim());
+    if (image) {
+      blocks.push({ kind: 'image', alt: image[1], src: image[2] });
+      i += 1;
+      continue;
+    }
+
     // Pipe table: a row followed by a valid `---`/`:--:` divider row.
     if (isTableRow(line) && i + 1 < lines.length) {
       const align = parseAlignRow(lines[i + 1]);
@@ -192,6 +207,9 @@ function parseBlocks(source: string): Block[] {
         break;
       }
       if (isTableRow(lines[i]) && i + 1 < lines.length && parseAlignRow(lines[i + 1])) {
+        break;
+      }
+      if (IMAGE_LINE.test(lines[i].trim())) {
         break;
       }
       para.push(lines[i]);
@@ -263,6 +281,8 @@ export function renderMarkdownView(source: string): string {
             .join('');
           return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
         }
+        case 'image':
+          return `<img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt)}" loading="lazy">`;
         case 'paragraph':
           return `<p>${renderParagraphText(block.text)}</p>`;
       }

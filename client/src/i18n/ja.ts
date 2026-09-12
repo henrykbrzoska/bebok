@@ -683,4 +683,11 @@ export const ja: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': '危険（オレンジ）',
   'settings.toolSafetyGroupUncategorized': '未分類（グレー）',
   'settings.toolSafetyBadge': '未分類のツール {n} 件',
+
+  // F8-4:「Bebokとは?」ページ
+  'topbar.about': 'Bebokとは?',
+  'palette.openAbout': 'Bebokとは?',
+  'about.back': '← ディレクトリ',
+  'about.loading': '読み込み中…',
+  'about.error': 'このページを読み込めませんでした。',
 };

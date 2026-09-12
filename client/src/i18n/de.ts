@@ -684,4 +684,11 @@ export const de: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': 'Gefährlich (orange)',
   'settings.toolSafetyGroupUncategorized': 'Nicht kategorisiert (grau)',
   'settings.toolSafetyBadge': '{n} nicht kategorisierte Werkzeuge',
+
+  // F8-4: Seite "Was ist Bebok?"
+  'topbar.about': 'Was ist Bebok?',
+  'palette.openAbout': 'Was ist Bebok?',
+  'about.back': '← Verzeichnis',
+  'about.loading': 'Wird geladen…',
+  'about.error': 'Diese Seite konnte nicht geladen werden.',
 };

@@ -43,6 +43,8 @@ export class Topbar {
         return this.t('nav.stats');
       case 'settings':
         return this.t('nav.settings');
+      case 'about':
+        return this.t('topbar.about');
       default:
         return null;
     }

@@ -72,3 +72,24 @@
   background: var(--surface-3);
   border-color: var(--border-strong);
 }
+
+.chip.about {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  text-decoration: none;
+}
+
+.about-icon {
+  font-size: var(--fs-12-5);
+  line-height: 1;
+}
+
+/* Icon-only below ~1100px: the label collapses, the tooltip (`title`) still
+   carries the full text - keeps the topbar from crowding the breadcrumb on
+   narrower windows while the 1400px layout stays untouched. */
+@media (max-width: 1100px) {
+  .about-label {
+    display: none;
+  }
+}

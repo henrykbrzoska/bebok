@@ -33,6 +33,7 @@ type ActionId =
   | 'openExplorer'
   | 'openTerminal'
   | 'openStats'
+  | 'openAbout'
   | 'settingsMcp'
   | 'settingsSkills'
   | 'settingsAgents'
@@ -47,6 +48,7 @@ interface PaletteAction {
     | 'palette.openExplorer'
     | 'palette.openTerminal'
     | 'palette.openStats'
+    | 'palette.openAbout'
     | 'palette.settingsMcp'
     | 'palette.settingsSkills'
     | 'palette.settingsAgents'
@@ -61,6 +63,7 @@ const ACTIONS: PaletteAction[] = [
   { id: 'openExplorer', labelKey: 'palette.openExplorer' },
   { id: 'openTerminal', labelKey: 'palette.openTerminal' },
   { id: 'openStats', labelKey: 'palette.openStats' },
+  { id: 'openAbout', labelKey: 'palette.openAbout' },
   { id: 'settingsMcp', labelKey: 'palette.settingsMcp' },
   { id: 'settingsSkills', labelKey: 'palette.settingsSkills' },
   { id: 'settingsAgents', labelKey: 'palette.settingsAgents' },
@@ -163,6 +166,9 @@ export class CommandPalette {
         return;
       case 'openStats':
         await this.router.navigate(['/stats'], { queryParams });
+        return;
+      case 'openAbout':
+        await this.router.navigate(['/about']);
         return;
       case 'settingsMcp':
         await this.goSettings('mcp', directory);

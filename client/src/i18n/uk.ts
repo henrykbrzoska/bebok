@@ -684,4 +684,11 @@ export const uk: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': 'Небезпечний (помаранчевий)',
   'settings.toolSafetyGroupUncategorized': 'Без категорії (сірий)',
   'settings.toolSafetyBadge': '{n} інструментів без категорії',
+
+  // F8-4: сторінка «Хто такий Бебок?»
+  'topbar.about': 'Хто такий Бебок?',
+  'palette.openAbout': 'Хто такий Бебок?',
+  'about.back': '← Каталог',
+  'about.loading': 'Завантаження…',
+  'about.error': 'Не вдалося завантажити цю сторінку.',
 };

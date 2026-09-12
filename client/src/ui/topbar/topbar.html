@@ -11,6 +11,15 @@
   </nav>
 
   <div class="actions">
+    <a
+      class="chip about"
+      routerLink="/about"
+      [class.on]="shell.activeScreen() === 'about'"
+      [title]="t('topbar.about')"
+    >
+      <span class="about-icon" aria-hidden="true">👻</span>
+      <span class="about-label">{{ t('topbar.about') }}</span>
+    </a>
     @if (isChat()) {
       <button
         type="button"

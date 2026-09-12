@@ -18,7 +18,15 @@ import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
 
 export type Screen =
-  'start' | 'connect' | 'chat' | 'explorer' | 'terminal' | 'debug' | 'stats' | 'settings';
+  | 'start'
+  | 'connect'
+  | 'chat'
+  | 'explorer'
+  | 'terminal'
+  | 'debug'
+  | 'stats'
+  | 'settings'
+  | 'about';
 
 interface RouteSnapshot {
   screen: Screen;
@@ -127,6 +135,7 @@ const SCREENS: readonly string[] = [
   'debug',
   'stats',
   'settings',
+  'about',
 ];
 
 function isScreen(value: unknown): value is Screen {
