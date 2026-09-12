@@ -73,6 +73,7 @@
             [ngModel]="draftContent()"
             (ngModelChange)="draftContent.set($event)"
             spellcheck="false"
+            [attr.aria-label]="t('explorer.editorLabel')"
           ></textarea>
         } @else if (htmlPreview() !== null) {
           <div class="html-preview-wrap">
@@ -81,6 +82,46 @@
               [label]="selectedName() ?? ''"
               (closed)="htmlPreview.set(null)"
             />
+          </div>
+        } @else if (isMarkdownSelection()) {
+          <div class="file-body markdown">
+            @for (row of markdownRows(); track $index) {
+              @switch (row.kind) {
+                @case ('h1') {
+                  <div class="md-h1">{{ row.text }}</div>
+                }
+                @case ('h2') {
+                  <div class="md-h2">{{ row.text }}</div>
+                }
+                @case ('h3') {
+                  <div class="md-h3">{{ row.text }}</div>
+                }
+                @case ('bullet') {
+                  <div class="md-bullet">
+                    <span class="md-mark" aria-hidden="true">-</span>
+                    @if (row.keyword) {
+                      <span class="md-keyword">{{ row.keyword }}</span>
+                      @if (row.text) {
+                        <span class="md-sep" aria-hidden="true">&nbsp;-&nbsp;</span>
+                      }
+                    }
+                    <span>{{ row.text }}</span>
+                  </div>
+                }
+                @case ('quote') {
+                  <div class="md-quote">{{ row.text }}</div>
+                }
+                @case ('code') {
+                  <div class="md-code">{{ row.text }}</div>
+                }
+                @case ('blank') {
+                  <div class="md-blank"></div>
+                }
+                @default {
+                  <div class="md-text">{{ row.text }}</div>
+                }
+              }
+            }
           </div>
         } @else {
           <pre class="file-body file-content"><code>{{ fileContent() }}</code></pre>

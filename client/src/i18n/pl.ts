@@ -177,6 +177,7 @@ export const pl: Record<MessageKey, string> = {
   'explorer.save': 'Zapisz',
   'explorer.saving': 'Zapisywanie…',
   'explorer.cancel': 'Anuluj',
+  'explorer.editorLabel': 'Zawartość pliku',
   'chat.follow': 'Auto-przewijanie',
   'chat.runAsFleet': 'Run as fleet',
   'chat.fleetToggleHint': 'When checked, this prompt fans out to the fleet (requires fleet enabled in settings). Unchecked runs a single orchestrator turn.',

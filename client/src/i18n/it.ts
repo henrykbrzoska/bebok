@@ -177,6 +177,7 @@ export const it: Record<MessageKey, string> = {
   'explorer.save': 'Save',
   'explorer.saving': 'Saving…',
   'explorer.cancel': 'Cancel',
+  'explorer.editorLabel': 'Contenuto del file',
   'chat.follow': 'Auto-scroll',
   'chat.runAsFleet': 'Run as fleet',
   'chat.fleetToggleHint': 'When checked, this prompt fans out to the fleet (requires fleet enabled in settings). Unchecked runs a single orchestrator turn.',

@@ -13,6 +13,7 @@ import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
+import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
 interface FsNode {
   name: string;
@@ -77,6 +78,16 @@ export class ExplorerView implements OnInit {
     const p = this.selectedPath();
     return !!p && /\.html?$/i.test(p);
   });
+
+  /** Markdown files get the light "reading view" instead of raw monospace. */
+  readonly isMarkdownSelection = computed(() => {
+    const p = this.selectedPath();
+    return !!p && /\.(md|markdown)$/i.test(p);
+  });
+
+  readonly markdownRows = computed<MarkdownRow[]>(() =>
+    this.isMarkdownSelection() ? toMarkdownRows(this.fileContent()) : [],
+  );
 
   async ngOnInit(): Promise<void> {
     this.directory.set(

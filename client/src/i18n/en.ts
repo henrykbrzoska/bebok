@@ -239,6 +239,7 @@ export const en = {
   'explorer.save': 'Save',
   'explorer.saving': 'Saving…',
   'explorer.cancel': 'Cancel',
+  'explorer.editorLabel': 'File contents',
 
   'connect.title': 'Connect to engine',
   'connect.hint': 'Enter the address of a running engine on your network (LAN).',
