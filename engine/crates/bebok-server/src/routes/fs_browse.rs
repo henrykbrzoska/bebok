@@ -100,7 +100,7 @@ pub async fn fs_browse(
             readable: std::fs::read_dir(&child).is_ok(),
         });
     }
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|e| e.name.to_lowercase());
 
     Ok(Json(serde_json::json!({
         "path": bebok_core::util::normalize_path(path),
