@@ -30,6 +30,7 @@ use super::args::{
     self, ClickTarget, GetTextArgs, ImageFormat, OpenArgs, ScreenshotArgs, TypeArgs,
 };
 use super::driver::BrowserDriver;
+use super::frames;
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Upper bound on one tool call (navigation included).
@@ -205,6 +206,27 @@ impl Tool for BrowserScreenshot {
                     .format(CaptureScreenshotFormat::Jpeg)
                     .quality(JPEG_QUALITY),
             };
+            // Headed windows on HiDPI screens render at DPR > 1: scale the
+            // capture to CSS pixels so click coordinates read off the image
+            // are right (WP-BROWSER2).
+            let headed = driver.is_headed(&ctx.session_id).await.unwrap_or(false);
+            let metrics = frames::page_metrics(&page).await;
+            if full_page && headed {
+                // chromiumoxide's full-page path installs a device-metrics
+                // override, which a visible window never recovers from
+                // cleanly; capture beyond the viewport instead (no override).
+                let content = page
+                    .layout_metrics()
+                    .await
+                    .map_err(|e| format!("layout metrics failed: {e}"))?
+                    .css_content_size;
+                params = params
+                    .full_page(false)
+                    .capture_beyond_viewport(true)
+                    .clip(frames::content_clip(content.width, content.height, metrics));
+            } else if !full_page && let Some(clip) = frames::css_pixel_clip(metrics) {
+                params = params.clip(clip);
+            }
             let bytes = page
                 .screenshot(params.build())
                 .await

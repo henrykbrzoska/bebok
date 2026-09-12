@@ -334,8 +334,10 @@ describe('BrowserView (F7-6)', () => {
       y: 20,
       toJSON: () => ({}),
     } as DOMRect);
-    spyOnProperty(img, 'naturalWidth').and.returnValue(1280);
-    spyOnProperty(img, 'naturalHeight').and.returnValue(800);
+    // A HiDPI capture is bigger than the CSS viewport the frame reports:
+    // the click must land in CSS pixels (1280x800), not image pixels.
+    spyOnProperty(img, 'naturalWidth').and.returnValue(1920);
+    spyOnProperty(img, 'naturalHeight').and.returnValue(1200);
     component.onFrameClick({ clientX: 10 + 320, clientY: 20 + 200 } as MouseEvent);
     await fixture.whenStable();
     expect(engine.browserAction).toHaveBeenCalledWith(SID, 'click', { x: 640, y: 400 });

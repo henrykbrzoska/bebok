@@ -291,11 +291,18 @@ export class BrowserView implements OnInit {
       return;
     }
     const rect = el.getBoundingClientRect();
-    const point = clickToPage(
-      { width: rect.width, height: rect.height },
-      { width: el.naturalWidth, height: el.naturalHeight },
-      { x: event.clientX - rect.left, y: event.clientY - rect.top },
-    );
+    // The engine wants CSS pixels of the page. Frames carry the CSS viewport
+    // size (the image itself may be scaled on HiDPI screens); fall back to
+    // the image's own size when a frame did not say.
+    const f = this.frame();
+    const natural =
+      f && f.width > 0 && f.height > 0
+        ? { width: f.width, height: f.height }
+        : { width: el.naturalWidth, height: el.naturalHeight };
+    const point = clickToPage({ width: rect.width, height: rect.height }, natural, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
     if (!point) {
       return;
     }
