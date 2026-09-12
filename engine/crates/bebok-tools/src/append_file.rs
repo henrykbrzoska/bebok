@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::pathguard::resolve_in_root;
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Append text to a file (creating it if needed) without rewriting the rest.
@@ -46,17 +47,17 @@ impl Tool for AppendFile {
             return ToolOutput::new("error: missing required parameter 'path'", "append_file");
         };
         let Some(content) = args.get("content").and_then(|v| v.as_str()) else {
-            return ToolOutput::new(
-                "error: missing required parameter 'content'",
-                "append_file",
-            );
+            return ToolOutput::new("error: missing required parameter 'content'", "append_file");
         };
         let newline = args
             .get("newline")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let full = ctx.root.join(path);
+        let full = match resolve_in_root(&ctx.root, path) {
+            Ok(full) => full,
+            Err(e) => return ToolOutput::new(format!("error: {e}"), "append_file"),
+        };
         if let Some(parent) = full.parent() {
             if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 return ToolOutput::new(
@@ -90,10 +91,41 @@ impl Tool for AppendFile {
                     ),
                 }
             }
-            Err(e) => ToolOutput::new(
-                format!("error: failed to open {path}: {e}"),
-                "append_file",
-            ),
+            Err(e) => ToolOutput::new(format!("error: failed to open {path}: {e}"), "append_file"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppendFile;
+    use crate::tool::{Tool, tool_ctx};
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn rejects_paths_outside_root_without_appending() {
+        let base = std::env::temp_dir().join(format!("bebok-append-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = base.join("secret.txt");
+        std::fs::write(&outside, "original").unwrap();
+        for path in [
+            "../../secret",
+            r"..\secret.txt",
+            "/tmp/secret",
+            r"C:\secret",
+            outside.to_str().unwrap(),
+        ] {
+            let out = AppendFile
+                .execute(
+                    tool_ctx(root.clone(), String::new(), CancellationToken::new()),
+                    json!({ "path": path, "content": "leak" }),
+                )
+                .await;
+            assert!(out.text.starts_with("error: "), "{path}: {}", out.text);
+        }
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "original");
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

@@ -6,8 +6,8 @@
 
 pub mod append_file;
 pub mod base64;
-pub mod bash;
 pub mod basename;
+pub mod bash;
 pub mod chmod;
 pub mod cp;
 pub mod diff;
@@ -26,6 +26,7 @@ pub mod list_dir;
 pub mod ln;
 pub mod mkdir;
 pub mod mv;
+mod pathguard;
 pub mod pwd;
 pub mod read_file;
 pub mod realpath;

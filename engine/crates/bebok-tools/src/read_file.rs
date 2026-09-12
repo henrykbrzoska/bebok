@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::pathguard::resolve_in_root;
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Read a UTF-8 text file from disk, optionally a line range.
@@ -91,7 +92,10 @@ impl Tool for ReadFile {
             .filter(|v| *v > 0)
             .map(|v| v as usize);
 
-        let full = ctx.root.join(path);
+        let full = match resolve_in_root(&ctx.root, path) {
+            Ok(full) => full,
+            Err(e) => return ToolOutput::new(format!("error: {e}"), "read_file"),
+        };
         match tokio::fs::read_to_string(&full).await {
             Ok(text) => {
                 // A plain whole-file read returns the file verbatim (no
@@ -108,10 +112,7 @@ impl Tool for ReadFile {
                 };
                 ToolOutput::new(out, title)
             }
-            Err(e) => ToolOutput::new(
-                format!("error: failed to read {path}: {e}"),
-                "read_file",
-            ),
+            Err(e) => ToolOutput::new(format!("error: failed to read {path}: {e}"), "read_file"),
         }
     }
 }
@@ -119,6 +120,9 @@ impl Tool for ReadFile {
 #[cfg(test)]
 mod tests {
     use super::ReadFile;
+    use crate::tool::{Tool, tool_ctx};
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
 
     const DOC: &str = "one\ntwo\nthree\nfour\nfive";
 
@@ -146,5 +150,32 @@ mod tests {
             "[read_file: file has 5 lines; offset 99 is past the end]"
         );
         assert_eq!(ReadFile::slice("", 1, None), "[read_file: empty file]");
+    }
+
+    #[tokio::test]
+    async fn rejects_paths_outside_root() {
+        let base = std::env::temp_dir().join(format!("bebok-read-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = base.join("secret.txt");
+        std::fs::write(&outside, "secret").unwrap();
+        for path in [
+            "../../secret",
+            r"..\secret.txt",
+            "/tmp/secret",
+            r"C:\secret",
+            outside.to_str().unwrap(),
+        ] {
+            let out = ReadFile
+                .execute(
+                    tool_ctx(root.clone(), String::new(), CancellationToken::new()),
+                    json!({ "path": path }),
+                )
+                .await;
+            assert!(out.text.starts_with("error: "), "{path}: {}", out.text);
+            assert!(!out.text.contains("secret\n"));
+        }
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "secret");
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

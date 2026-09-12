@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::pathguard::resolve_in_root;
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Remove a file or directory.
@@ -46,7 +47,10 @@ impl Tool for Rm {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let full = ctx.root.join(path);
+        let full = match resolve_in_root(&ctx.root, path) {
+            Ok(full) => full,
+            Err(e) => return ToolOutput::new(format!("error: {e}"), "rm"),
+        };
         let meta = match tokio::fs::symlink_metadata(&full).await {
             Ok(m) => m,
             Err(e) => {
@@ -70,5 +74,39 @@ impl Tool for Rm {
             Ok(()) => ToolOutput::new(format!("removed {path}"), format!("rm {path}")),
             Err(e) => ToolOutput::new(format!("error: failed to remove {path}: {e}"), "rm"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Rm;
+    use crate::tool::{Tool, tool_ctx};
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn rejects_paths_outside_root_without_removing() {
+        let base = std::env::temp_dir().join(format!("bebok-rm-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = base.join("secret.txt");
+        std::fs::write(&outside, "original").unwrap();
+        for path in [
+            "../../secret",
+            r"..\secret.txt",
+            "/tmp/secret",
+            r"C:\secret",
+            outside.to_str().unwrap(),
+        ] {
+            let out = Rm
+                .execute(
+                    tool_ctx(root.clone(), String::new(), CancellationToken::new()),
+                    json!({ "path": path, "recursive": true }),
+                )
+                .await;
+            assert!(out.text.starts_with("error: "), "{path}: {}", out.text);
+        }
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "original");
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
