@@ -539,4 +539,11 @@ export const de: Record<MessageKey, string> = {
   'start.removeWorktreeToo': 'Auch den Git-Worktree entfernen',
   'start.worktreeRemoved': 'Git-Worktree entfernt.',
   'start.worktreeRemoveFailed': 'Sitzung gelöscht, aber der Worktree konnte nicht entfernt werden: {error}',
+  // WP-BROWSER (F6-19): headless-browser panel
+  'drawer.browser': 'Browser',
+  'browser.none': 'Noch keine Browser-Aktivität in dieser Sitzung',
+  'browser.openExternal': 'In meinem Browser öffnen',
+  'browser.noScreenshot': 'Noch kein Screenshot',
+  'browser.screenshotAlt': 'Letzter Screenshot aus dem Browser des Agenten',
+  'browser.screenshotOf': 'Screenshot von',
 };

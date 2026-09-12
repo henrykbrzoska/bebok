@@ -538,4 +538,11 @@ export const zh: Record<MessageKey, string> = {
   'start.removeWorktreeToo': '同时删除 git worktree',
   'start.worktreeRemoved': '已删除 git worktree。',
   'start.worktreeRemoveFailed': '会话已删除，但无法删除 worktree：{error}',
+  // WP-BROWSER (F6-19): headless-browser panel
+  'drawer.browser': '浏览器',
+  'browser.none': '此会话中尚无浏览器活动',
+  'browser.openExternal': '在我的浏览器中打开',
+  'browser.noScreenshot': '尚无截图',
+  'browser.screenshotAlt': '代理浏览器的最新截图',
+  'browser.screenshotOf': '截图：',
 };
