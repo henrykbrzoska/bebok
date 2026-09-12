@@ -61,9 +61,11 @@ impl InstanceStore {
         let recovered = persist::repair(&data_dir);
         let meta: HashMap<Uuid, Session> = recovered.into_iter().map(|s| (s.id, s)).collect();
         tracing::info!("recovered {} session(s) from disk", meta.len());
+        let bus = EventBus::default();
+        install_browser_frame_sink(bus.clone());
         Self {
             data_dir,
-            bus: EventBus::default(),
+            bus,
             instances: RwLock::new(HashMap::new()),
             sessions: RwLock::new(HashMap::new()),
             meta: RwLock::new(meta),
@@ -97,6 +99,7 @@ impl InstanceStore {
         }
 
         let config = Arc::new(std::sync::RwLock::new(config::load(&root)));
+        configure_browser(&root, &config.read().unwrap());
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let permission = Arc::new(PermissionEngine::load(&root));
         permission.set_yolo(config.read().unwrap().yolo);
@@ -160,6 +163,7 @@ impl InstanceStore {
         *instance.config.write().unwrap() = config.clone();
         instance.permission.reload();
         instance.permission.set_yolo(config.yolo);
+        configure_browser(&instance.root, &config);
 
         let specs = McpServerSpec::parse_all(&config.mcp);
         let runtimes = Runtimes::from_config(&config.runtimes);
@@ -540,4 +544,28 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&base);
     }
+}
+
+/// WP-BROWSER2 (F7-6): hand the instance's `browser` config section to the
+/// browser driver (display mode + window position; applied at the next launch).
+fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
+    bebok_tools::browser::configure(
+        root,
+        bebok_tools::browser::BrowserSettings::from_config(&cfg.browser),
+    );
+}
+
+/// WP-BROWSER2 (F7-6): every streamed browser frame becomes a `browser.frame`
+/// event on the bus (`properties` = the frame: url, title, media_type, data,
+/// width, height, seq, headed). The client's viewer window renders them; the
+/// chat view ignores the type.
+fn install_browser_frame_sink(bus: EventBus) {
+    bebok_tools::browser::set_frame_sink(Arc::new(move |frame: bebok_tools::browser::Frame| {
+        let (directory, session_id) = (frame.directory.clone(), frame.session_id.clone());
+        let properties = serde_json::to_value(&frame).unwrap_or(serde_json::Value::Null);
+        bus.publish(
+            crate::event::Event::new("browser.frame", &directory, &session_id)
+                .with_properties(properties),
+        );
+    }));
 }

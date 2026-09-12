@@ -14,6 +14,7 @@ axum.workspace = true
 base64.workspace = true
 bebok-core = { path = "../bebok-core" }
 bebok-llm = { path = "../bebok-llm" }
+bebok-tools = { path = "../bebok-tools" }
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true

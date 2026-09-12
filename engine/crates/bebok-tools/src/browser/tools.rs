@@ -1,6 +1,6 @@
 //! The six `browser_*` tools (WP-BROWSER / F6-17).
 //!
-//! All share one [`BrowserDriver`] (per-session headless page). Every call:
+//! All share one [`BrowserDriver`] (per-session page, headless or headed). Every call:
 //! * validates its arguments through [`super::args`] (errors are returned as
 //!   `error: ...` text, never panics),
 //! * is bounded by [`CALL_TIMEOUT`] and cancelled by the turn's abort token,
@@ -10,6 +10,10 @@
 //! `browser_screenshot` additionally returns the capture through
 //! [`ToolOutput::image`], which `bebok-core` turns into an image part the
 //! model can actually see.
+//!
+//! Every call holds a [`BrowserDriver::activity`] guard for its duration so
+//! the viewer window's frame stream runs while the page is being driven
+//! (WP-BROWSER2 / F7-6).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,7 +69,7 @@ where
 }
 
 async fn page_for(driver: &Arc<BrowserDriver>, ctx: &ToolCtx) -> Result<Page, String> {
-    driver.page(&ctx.session_id).await
+    driver.page(&ctx.session_id, &ctx.root).await
 }
 
 async fn find(page: &Page, selector: &str) -> Result<chromiumoxide::Element, String> {
@@ -87,7 +91,7 @@ impl Tool for BrowserOpen {
     }
 
     fn description(&self) -> &str {
-        "Open a URL in a headless browser bound to this session (one page per session; later browser_* calls act on it). Returns the final URL and page title. Follow with browser_screenshot to see the page or browser_get_text to read it."
+        "Open a URL in the browser bound to this session (one page per session, headless or a visible window per the user's settings; later browser_* calls act on it). Returns the final URL and page title. Follow with browser_screenshot to see the page or browser_get_text to read it."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -116,6 +120,7 @@ impl Tool for BrowserOpen {
         let title = format!("browser_open {url}");
         let driver = self.driver.clone();
         let work = async {
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             page.goto(url.as_str())
                 .await
@@ -154,7 +159,7 @@ impl Tool for BrowserScreenshot {
     }
 
     fn description(&self) -> &str {
-        "Capture the current page of this session's headless browser as an image you can see (PNG by default). Use it after browser_open / browser_click / browser_type to check what the page looks like."
+        "Capture the current page of this session's browser as an image you can see (PNG by default). Use it after browser_open / browser_click / browser_type to check what the page looks like."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -163,7 +168,7 @@ impl Tool for BrowserScreenshot {
             "properties": {
                 "full_page": {
                     "type": "boolean",
-                    "description": "Capture the whole scrollable page instead of the 1280x800 viewport (default false)."
+                    "description": "Capture the whole scrollable page instead of the visible viewport (default false)."
                 },
                 "format": {
                     "type": "string",
@@ -191,6 +196,7 @@ impl Tool for BrowserScreenshot {
                     "no page is open in this session yet; call browser_open first".to_string(),
                 );
             }
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             let mut params = ScreenshotParams::builder().full_page(full_page);
             params = match format {
@@ -243,7 +249,7 @@ impl Tool for BrowserClick {
     }
 
     fn description(&self) -> &str {
-        "Click an element in this session's headless browser, addressed by a CSS selector or by viewport coordinates (x, y in CSS pixels, as seen in the last screenshot)."
+        "Click an element in this session's browser, addressed by a CSS selector or by viewport coordinates (x, y in CSS pixels, as seen in the last screenshot)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -280,6 +286,7 @@ impl Tool for BrowserClick {
                     "no page is open in this session yet; call browser_open first".to_string(),
                 );
             }
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             match &target {
                 ClickTarget::Selector(sel) => {
@@ -322,7 +329,7 @@ impl Tool for BrowserType {
     }
 
     fn description(&self) -> &str {
-        "Type text into an input/textarea/contenteditable element of this session's headless browser (focuses it first). Set submit=true to press Enter afterwards."
+        "Type text into an input/textarea/contenteditable element of this session's browser (focuses it first). Set submit=true to press Enter afterwards."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -356,6 +363,7 @@ impl Tool for BrowserType {
                     "no page is open in this session yet; call browser_open first".to_string(),
                 );
             }
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             let el = find(&page, &selector).await?;
             el.focus()
@@ -412,7 +420,7 @@ impl Tool for BrowserGetText {
     }
 
     fn description(&self) -> &str {
-        "Return the visible text (innerText) of the current page in this session's headless browser, or of one element when a selector is given. Cheaper than a screenshot when you only need the words."
+        "Return the visible text (innerText) of the current page in this session's browser, or of one element when a selector is given. Cheaper than a screenshot when you only need the words."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -445,6 +453,7 @@ impl Tool for BrowserGetText {
                     "no page is open in this session yet; call browser_open first".to_string(),
                 );
             }
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             let text = match &selector {
                 Some(sel) => find(&page, sel)
@@ -490,7 +499,7 @@ impl Tool for BrowserEval {
     }
 
     fn description(&self) -> &str {
-        "Evaluate a JavaScript expression in the current page of this session's headless browser and return its JSON-serialised value (promises are awaited). Use it to read DOM state or trigger page code."
+        "Evaluate a JavaScript expression in the current page of this session's browser and return its JSON-serialised value (promises are awaited). Use it to read DOM state or trigger page code."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -516,6 +525,7 @@ impl Tool for BrowserEval {
                     "no page is open in this session yet; call browser_open first".to_string(),
                 );
             }
+            let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
             let params = EvaluateParams::builder()
                 .expression(js.clone())
