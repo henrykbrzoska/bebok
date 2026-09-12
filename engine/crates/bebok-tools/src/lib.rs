@@ -48,6 +48,7 @@ pub mod write_file;
 
 pub use docker::{DockerStatus, check_docker};
 pub use explorer::FsEntry;
+pub use pathguard::resolve_in_root;
 pub use registry::ToolRegistry;
 pub use runtimes::Runtimes;
 pub use tool::{Tool, ToolCtx, ToolOutput};
