@@ -1,0 +1,47 @@
+<aside class="sidebar" [class.collapsed]="!expanded()">
+  <div class="head">
+    <div class="logo" aria-hidden="true"></div>
+    @if (expanded()) {
+      <div class="brand">Bebok</div>
+      <button
+        type="button"
+        class="palette-btn"
+        (click)="shell.openCommandPalette()"
+        [title]="t('shell.openPalette')"
+        [attr.aria-label]="t('shell.openPalette')"
+      >
+        <span class="cmd" aria-hidden="true">⌘</span>K
+      </button>
+    }
+    <button
+      type="button"
+      class="collapse"
+      (click)="shell.toggleSidebar()"
+      [title]="expanded() ? t('shell.collapseSidebar') : t('shell.expandSidebar')"
+      [attr.aria-label]="expanded() ? t('shell.collapseSidebar') : t('shell.expandSidebar')"
+    >
+      {{ expanded() ? '«' : '»' }}
+    </button>
+  </div>
+
+  @if (!expanded()) {
+    <nav class="rail">
+      @for (item of navItems; track item.screen) {
+        <button
+          type="button"
+          class="rail-btn"
+          [class.active]="isActive(item.screen)"
+          (click)="go(item.path)"
+          [title]="t(item.labelKey)"
+          [attr.aria-label]="t(item.labelKey)"
+          [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+        >
+          {{ t(item.railKey) }}
+        </button>
+      }
+      <div class="rail-status">
+        <app-status-dot [label]="statusLabel()" [tone]="statusTone()" [labelHidden]="true" />
+      </div>
+    </nav>
+  }
+</aside>
