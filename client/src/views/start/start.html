@@ -61,13 +61,24 @@
           [placeholder]="t('start.dirPlaceholder')"
           spellcheck="false"
         />
-        @if (isTauri()) {
-          <button (click)="browse()">{{ t('start.browse') }}</button>
-        }
+        <button (click)="browse()">{{ t('start.browse') }}</button>
         <button (click)="applyDirectory()" [disabled]="!directory()">
           {{ t('start.loadSessions') }}
         </button>
       </div>
+
+      @if (recentProjects().length > 0) {
+        <div class="recent-row">
+          <span class="micro-label">{{ t('start.recentProjects') }}</span>
+          <div class="chips">
+            @for (entry of recentProjects(); track entry.id) {
+              <button type="button" class="chip" [title]="entry.path" (click)="openRecent(entry)">
+                {{ chipLabel(entry) }}
+              </button>
+            }
+          </div>
+        </div>
+      }
 
       @if (directory()) {
         <div class="sessions-block">

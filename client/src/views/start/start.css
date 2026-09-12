@@ -311,3 +311,37 @@
   font-size: var(--fs-12);
   overflow-wrap: anywhere;
 }
+
+/* F5-7: recent-project chips under the directory input. */
+.recent-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-top: var(--space-10);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+}
+
+.chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  max-width: 220px;
+  overflow: hidden;
+  padding: var(--space-4, 4px) var(--space-10);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}

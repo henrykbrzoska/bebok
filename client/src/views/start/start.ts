@@ -14,10 +14,12 @@ import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 
+import { DirectoryPicker } from '../../core/directory-picker.service';
 import { EngineClient } from '../../core/engine-client.service';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
+import { ProjectsStore } from '../../core/projects.store';
 import { EventsStore } from '../../core/events.store';
-import { AgentInfo, SessionMeta } from '../../core/engine.dtos';
+import { AgentInfo, ProjectEntry, SessionMeta } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { StatusDot, type StatusTone } from '../../ui/status-dot/status-dot';
@@ -37,10 +39,15 @@ export class StartView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly openSessions = inject(OpenSessionsStore);
   private readonly project = inject(ProjectSessionsStore);
+  private readonly projects = inject(ProjectsStore);
+  private readonly picker = inject(DirectoryPicker);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly isTauri = this.engine.isTauri;
+
+  /** Recent projects shown as chips under the directory input (F5-7). */
+  readonly recentProjects = this.projects.recent;
 
   /** connection phase */
   readonly connecting = signal(true);
@@ -130,6 +137,9 @@ export class StartView implements OnInit, OnDestroy {
       await this.engine.ping();
       this.connected.set(true);
       this.showAddressForm.set(false);
+      // The registry powers the recent-project chips (and migrates the single
+      // remembered `bebok.lastDirectory` on first run).
+      await this.projects.refresh();
       if (this.directory()) {
         await this.project.select(this.directory(), true);
       }
@@ -158,14 +168,33 @@ export class StartView implements OnInit, OnDestroy {
     this.showAddressForm.update((shown) => !shown);
   }
 
+  /**
+   * Browse for a directory. `DirectoryPicker` uses the native OS dialog on
+   * Tauri and the engine-backed modal in browser/Capacitor mode, so the button
+   * now works on every platform instead of silently doing nothing.
+   */
   async browse(): Promise<void> {
     this.error.set(null);
-    const picked = await this.engine.pickDirectory(this.i18n.t('dialog.pickDirectory'));
+    const picked = await this.picker.pick(this.i18n.t('dialog.pickDirectory'));
     if (!picked) {
       return;
     }
     this.directory.set(picked);
+    await this.projects.add(picked);
     await this.project.select(picked, true);
+  }
+
+  /** A recent-project chip: fill the input and load that directory at once. */
+  async openRecent(entry: ProjectEntry): Promise<void> {
+    this.error.set(null);
+    this.directory.set(entry.path);
+    await this.project.select(entry.path, true);
+    void this.projects.open(entry.id);
+  }
+
+  /** Chips show the tail of the path; the engine-normalised form is the title. */
+  chipLabel(entry: ProjectEntry): string {
+    return entry.name;
   }
 
   applyDirectory(): void {
