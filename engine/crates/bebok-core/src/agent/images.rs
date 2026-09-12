@@ -41,25 +41,12 @@ pub struct AgentImageInput {
     pub name: Option<String>,
 }
 
-/// Model id fragments known to reject image input. Matched against the
-/// lowercased model id; anything not listed is assumed vision-capable, so this
-/// can only make a doomed turn fail fast -- it never refuses a working model.
-const NON_VISION_MODEL_FRAGMENTS: &[&str] = &[
-    "deepseek-chat",
-    "deepseek-reasoner",
-    "llama-3.3-70b",
-    "llama-3.1-",
-];
-
 /// Pre-flight capability check: does this model accept image input?
 ///
-/// Conservative: `false` only for the small documented deny-list above;
-/// `true` for everything else (unknown models are never blocked).
+/// The embedded model catalog is authoritative for known models. Unknown
+/// models use the catalog's permissive fallback and are never blocked.
 pub fn model_supports_images(model: &str) -> bool {
-    let model = model.to_ascii_lowercase();
-    !NON_VISION_MODEL_FRAGMENTS
-        .iter()
-        .any(|frag| model.contains(frag))
+    bebok_llm::ModelCatalog::global().get(model).supports_images
 }
 
 /// Strip ASCII whitespace (clients may wrap base64 across lines).
@@ -524,15 +511,17 @@ mod tests {
     }
 
     #[test]
-    fn vision_preflight_is_conservative() {
-        // Known text-only models fail fast.
+    fn vision_preflight_uses_model_catalog() {
         assert!(!model_supports_images("deepseek/deepseek-chat"));
         assert!(!model_supports_images("deepseek-reasoner"));
         assert!(!model_supports_images("groq/llama-3.3-70b-versatile"));
-        // Everything else (including unknown models) is assumed capable.
         assert!(model_supports_images("zai/glm-4.6"));
         assert!(model_supports_images("openai/gpt-4o"));
         assert!(model_supports_images("anthropic/claude-sonnet-4-5"));
+        // This nested OpenRouter id is catalog data and does not rely on a
+        // recognizable model-name fragment.
+        assert!(model_supports_images("openrouter/acme/custom-vision"));
+        // Unknown/custom models retain the permissive fallback.
         assert!(model_supports_images("my-custom-local-model"));
     }
 
