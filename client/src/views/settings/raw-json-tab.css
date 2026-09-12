@@ -1,0 +1,156 @@
+/* Raw JSON tab (F2-29): layer switcher + highlighted editor + diagnostics. */
+
+.layer-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-12);
+}
+
+.layer-tabs button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-12-5);
+  padding: 5px var(--space-12);
+}
+
+.layer-tabs button.active {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.layer-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* --- editor: a highlighted <pre> under a transparent <textarea> --------- */
+
+.editor {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+  overflow: hidden;
+  height: 420px;
+}
+
+.highlight,
+.input {
+  margin: 0;
+  padding: var(--space-12);
+  border: none;
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
+.highlight {
+  position: absolute;
+  inset: 0;
+  color: var(--code-text);
+  pointer-events: none;
+}
+
+.input {
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent);
+  resize: none;
+  outline: none;
+}
+
+.input:focus {
+  border: none;
+}
+
+.input::selection {
+  background: rgba(232, 147, 90, 0.3);
+}
+
+/* token colors */
+.highlight ::ng-deep .jt-key {
+  color: var(--accent);
+}
+
+.highlight ::ng-deep .jt-string {
+  color: var(--diff-add-text);
+}
+
+.highlight ::ng-deep .jt-number {
+  color: #86b6e0;
+}
+
+.highlight ::ng-deep .jt-boolean,
+.highlight ::ng-deep .jt-null {
+  color: var(--warning);
+}
+
+.highlight ::ng-deep .jt-punct {
+  color: var(--text-faint);
+}
+
+.highlight ::ng-deep .jt-invalid {
+  color: var(--danger);
+}
+
+.highlight ::ng-deep .jt-bad {
+  text-decoration: underline wavy var(--danger);
+  background: rgba(226, 100, 95, 0.16);
+  border-radius: 3px;
+}
+
+.highlight ::ng-deep .jt-warn {
+  text-decoration: underline wavy var(--warning);
+  background: rgba(224, 182, 74, 0.16);
+  border-radius: 3px;
+}
+
+/* --- diagnostics -------------------------------------------------------- */
+
+.diagnostics {
+  list-style: none;
+  margin: var(--space-12) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-12);
+}
+
+.diagnostics li {
+  display: flex;
+  gap: var(--space-10);
+  align-items: baseline;
+}
+
+.diagnostics li.err {
+  color: var(--danger);
+}
+
+.diagnostics li.warn {
+  color: var(--warning);
+}
+
+.diagnostics .loc {
+  flex: none;
+  min-width: 48px;
+  color: var(--text-faint);
+}
+
+.valid {
+  margin: var(--space-12) 0 0;
+  color: var(--success);
+}
