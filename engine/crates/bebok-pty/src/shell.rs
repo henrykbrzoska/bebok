@@ -23,10 +23,10 @@ pub fn default_shell() -> String {
 
     #[cfg(not(windows))]
     {
-        if let Ok(shell) = std::env::var("BEBOK_SHELL").or_else(|_| std::env::var("SHELL")) {
-            if !shell.is_empty() {
-                return shell;
-            }
+        if let Ok(shell) = std::env::var("BEBOK_SHELL").or_else(|_| std::env::var("SHELL"))
+            && !shell.is_empty()
+        {
+            return shell;
         }
         if std::path::Path::new("/bin/bash").exists() {
             return "/bin/bash".to_string();
