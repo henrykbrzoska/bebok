@@ -1,0 +1,19 @@
+<div class="shell" [class.density-compact]="density() === 'compact'">
+  <app-sidebar />
+
+  <div class="main">
+    <app-topbar />
+
+    <div class="content-row">
+      <main class="content">
+        <router-outlet />
+      </main>
+
+      @if (showDrawer()) {
+        <app-right-drawer />
+      }
+    </div>
+  </div>
+
+  <app-command-palette />
+</div>
