@@ -2,8 +2,8 @@
  * Right-drawer "Session" panel (F2-12).
  *
  * The stacked replacement for the old left-hand `ui/session-sidebar`: TOKENS
- * grid, COST, FILES CHANGED with per-file line deltas, SUB-AGENTS and an
- * "Active in this session" chip list of the enabled MCP servers and skills
+ * grid, COST, SUB-AGENTS and an "Active in this session" chip list of the
+ * enabled MCP servers and skills
  * (chips toggle them, as the old sidebar's checkboxes did), plus the YOLO
  * switch. The numbers come from `ChatSessionStore`, which the chat view
  * publishes into - the panel never refetches the transcript.
@@ -93,23 +93,6 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
             [class.unknown]="session.totals().cost === null"
             [title]="session.totals().cost === null ? t('drawer.costUnknown') : ''"
           >{{ session.costLabel() }}</div>
-        </section>
-
-        <section class="group">
-          <h3 class="group-title">{{ t('drawer.filesChanged') }}</h3>
-          @if (session.filesChanged().length === 0) {
-            <div class="none">{{ t('drawer.noFiles') }}</div>
-          } @else {
-            <ul class="files">
-              @for (file of session.filesChanged(); track file.path) {
-                <li class="file" [title]="file.path">
-                  <span class="file-path">{{ file.path }}</span>
-                  <span class="plus">+{{ file.added }}</span>
-                  <span class="minus">-{{ file.removed }}</span>
-                </li>
-              }
-            </ul>
-          }
         </section>
 
         <section class="group">
@@ -310,7 +293,6 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         font-weight: 400;
       }
 
-      .files,
       .subagents {
         list-style: none;
         margin: 0;
@@ -318,33 +300,6 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         display: flex;
         flex-direction: column;
         gap: 3px;
-      }
-
-      .file {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-6);
-        font-family: var(--font-mono);
-        font-size: var(--fs-11);
-      }
-
-      .file-path {
-        flex: 1 1 auto;
-        min-width: 0;
-        color: var(--code-text-strong);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .plus {
-        color: var(--diff-add-text);
-        flex: none;
-      }
-
-      .minus {
-        color: var(--diff-remove-text);
-        flex: none;
       }
 
       .subagent {
