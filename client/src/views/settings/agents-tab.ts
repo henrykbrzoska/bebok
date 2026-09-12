@@ -20,11 +20,12 @@ import { AgentInfo } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
 import { FrontendVerifyCard } from './frontend-verify';
+import { DelegationBlock } from './delegation-block';
 import { SettingsStore } from './settings.store';
 
 @Component({
   selector: 'app-settings-agents',
-  imports: [FormsModule, FrontendVerifyCard],
+  imports: [FormsModule, FrontendVerifyCard, DelegationBlock],
   templateUrl: './agents-tab.html',
   styleUrls: ['./settings-shared.css', './agents-tab.css'],
 })

@@ -13,6 +13,9 @@ import {
   safetyCategory,
 } from '../../../core/engine.dtos';
 import { formatBytes, prettyJson, toolCallPreview } from '../../../core/format';
+import { LiveTaskEntry, TaskProgressStore } from '../../../core/task-progress.store';
+import { TaskProgressLine } from '../../../ui/task-progress-line/task-progress-line';
+import { ChatSessionStore } from '../chat-session.store';
 import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
@@ -38,7 +41,7 @@ import { safetyLegend } from './safety-legend';
  */
 @Component({
   selector: 'app-tool-part',
-  imports: [DiffViewComponent, RouterLink],
+  imports: [DiffViewComponent, RouterLink, TaskProgressLine],
   template: `
     <div class="tool" [class.failed]="kind() === 'error'">
       <button
@@ -77,6 +80,22 @@ import { safetyLegend } from './safety-legend';
           } @else {
             <span class="task-target muted">{{ taskName() }}</span>
           }
+        </div>
+      }
+
+      <!-- WP-DELEGATION: live one-line progress of the child(ren) while the
+           delegation call is still running (fed by task.progress events). -->
+      @for (live of liveChildren(); track live.taskID) {
+        <div class="progress-row" data-testid="task-progress-row">
+          @if (liveChildren().length > 1 || !isTask()) {
+            <span class="progress-name">{{ live.name }}</span>
+          }
+          <app-task-progress-line
+            class="progress-line"
+            [status]="live.status"
+            [progress]="live.progress"
+            [tokens]="live.tokens.input + live.tokens.output"
+          />
         </div>
       }
 
@@ -254,6 +273,24 @@ import { safetyLegend } from './safety-legend';
       color: var(--text-muted);
     }
 
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-8);
+      min-width: 0;
+      padding: 0 var(--space-12) var(--space-6);
+    }
+    .progress-name {
+      flex: none;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--accent);
+    }
+    .progress-line {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
     .tool-details {
       padding: 0 var(--space-12) var(--space-12);
       display: flex;
@@ -301,6 +338,8 @@ export class ToolPartComponent {
   private readonly i18n = inject(I18nService);
   private readonly prefs = inject(UiPrefsStore);
   private readonly toolSafety = inject(ToolSafetyStore);
+  private readonly liveTasks = inject(TaskProgressStore);
+  private readonly session = inject(ChatSessionStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
@@ -328,6 +367,31 @@ export class ToolPartComponent {
   readonly kind = computed(() => this.state().state);
   /** True for the sub-agent delegation tool (`task`). */
   readonly isTask = computed(() => this.toolPart().name === 'task');
+  /** True for the parallel fan-out tool (`fleet`). */
+  readonly isFleet = computed(() => this.toolPart().name === 'fleet');
+
+  /**
+   * WP-DELEGATION: the child task(s) this call spawned, while it is still
+   * running. A `task` call is matched by its `name`/`prompt` arguments; a
+   * `fleet` call (one per turn, never parallel) shows every live child.
+   */
+  readonly liveChildren = computed<LiveTaskEntry[]>(() => {
+    if (this.kind() !== 'running') {
+      return [];
+    }
+    if (this.isTask()) {
+      const match = this.liveTasks.matchTaskCall(
+        this.state().input as Record<string, unknown> | undefined,
+        this.session.meta()?.id,
+      );
+      return match ? [match] : [];
+    }
+    if (this.isFleet()) {
+      const sessionID = this.session.meta()?.id;
+      return sessionID ? this.liveTasks.liveForSession(sessionID) : [];
+    }
+    return [];
+  });
 
   /** Display name for the delegated task (from structured metadata or input). */
   readonly taskName = computed(() => {
