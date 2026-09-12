@@ -14,6 +14,7 @@ pub mod permission;
 pub mod plugin;
 pub mod provider;
 pub mod session;
+pub mod stats;
 pub mod store;
 pub mod util;
 
