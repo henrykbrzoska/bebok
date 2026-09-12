@@ -6,6 +6,8 @@
 }
 
 .rule-table th {
+  /* `.micro-label` is `display:block`; keep the header a real table row. */
+  display: table-cell;
   text-align: left;
   padding: 0 var(--space-8) 6px 0;
 }
