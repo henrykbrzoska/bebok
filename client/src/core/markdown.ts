@@ -5,7 +5,14 @@
  * escaped text. Raw HTML is never passed through, so this stays safe to inject
  * with `[innerHTML]`. Scope is intentionally small (M3): paragraphs, fenced
  * code blocks, inline code/bold/links and simple lists.
+ *
+ * F7-4: fenced code blocks are additionally run through
+ * `ui/code-highlight` for syntax highlighting (language resolved from the
+ * fence hint). That module escapes/tokenizes safely on its own, so this file
+ * still never binds raw text.
  */
+
+import { highlightBlockHtml } from '../ui/code-highlight/code-highlight';
 
 interface Block {
   kind: 'code' | 'md';
@@ -140,8 +147,7 @@ export function renderMarkdown(source: string): string {
   return blocks
     .map((block) => {
       if (block.kind === 'code') {
-        const lang = block.lang ? ` data-lang="${escapeHtml(block.lang)}"` : '';
-        return `<pre><code${lang}>${escapeHtml(block.code ?? '')}</code></pre>`;
+        return highlightBlockHtml(block.code ?? '', { language: block.lang || null });
       }
       const paragraphs = (block.text ?? '')
         .split(/\n{2,}/)

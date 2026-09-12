@@ -198,6 +198,91 @@ pre {
   font-family: var(--font-mono);
 }
 
+/* --- Syntax highlighting (F7-4) -----------------------------------------
+ * `highlight.js`'s own theme stylesheets are not used - `ui/code-highlight`
+ * only ever emits the plain `hljs-*` token classes it authors, and they are
+ * themed here directly against the app's existing dark-palette tokens so
+ * highlighted code always matches the rest of the UI (Explorer content pane,
+ * Preview panel + chat fenced code blocks, and the diff view's +/- lines).
+ */
+.hljs {
+  color: var(--code-text-strong);
+  background: transparent;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-link,
+.hljs-built_in,
+.hljs-builtin-name {
+  color: var(--accent);
+}
+
+.hljs-string,
+.hljs-addition,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--success);
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-doctag {
+  color: var(--warning);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-section,
+.hljs-name {
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.hljs-type,
+.hljs-class .hljs-title {
+  color: var(--code-text-strong);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-attribute,
+.hljs-params {
+  color: var(--text);
+}
+
+.hljs-tag {
+  color: var(--text-muted);
+}
+.hljs-tag .hljs-name {
+  color: var(--accent);
+}
+.hljs-tag .hljs-attr {
+  color: var(--code-text-strong);
+}
+
+.hljs-meta {
+  color: var(--text-faint);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
+
 a {
   color: var(--accent);
 }

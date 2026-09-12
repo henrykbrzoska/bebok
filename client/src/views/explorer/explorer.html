@@ -125,7 +125,7 @@
             }
           </div>
         } @else {
-          <pre class="file-body file-content"><code>{{ fileContent() }}</code></pre>
+          <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
         }
       }
     </main>

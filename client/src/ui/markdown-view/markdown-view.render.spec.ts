@@ -4,6 +4,7 @@
  * deliberately does not support (see that file's header comment).
  */
 
+import { preloadLanguage } from '../code-highlight/code-highlight';
 import { renderMarkdownView } from './markdown-view.render';
 
 describe('renderMarkdownView', () => {
@@ -14,9 +15,20 @@ describe('renderMarkdownView', () => {
     expect(html).toContain('<h3>Sub sub</h3>');
   });
 
-  it('renders a fenced code block verbatim, escaped', () => {
+  it('renders a fenced code block, escaped and syntax-highlighted (F7-4)', async () => {
+    await preloadLanguage('ts');
     const html = renderMarkdownView('```ts\nconst a = <b>1</b>;\n```');
-    expect(html).toContain('<pre><code data-lang="ts">const a = &lt;b&gt;1&lt;/b&gt;;</code></pre>');
+    expect(html).toContain('<pre><code class="hljs language-typescript">');
+    // Never a raw, unescaped `<b>` - highlight.js escapes as it tokenizes.
+    expect(html).not.toContain('<b>1</b>');
+    expect(html).toContain('&lt;b&gt;1&lt;/b&gt;');
+    // Actually tokenized, not just escaped verbatim.
+    expect(html).toContain('hljs-keyword');
+  });
+
+  it('falls back to plain escaped text for an unknown language hint', () => {
+    const html = renderMarkdownView('```not-a-real-language\n<b>x</b>\n```');
+    expect(html).toContain('<pre><code class="hljs">&lt;b&gt;x&lt;/b&gt;</code></pre>');
   });
 
   it('parses a GFM pipe table with alignment', () => {
