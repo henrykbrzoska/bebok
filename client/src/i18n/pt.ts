@@ -332,6 +332,7 @@ export const pt: Record<MessageKey, string> = {
   'chat.goToLastUser': 'Ir para a última pergunta ↑',
   'chat.loadEarlier': 'Carregar mensagens anteriores',
   'chat.earlierHidden': '{n} mensagens anteriores ocultas',
+  'chat.mergedTurns': '{n} turnos apenas com ferramentas combinados',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

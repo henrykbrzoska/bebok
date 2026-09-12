@@ -90,14 +90,22 @@
               </div>
             }
             <div class="messages">
-              @for (message of windowedMessages(); track message.id) {
-                <app-message-row
-                  [rowId]="'msg-'+message.id"
-                  [message]="message"
-                  [taskLinks]="taskLinks()"
-                  [rollbackEnabled]="true"
-                  (rollback)="rollbackTo($event)"
-                />
+              @for (row of transcriptRows(); track row.kind === 'run' ? row.key : row.message.id) {
+                @if (row.kind === 'single') {
+                  <app-message-row
+                    [rowId]="'msg-'+row.message.id"
+                    [message]="row.message"
+                    [taskLinks]="taskLinks()"
+                    [rollbackEnabled]="true"
+                    (rollback)="rollbackTo($event)"
+                  />
+                } @else {
+                  <app-tool-run-row
+                    [rowId]="'msg-'+row.key"
+                    [messages]="row.messages"
+                    [taskLinks]="taskLinks()"
+                  />
+                }
               }
             </div>
             @for (p of pending(); track p.id) {

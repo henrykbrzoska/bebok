@@ -31,6 +31,7 @@ import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
+import { ToolRunRowComponent } from './parts/tool-run-row';
 
 const REFRESH_DEBOUNCE_MS = 300;
 /**
@@ -170,6 +171,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
+    ToolRunRowComponent,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -288,6 +290,17 @@ export class ChatView implements OnInit, OnDestroy {
   /** Older messages kept out of the DOM (drives the "Load earlier" control). */
   readonly hiddenCount = computed(() =>
     Math.max(0, this.filteredMessages().length - this.visibleCount()),
+  );
+
+  /**
+   * F6-1c: `windowedMessages()` with runs of >= 2 consecutive tool-only
+   * assistant turns folded into one `RunRow` (rendered as `<app-tool-run-row>`
+   * instead of one `<app-message-row>` per turn). Computed from the already
+   * windowed slice, so a run can span - and be split by - the window edge;
+   * that is expected, not a bug (see `groupMessageRuns`).
+   */
+  readonly transcriptRows = computed<TranscriptRow[]>(() =>
+    groupMessageRuns(this.windowedMessages()),
   );
 
   /** Show the "jump to last user message" button when user has scrolled up
@@ -1308,6 +1321,70 @@ export function windowMessages<T>(messages: readonly T[], count: number): T[] {
     return [];
   }
   return messages.length > count ? messages.slice(-count) : [...messages];
+}
+
+/**
+ * F6-1c: a "tool-only" turn - the unit `groupMessageRuns` merges - is an
+ * assistant message with no `text` part: only tool calls/results, and
+ * optionally thinking/usage/image parts. A user message, or any assistant
+ * message that *does* carry a text part, is never tool-only and always ends
+ * a run.
+ */
+export function isToolOnlyTurn(message: Message): boolean {
+  return message.role === 'assistant' && !message.parts.some((part) => part.type === 'text');
+}
+
+/** One rendered transcript row: an ordinary message, or a merged run. */
+export interface SingleMessageRow {
+  kind: 'single';
+  message: Message;
+}
+
+/**
+ * A run of >= 2 consecutive tool-only turns (F6-1c), rendered as one
+ * `<app-tool-run-row>`. `key` is the first message's id: stable for the
+ * run's lifetime (it never changes as later turns join the same run), used
+ * both as the `@for` track expression and, inside `ToolRunRowComponent`, to
+ * decide whether an expand/collapse override still applies.
+ */
+export interface ToolRunRow {
+  kind: 'run';
+  key: string;
+  messages: Message[];
+}
+
+export type TranscriptRow = SingleMessageRow | ToolRunRow;
+
+/**
+ * F6-1c: walk a (already windowed/filtered) message list and fold every run
+ * of >= 2 consecutive tool-only assistant turns into one `ToolRunRow`. A
+ * lone tool-only turn - one with no tool-only neighbour - stays a
+ * `SingleMessageRow`, rendered exactly as before merging existed; so does
+ * every user message and every assistant turn that carries a text part.
+ */
+export function groupMessageRuns(messages: readonly Message[]): TranscriptRow[] {
+  const rows: TranscriptRow[] = [];
+  let run: Message[] = [];
+
+  const flush = (): void => {
+    if (run.length >= 2) {
+      rows.push({ kind: 'run', key: run[0].id, messages: run });
+    } else if (run.length === 1) {
+      rows.push({ kind: 'single', message: run[0] });
+    }
+    run = [];
+  };
+
+  for (const message of messages) {
+    if (isToolOnlyTurn(message)) {
+      run.push(message);
+      continue;
+    }
+    flush();
+    rows.push({ kind: 'single', message });
+  }
+  flush();
+  return rows;
 }
 
 /** Recover a user prompt into the composer when opening its retry branch. */

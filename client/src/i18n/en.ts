@@ -66,6 +66,7 @@ export const en = {
   'chat.goToLastUser': 'Go to last question ↑',
   'chat.loadEarlier': 'Load earlier messages',
   'chat.earlierHidden': '{n} earlier messages not shown',
+  'chat.mergedTurns': '{n} tool-only turns merged',
   'chat.attachImage': 'Attach image',
   'chat.removeAttachment': 'Remove attachment',
   'chat.imageTooLarge': 'Image too large (max 5 MB): {name}',
