@@ -245,12 +245,7 @@ fn console_entry(ev: &EventConsoleApiCalled) -> Option<ConsoleEntry> {
     ) {
         return None;
     }
-    let text = ev
-        .args
-        .iter()
-        .map(render_arg)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let text = ev.args.iter().map(render_arg).collect::<Vec<_>>().join(" ");
     let frame = ev
         .stack_trace
         .as_ref()

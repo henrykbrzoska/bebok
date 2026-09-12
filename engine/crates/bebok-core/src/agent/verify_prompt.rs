@@ -124,7 +124,11 @@ mod tests {
 
     #[test]
     fn every_mode_advertises_the_browser_and_dev_servers() {
-        for mode in [FrontendVerify::Auto, FrontendVerify::Ask, FrontendVerify::Off] {
+        for mode in [
+            FrontendVerify::Auto,
+            FrontendVerify::Ask,
+            FrontendVerify::Off,
+        ] {
             let text = render(mode, true);
             assert!(text.starts_with(SECTION_HEADING), "{text}");
             assert!(text.contains("`browser_open`"), "{mode:?}: {text}");
@@ -142,8 +146,12 @@ mod tests {
         let text = render(FrontendVerify::Auto, true);
         assert!(text.contains("frontend verification: auto"));
         assert!(text.contains("MANDATORY"));
-        assert!(text.contains("is NOT \
-             verification") || text.contains("is NOT verification"));
+        assert!(
+            text.contains(
+                "is NOT \
+             verification"
+            ) || text.contains("is NOT verification")
+        );
         assert!(text.contains("at most 2 more rounds"));
         assert!(text.contains("Verification: opened <url>"));
         assert!(text.contains("without asking"));

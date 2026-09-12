@@ -75,8 +75,14 @@ mod tests {
     #[test]
     fn default_is_auto() {
         assert_eq!(FrontendVerify::default(), FrontendVerify::Auto);
-        assert_eq!(FrontendVerify::from_config(&json!({})), FrontendVerify::Auto);
-        assert_eq!(FrontendVerify::from_config(&Value::Null), FrontendVerify::Auto);
+        assert_eq!(
+            FrontendVerify::from_config(&json!({})),
+            FrontendVerify::Auto
+        );
+        assert_eq!(
+            FrontendVerify::from_config(&Value::Null),
+            FrontendVerify::Auto
+        );
     }
 
     #[test]
@@ -116,7 +122,11 @@ mod tests {
 
     #[test]
     fn as_str_round_trips() {
-        for mode in [FrontendVerify::Auto, FrontendVerify::Ask, FrontendVerify::Off] {
+        for mode in [
+            FrontendVerify::Auto,
+            FrontendVerify::Ask,
+            FrontendVerify::Off,
+        ] {
             assert_eq!(FrontendVerify::parse(mode.as_str()), Some(mode));
         }
     }

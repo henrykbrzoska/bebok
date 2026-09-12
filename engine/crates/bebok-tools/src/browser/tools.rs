@@ -123,7 +123,9 @@ pub(super) fn explain_navigation_error(url: &str, raw: &str) -> String {
         return format!("file not found: {url}");
     }
     if raw.contains("ERR_ABORTED") {
-        return format!("navigation to {url} was aborted (the page redirected or the request was cancelled); retry once");
+        return format!(
+            "navigation to {url} was aborted (the page redirected or the request was cancelled); retry once"
+        );
     }
     format!("navigation to {url} failed: {raw}")
 }
@@ -780,7 +782,10 @@ mod tests {
             "http://localhost:4200/inventory",
             "net::ERR_CONNECTION_REFUSED",
         );
-        assert!(msg.starts_with("connection refused at http://localhost:4200/inventory"), "{msg}");
+        assert!(
+            msg.starts_with("connection refused at http://localhost:4200/inventory"),
+            "{msg}"
+        );
         assert!(msg.contains("Start the dev server first"), "{msg}");
         assert!(msg.contains("retry browser_open"), "{msg}");
         assert!(!msg.contains("net::"), "{msg}");
@@ -795,7 +800,10 @@ mod tests {
         assert!(msg.contains("still be starting"), "{msg}");
         // Unknown codes keep the raw text so nothing is hidden.
         let msg = explain_navigation_error("http://x/", "net::ERR_SOMETHING_ODD");
-        assert_eq!(msg, "navigation to http://x/ failed: net::ERR_SOMETHING_ODD");
+        assert_eq!(
+            msg,
+            "navigation to http://x/ failed: net::ERR_SOMETHING_ODD"
+        );
     }
 
     #[test]
