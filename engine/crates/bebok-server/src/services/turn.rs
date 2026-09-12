@@ -300,6 +300,11 @@ fn assemble_prompt(
     // WP-AUTOVERIFY (F8-1): "Verification capabilities" section (browser,
     // dev servers, `verify.frontend` policy); built in its own module.
     if let Some(section) = bebok_core::agent::verification_section(cfg, agent) {
+        tracing::debug!(
+            agent = %agent.name,
+            mode = cfg.frontend_verify().as_str(),
+            "verification capabilities section added to the system prompt"
+        );
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 }

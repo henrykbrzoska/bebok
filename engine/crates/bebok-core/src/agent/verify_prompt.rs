@@ -72,22 +72,32 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
          file, then poll the log (or `fetch` the URL) until the server prints its ready line. \
          Windows: `start \"dev\" /B cmd /C \"npm run dev > .bebok-dev.log 2>&1\"`; macOS/Linux: \
          `nohup npm run dev > .bebok-dev.log 2>&1 &`. Never run a server in the foreground: the \
-         `bash` call would block until its timeout. Before starting one, check whether a known \
-         port already answers (`fetch` http://localhost:<port>/) and reuse it.\n",
+         `bash` call would block until its timeout. Before starting one, check whether the \
+         project's port already answers (`fetch` http://localhost:<port>/) and that the response \
+         really is this project; reuse it only then.\n",
     );
     match mode {
         FrontendVerify::Auto => s.push_str(
-            "- Policy (frontend verification: auto): after modifying frontend/web code (components, \
-             templates, styles, routes, client-side state) verify it yourself before answering — the \
-             user should not have to check your work by hand. Steps: (1) detect a running dev server \
-             or start one as above; (2) `browser_open` the affected route; (3) `browser_wait` for the \
-             changed element or text, then `browser_screenshot`; (4) `browser_console` with \
-             level=\"error\" and fix anything the change introduced; (5) confirm the specific change \
-             is visible in the screenshot (use `browser_find`/`browser_get_text` for exact values); \
-             (6) if something is wrong, fix it and re-verify, at most 2 more times; (7) end your \
-             final answer with one line `Verification: <what you opened, what you saw, console \
-             status>` (or why verification was impossible). Do not ask the user whether to verify — \
-             just do it.\n",
+            "- Policy (frontend verification: auto) — MANDATORY: whenever you modify frontend/web \
+             code (components, templates, styles, routes, client-side state) you must look at the \
+             result in the browser before you answer. A passing build, lint or unit test is NOT \
+             verification of frontend work; only opening the page is. The user must never have to \
+             check your frontend work by hand, and \"it builds\" is not an acceptable final state. \
+             Do this, in order, without asking:\n\
+             1. Find the dev server: work out the project's serve command and port (package.json \
+             scripts, project.json, README), `fetch` that URL and confirm the response is THIS app \
+             (title/markup) — another project may be using the port, in which case start your own \
+             server on a free port. If nothing answers, start it with `bash` in the background as \
+             described above and poll its log until it prints the ready line / URL.\n\
+             2. `browser_open` the affected route (e.g. http://localhost:<port>/inventory).\n\
+             3. `browser_wait` for the element or text you changed, then `browser_screenshot`.\n\
+             4. `browser_console` with level=\"error\"; fix anything your change caused and \
+             re-verify (at most 2 more rounds).\n\
+             5. Confirm in the screenshot — and with `browser_find` / `browser_get_text` for exact \
+             values — that the specific change is visible.\n\
+             6. End your final answer with exactly one line: `Verification: opened <url>, saw \
+             <what>, console <clean | N errors>` — or `Verification: not possible because <reason>` \
+             if the browser or dev server truly could not be used.\n",
         ),
         FrontendVerify::Ask => s.push_str(
             "- Policy (frontend verification: ask): after modifying frontend/web code, ask the user \
@@ -131,10 +141,12 @@ mod tests {
     fn auto_mode_carries_the_full_policy() {
         let text = render(FrontendVerify::Auto, true);
         assert!(text.contains("frontend verification: auto"));
-        assert!(text.contains("verify it yourself"));
-        assert!(text.contains("at most 2 more times"));
-        assert!(text.contains("Verification: <"));
-        assert!(text.contains("Do not ask the user whether to verify"));
+        assert!(text.contains("MANDATORY"));
+        assert!(text.contains("is NOT \
+             verification") || text.contains("is NOT verification"));
+        assert!(text.contains("at most 2 more rounds"));
+        assert!(text.contains("Verification: opened <url>"));
+        assert!(text.contains("without asking"));
         assert!(!text.contains("ask the user once"));
     }
 
@@ -143,8 +155,8 @@ mod tests {
         let text = render(FrontendVerify::Ask, true);
         assert!(text.contains("frontend verification: ask"));
         assert!(text.contains("ask the user once"));
-        assert!(!text.contains("verify it yourself"));
-        assert!(!text.contains("Verification: <"));
+        assert!(!text.contains("MANDATORY"));
+        assert!(!text.contains("Verification: opened"));
     }
 
     #[test]
@@ -153,7 +165,7 @@ mod tests {
         assert!(text.contains("`browser_open`"));
         assert!(!text.contains("Policy ("));
         assert!(!text.contains("ask the user once"));
-        assert!(!text.contains("verify it yourself"));
+        assert!(!text.contains("MANDATORY"));
         assert!(!text.ends_with('\n'));
     }
 
