@@ -14,6 +14,9 @@ import {
   AgentEntry,
   AgentInfo,
   AgentListResponse,
+  ChangeDiffResponse,
+  ChangeEntry,
+  ChangesResponse,
   CompactResponse,
   ConfigResponse,
   CreatePtyResponse,
@@ -40,6 +43,7 @@ import {
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
+  RevertChangeResponse,
   SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
@@ -222,6 +226,35 @@ export class EngineClient {
     return this.request<CompactResponse>('POST', `/session/${id}/compact`, {
       ...(budget ? { budget } : {}),
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // WP-CHANGES (F6-9): engine-tracked file changes
+  // ---------------------------------------------------------------------------
+
+  /** `GET /session/{id}/changes` -> tracked files with +/- line counts. */
+  sessionChanges(id: string): Promise<ChangeEntry[]> {
+    return this.request<ChangesResponse>(
+      'GET',
+      `/session/${encodeURIComponent(id)}/changes`,
+    ).then((d) => d.changes);
+  }
+
+  /** `GET /session/{id}/changes/diff?path=` -> unified diff against the baseline. */
+  sessionChangeDiff(id: string, path: string): Promise<ChangeDiffResponse> {
+    return this.request<ChangeDiffResponse>(
+      'GET',
+      `/session/${encodeURIComponent(id)}/changes/diff?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** `POST /session/{id}/changes/revert` -> restore the baseline (bytes or absence). */
+  revertSessionChange(id: string, path: string): Promise<RevertChangeResponse> {
+    return this.request<RevertChangeResponse>(
+      'POST',
+      `/session/${encodeURIComponent(id)}/changes/revert`,
+      { path },
+    );
   }
 
   prompt(

@@ -36,13 +36,15 @@ export const MAX_DRAWER_WIDTH = 560;
 
 export type Density = 'comfortable' | 'compact';
 
-/** The three stacked sections of the right drawer - independent, not tabs. */
+/** The stacked sections of the right drawer - independent, not tabs. */
 export interface RightDrawerPanels {
   session: boolean;
   explorer: boolean;
   terminal: boolean;
   /** F6-13: live sub-agent list (Agents panel). */
   agents: boolean;
+  /** WP-CHANGES (F6-9): engine-tracked file changes. */
+  changes: boolean;
 }
 
 const DEFAULT_PANELS: RightDrawerPanels = {
@@ -50,6 +52,7 @@ const DEFAULT_PANELS: RightDrawerPanels = {
   explorer: true,
   terminal: false,
   agents: false,
+  changes: false,
 };
 
 function readBool(key: string, fallback: boolean): boolean {
@@ -114,6 +117,8 @@ function readPanels(): RightDrawerPanels {
       terminal:
         typeof parsed['terminal'] === 'boolean' ? parsed['terminal'] : DEFAULT_PANELS.terminal,
       agents: typeof parsed['agents'] === 'boolean' ? parsed['agents'] : DEFAULT_PANELS.agents,
+      changes:
+        typeof parsed['changes'] === 'boolean' ? parsed['changes'] : DEFAULT_PANELS.changes,
     };
   } catch {
     return { ...DEFAULT_PANELS };

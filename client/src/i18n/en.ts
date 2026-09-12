@@ -500,6 +500,22 @@ export const en = {
   'agents.close': 'Close',
   'agents.empty': 'No messages yet',
   'agents.tokens': 'tokens',
+  // WP-CHANGES (F6-9): engine-tracked file changes panel + diff overlay
+  'drawer.changes': 'Changes',
+  'changes.count': 'Tracked files: {n}',
+  'changes.refresh': 'Refresh',
+  'changes.loading': 'Loading changes…',
+  'changes.none': 'No files changed by the agent yet',
+  'changes.diffTitle': 'Diff of {path}',
+  'changes.baselineGit': 'vs git HEAD',
+  'changes.baselineSnapshot': 'vs session start',
+  'changes.openInExplorer': 'Open in Explorer',
+  'changes.revert': 'Revert file',
+  'changes.reverting': 'Reverting…',
+  'changes.revertConfirm': 'Revert {path} to its original state? This discards every change the agent made to it.',
+  'changes.close': 'Close',
+  'changes.loadingDiff': 'Loading diff…',
+  'changes.noDiff': 'No differences against the baseline',
 };
 
 export type MessageKey = keyof typeof en;

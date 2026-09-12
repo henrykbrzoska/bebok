@@ -554,6 +554,40 @@ export interface ProjectPatch {
   group?: string;
 }
 
+/** WP-CHANGES (F6-9): which baseline a change diff / revert is computed against. */
+export type ChangeBaseline = 'git' | 'snapshot';
+
+/** One engine-tracked file change (`GET /session/{id}/changes`). */
+export interface ChangeEntry {
+  /** Project-relative path, forward slashes. */
+  path: string;
+  added: number;
+  removed: number;
+  baseline: ChangeBaseline;
+  /** Whether the file currently exists on disk. */
+  exists: boolean;
+}
+
+export interface ChangesResponse {
+  changes: ChangeEntry[];
+}
+
+/** `GET /session/{id}/changes/diff?path=`: a plain unified diff string. */
+export interface ChangeDiffResponse {
+  path: string;
+  diff: string;
+  baseline: ChangeBaseline;
+  added: number;
+  removed: number;
+}
+
+/** `POST /session/{id}/changes/revert`. */
+export interface RevertChangeResponse {
+  path: string;
+  baseline: ChangeBaseline;
+  exists: boolean;
+}
+
 /** One row of the directory picker: always a directory, never a file. */
 export interface FsBrowseEntry {
   name: string;
