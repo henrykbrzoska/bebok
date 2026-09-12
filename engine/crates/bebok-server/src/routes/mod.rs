@@ -69,5 +69,11 @@ pub fn build_api_router() -> Router<AppState> {
 
     // Silence unused-mut on Android where no PTY routes are appended.
     let _ = &mut router;
-    router
+
+    // Capability token (F0-5): ONE layer around the whole API instead of a
+    // per-handler check, applied last so it also covers the PTY routes above.
+    // `/pty/{id}/connect` opts out inside the middleware (ticket-authenticated
+    // WebSocket upgrade). Wrapped by CORS in `server.rs`, so preflight is
+    // answered before it reaches this layer.
+    router.layer(axum::middleware::from_fn(crate::auth::require_token))
 }

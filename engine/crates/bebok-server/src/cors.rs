@@ -3,6 +3,12 @@
 //! The webview runs on `tauri://localhost` / `http://tauri.localhost` in builds
 //! and on `http://localhost:4200` in browser dev. Extend via `BEBOK_CORS`
 //! (comma separated); the defaults always apply.
+//!
+//! CORS is NOT an authorisation boundary: it only constrains browsers that
+//! choose to respect it, never another local process or `curl`. The actual
+//! boundary is the per-launch capability token in [`crate::auth`]; this layer
+//! merely has to let the `Authorization` header through (and answer preflight
+//! before the token layer sees it, hence it wraps the API router).
 
 use axum::http::{HeaderValue, Method};
 use tower_http::cors::CorsLayer;

@@ -11,6 +11,7 @@
 //! their own modules, orchestration in `server.rs`. `stdout` carries only
 //! `BEBOK_READY`; all logs go to `stderr`.
 
+mod auth;
 mod cli;
 mod cors;
 mod error;

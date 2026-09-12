@@ -1,8 +1,9 @@
 //! Server bootstrap: state assembly, router, `BEBOK_READY` handshake, serve.
 //!
-//! `stdout` carries exactly one line — `BEBOK_READY http://host:port` — which
-//! the Tauri shell parses to discover the port. Everything else logs to
-//! `stderr` via `tracing`.
+//! `stdout` carries exactly one line — `BEBOK_READY http://host:port/?token=…`
+//! — which the Tauri shell parses to discover the port (and, since F0-5, to
+//! hand the per-launch capability token to the webview). Everything else logs
+//! to `stderr` via `tracing`.
 
 use std::sync::Arc;
 
@@ -108,7 +109,19 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
 
     // Machine-readable handshake for the parent (Tauri sidecar spawn).
     // The ONLY stdout line.
-    println!("BEBOK_READY http://{actual}");
+    //
+    // The per-launch capability token (F0-5) rides along as a query parameter:
+    // every existing launcher (Tauri sidecar reader, Android
+    // `EngineLauncherPlugin`) forwards the whole string to the webview as
+    // `baseUrl` verbatim, so the client receives the token with no shell
+    // change. `transport.strategy.ts` splits it off before building request
+    // URLs. stdout is a private pipe to the launcher — the token is never
+    // logged to stderr.
+    if crate::auth::disabled() {
+        println!("BEBOK_READY http://{actual}");
+    } else {
+        println!("BEBOK_READY http://{actual}/?token={}", crate::auth::token());
+    }
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
