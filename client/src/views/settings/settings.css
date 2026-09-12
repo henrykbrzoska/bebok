@@ -1,467 +1,111 @@
-.settings {
-  padding: 20px 24px;
-  max-width: 760px;
-  margin: 0 auto;
-  width: 100%;
-  overflow-y: auto;
-}
+/* Settings shell (F2-22): 210px left rail + scrollable detail pane. */
 
-.settings-head {
+:host {
   display: flex;
-  align-items: baseline;
-  gap: 14px;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-
-.settings-head h1 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.settings-head .dir {
-  font-size: 12.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 420px;
-}
-
-.back {
-  color: var(--accent);
-  text-decoration: none;
-  font-size: 13px;
-}
-
-.type-model-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
-}
-
-.type-model-grid label {
-  margin-bottom: 0;
-}
-
-.type-model-grid select {
-  width: 100%;
-}
-
-/* Section tabs: split the long settings page into Agents / Providers / Others. */
-.settings-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.settings-tabs button {
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  border-radius: var(--radius-sm);
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--fg-muted);
-}
-
-.settings-tabs button:hover {
-  color: var(--fg);
-}
-
-.settings-tabs button.active {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 18px;
-  margin-bottom: 16px;
-}
-
-.card h2 {
-  margin: 0 0 6px;
-  font-size: 15px;
-}
-
-.card p {
-  margin: 0 0 12px;
-  font-size: 12.5px;
-}
-
-.card label {
-  display: block;
-  margin-bottom: 12px;
-}
-
-.card label span {
-  display: block;
-  font-size: 12.5px;
-  color: var(--fg-muted);
-  margin-bottom: 4px;
-}
-
-.card input[type='text'],
-.card input[type='password'],
-.card textarea {
-  width: 100%;
-}
-
-.card textarea {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-.runtime-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.runtime-grid label {
-  margin-bottom: 0;
-}
-
-.runtime-grid input {
-  width: 100%;
-}
-
-.runtime-grid .path-row {
-  display: flex;
-  gap: 6px;
-}
-
-.runtime-grid .path-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.runtime-grid .path-row button {
-  flex: 0 0 auto;
-  padding: 0 8px;
-}
-
-.yolo-card {
-  border-color: var(--warn);
-}
-
-.yolo-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.warn {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius-sm);
-  color: var(--warn);
-  font-size: 12.5px;
-}
-
-.docker-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.docker-result {
-  font-size: 13px;
-}
-
-.docker-result.ok {
-  color: var(--ok);
-}
-
-.docker-result.err {
-  color: var(--err);
-}
-
-.error-banner {
-  background: rgba(224, 82, 96, 0.14);
-  border: 1px solid var(--err);
-  color: var(--err);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-.saved-banner {
-  background: rgba(76, 175, 125, 0.14);
-  border: 1px solid var(--ok);
-  color: var(--ok);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-.placeholder,
-.empty {
-  color: var(--fg-muted);
-}
-
-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.agent-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-
-.agent-list li:last-child,
-.toggle-list li:last-child {
-  border-bottom: none;
-}
-
-.agent-name {
-  font-weight: 600;
-  min-width: 90px;
-}
-
-.desc {
-  font-size: 12px;
-}
-
-.toggle-list li {
-  border-bottom: 1px solid var(--border);
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.toggle input[type='checkbox'] {
-  accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
-  cursor: pointer;
-}
-
-.toggle .name {
-  font-weight: 600;
-  min-width: 130px;
-}
-
-.toggle .status {
-  font-size: 12px;
-}
-
-/* Providers (M6) */
-.provider-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.provider-row {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-}
-
-.provider-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.provider-head .name {
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.provider-head .badge {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-/* "Check available models" - compact, spaced from the provider name */
-.provider-head button {
-  margin-left: auto;
-  font-size: 11.5px;
-  line-height: 1.2;
-  padding: 3px 10px;
+  flex: 1;
   min-height: 0;
 }
 
-.provider-head .kind-select {
-  font-size: 11.5px;
-  padding: 2px 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  color: var(--fg-muted);
-}
-
-.provider-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.provider-fields label {
-  margin-bottom: 0;
-}
-
-.provider-models {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.model-chips {
+.settings {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
 }
 
-.chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
+/* --- left rail (210px) ------------------------------------------------- */
 
-/* Add custom API (provider) */
-.custom-provider {
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 10px;
-}
-
-.custom-provider .row {
+.rail {
+  width: 210px;
+  flex: none;
   display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-14) var(--space-10);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
 }
 
-.custom-provider input[type='text'],
-.custom-provider input[type='password'] {
-  width: auto;
-  flex: 1 1 120px;
-  min-width: 0;
-}
-
-.custom-provider select {
-  flex: 0 0 auto;
-}
-
-/* Raw config.json tab (top card) */
-.raw-card .raw-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.raw-card .raw-tabs button {
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  border-radius: var(--radius-sm);
-  padding: 4px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.raw-card .raw-tabs button.active {
-  border-color: var(--accent);
-  color: var(--accent);
+.rail-title {
+  margin: 0 0 var(--space-12);
+  padding: 0 var(--space-8);
+  font-size: var(--fs-16);
   font-weight: 600;
+  color: var(--text);
 }
 
-.raw-card .raw-path {
-  font-size: 11.5px;
-  margin-bottom: 8px;
+.rail-tab {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control-sm);
+  padding: 7px var(--space-10);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.rail-tab:hover:not(.active) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rail-tab.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.rail-dir {
+  margin-top: auto;
+  padding: var(--space-12) var(--space-8) 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.raw-card .raw-editor {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  resize: vertical;
-  min-height: 280px;
-}
+/* --- detail pane ------------------------------------------------------- */
 
-.raw-card .raw-actions {
-  justify-content: space-between;
-}
-
-/* Task 6: Appearance (custom CSS) editor. */
-.css-editor {
-  min-height: 180px;
-  tab-size: 2;
-}
-
-.small {
-  font-size: 12px;
-}
-
-/* Parallel fleet members editor. */
-.fleet-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 12px 0 10px;
-}
-
-.fleet-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.fleet-row input[type='text'] {
-  flex: 1 1 120px;
+.detail {
+  flex: 1;
   min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-20) var(--space-24);
 }
 
-.fleet-row select {
-  flex: 1 1 120px;
-  min-width: 0;
+.detail > * {
+  display: block;
+  max-width: 760px;
 }
 
-.actions-spread {
-  justify-content: space-between;
+.placeholder {
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+}
+
+.error-banner,
+.saved-banner {
+  max-width: 760px;
+  margin-bottom: var(--space-14);
+  padding: var(--space-9) var(--space-12);
+  border-radius: var(--radius-control-sm);
+  font-size: var(--fs-12-5);
+  border: 1px solid var(--border);
+}
+
+.error-banner {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(226, 100, 95, 0.1);
+}
+
+.saved-banner {
+  border-color: var(--success);
+  color: var(--success);
+  background: rgba(95, 184, 138, 0.1);
 }

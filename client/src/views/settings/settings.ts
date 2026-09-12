@@ -1,30 +1,60 @@
 /**
- * Settings view (M4 + Task 6): model + API key, agents, permission rules, MCP
- * toggles and skill toggles. Every save maps to a config edit on the engine
- * (PUT /config or POST /mcp/{name}/toggle); the GUI holds no separate state.
- * Task 6: Appearance card edits `ui.customCss` (+ `ui.customCssFiles`).
+ * Settings screen (WP-SETTINGS / F2-22): one full-screen list+detail view.
+ *
+ * A 210px left rail lists the seven tabs of the design handoff (§8) -
+ * Providers, Agents, MCP, Skills, Permissions, Appearance, Raw JSON - and the
+ * detail pane swaps one component per tab. The old standalone Config page is
+ * folded in as the Raw JSON tab; `/config` redirects here (WP-SHELL / F1-11).
+ *
+ * This component owns nothing but the shell: loading, the banners and the tab
+ * selection. Everything else lives in `SettingsStore`, which it provides.
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, OnInit, effect, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { CustomCssService } from '../../core/custom-css.service';
-import {
-  ConfigResponse,
-  DockerStatus,
-  FleetMember,
-  McpStatus,
-  ProviderSpec,
-  ResolvedSkill,
-} from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { I18nService } from '../../i18n/i18n.service';
+import { MessageKey } from '../../i18n';
+import { ProviderCatalog } from './provider-catalog';
+import { SETTINGS_TABS, SettingsStore, SettingsTab } from './settings.store';
+import { ProvidersTab } from './providers-tab';
+import { AgentsTab } from './agents-tab';
+import { McpTab } from './mcp-tab';
+import { SkillsTab } from './skills-tab';
+import { PermissionsTab } from './permissions-tab';
+import { AppearanceTab } from './appearance-tab';
+import { RawJsonTab } from './raw-json-tab';
+
+/** Query-param aliases accepted for `?tab=` (the command palette uses these). */
+const TAB_ALIASES: Record<string, SettingsTab> = {
+  providers: 'providers',
+  agents: 'agents',
+  mcp: 'mcp',
+  skills: 'skills',
+  permissions: 'permissions',
+  appearance: 'appearance',
+  raw: 'rawJson',
+  rawjson: 'rawJson',
+  json: 'rawJson',
+  config: 'rawJson',
+};
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, RouterLink],
+  imports: [
+    ProvidersTab,
+    AgentsTab,
+    McpTab,
+    SkillsTab,
+    PermissionsTab,
+    AppearanceTab,
+    RawJsonTab,
+  ],
+  providers: [SettingsStore],
   templateUrl: './settings.html',
   styleUrl: './settings.css',
 })
@@ -33,568 +63,54 @@ export class SettingsView implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly events = inject(EventsStore);
   private readonly i18n = inject(I18nService);
-  private readonly customCss = inject(CustomCssService);
+  private readonly catalog = inject(ProviderCatalog);
 
+  readonly store = inject(SettingsStore);
   readonly t = this.i18n.t.bind(this.i18n);
+  readonly tabs = SETTINGS_TABS;
 
-  /** Native file pickers are only available in the Tauri desktop shell. */
-  readonly isTauri = this.engine.isTauri;
+  /** Tab requested through `?tab=` (command palette deep links). */
+  private readonly requestedTab = toSignal(
+    this.route.queryParamMap.pipe(map((p) => p.get('tab'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('tab') },
+  );
 
-  readonly directory = signal<string | null>(null);
-  readonly loading = signal(false);
-  readonly saving = signal(false);
-  readonly error = signal<string | null>(null);
-  readonly saved = signal<string | null>(null);
-
-  readonly config = signal<ConfigResponse | null>(null);
-
-  /**
-   * Active settings section. The page got too long, so the cards are grouped
-   * into tabs: agents (type models + presets + parallel fleet), providers, and
-   * everything else. State only - all cards still live in this one view.
-   */
-  readonly tab = signal<'agents' | 'providers' | 'other'>('agents');
-
-  readonly rulesText = signal('[]');
-
-  /** M6: providers + per-agent-type models */
-  readonly providers = signal<ProviderSpec[]>([]);
-  readonly typeModels = signal<Record<string, string>>({});
-  readonly checkedModels = signal<Record<string, string[]>>({});
-  readonly checkingProvider = signal<string | null>(null);
-  readonly providerModelsError = signal<string | null>(null);
-
-  /**
-   * JSON snapshot of the providers list as last seen in the engine config.
-   * "Check available models" compares the live form against this snapshot and
-   * persists the delta first, so a freshly typed API key is used by the check.
-   */
-  private savedProvidersJson = '[]';
-
-  /** Draft form for adding a custom API (provider). */
-  readonly customProvider = signal<{
-    name: string;
-    kind: 'openai' | 'anthropic';
-    endpoint: string;
-    api_key: string;
-  }>({ name: '', kind: 'openai', endpoint: '', api_key: '' });
-
-  /** agent types with their per-type model override */
-  readonly agentTypes = ['code', 'ask', 'plan', 'debug', 'orchestrator'];
-
-  /** YOLO mode: auto-allow every tool call (dangerous). */
-  readonly yolo = signal(false);
-
-  /** Parallel-agents fleet: enabled flag + editable member list. */
-  readonly fleetEnabled = signal(false);
-  readonly fleetMembers = signal<FleetMember[]>([]);
-
-  /** Task 6: appearance — `ui.customCss` (+ `ui.customCssFiles`). */
-  readonly customCssText = signal('');
-  readonly customCssFilesText = signal('');
-
-  /** Flat list of selectable models (`provider/model`) from every provider. */
-  readonly availableModels = computed<string[]>(() => {
-    const out: string[] = [];
-    for (const provider of this.providers()) {
-      for (const model of provider.models ?? []) {
-        out.push(`${provider.name}/${model}`);
-      }
-    }
-    return out;
-  });
-
-  /** runtime executable paths */
-  readonly pythonPath = signal('');
-  readonly python3Path = signal('');
-  readonly nodePath = signal('');
-  readonly phpPath = signal('');
-  readonly dockerPath = signal('');
-  readonly gitPath = signal('');
-
-  /** docker access probe */
-  readonly dockerStatus = signal<DockerStatus | null>(null);
-  readonly checkingDocker = signal(false);
+  constructor() {
+    // A `?tab=` deep link (command palette) selects the rail entry, also when
+    // the user is already on this screen.
+    effect(() => this.applyRequestedTab());
+  }
 
   async ngOnInit(): Promise<void> {
-    this.directory.set(
-      this.route.snapshot.queryParamMap.get('directory') ?? this.engine.readLastDirectory(),
-    );
+    const directory =
+      this.route.snapshot.queryParamMap.get('directory') ?? this.engine.readLastDirectory();
     if (!this.engine.connected()) {
       try {
         await this.engine.connect();
       } catch (err) {
-        this.error.set(this.describe(err));
+        this.store.error.set(this.store.describe(err));
         return;
       }
     }
     this.events.start();
-    await this.reload();
+    void this.catalog.load();
+    await this.store.load(directory);
   }
 
-  async reload(): Promise<void> {
-    const dir = this.directory();
-    if (!dir) {
-      this.error.set(this.i18n.t('settings.noDirectory'));
-      return;
-    }
-    this.loading.set(true);
-    this.error.set(null);
-    try {
-      const cfg = await this.engine.getConfig(dir);
-      this.config.set(cfg);
-      this.rulesText.set(this.rulesToText(cfg.config.permission));
-      const providers = (cfg.providers ?? []).map((provider) => ({ ...provider, api_key: null }));
-      this.providers.set(providers);
-      this.savedProvidersJson = JSON.stringify(providers);
-      this.typeModels.set({ ...(cfg.config.models ?? {}) });
-      this.yolo.set(!!cfg.config.yolo);
-      const fleet = cfg.config.fleet;
-      this.fleetEnabled.set(!!fleet?.enabled);
-      this.fleetMembers.set(
-        Array.isArray(fleet?.members)
-          ? fleet.members.map((m) => ({
-              name: m.name ?? '',
-              agent: m.agent ?? 'code',
-              model: m.model ?? '',
-            }))
-          : [],
-      );
-      const ui = (cfg.config.ui ?? {}) as {
-        customCss?: string;
-        custom_css?: string;
-        customCssFiles?: string[];
-        custom_css_files?: string[];
-      };
-      this.customCssText.set(ui.customCss ?? ui.custom_css ?? '');
-      const files = ui.customCssFiles ?? ui.custom_css_files ?? [];
-      this.customCssFilesText.set(Array.isArray(files) ? files.join('\n') : '');
-      this.pythonPath.set(cfg.runtimes.python);
-      this.python3Path.set(cfg.runtimes.python3);
-      this.nodePath.set(cfg.runtimes.node);
-      this.phpPath.set(cfg.runtimes.php);
-      this.dockerPath.set(cfg.runtimes.docker);
-      this.gitPath.set(cfg.runtimes.git);
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.loading.set(false);
-    }
+  /** Label key of a tab in the left rail. */
+  tabLabel(tab: SettingsTab): MessageKey {
+    return `settings.tab.${tab}` as MessageKey;
   }
 
-  /** Switch the active settings tab; clear any leftover banners. */
-  setTab(tab: 'agents' | 'providers' | 'other'): void {
-    this.tab.set(tab);
-    this.error.set(null);
-    this.saved.set(null);
+  select(tab: SettingsTab): void {
+    this.store.setTab(tab);
   }
 
-  /** Save the Appearance card: `ui.customCss` (+ `ui.customCssFiles`). */
-  async saveAppearance(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
+  private applyRequestedTab(): void {
+    const raw = (this.requestedTab() ?? '').toLowerCase();
+    const tab = TAB_ALIASES[raw];
+    if (tab) {
+      this.store.tab.set(tab);
     }
-    const files = this.customCssFilesText()
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, {
-        ui: { customCss: this.customCssText(), customCssFiles: files },
-      });
-      this.saved.set(this.i18n.t('settings.savedAppearance'));
-      await this.customCss.sync(dir);
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  async saveRules(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    let rules: unknown;
-    try {
-      rules = JSON.parse(this.rulesText());
-    } catch (err) {
-      this.error.set(this.i18n.t('settings.invalidRules', { msg: this.describe(err) }));
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, { permission: { rules } });
-      this.saved.set(this.i18n.t('settings.savedRules'));
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  async saveRuntimes(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, {
-        runtimes: {
-          python: this.pythonPath().trim(),
-          python3: this.python3Path().trim(),
-          node: this.nodePath().trim(),
-          php: this.phpPath().trim(),
-          docker: this.dockerPath().trim(),
-          git: this.gitPath().trim(),
-        },
-      });
-      this.saved.set(this.i18n.t('settings.savedPaths'));
-      this.dockerStatus.set(null);
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  /** Browse for a runtime executable with the native file picker (Tauri only). */
-  async browseRuntime(field: 'python' | 'python3' | 'node' | 'php' | 'docker' | 'git'): Promise<void> {
-    const picked = await this.engine.pickFile(field);
-    if (!picked) {
-      return;
-    }
-    switch (field) {
-      case 'python':
-        this.pythonPath.set(picked);
-        break;
-      case 'python3':
-        this.python3Path.set(picked);
-        break;
-      case 'node':
-        this.nodePath.set(picked);
-        break;
-      case 'php':
-        this.phpPath.set(picked);
-        break;
-      case 'docker':
-        this.dockerPath.set(picked);
-        break;
-      case 'git':
-        this.gitPath.set(picked);
-        break;
-    }
-  }
-
-  async checkDocker(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.checkingDocker()) {
-      return;
-    }
-    this.checkingDocker.set(true);
-    this.error.set(null);
-    this.dockerStatus.set(null);
-    try {
-      const status = await this.engine.checkDocker(dir);
-      this.dockerStatus.set(status);
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.checkingDocker.set(false);
-    }
-  }
-
-  async toggleSkill(skill: ResolvedSkill, enabled: boolean): Promise<void> {
-    const dir = this.directory();
-    if (!dir) {
-      return;
-    }
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      const skills: Record<string, boolean> = {};
-      for (const s of this.config()?.skills ?? []) {
-        skills[s.name] = s.enabled;
-      }
-      skills[skill.name] = enabled;
-      await this.engine.putConfig(dir, { skills });
-      this.saved.set(
-        this.i18n.t(enabled ? 'settings.skillEnabled' : 'settings.skillDisabled', {
-          name: skill.name,
-        }),
-      );
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    }
-  }
-
-  async toggleMcp(server: McpStatus, enabled: boolean): Promise<void> {
-    const dir = this.directory();
-    if (!dir) {
-      return;
-    }
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.toggleMcp(dir, server.name, enabled);
-      this.saved.set(
-        this.i18n.t(enabled ? 'settings.mcpEnabled' : 'settings.mcpDisabled', {
-          name: server.name,
-        }),
-      );
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    }
-  }
-
-  async checkModels(provider: ProviderSpec): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.checkingProvider()) {
-      return;
-    }
-    // Read the live draft from the signal: the @for snapshot can be stale.
-    const draft = this.providers().find((p) => p.name === provider.name) ?? provider;
-    this.checkingProvider.set(draft.name);
-    this.error.set(null);
-    this.providerModelsError.set(null);
-    try {
-      // Persist the current form state (kind, endpoint, freshly typed API key,
-      // and providers not saved yet) BEFORE the check - the engine resolves the
-      // key from its saved config, not from the GUI, so an unsaved key would
-      // make the check fail with 401 even though the key is correct.
-      if (JSON.stringify(this.providers()) !== this.savedProvidersJson) {
-        await this.engine.putConfig(dir, { providers: this.providers() });
-        this.savedProvidersJson = JSON.stringify(this.providers());
-      }
-      const res = await this.engine.listModels(dir, draft.name);
-      this.checkedModels.update((m) => ({ ...m, [draft.name]: res.models }));
-      // The engine persisted the models to the project config; reload so the
-      // providers/models signals (and the per-agent model selects) refresh.
-      await this.reload();
-      this.saved.set(this.i18n.t('settings.modelsSaved', { name: draft.name }));
-    } catch (err) {
-      this.providerModelsError.set(this.describe(err));
-    } finally {
-      this.checkingProvider.set(null);
-    }
-  }
-
-  async saveTypeModels(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      const models: Record<string, string> = {};
-      for (const t of this.agentTypes) {
-        const v = this.typeModels()[t]?.trim();
-        if (v) {
-          models[t] = v;
-        }
-      }
-      await this.engine.putConfig(dir, { models });
-      this.saved.set(this.i18n.t('settings.savedModels'));
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  async saveProviders(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, { providers: this.providers() });
-      this.saved.set(this.i18n.t('settings.savedProviders'));
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  updateProviderField(index: number, field: 'endpoint' | 'api_key', value: string): void {
-    this.providers.update((list) => {
-      const next = list.map((p) => ({ ...p }));
-      if (next[index]) {
-        next[index] = { ...next[index], [field]: value };
-      }
-      return next;
-    });
-  }
-
-  updateProviderKind(index: number, value: 'openai' | 'anthropic'): void {
-    this.providers.update((list) => {
-      const next = list.map((p) => ({ ...p }));
-      if (next[index]) {
-        next[index] = { ...next[index], kind: value };
-      }
-      return next;
-    });
-  }
-
-  setCustomProvider(field: 'name' | 'kind' | 'endpoint' | 'api_key', value: string): void {
-    this.customProvider.update((c) => ({ ...c, [field]: value }));
-  }
-
-  /** Add a custom API (provider) to the list; persist with "Save providers". */
-  addCustomProvider(): void {
-    const p = this.customProvider();
-    const name = p.name.trim();
-    if (!name) {
-      return;
-    }
-    const exists = this.providers().some((x) => x.name === name);
-    if (!exists) {
-      this.providers.update((list) => [
-        ...list,
-        {
-          name,
-          kind: p.kind,
-          endpoint: p.endpoint.trim() || null,
-          api_key: p.api_key.trim() || null,
-          models: [],
-        },
-      ]);
-    }
-    this.customProvider.set({ name: '', kind: 'openai', endpoint: '', api_key: '' });
-  }
-
-  setTypeModel(type: string, value: string): void {
-    this.typeModels.update((m) => ({ ...m, [type]: value }));
-  }
-
-  /** Toggle YOLO mode (auto-allow every tool call). Persisted to config. */
-  async toggleYolo(enabled: boolean): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, { yolo: enabled });
-      this.yolo.set(enabled);
-      this.saved.set(this.i18n.t('settings.yoloSaved'));
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  typeModelFor(type: string): string {
-    return this.typeModels()[type] ?? '';
-  }
-
-  /** Toggle the parallel fleet on/off (PUT /config `fleet` delta). */
-  async toggleFleet(enabled: boolean): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      await this.engine.putConfig(dir, {
-        fleet: { enabled, members: this.fleetMembers() },
-      });
-      this.fleetEnabled.set(enabled);
-      this.saved.set(this.i18n.t('settings.fleetSaved'));
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  /** Save the fleet members list (with the current enabled flag). */
-  async saveFleet(): Promise<void> {
-    const dir = this.directory();
-    if (!dir || this.saving()) {
-      return;
-    }
-    this.saving.set(true);
-    this.error.set(null);
-    this.saved.set(null);
-    try {
-      const members = this.fleetMembers()
-        .map((m) => ({
-          name: m.name.trim(),
-          agent: m.agent.trim() || 'code',
-          model: m.model.trim(),
-        }))
-        .filter((m) => m.name.length > 0);
-      await this.engine.putConfig(dir, {
-        fleet: { enabled: this.fleetEnabled(), members },
-      });
-      this.saved.set(this.i18n.t('settings.fleetSaved'));
-      await this.reload();
-    } catch (err) {
-      this.error.set(this.describe(err));
-    } finally {
-      this.saving.set(false);
-    }
-  }
-
-  addFleetMember(): void {
-    this.fleetMembers.update((list) => [...list, { name: '', agent: 'code', model: '' }]);
-  }
-
-  removeFleetMember(index: number): void {
-    this.fleetMembers.update((list) => list.filter((_, i) => i !== index));
-  }
-
-  updateFleetMember(index: number, field: 'name' | 'agent' | 'model', value: string): void {
-    this.fleetMembers.update((list) => {
-      const next = list.map((m) => ({ ...m }));
-      if (next[index]) {
-        next[index] = { ...next[index], [field]: value };
-      }
-      return next;
-    });
-  }
-
-  rulesToText(permission: unknown): string {
-    if (permission && typeof permission === 'object') {
-      const obj = permission as Record<string, unknown>;
-      if (Array.isArray(obj['rules'])) {
-        return JSON.stringify(obj['rules'], null, 2);
-      }
-    }
-    return '[]';
-  }
-
-  describe(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
   }
 }
