@@ -25,6 +25,24 @@ pub struct CreateSession {
     /// `forkOf: { sessionID, messageIndex }` -> fork that session.
     #[serde(rename = "forkOf", default)]
     pub fork_of: Option<ForkSpec>,
+    /// WP-GIT / F6-15: `worktree: { branch, base? }` -> create the session in
+    /// a fresh `git worktree` of `directory` at
+    /// `<directory>/.bebok/worktrees/<branch>` (additive; absent = unchanged
+    /// behaviour). Ignored for `forkOf`/`continueLast`.
+    #[serde(default)]
+    pub worktree: Option<WorktreeSpec>,
+}
+
+/// Worktree request for `POST /session`.
+#[derive(Deserialize)]
+pub struct WorktreeSpec {
+    /// Branch to check out (created from `base` when it does not exist yet).
+    /// Doubles as the path below `.bebok/worktrees`, so it must be a safe
+    /// relative path (validated in `bebok_core::git`).
+    pub branch: String,
+    /// Start point for a new branch; default: the current `HEAD`.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +136,35 @@ pub async fn create_session(
     }
     // No prior session -> fall through and create one.
 
+    // Worktree-backed session (F6-15): the store shells out to `git worktree
+    // add` and binds the session to the worktree path.
+    if let Some(spec) = body.worktree {
+        let base = spec
+            .base
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty());
+        let (session, path) = state
+            .store
+            .create_worktree_session(
+                &body.directory,
+                spec.branch.trim(),
+                base,
+                body.agent.as_deref().unwrap_or("code"),
+                body.model.as_deref(),
+            )
+            .await
+            .map_err(|e| err_response(&e))?;
+        return Ok(Json(serde_json::json!({
+            "sessionID": session.id().to_string(),
+            "directory": session.directory(),
+            "worktree": {
+                "path": path.to_string_lossy(),
+                "branch": spec.branch.trim(),
+            },
+        })));
+    }
+
     let session = state
         .store
         .create_session(
@@ -153,6 +200,7 @@ pub async fn list_sessions(
         .map(|session| {
             let mut value = serde_json::to_value(session).unwrap_or_default();
             attach_context_window(&mut value, session, default_model.as_deref());
+            attach_worktree(&mut value, session);
             value
         })
         .collect();
@@ -176,6 +224,16 @@ pub fn attach_context_window(
     value["context_window"] = serde_json::json!(bebok_core::context::context_window_for(model));
 }
 
+/// WP-GIT: add `worktree_branch` (the branch name, or `null`) when the
+/// session's directory is a Bebok worktree (`<root>/.bebok/worktrees/<branch>`).
+/// Derived from the directory at response time - nothing is persisted, and
+/// the client never has to split paths itself.
+pub fn attach_worktree(value: &mut serde_json::Value, session: &bebok_core::session::Session) {
+    let branch = bebok_core::git::worktree_info(std::path::Path::new(&session.directory))
+        .map(|info| info.branch);
+    value["worktree_branch"] = serde_json::json!(branch);
+}
+
 /// `GET /session/{id}` -> metadata + usage totals
 pub async fn get_session(
     State(state): State<AppState>,
@@ -191,6 +249,7 @@ pub async fn get_session(
     meta["running"] = serde_json::json!(session.is_running());
     let default_model = session.config_snapshot().model_for(&snapshot.agent);
     attach_context_window(&mut meta, &snapshot, Some(&default_model));
+    attach_worktree(&mut meta, &snapshot);
     Ok(Json(meta))
 }
 
@@ -484,10 +543,18 @@ pub async fn delete_session(
         .delete_session(id)
         .await
         .map_err(|e| err_response(&e))?;
+    // WP-GIT: tell the client when the directory was a Bebok worktree so it
+    // can *offer* removal. The worktree itself is never touched here - that
+    // only happens through `POST /projects/{id}/git/worktree/remove`.
+    let worktree = bebok_core::git::worktree_info(std::path::Path::new(&meta.directory));
     Ok(Json(serde_json::json!({
         "sessionID": id.to_string(),
         "directory": meta.directory,
         "deleted": true,
+        "is_worktree": worktree.is_some(),
+        "worktree_path": worktree.as_ref().map(|_| meta.directory.clone()),
+        "worktree_branch": worktree.as_ref().map(|w| w.branch.clone()),
+        "project_root": worktree.as_ref().map(|w| w.root.to_string_lossy().to_string()),
     })))
 }
 
@@ -510,6 +577,42 @@ pub fn compact_cutoff(messages: &[bebok_core::session::Message], budget: usize) 
 mod tests {
     use super::*;
     use bebok_core::session::Message;
+
+    /// WP-GIT: the `worktree` field is additive - bodies without it still
+    /// parse, bodies with it carry branch + optional base.
+    #[test]
+    fn create_session_body_accepts_an_optional_worktree_spec() {
+        let plain: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","agent":"code"}"#).unwrap();
+        assert!(plain.worktree.is_none());
+        let with: CreateSession = serde_json::from_str(
+            r#"{"directory":"/p","worktree":{"branch":"bebok/session-1"}}"#,
+        )
+        .unwrap();
+        let spec = with.worktree.unwrap();
+        assert_eq!(spec.branch, "bebok/session-1");
+        assert!(spec.base.is_none());
+        let with_base: CreateSession = serde_json::from_str(
+            r#"{"directory":"/p","worktree":{"branch":"x","base":"main"}}"#,
+        )
+        .unwrap();
+        assert_eq!(with_base.worktree.unwrap().base.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn attach_worktree_derives_the_branch_from_the_directory() {
+        let root = std::env::temp_dir().join("proj");
+        let wt = bebok_core::git::worktrees_dir(&root).join("bebok").join("feat");
+        let session = bebok_core::session::Session::new(wt.to_string_lossy().to_string(), "code");
+        let mut value = serde_json::json!({});
+        attach_worktree(&mut value, &session);
+        assert_eq!(value["worktree_branch"], "bebok/feat");
+
+        let plain = bebok_core::session::Session::new(root.to_string_lossy().to_string(), "code");
+        let mut value = serde_json::json!({});
+        attach_worktree(&mut value, &plain);
+        assert!(value["worktree_branch"].is_null());
+    }
 
     #[test]
     fn compaction_marker_is_human_readable() {

@@ -17,6 +17,7 @@ pub mod debug;
 pub mod events;
 pub mod fs;
 pub mod fs_browse;
+pub mod git;
 pub mod mcp;
 pub mod meta;
 pub mod projects;
@@ -76,6 +77,11 @@ pub fn build_api_router() -> Router<AppState> {
             patch(projects::patch_project).delete(projects::delete_project),
         )
         .route("/projects/{id}/open", post(projects::open_project))
+        .route("/projects/{id}/git", get(git::project_git))
+        .route(
+            "/projects/{id}/git/worktree/remove",
+            post(git::remove_worktree),
+        )
         .route("/plugins", get(meta::list_plugins))
         .route("/event", get(events::event_stream))
         .route(

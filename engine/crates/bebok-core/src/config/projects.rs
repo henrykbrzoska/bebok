@@ -146,6 +146,15 @@ pub fn list_from(config_path: &Path) -> Vec<ProjectEntry> {
     projects
 }
 
+/// Look up one entry by id (WP-GIT: `GET /projects/{id}/git` and the
+/// worktree endpoints resolve a project id to its registered path here).
+pub fn find_in(config_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsError> {
+    load_from(config_path)
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or(ProjectsError::NotFound)
+}
+
 // ---------------------------------------------------------------------------
 // mutations
 // ---------------------------------------------------------------------------
@@ -322,6 +331,16 @@ mod tests {
     fn missing_file_loads_an_empty_registry() {
         let fx = Fixture::new();
         assert!(load_from(&fx.config()).is_empty());
+    }
+
+    #[test]
+    fn find_in_resolves_a_known_id_and_404s_an_unknown_one() {
+        let fx = Fixture::new();
+        let dir = fx.dir("alpha");
+        let (entry, _) = add_in(&fx.config(), dir.to_str().unwrap(), None).unwrap();
+        let found = find_in(&fx.config(), &entry.id).unwrap();
+        assert_eq!(found.path, entry.path);
+        assert_eq!(find_in(&fx.config(), "nope"), Err(ProjectsError::NotFound));
     }
 
     #[test]

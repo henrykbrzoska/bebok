@@ -127,6 +127,13 @@ export interface SessionMeta {
   /** Context window of that model, resolved live from the engine's catalog. */
   context_window?: number | null;
   share?: unknown;
+  /**
+   * WP-GIT: branch name when the session runs in a Bebok git worktree
+   * (`<root>/.bebok/worktrees/<branch>`), derived by the engine from
+   * `directory` at response time. `null`/absent for ordinary sessions - the
+   * client never splits paths to work this out.
+   */
+  worktree_branch?: string | null;
 }
 
 export interface PendingPermissionSnapshot extends PermissionAsked {
@@ -458,6 +465,60 @@ export interface DeleteSessionResponse {
   sessionID: string;
   directory: string;
   deleted: boolean;
+  /**
+   * WP-GIT: the deleted session's directory was a Bebok git worktree. The
+   * engine never removes it as a side effect - the client may *offer* removal
+   * through `EngineClient.removeWorktree` (explicit, separate call).
+   */
+  is_worktree?: boolean;
+  /** Worktree path (same as `directory`) when `is_worktree`. */
+  worktree_path?: string | null;
+  worktree_branch?: string | null;
+  /** Project root that owns the worktree (`<root>/.bebok/worktrees/...`). */
+  project_root?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// WP-GIT: git probe + worktree-backed sessions
+// ---------------------------------------------------------------------------
+
+/** `GET /projects/{id}/git` (mirrors `bebok_core::git::GitInfo` + project fields). */
+export interface ProjectGitInfo {
+  project_id: string;
+  /** Registered, engine-normalised project path. */
+  path: string;
+  /** `<path>/.bebok/worktrees`, engine-built. */
+  worktrees_dir: string;
+  /** False for a non-repo directory or a host without `git`; other fields are then null. */
+  is_repo: boolean;
+  root: string | null;
+  /** Current branch; null on a detached HEAD. */
+  branch: string | null;
+  remote_url: string | null;
+  is_github: boolean;
+  /** `git status --porcelain` line count (staged + unstaged + untracked). */
+  dirty_count: number | null;
+}
+
+/** `POST /session` `worktree` field: run the session in a fresh git worktree. */
+export interface WorktreeSpec {
+  /** Branch to check out (created from `base` when new); also the path below `.bebok/worktrees`. */
+  branch: string;
+  /** Start point for a new branch; engine default is the current HEAD. */
+  base?: string;
+}
+
+/** `POST /session` answer when a `worktree` spec was sent. */
+export interface CreateWorktreeSessionResponse extends CreateSessionResponse {
+  /** Normalised worktree path the session is bound to. */
+  directory: string;
+  worktree: { path: string; branch: string };
+}
+
+/** `POST /projects/{id}/git/worktree/remove` answer. */
+export interface RemoveWorktreeResponse {
+  removed: boolean;
+  path: string;
 }
 
 // ---------------------------------------------------------------------------
