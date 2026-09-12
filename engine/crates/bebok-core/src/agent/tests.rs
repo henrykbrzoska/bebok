@@ -338,6 +338,21 @@ if __name__ == "__main__":
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn session_directory_has_no_verbatim_prefix() {
+        let base = std::env::temp_dir().join(format!("bebok-path-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        assert!(!session.directory().starts_with(r"\\?\"));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
     // ------------------------------------------------------------------
     // M2 permission gate
     // ------------------------------------------------------------------
