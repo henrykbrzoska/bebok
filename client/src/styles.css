@@ -205,3 +205,37 @@ a {
 .muted {
   color: var(--text-muted);
 }
+
+/* --- Density (WP-SHELL / F1-12) ---------------------------------------
+ * The shell root carries `.density-compact` when the user picks Compact in
+ * the topbar. Compact tightens the shared spacing scale, which every shell
+ * component is built on, and trims the card/list padding used by the Start
+ * and Settings screens. The choice is persisted by `ui-prefs.store.ts`.
+ */
+
+.density-compact {
+  --space-8: 6px;
+  --space-9: 7px;
+  --space-10: 8px;
+  --space-12: 9px;
+  --space-14: 10px;
+  --space-16: 12px;
+  --space-18: 13px;
+  --space-20: 14px;
+  --space-24: 16px;
+}
+
+.density-compact .card {
+  padding: 12px 14px;
+}
+
+.density-compact .settings-tabs {
+  gap: 2px;
+}
+
+.density-compact .session-item,
+.density-compact .provider-list li,
+.density-compact .agent-list li {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
