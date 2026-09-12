@@ -1,0 +1,44 @@
+<div class="card" data-testid="frontend-verify-card">
+  <h3>{{ t('settings.frontendVerifyTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.frontendVerifyHint') }}</p>
+
+  <fieldset class="modes" [disabled]="store.saving()">
+    <legend class="micro-label">{{ t('settings.frontendVerifyLabel') }}</legend>
+    @for (m of modes; track m) {
+      <label class="mode" [class.selected]="mode() === m">
+        <input
+          type="radio"
+          name="frontend-verify"
+          [value]="m"
+          [checked]="mode() === m"
+          (change)="setMode(m)"
+          [attr.data-testid]="'frontend-verify-' + m"
+        />
+        <span class="mode-text">
+          <span class="mode-name">{{ modeLabel(m) }}</span>
+          <span class="mode-help small faint">{{ modeHelp(m) }}</span>
+        </span>
+      </label>
+    }
+  </fieldset>
+
+  <p class="small faint perm-note">{{ t('settings.frontendVerifyPermissions') }}</p>
+
+  <label class="field scope">
+    <span class="micro-label">{{ t('settings.frontendVerifyScope') }}</span>
+    <select
+      data-testid="frontend-verify-scope"
+      [ngModel]="scope()"
+      (ngModelChange)="setScope($event)"
+      [disabled]="store.saving()"
+    >
+      <option value="global">{{ t('settings.frontendVerifyScopeGlobal') }}</option>
+      <option value="project">{{ t('settings.frontendVerifyScopeProject') }}</option>
+    </select>
+    @if (projectOverride(); as override) {
+      <span class="small faint mono" data-testid="frontend-verify-override">
+        {{ t('settings.frontendVerifyProjectOverride', { mode: override }) }}
+      </span>
+    }
+  </label>
+</div>

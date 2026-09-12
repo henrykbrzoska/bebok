@@ -103,6 +103,13 @@ impl InstanceStore {
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let permission = Arc::new(PermissionEngine::load(&root));
         permission.set_yolo(config.read().unwrap().yolo);
+        permission.set_browser_auto(
+            config
+                .read()
+                .unwrap()
+                .frontend_verify()
+                .auto_allows_browser(),
+        );
         let agents = Arc::new(std::sync::RwLock::new(AgentCatalog::load(&root)));
         let mcp = Arc::new(McpManager::new());
         let instance = Arc::new(Instance {
@@ -163,6 +170,9 @@ impl InstanceStore {
         *instance.config.write().unwrap() = config.clone();
         instance.permission.reload();
         instance.permission.set_yolo(config.yolo);
+        instance
+            .permission
+            .set_browser_auto(config.frontend_verify().auto_allows_browser());
         configure_browser(&instance.root, &config);
 
         let specs = McpServerSpec::parse_all(&config.mcp);

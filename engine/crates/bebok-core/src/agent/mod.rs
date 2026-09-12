@@ -28,6 +28,7 @@ pub mod prompt_env;
 pub mod request;
 pub mod task_tool;
 pub mod turn;
+pub mod verify_prompt;
 
 #[cfg(test)]
 mod tests;
@@ -46,3 +47,4 @@ pub use prompt_env::host_os_note;
 pub use request::{RequestBuilder, build_request, prune_for_budget};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};
+pub use verify_prompt::verification_section;

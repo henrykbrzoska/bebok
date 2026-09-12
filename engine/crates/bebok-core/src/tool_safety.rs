@@ -99,6 +99,10 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("dirname", SafetyCategory::Safe),
     ("sha256sum", SafetyCategory::Safe),
     ("browser_get_text", SafetyCategory::Safe),
+    // WP-AUTOVERIFY (F8-1): read-only verification helpers.
+    ("browser_console", SafetyCategory::Safe),
+    ("browser_wait", SafetyCategory::Safe),
+    ("browser_find", SafetyCategory::Safe),
     // --- caution: reaches out / delegates / can write on request --------
     ("fetch", SafetyCategory::Caution),
     ("task", SafetyCategory::Caution),

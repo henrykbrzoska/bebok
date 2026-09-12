@@ -699,6 +699,21 @@ export const en = {
   'about.back': '← Directory',
   'about.loading': 'Loading…',
   'about.error': 'Could not load this page.',
+  'settings.frontendVerifyTitle': 'Frontend verification',
+  'settings.frontendVerifyHint': 'Whether the agent checks its own frontend changes in the built-in browser (browser_* tools) without being asked. Read by every agent that can use the browser; the agent starts or reuses the dev server, opens the route, takes a screenshot, reads console errors and reports a one-line verification result.',
+  'settings.frontendVerifyLabel': 'Policy',
+  'settings.frontendVerifyAuto': 'Automatic (recommended)',
+  'settings.frontendVerifyAutoHelp': 'After changing frontend code the agent verifies it on its own and reports the result. Manual checking by you becomes the exception.',
+  'settings.frontendVerifyAsk': 'Ask first',
+  'settings.frontendVerifyAskHelp': 'The agent asks once whether to verify in the browser before doing so.',
+  'settings.frontendVerifyOff': 'Off',
+  'settings.frontendVerifyOffHelp': 'No verification policy in the system prompt; the browser tools stay available on request.',
+  'settings.frontendVerifyPermissions': 'Permissions: with “Automatic” the browser_* tools are allowed by default (browser_eval still asks) so verification does not stall on prompts. Your own allow/ask/deny rules on the Permissions tab always win.',
+  'settings.frontendVerifyScope': 'Save to',
+  'settings.frontendVerifyScopeGlobal': 'Global (all projects)',
+  'settings.frontendVerifyScopeProject': 'This project only (overrides global)',
+  'settings.frontendVerifyProjectOverride': 'This project overrides the global setting: {mode}',
+  'settings.frontendVerifySaved': 'Frontend verification saved.',
 };
 
 export type MessageKey = keyof typeof en;

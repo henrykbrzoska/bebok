@@ -1,4 +1,6 @@
-//! The six `browser_*` tools (WP-BROWSER / F6-17).
+//! The six core `browser_*` tools (WP-BROWSER / F6-17); the verification
+//! trio lives in [`super::verify_tools`] (WP-AUTOVERIFY / F8-1) and reuses
+//! the `pub(super)` helpers below.
 //!
 //! All share one [`BrowserDriver`] (per-session page, headless or headed). Every call:
 //! * validates its arguments through [`super::args`] (errors are returned as
@@ -41,18 +43,18 @@ const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(20);
 const JPEG_QUALITY: i64 = 85;
 
 /// Current `{url, title}` of a page, tolerant of transient CDP errors.
-async fn page_state(page: &Page) -> (String, String) {
+pub(super) async fn page_state(page: &Page) -> (String, String) {
     let url = page.url().await.ok().flatten().unwrap_or_default();
     let title = page.get_title().await.ok().flatten().unwrap_or_default();
     (url, title)
 }
 
-fn state_json(url: &str, title: &str) -> Value {
+pub(super) fn state_json(url: &str, title: &str) -> Value {
     json!({ "url": url, "title": title })
 }
 
 /// Run `fut` under the call timeout and the turn's abort token.
-async fn bounded<T, F>(ctx: &ToolCtx, title: &str, fut: F) -> Result<T, ToolOutput>
+pub(super) async fn bounded<T, F>(ctx: &ToolCtx, title: &str, fut: F) -> Result<T, ToolOutput>
 where
     F: std::future::Future<Output = Result<T, String>>,
 {
@@ -69,8 +71,61 @@ where
     }
 }
 
-async fn page_for(driver: &Arc<BrowserDriver>, ctx: &ToolCtx) -> Result<Page, String> {
+pub(super) async fn page_for(driver: &Arc<BrowserDriver>, ctx: &ToolCtx) -> Result<Page, String> {
     driver.page(&ctx.session_id, &ctx.root).await
+}
+
+/// Turn a Chrome navigation error (`net::ERR_*`) or a `chrome-error://`
+/// landing into a clear, actionable message (WP-AUTOVERIFY / F8-1): a
+/// refused localhost connection almost always means "the dev server is not
+/// running yet", so say so and say what to do.
+pub(super) fn explain_navigation_error(url: &str, raw: &str) -> String {
+    let host_hint = |what: &str| {
+        let local = url.contains("localhost") || url.contains("127.0.0.1") || url.contains("[::1]");
+        if local {
+            format!(
+                "{what} at {url}: nothing is listening on that port. Start the dev server first \
+                 (with `bash` in the background, output redirected to a log file), wait until its \
+                 log prints the ready line / the URL, then retry browser_open. If a server is \
+                 already running, check which port it printed."
+            )
+        } else {
+            format!(
+                "{what} at {url}: the host did not accept the connection. Check the URL, the \
+                 port and that the service is up, then retry browser_open."
+            )
+        }
+    };
+    if raw.contains("ERR_CONNECTION_REFUSED") {
+        return host_hint("connection refused");
+    }
+    if raw.contains("ERR_CONNECTION_RESET") || raw.contains("ERR_EMPTY_RESPONSE") {
+        return host_hint("connection dropped");
+    }
+    if raw.contains("ERR_NAME_NOT_RESOLVED") {
+        return format!(
+            "cannot resolve the host of {url} (DNS lookup failed). Check the hostname; for a \
+             local dev server use http://localhost:<port>/."
+        );
+    }
+    if raw.contains("ERR_CONNECTION_TIMED_OUT") || raw.contains("ERR_TIMED_OUT") {
+        return format!(
+            "{url} did not answer in time (connection timed out). The server may still be \
+             starting: wait for its ready line, then retry browser_open."
+        );
+    }
+    if raw.contains("ERR_SSL") || raw.contains("ERR_CERT") {
+        return format!(
+            "TLS error opening {url} ({raw}). Try the http:// address of the dev server."
+        );
+    }
+    if raw.contains("ERR_FILE_NOT_FOUND") {
+        return format!("file not found: {url}");
+    }
+    if raw.contains("ERR_ABORTED") {
+        return format!("navigation to {url} was aborted (the page redirected or the request was cancelled); retry once");
+    }
+    format!("navigation to {url} failed: {raw}")
 }
 
 async fn find(page: &Page, selector: &str) -> Result<chromiumoxide::Element, String> {
@@ -92,7 +147,7 @@ impl Tool for BrowserOpen {
     }
 
     fn description(&self) -> &str {
-        "Open a URL in the browser bound to this session (one page per session, headless or a visible window per the user's settings; later browser_* calls act on it). Returns the final URL and page title. Follow with browser_screenshot to see the page or browser_get_text to read it."
+        "Open a URL in the real Chromium browser bound to this session (launched on first use; one page per session, headless or a visible window per the user's settings; later browser_* calls act on the same page). Works for any http(s) URL including local dev servers (http://localhost:<port>/route) — start the server first with bash in the background if nothing listens there; a refused connection is reported as such. Returns the final URL and title. Typical verification flow: browser_open -> browser_wait (selector/text) -> browser_screenshot -> browser_console(level=\"error\") -> browser_find/browser_get_text for exact values."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -125,13 +180,20 @@ impl Tool for BrowserOpen {
             let page = page_for(&driver, &ctx).await?;
             page.goto(url.as_str())
                 .await
-                .map_err(|e| format!("navigation to {url} failed: {e}"))?;
+                .map_err(|e| explain_navigation_error(&url, &e.to_string()))?;
             // Best effort: the load event may already have fired.
             let _ = tokio::time::timeout(NAVIGATION_TIMEOUT, page.wait_for_navigation()).await;
             if wait_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(wait_ms)).await;
             }
-            Ok::<_, String>(page_state(&page).await)
+            let (final_url, page_title) = page_state(&page).await;
+            // Chrome shows its own error page for some failures instead of
+            // failing `Page.navigate`; treat that landing as the error it is.
+            if final_url.starts_with("chrome-error://") {
+                let code = error_code_on_page(&page).await;
+                return Err(explain_navigation_error(&url, &code));
+            }
+            Ok::<_, String>((final_url, page_title))
         };
         match bounded(&ctx, &title, work).await {
             Ok((final_url, page_title)) => {
@@ -147,6 +209,20 @@ impl Tool for BrowserOpen {
     }
 }
 
+/// Read the `net::ERR_*` code Chrome prints on its error page (best effort).
+async fn error_code_on_page(page: &Page) -> String {
+    page.evaluate("(document.body && document.body.innerText) || ''")
+        .await
+        .ok()
+        .and_then(|r| r.into_value::<String>().ok())
+        .and_then(|t| {
+            t.split_whitespace()
+                .find(|w| w.starts_with("ERR_") || w.starts_with("net::ERR_"))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "chrome-error page".to_string())
+}
+
 // ── browser_screenshot ──────────────────────────────────────────────────
 
 pub struct BrowserScreenshot {
@@ -160,7 +236,7 @@ impl Tool for BrowserScreenshot {
     }
 
     fn description(&self) -> &str {
-        "Capture the current page of this session's browser as an image you can see (PNG by default). Use it after browser_open / browser_click / browser_type to check what the page looks like."
+        "Capture the current page of this session's browser as an image you can actually see (PNG by default, viewport 1280x800 headless). This is how you verify frontend work visually: after browser_open (+ browser_wait for client-rendered UI) take a screenshot and check that the specific change is there — colours, badges, numbers, layout. full_page=true for long pages. Pair it with browser_console for errors the eye cannot see."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -271,7 +347,7 @@ impl Tool for BrowserClick {
     }
 
     fn description(&self) -> &str {
-        "Click an element in this session's browser, addressed by a CSS selector or by viewport coordinates (x, y in CSS pixels, as seen in the last screenshot)."
+        "Click an element in this session's browser, addressed by a CSS selector (get reliable ones from browser_find) or by viewport coordinates (x, y in CSS pixels as seen in the last screenshot). Use it to navigate (tabs, links, menu items) and to exercise the interaction you changed; follow with browser_wait / browser_screenshot to see the result."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -351,7 +427,7 @@ impl Tool for BrowserType {
     }
 
     fn description(&self) -> &str {
-        "Type text into an input/textarea/contenteditable element of this session's browser (focuses it first). Set submit=true to press Enter afterwards."
+        "Type text into an input/textarea/contenteditable element of this session's browser (focuses it first; clear=true empties the field before typing, submit=true presses Enter afterwards). Get the selector from browser_find. Use it to fill search boxes and forms when verifying interactive behaviour."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -442,7 +518,7 @@ impl Tool for BrowserGetText {
     }
 
     fn description(&self) -> &str {
-        "Return the visible text (innerText) of the current page in this session's browser, or of one element when a selector is given. Cheaper than a screenshot when you only need the words."
+        "Return the visible text (innerText) of the current page in this session's browser, or of one element when a selector is given. Cheaper than a screenshot when you only need the words — use it to check exact labels, numbers or percentages your change should display."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -521,7 +597,7 @@ impl Tool for BrowserEval {
     }
 
     fn description(&self) -> &str {
-        "Evaluate a JavaScript expression in the current page of this session's browser and return its JSON-serialised value (promises are awaited). Use it to read DOM state or trigger page code."
+        "Evaluate a JavaScript expression in the current page of this session's browser and return its JSON-serialised value (promises are awaited). Use it for checks the other tools cannot express (computed styles such as a badge's background colour, element counts, app state). Prefer browser_find / browser_get_text / browser_console for the common cases; this tool always asks the user for permission."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -694,6 +770,45 @@ mod tests {
         assert!(!BrowserClick { driver: d.clone() }.is_read_only());
         assert!(!BrowserType { driver: d.clone() }.is_read_only());
         assert!(!BrowserEval { driver: d }.is_read_only());
+    }
+
+    /// WP-AUTOVERIFY (F8-1): a refused localhost connection tells the model
+    /// to start the dev server instead of surfacing a raw `net::ERR_*`.
+    #[test]
+    fn connection_refused_suggests_starting_the_dev_server() {
+        let msg = explain_navigation_error(
+            "http://localhost:4200/inventory",
+            "net::ERR_CONNECTION_REFUSED",
+        );
+        assert!(msg.starts_with("connection refused at http://localhost:4200/inventory"), "{msg}");
+        assert!(msg.contains("Start the dev server first"), "{msg}");
+        assert!(msg.contains("retry browser_open"), "{msg}");
+        assert!(!msg.contains("net::"), "{msg}");
+
+        let msg = explain_navigation_error("https://example.org/", "net::ERR_CONNECTION_REFUSED");
+        assert!(msg.contains("did not accept the connection"), "{msg}");
+        assert!(!msg.contains("dev server"), "{msg}");
+
+        let msg = explain_navigation_error("http://nope.invalid/", "net::ERR_NAME_NOT_RESOLVED");
+        assert!(msg.contains("cannot resolve the host"), "{msg}");
+        let msg = explain_navigation_error("http://localhost:1/", "net::ERR_CONNECTION_TIMED_OUT");
+        assert!(msg.contains("still be starting"), "{msg}");
+        // Unknown codes keep the raw text so nothing is hidden.
+        let msg = explain_navigation_error("http://x/", "net::ERR_SOMETHING_ODD");
+        assert_eq!(msg, "navigation to http://x/ failed: net::ERR_SOMETHING_ODD");
+    }
+
+    #[test]
+    fn descriptions_teach_the_verification_flow() {
+        let d = driver();
+        let open = BrowserOpen { driver: d.clone() };
+        assert!(open.description().contains("localhost"));
+        assert!(open.description().contains("browser_wait"));
+        assert!(open.description().contains("browser_console"));
+        let shot = BrowserScreenshot { driver: d.clone() };
+        assert!(shot.description().contains("verify"));
+        let eval = BrowserEval { driver: d };
+        assert!(eval.description().contains("always asks"));
     }
 
     #[test]

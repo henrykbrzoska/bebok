@@ -16,6 +16,7 @@ pub mod loader;
 pub mod model;
 pub mod projects;
 pub mod providers;
+pub mod verify;
 pub mod writer;
 
 // --- model (ResolvedConfig + Default + model_for/provider_spec, Builder) ---
@@ -36,6 +37,9 @@ pub use writer::{
     write_delta_to, write_full_global, write_full_project, write_full_to, write_global_delta,
     write_project_delta,
 };
+
+// --- verify (`verify.frontend` policy, WP-AUTOVERIFY / F8-1) ---
+pub use verify::FrontendVerify;
 
 // --- projects (registry stored under the global config's "projects" key) ---
 pub use projects::{ProjectEntry, ProjectPatch, ProjectsError};

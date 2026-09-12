@@ -436,6 +436,24 @@ export interface ResolvedConfig {
   browser?: BrowserConfig;
   /** F7-7: `{ "<tool name or glob>": SafetyCategory }` (merged global + project). */
   tool_safety?: Record<string, string>;
+  /** WP-AUTOVERIFY (F8-1): autonomous frontend verification policy. */
+  verify?: VerifyConfig;
+}
+
+/** `verify` config section (WP-AUTOVERIFY / F8-1). */
+export type FrontendVerify = 'auto' | 'ask' | 'off';
+
+export const FRONTEND_VERIFY_MODES: readonly FrontendVerify[] = ['auto', 'ask', 'off'];
+
+export function isFrontendVerify(value: unknown): value is FrontendVerify {
+  return (
+    typeof value === 'string' && (FRONTEND_VERIFY_MODES as readonly string[]).includes(value)
+  );
+}
+
+export interface VerifyConfig {
+  /** `auto` (default): verify without asking; `ask`: ask once; `off`: no policy. */
+  frontend?: FrontendVerify;
 }
 
 /** `browser` config section (WP-BROWSER2 / F7-6). */
