@@ -111,6 +111,11 @@ export const de: Record<MessageKey, string> = {
   'tool.output': 'Ausgabe',
   'tool.error': 'Fehler',
   'tool.running': 'Werkzeug läuft…',
+  'tool.expandCall': 'Werkzeugaufruf ausklappen',
+  'tool.collapseCall': 'Werkzeugaufruf einklappen',
+  'toolGroup.summary': '{n} Werkzeugaufrufe',
+  'toolGroup.expand': 'Werkzeugaufrufe ausklappen',
+  'toolGroup.collapse': 'Werkzeugaufrufe einklappen',
 
   'thinking.label': 'Denken - {text}',
 
@@ -259,6 +264,10 @@ export const de: Record<MessageKey, string> = {
   'settings.densityHint': 'Abstände von Listen und Karten in der ganzen App.',
   'settings.densityComfortable': 'Komfortabel',
   'settings.densityCompact': 'Kompakt',
+  'settings.toolCallsTitle': 'Werkzeugaufrufe',
+  'settings.toolCallsHint': 'Darstellung von Werkzeugaufrufen im Chatverlauf.',
+  'settings.expandToolCalls': 'Werkzeugaufrufe standardmäßig ausklappen',
+  'settings.expandToolCallsHint': 'Wenn aus, startet nur der erste Werkzeugaufruf eines Zuges ausgeklappt und Folgen von Aufrufen werden zu einer Zusammenfassungszeile gefaltet.',
   'settings.appearanceTabTitle': 'Darstellung',
   'settings.appearanceTabHint': 'Laufzeitpfade, Oberflächendichte und eigenes CSS.',
   'settings.jsonParseError': 'Ungültiges JSON: {msg}',

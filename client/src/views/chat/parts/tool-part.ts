@@ -11,6 +11,7 @@ import {
   ToolStateError,
 } from '../../../core/engine.dtos';
 import { prettyJson, summarizeInput } from '../../../core/format';
+import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 
 /**
@@ -20,7 +21,12 @@ import { I18nService } from '../../../i18n/i18n.service';
  * accent / danger by outcome) + monospace tool name + truncated monospace
  * args + chevron. Expanding reveals the arguments and the result body on a
  * `--bg` panel. The first tool call of a turn starts expanded, every later one
- * collapsed - see `toolIndex`.
+ * collapsed - see `toolIndex` - unless the "Expand tool calls by default"
+ * preference (F6-1, `UiPrefsStore.expandToolCallsByDefault`) is on, in which
+ * case every call starts expanded. A collapsed call is a single ~28px line:
+ * status dot + mono tool name + truncated args + state label. No duration is
+ * shown: the engine's `ToolState` carries `started_at` only while running and
+ * no end timestamp once completed, so there is nothing truthful to display.
  */
 @Component({
   selector: 'app-tool-part',
@@ -30,8 +36,10 @@ import { I18nService } from '../../../i18n/i18n.service';
       <button
         type="button"
         class="tool-head"
+        [class.collapsed]="!detailsOpen()"
         (click)="detailsOpen.set(!detailsOpen())"
         [attr.aria-expanded]="detailsOpen()"
+        [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
       >
         <span class="dot state-{{ kind() }}" aria-hidden="true"></span>
         <span class="tool-name">{{ name() }}</span>
@@ -118,6 +126,12 @@ import { I18nService } from '../../../i18n/i18n.service';
     }
     .tool-head:hover {
       background: var(--surface-2);
+    }
+    /* F6-1: a collapsed call is one dense ~28px line. */
+    .tool-head.collapsed {
+      padding-top: 5px;
+      padding-bottom: 5px;
+      min-height: 28px;
     }
 
     .dot {
@@ -253,6 +267,7 @@ import { I18nService } from '../../../i18n/i18n.service';
 })
 export class ToolPartComponent {
   private readonly i18n = inject(I18nService);
+  private readonly prefs = inject(UiPrefsStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
@@ -264,7 +279,14 @@ export class ToolPartComponent {
   /** Task name/ID → childSessionID map, passed down from the chat view. */
   readonly taskLinks = input<Map<string, string>>(new Map());
 
-  readonly detailsOpen = linkedSignal(() => this.toolIndex() <= 0);
+  /**
+   * Default open state: the "expand tool calls by default" preference wins;
+   * otherwise only the first call of the turn (`toolIndex() <= 0`) opens.
+   * A user toggle overrides the default until either input/pref changes.
+   */
+  readonly detailsOpen = linkedSignal(
+    () => this.prefs.expandToolCallsByDefault() || this.toolIndex() <= 0,
+  );
 
   private readonly toolPart = computed(() => this.part() as ToolPart);
   private readonly state = computed<ToolState>(() => this.toolPart().state);

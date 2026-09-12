@@ -110,6 +110,11 @@ export const ja: Record<MessageKey, string> = {
   'tool.output': '出力',
   'tool.error': 'エラー',
   'tool.running': 'ツール実行中…',
+  'tool.expandCall': 'ツール呼び出しを展開',
+  'tool.collapseCall': 'ツール呼び出しを折りたたむ',
+  'toolGroup.summary': 'ツール呼び出し {n} 件',
+  'toolGroup.expand': 'ツール呼び出しを展開',
+  'toolGroup.collapse': 'ツール呼び出しを折りたたむ',
 
   'thinking.label': '思考中 - {text}',
 
@@ -258,6 +263,10 @@ export const ja: Record<MessageKey, string> = {
   'settings.densityHint': 'アプリ全体のリストとカードの余白。',
   'settings.densityComfortable': 'ゆったり',
   'settings.densityCompact': 'コンパクト',
+  'settings.toolCallsTitle': 'ツール呼び出し',
+  'settings.toolCallsHint': 'チャット履歴でのツール呼び出しの表示方法。',
+  'settings.expandToolCalls': 'ツール呼び出しをデフォルトで展開',
+  'settings.expandToolCallsHint': 'オフの場合、各ターンの最初のツール呼び出しのみ展開され、連続する呼び出しは要約行にまとめられます。',
   'settings.appearanceTabTitle': '外観',
   'settings.appearanceTabHint': 'ランタイムのパス、UI の密度、カスタム CSS。',
   'settings.jsonParseError': '無効な JSON: {msg}',

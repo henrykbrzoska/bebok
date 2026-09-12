@@ -111,6 +111,11 @@ export const uk: Record<MessageKey, string> = {
   'tool.output': 'результат',
   'tool.error': 'помилка',
   'tool.running': 'інструмент працює…',
+  'tool.expandCall': 'Розгорнути виклик інструмента',
+  'tool.collapseCall': 'Згорнути виклик інструмента',
+  'toolGroup.summary': 'Викликів інструментів: {n}',
+  'toolGroup.expand': 'Розгорнути виклики інструментів',
+  'toolGroup.collapse': 'Згорнути виклики інструментів',
 
   'thinking.label': 'Міркування - {text}',
 
@@ -259,6 +264,10 @@ export const uk: Record<MessageKey, string> = {
   'settings.densityHint': 'Відступи списків і карток у всьому застосунку.',
   'settings.densityComfortable': 'Комфортна',
   'settings.densityCompact': 'Компактна',
+  'settings.toolCallsTitle': 'Виклики інструментів',
+  'settings.toolCallsHint': 'Як виклики інструментів відображаються у транскрипті чату.',
+  'settings.expandToolCalls': 'Розгортати виклики інструментів за замовчуванням',
+  'settings.expandToolCallsHint': 'Якщо вимкнено, лише перший виклик у ході починається розгорнутим, а серії викликів згортаються в один рядок підсумку.',
   'settings.appearanceTabTitle': 'Вигляд',
   'settings.appearanceTabHint': 'Шляхи середовищ, щільність інтерфейсу та власний CSS.',
   'settings.jsonParseError': 'Некоректний JSON: {msg}',

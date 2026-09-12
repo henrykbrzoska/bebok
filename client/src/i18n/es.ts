@@ -111,6 +111,11 @@ export const es: Record<MessageKey, string> = {
   'tool.output': 'salida',
   'tool.error': 'error',
   'tool.running': 'herramienta ejecutándose…',
+  'tool.expandCall': 'Expandir llamada a herramienta',
+  'tool.collapseCall': 'Contraer llamada a herramienta',
+  'toolGroup.summary': '{n} llamadas a herramientas',
+  'toolGroup.expand': 'Expandir llamadas a herramientas',
+  'toolGroup.collapse': 'Contraer llamadas a herramientas',
 
   'thinking.label': 'Pensando - {text}',
 
@@ -259,6 +264,10 @@ export const es: Record<MessageKey, string> = {
   'settings.densityHint': 'Espaciado de listas y tarjetas en toda la app.',
   'settings.densityComfortable': 'Cómoda',
   'settings.densityCompact': 'Compacta',
+  'settings.toolCallsTitle': 'Llamadas a herramientas',
+  'settings.toolCallsHint': 'Cómo se muestran las llamadas a herramientas en la transcripción del chat.',
+  'settings.expandToolCalls': 'Expandir llamadas a herramientas por defecto',
+  'settings.expandToolCallsHint': 'Si está desactivado, solo la primera llamada de cada turno empieza expandida y las series de llamadas se pliegan en una fila de resumen.',
   'settings.appearanceTabTitle': 'Apariencia',
   'settings.appearanceTabHint': 'Rutas de ejecutables, densidad de la interfaz y CSS propio.',
   'settings.jsonParseError': 'JSON no válido: {msg}',

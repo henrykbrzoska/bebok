@@ -111,6 +111,11 @@ export const fr: Record<MessageKey, string> = {
   'tool.output': 'sortie',
   'tool.error': 'erreur',
   'tool.running': 'outil en cours…',
+  'tool.expandCall': 'Développer l\'appel d\'outil',
+  'tool.collapseCall': 'Réduire l\'appel d\'outil',
+  'toolGroup.summary': '{n} appels d\'outils',
+  'toolGroup.expand': 'Développer les appels d\'outils',
+  'toolGroup.collapse': 'Réduire les appels d\'outils',
 
   'thinking.label': 'Réflexion - {text}',
 
@@ -259,6 +264,10 @@ export const fr: Record<MessageKey, string> = {
   'settings.densityHint': 'Espacement des listes et des cartes dans toute l’application.',
   'settings.densityComfortable': 'Confortable',
   'settings.densityCompact': 'Compacte',
+  'settings.toolCallsTitle': 'Appels d\'outils',
+  'settings.toolCallsHint': 'Affichage des appels d\'outils dans la transcription du chat.',
+  'settings.expandToolCalls': 'Développer les appels d\'outils par défaut',
+  'settings.expandToolCallsHint': 'Si désactivé, seul le premier appel d\'outil d\'un tour est développé et les séries d\'appels sont repliées en une ligne de résumé.',
   'settings.appearanceTabTitle': 'Apparence',
   'settings.appearanceTabHint': 'Chemins des exécutables, densité de l’interface et CSS personnalisé.',
   'settings.jsonParseError': 'JSON invalide : {msg}',

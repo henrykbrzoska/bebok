@@ -217,6 +217,10 @@ export const en = {
   'settings.densityHint': 'Spacing of lists and cards across the app.',
   'settings.densityComfortable': 'Comfortable',
   'settings.densityCompact': 'Compact',
+  'settings.toolCallsTitle': 'Tool calls',
+  'settings.toolCallsHint': 'How tool calls appear in the chat transcript.',
+  'settings.expandToolCalls': 'Expand tool calls by default',
+  'settings.expandToolCallsHint': 'When off, only the first tool call of a turn starts expanded and runs of tool calls are folded into a summary row.',
   'settings.appearanceTabTitle': 'Appearance',
   'settings.appearanceTabHint': 'Runtime paths, interface density and custom CSS.',
   'settings.jsonParseError': 'Invalid JSON: {msg}',
@@ -284,6 +288,11 @@ export const en = {
   'tool.output': 'output',
   'tool.error': 'error',
   'tool.running': 'tool running…',
+  'tool.expandCall': 'Expand tool call',
+  'tool.collapseCall': 'Collapse tool call',
+  'toolGroup.summary': '{n} tool calls',
+  'toolGroup.expand': 'Expand tool calls',
+  'toolGroup.collapse': 'Collapse tool calls',
 
   'thinking.label': 'Thinking - {text}',
 

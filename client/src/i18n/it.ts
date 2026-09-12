@@ -111,6 +111,11 @@ export const it: Record<MessageKey, string> = {
   'tool.output': 'output',
   'tool.error': 'errore',
   'tool.running': 'strumento in esecuzione…',
+  'tool.expandCall': 'Espandi chiamata strumento',
+  'tool.collapseCall': 'Comprimi chiamata strumento',
+  'toolGroup.summary': '{n} chiamate strumento',
+  'toolGroup.expand': 'Espandi chiamate strumento',
+  'toolGroup.collapse': 'Comprimi chiamate strumento',
 
   'thinking.label': 'Ragionamento - {text}',
 
@@ -259,6 +264,10 @@ export const it: Record<MessageKey, string> = {
   'settings.densityHint': 'Spaziatura di elenchi e schede in tutta l’app.',
   'settings.densityComfortable': 'Comoda',
   'settings.densityCompact': 'Compatta',
+  'settings.toolCallsTitle': 'Chiamate strumento',
+  'settings.toolCallsHint': 'Come appaiono le chiamate strumento nella trascrizione della chat.',
+  'settings.expandToolCalls': 'Espandi le chiamate strumento per impostazione predefinita',
+  'settings.expandToolCallsHint': 'Se disattivato, solo la prima chiamata di un turno parte espansa e le serie di chiamate vengono raccolte in una riga di riepilogo.',
   'settings.appearanceTabTitle': 'Aspetto',
   'settings.appearanceTabHint': 'Percorsi dei runtime, densità dell’interfaccia e CSS personalizzato.',
   'settings.jsonParseError': 'JSON non valido: {msg}',

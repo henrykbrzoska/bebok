@@ -20,6 +20,22 @@
 </div>
 
 <div class="card">
+  <h3>{{ t('settings.toolCallsTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.toolCallsHint') }}</p>
+  <label class="toggle-row">
+    <input
+      type="checkbox"
+      [checked]="expandToolCalls()"
+      (change)="setExpandToolCalls($any($event.target).checked)"
+    />
+    <span class="toggle-text">
+      <span>{{ t('settings.expandToolCalls') }}</span>
+      <span class="small faint">{{ t('settings.expandToolCallsHint') }}</span>
+    </span>
+  </label>
+</div>
+
+<div class="card">
   <h3>{{ t('settings.runtimesTitle') }}</h3>
   <p class="card-sub">{{ t('settings.runtimesHint') }}</p>
   <div class="grid-2">

@@ -110,6 +110,11 @@ export const zh: Record<MessageKey, string> = {
   'tool.output': '输出',
   'tool.error': '错误',
   'tool.running': '工具运行中…',
+  'tool.expandCall': '展开工具调用',
+  'tool.collapseCall': '折叠工具调用',
+  'toolGroup.summary': '{n} 次工具调用',
+  'toolGroup.expand': '展开工具调用',
+  'toolGroup.collapse': '折叠工具调用',
 
   'thinking.label': '思考中 - {text}',
 
@@ -258,6 +263,10 @@ export const zh: Record<MessageKey, string> = {
   'settings.densityHint': '全应用列表与卡片的间距。',
   'settings.densityComfortable': '舒适',
   'settings.densityCompact': '紧凑',
+  'settings.toolCallsTitle': '工具调用',
+  'settings.toolCallsHint': '工具调用在聊天记录中的显示方式。',
+  'settings.expandToolCalls': '默认展开工具调用',
+  'settings.expandToolCallsHint': '关闭时，每轮只有第一个工具调用默认展开，连续的调用会折叠为一行摘要。',
   'settings.appearanceTabTitle': '外观',
   'settings.appearanceTabHint': '运行时路径、界面密度与自定义 CSS。',
   'settings.jsonParseError': 'JSON 无效：{msg}',

@@ -110,6 +110,11 @@ export const hi: Record<MessageKey, string> = {
   'tool.output': 'आउटपुट',
   'tool.error': 'त्रुटि',
   'tool.running': 'उपकरण चल रहा है…',
+  'tool.expandCall': 'उपकरण कॉल विस्तृत करें',
+  'tool.collapseCall': 'उपकरण कॉल संक्षिप्त करें',
+  'toolGroup.summary': '{n} उपकरण कॉल',
+  'toolGroup.expand': 'उपकरण कॉल विस्तृत करें',
+  'toolGroup.collapse': 'उपकरण कॉल संक्षिप्त करें',
 
   'thinking.label': 'सोच रहा है - {text}',
 
@@ -258,6 +263,10 @@ export const hi: Record<MessageKey, string> = {
   'settings.densityHint': 'पूरे ऐप में सूचियों और कार्ड का अंतराल।',
   'settings.densityComfortable': 'आरामदायक',
   'settings.densityCompact': 'संहत',
+  'settings.toolCallsTitle': 'उपकरण कॉल',
+  'settings.toolCallsHint': 'चैट प्रतिलेख में उपकरण कॉल कैसे दिखें।',
+  'settings.expandToolCalls': 'उपकरण कॉल डिफ़ॉल्ट रूप से विस्तृत रखें',
+  'settings.expandToolCallsHint': 'बंद होने पर केवल प्रत्येक बारी की पहली उपकरण कॉल विस्तृत रहती है और लगातार कॉल एक सारांश पंक्ति में समेट दी जाती हैं।',
   'settings.appearanceTabTitle': 'रूप-रंग',
   'settings.appearanceTabHint': 'रनटाइम पथ, इंटरफ़ेस घनत्व और कस्टम CSS।',
   'settings.jsonParseError': 'अमान्य JSON: {msg}',
