@@ -474,4 +474,20 @@ export const ja: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'このセッションで使用したモデルの料金は不明です',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': 'エージェント',
+  'agents.none': 'このセッションにはまだサブエージェントがありません',
+  'agents.loading': 'サブエージェントを読み込み中…',
+  'agents.running': '実行中',
+  'agents.done': '完了',
+  'agents.failed': '失敗',
+  'agents.aborted': '中止',
+  'agents.unknown': '不明',
+  'agents.openTranscript': 'トランスクリプトを開く',
+  'agents.transcript': 'サブエージェントのトランスクリプト',
+  'agents.readOnly': '読み取り専用ビュー',
+  'agents.close': '閉じる',
+  'agents.empty': 'まだメッセージはありません',
+  'agents.tokens': 'トークン',
 };

@@ -100,7 +100,7 @@ export class ShellStore {
     this.prefs.toggleRightDrawer();
   }
 
-  toggleRightDrawerPanel(panel: 'session' | 'explorer' | 'terminal'): void {
+  toggleRightDrawerPanel(panel: 'session' | 'explorer' | 'terminal' | 'agents'): void {
     this.prefs.toggleRightDrawerPanel(panel);
   }
 

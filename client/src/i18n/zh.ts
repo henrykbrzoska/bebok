@@ -474,4 +474,20 @@ export const zh: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': '本会话所用模型的定价未知',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': '代理',
+  'agents.none': '此会话中尚无子代理',
+  'agents.loading': '正在加载子代理…',
+  'agents.running': '运行中',
+  'agents.done': '完成',
+  'agents.failed': '失败',
+  'agents.aborted': '已中止',
+  'agents.unknown': '未知',
+  'agents.openTranscript': '打开记录',
+  'agents.transcript': '子代理记录',
+  'agents.readOnly': '只读视图',
+  'agents.close': '关闭',
+  'agents.empty': '暂无消息',
+  'agents.tokens': '个令牌',
 };

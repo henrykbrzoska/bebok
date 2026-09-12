@@ -475,4 +475,20 @@ export const uk: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Ціни для моделей, використаних у цій сесії, невідомі',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': 'Агенти',
+  'agents.none': 'У цій сесії ще немає субагентів',
+  'agents.loading': 'Завантаження субагентів…',
+  'agents.running': 'працює',
+  'agents.done': 'готово',
+  'agents.failed': 'помилка',
+  'agents.aborted': 'перервано',
+  'agents.unknown': 'невідомо',
+  'agents.openTranscript': 'Відкрити транскрипт',
+  'agents.transcript': 'Транскрипт субагента',
+  'agents.readOnly': 'Лише для читання',
+  'agents.close': 'Закрити',
+  'agents.empty': 'Повідомлень ще немає',
+  'agents.tokens': 'токенів',
 };

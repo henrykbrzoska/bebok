@@ -484,6 +484,22 @@ export const en = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'No pricing known for the model(s) used in this session',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': 'Agents',
+  'agents.none': 'No sub-agents in this session yet',
+  'agents.loading': 'Loading sub-agents…',
+  'agents.running': 'running',
+  'agents.done': 'done',
+  'agents.failed': 'failed',
+  'agents.aborted': 'aborted',
+  'agents.unknown': 'unknown',
+  'agents.openTranscript': 'Open transcript',
+  'agents.transcript': 'Sub-agent transcript',
+  'agents.readOnly': 'Read-only view',
+  'agents.close': 'Close',
+  'agents.empty': 'No messages yet',
+  'agents.tokens': 'tokens',
 };
 
 export type MessageKey = keyof typeof en;

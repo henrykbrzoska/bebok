@@ -474,4 +474,20 @@ export const hi: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'इस सत्र में प्रयुक्त मॉडल की कीमत ज्ञात नहीं है',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': 'एजेंट',
+  'agents.none': 'इस सत्र में अभी कोई उप-एजेंट नहीं है',
+  'agents.loading': 'उप-एजेंट लोड हो रहे हैं…',
+  'agents.running': 'चल रहा है',
+  'agents.done': 'पूर्ण',
+  'agents.failed': 'विफल',
+  'agents.aborted': 'रद्द',
+  'agents.unknown': 'अज्ञात',
+  'agents.openTranscript': 'ट्रांसक्रिप्ट खोलें',
+  'agents.transcript': 'उप-एजेंट ट्रांसक्रिप्ट',
+  'agents.readOnly': 'केवल-पढ़ने का दृश्य',
+  'agents.close': 'बंद करें',
+  'agents.empty': 'अभी कोई संदेश नहीं',
+  'agents.tokens': 'टोकन',
 };
