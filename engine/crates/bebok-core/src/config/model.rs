@@ -131,6 +131,9 @@ pub struct ResolvedConfig {
     /// WP-BROWSER2 (F7-6): `browser.display` = `headed` | `viewer` | `drawer`
     /// (+ optional `windowPosition`), parsed by `bebok_tools::browser::BrowserSettings`.
     pub browser: Value,
+    /// WP-AUTOVERIFY (F8-1): `verify.frontend` = `auto` | `ask` | `off`,
+    /// parsed by [`super::verify::FrontendVerify`].
+    pub verify: Value,
     /// Client-only UI overrides (custom CSS, plain text).
     #[serde(default)]
     pub ui: UiConfig,
@@ -163,6 +166,7 @@ impl Default for ResolvedConfig {
             terminal: Value::Object(serde_json::Map::new()),
             runtimes: Value::Object(serde_json::Map::new()),
             browser: Value::Object(serde_json::Map::new()),
+            verify: Value::Object(serde_json::Map::new()),
             ui: UiConfig::default(),
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
@@ -206,6 +210,11 @@ impl ResolvedConfig {
     /// Fleet members (empty when the fleet is disabled/unconfigured).
     pub fn fleet_members(&self) -> &[FleetMember] {
         &self.fleet.members
+    }
+
+    /// The effective `verify.frontend` policy (WP-AUTOVERIFY / F8-1).
+    pub fn frontend_verify(&self) -> super::verify::FrontendVerify {
+        super::verify::FrontendVerify::from_config(&self.verify)
     }
 }
 
@@ -312,6 +321,11 @@ impl ResolvedConfigBuilder {
 
     pub fn tool_safety(mut self, v: Value) -> Self {
         self.inner.tool_safety = v;
+        self
+    }
+
+    pub fn verify(mut self, v: Value) -> Self {
+        self.inner.verify = v;
         self
     }
 

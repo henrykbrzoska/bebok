@@ -241,6 +241,126 @@ pub fn parse_eval(args: &Value) -> Result<String, String> {
     Ok(js.to_string())
 }
 
+// ── WP-AUTOVERIFY (F8-1): browser_console / browser_wait / browser_find ──
+
+/// Default number of console entries returned.
+pub const DEFAULT_CONSOLE_MAX: usize = 100;
+/// Hard cap on console entries returned.
+pub const CONSOLE_MAX_LIMIT: usize = 500;
+/// Default `browser_wait` timeout (ms).
+pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 10_000;
+/// Hard cap on the `browser_wait` timeout (ms).
+pub const WAIT_TIMEOUT_LIMIT_MS: u64 = 60_000;
+/// Default number of elements `browser_find` lists.
+pub const DEFAULT_FIND_MAX: usize = 50;
+/// Hard cap on elements `browser_find` lists.
+pub const FIND_MAX_LIMIT: usize = 200;
+
+/// Validated `browser_console` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleArgs {
+    /// Minimum severity to return (`None` = everything).
+    pub min_level: Option<super::console::ConsoleLevel>,
+    /// Newest-N cap on returned entries.
+    pub max: usize,
+}
+
+/// What `browser_wait` waits for (at least one condition is required; all
+/// given conditions must hold).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitArgs {
+    /// CSS selector that must match a *visible* element.
+    pub selector: Option<String>,
+    /// Text that must appear in the page's visible text (case-insensitive).
+    pub text: Option<String>,
+    /// Wait until no resource has started loading for a short quiet period.
+    pub network_idle: bool,
+    /// Wait for the selector to be *absent/hidden* instead of visible.
+    pub hidden: bool,
+    pub timeout_ms: u64,
+}
+
+/// Validated `browser_find` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindArgs {
+    /// Case-insensitive substring filter on role/name/text/selector.
+    pub query: Option<String>,
+    /// Optional CSS scope: only elements inside the first match are listed.
+    pub within: Option<String>,
+    pub max: usize,
+}
+
+pub fn parse_console(args: &Value) -> Result<ConsoleArgs, String> {
+    let min_level = match str_arg(args, "level") {
+        None => None,
+        Some(raw) => super::console::ConsoleLevel::parse_filter(raw).ok_or_else(|| {
+            format!(
+                "unsupported level '{}' (expected all, debug, log, info, warning or error)",
+                raw.trim()
+            )
+        })?,
+    };
+    let max = args
+        .get("max")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize)
+        .unwrap_or(DEFAULT_CONSOLE_MAX)
+        .clamp(1, CONSOLE_MAX_LIMIT);
+    Ok(ConsoleArgs { min_level, max })
+}
+
+pub fn parse_wait(args: &Value) -> Result<WaitArgs, String> {
+    let selector = match str_arg(args, "selector") {
+        Some(s) if !s.trim().is_empty() => Some(validate_selector(s)?),
+        _ => None,
+    };
+    let text = str_arg(args, "text")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    let network_idle = bool_arg(args, "network_idle", false);
+    let hidden = bool_arg(args, "hidden", false);
+    if selector.is_none() && text.is_none() && !network_idle {
+        return Err(
+            "nothing to wait for: pass a CSS 'selector', a 'text' or 'network_idle': true"
+                .to_string(),
+        );
+    }
+    if hidden && selector.is_none() {
+        return Err("'hidden' requires a 'selector'".to_string());
+    }
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_WAIT_TIMEOUT_MS)
+        .clamp(100, WAIT_TIMEOUT_LIMIT_MS);
+    Ok(WaitArgs {
+        selector,
+        text,
+        network_idle,
+        hidden,
+        timeout_ms,
+    })
+}
+
+pub fn parse_find(args: &Value) -> Result<FindArgs, String> {
+    let query = str_arg(args, "query")
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(str::to_string);
+    let within = match str_arg(args, "within") {
+        Some(s) if !s.trim().is_empty() => Some(validate_selector(s)?),
+        _ => None,
+    };
+    let max = args
+        .get("max")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize)
+        .unwrap_or(DEFAULT_FIND_MAX)
+        .clamp(1, FIND_MAX_LIMIT);
+    Ok(FindArgs { query, within, max })
+}
+
 /// Truncate `text` to `max_chars` characters with a visible marker.
 pub fn truncate_chars(text: &str, max_chars: usize) -> String {
     let total = text.chars().count();
@@ -423,5 +543,89 @@ mod tests {
         assert_eq!(truncate_chars("abc", 5), "abc");
         let t = truncate_chars("abcdef", 3);
         assert!(t.starts_with("abc\n[browser: text truncated at 3 of 6 characters]"));
+    }
+
+    // ── WP-AUTOVERIFY (F8-1): console / wait / find ──────────────────────
+
+    #[test]
+    fn console_defaults_to_everything_capped() {
+        let a = parse_console(&json!({})).unwrap();
+        assert_eq!(a.min_level, None);
+        assert_eq!(a.max, DEFAULT_CONSOLE_MAX);
+        let a = parse_console(&json!({ "level": "error", "max": 5 })).unwrap();
+        assert_eq!(a.min_level, Some(super::super::console::ConsoleLevel::Error));
+        assert_eq!(a.max, 5);
+        let a = parse_console(&json!({ "level": "all", "max": 10_000 })).unwrap();
+        assert_eq!(a.min_level, None);
+        assert_eq!(a.max, CONSOLE_MAX_LIMIT);
+        let a = parse_console(&json!({ "max": 0 })).unwrap();
+        assert_eq!(a.max, 1);
+    }
+
+    #[test]
+    fn console_rejects_unknown_levels() {
+        let err = parse_console(&json!({ "level": "loud" })).unwrap_err();
+        assert!(err.contains("unsupported level 'loud'"), "{err}");
+    }
+
+    #[test]
+    fn wait_requires_a_condition() {
+        let err = parse_wait(&json!({})).unwrap_err();
+        assert!(err.contains("nothing to wait for"), "{err}");
+        let err = parse_wait(&json!({ "selector": "  ", "text": "" })).unwrap_err();
+        assert!(err.contains("nothing to wait for"), "{err}");
+    }
+
+    #[test]
+    fn wait_accepts_each_condition_and_combinations() {
+        let a = parse_wait(&json!({ "selector": ".badge" })).unwrap();
+        assert_eq!(a.selector.as_deref(), Some(".badge"));
+        assert_eq!(a.text, None);
+        assert!(!a.network_idle);
+        assert!(!a.hidden);
+        assert_eq!(a.timeout_ms, DEFAULT_WAIT_TIMEOUT_MS);
+
+        let a = parse_wait(&json!({ "text": " Low stock " })).unwrap();
+        assert_eq!(a.text.as_deref(), Some("Low stock"));
+
+        let a = parse_wait(&json!({ "network_idle": true, "timeout_ms": 2500 })).unwrap();
+        assert!(a.network_idle);
+        assert_eq!(a.timeout_ms, 2500);
+
+        let a = parse_wait(&json!({
+            "selector": "#spinner", "hidden": true, "text": "Done", "network_idle": true
+        }))
+        .unwrap();
+        assert!(a.hidden && a.network_idle);
+        assert_eq!(a.selector.as_deref(), Some("#spinner"));
+        assert_eq!(a.text.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn wait_timeout_is_clamped_and_hidden_needs_selector() {
+        let a = parse_wait(&json!({ "text": "x", "timeout_ms": 10 })).unwrap();
+        assert_eq!(a.timeout_ms, 100);
+        let a = parse_wait(&json!({ "text": "x", "timeout_ms": 999_999 })).unwrap();
+        assert_eq!(a.timeout_ms, WAIT_TIMEOUT_LIMIT_MS);
+        let err = parse_wait(&json!({ "text": "x", "hidden": true })).unwrap_err();
+        assert!(err.contains("'hidden' requires a 'selector'"), "{err}");
+        let err = parse_wait(&json!({ "selector": "a\u{0}b" })).unwrap_err();
+        assert!(err.contains("control characters"), "{err}");
+    }
+
+    #[test]
+    fn find_defaults_and_filters() {
+        let a = parse_find(&json!({})).unwrap();
+        assert_eq!(a.query, None);
+        assert_eq!(a.within, None);
+        assert_eq!(a.max, DEFAULT_FIND_MAX);
+        let a = parse_find(&json!({ "query": " Save ", "within": "form#main", "max": 3 })).unwrap();
+        assert_eq!(a.query.as_deref(), Some("Save"));
+        assert_eq!(a.within.as_deref(), Some("form#main"));
+        assert_eq!(a.max, 3);
+        let a = parse_find(&json!({ "max": 5000 })).unwrap();
+        assert_eq!(a.max, FIND_MAX_LIMIT);
+        let err = parse_find(&json!({ "within": "x\ty" })).unwrap_err();
+        assert!(err.contains("control characters"), "{err}");
     }
 }

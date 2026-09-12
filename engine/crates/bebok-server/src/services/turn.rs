@@ -296,6 +296,12 @@ fn assemble_prompt(
     // Tell the model which host OS / shell dialect the `bash` tool uses so it
     // emits syntax that actually runs (matters most on Windows).
     agent.prompt = format!("{}\n\n{}", agent.prompt, bebok_core::agent::host_os_note());
+
+    // WP-AUTOVERIFY (F8-1): "Verification capabilities" section (browser,
+    // dev servers, `verify.frontend` policy); built in its own module.
+    if let Some(section) = bebok_core::agent::verification_section(cfg, agent) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
 }
 
 // Keep the error import used in both cfg paths (avoids unused warnings where

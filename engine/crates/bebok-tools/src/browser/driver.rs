@@ -40,6 +40,7 @@ use futures::StreamExt;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use super::console::{self, ConsoleBuffer, SharedConsole};
 use super::discovery;
 use super::frames::{self, Frame, FrameSink};
 use super::settings::{BrowserDisplay, BrowserSettings};
@@ -70,6 +71,10 @@ struct SessionBrowser {
     headed: bool,
     /// Frame counter (monotonic per browser).
     seq: u64,
+    /// Console / exception / log capture (WP-AUTOVERIFY / F8-1).
+    console: SharedConsole,
+    /// The capture task feeding `console`; aborted on shutdown.
+    console_task: Option<JoinHandle<()>>,
 }
 
 /// Static facts about a session's live browser (for the HTTP API).
@@ -186,6 +191,9 @@ impl BrowserDriver {
             }
             if let Some(mut sb) = sessions.remove(session_id) {
                 sb.handler.abort();
+                if let Some(task) = sb.console_task.take() {
+                    task.abort();
+                }
                 let _ = sb.browser.kill().await;
                 cleanup_user_data_dir(&sb.user_data_dir);
             }
@@ -217,6 +225,16 @@ impl BrowserDriver {
             url,
             title,
         })
+    }
+
+    /// The console buffer of the session's page (`None` without a browser).
+    /// WP-AUTOVERIFY (F8-1): read by `browser_console`.
+    pub async fn console(&self, session_id: &str) -> Option<SharedConsole> {
+        self.sessions
+            .lock()
+            .await
+            .get(session_id)
+            .map(|sb| sb.console.clone())
     }
 
     /// Whether the session's browser has a visible window.
@@ -757,6 +775,18 @@ async fn launch(
         },
     };
 
+    // Console capture must be listening before the first navigation so
+    // `browser_console` can report everything since that navigation. A
+    // failure here is not fatal: the tool then reports an empty buffer.
+    let console: SharedConsole = Arc::new(std::sync::Mutex::new(ConsoleBuffer::default()));
+    let console_task = match console::attach(&page, console.clone()).await {
+        Ok(task) => Some(task),
+        Err(e) => {
+            tracing_debug(&format!("console capture unavailable: {e}"));
+            None
+        }
+    };
+
     Ok(SessionBrowser {
         browser,
         page,
@@ -766,6 +796,8 @@ async fn launch(
         directory: root.to_string_lossy().into_owned(),
         headed: !headless,
         seq: 0,
+        console,
+        console_task,
     })
 }
 
@@ -778,6 +810,9 @@ async fn shutdown(mut sb: SessionBrowser) {
     }
     let _ = tokio::time::timeout(Duration::from_secs(5), sb.browser.wait()).await;
     sb.handler.abort();
+    if let Some(task) = sb.console_task.take() {
+        task.abort();
+    }
     cleanup_user_data_dir(&sb.user_data_dir);
 }
 

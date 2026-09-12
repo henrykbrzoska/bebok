@@ -855,6 +855,11 @@ fn assemble_prompt(
     // Fleet members are sub-agents too: they need the host-OS/shell note, or on
     // Windows they emit POSIX pipelines `cmd /C` cannot run.
     agent.prompt = format!("{}\n\n{}", agent.prompt, super::prompt_env::host_os_note());
+    // WP-AUTOVERIFY (F8-1): browser + dev-server capabilities and the
+    // `verify.frontend` policy (skipped for presets without browser tools).
+    if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
 }
 
 #[cfg(test)]

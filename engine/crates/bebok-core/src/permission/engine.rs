@@ -153,6 +153,11 @@ pub struct PermissionEngine {
     global: RwLock<Layer>,
     /// YOLO mode: when set, every tool call is auto-allowed without asking.
     yolo: AtomicBool,
+    /// WP-AUTOVERIFY (F8-1): `verify.frontend = auto` switches the *default*
+    /// verdict of the `browser_*` family (all but `browser_eval`) to `Allow`
+    /// so autonomous verification does not stall on prompts. Explicit
+    /// project/global/agent rules are evaluated first and still win.
+    browser_auto: AtomicBool,
 }
 
 impl PermissionEngine {
@@ -178,6 +183,7 @@ impl PermissionEngine {
             project: RwLock::new(Layer::new(project_rules)),
             global: RwLock::new(Layer::new(global_rules)),
             yolo: AtomicBool::new(false),
+            browser_auto: AtomicBool::new(false),
         }
     }
 
@@ -193,6 +199,16 @@ impl PermissionEngine {
 
     pub fn yolo(&self) -> bool {
         self.yolo.load(Ordering::Relaxed)
+    }
+
+    /// Enable/disable the `browser_*` auto-allow default (WP-AUTOVERIFY /
+    /// F8-1, driven by `verify.frontend = auto`).
+    pub fn set_browser_auto(&self, enabled: bool) {
+        self.browser_auto.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn browser_auto(&self) -> bool {
+        self.browser_auto.load(Ordering::Relaxed)
     }
 
     /// Recompile rules from the current config files (`config.changed` hook).
@@ -259,7 +275,16 @@ impl PermissionEngine {
         // even when a call is read-only: reading a URL or a rendered page can
         // expose local services. Projects relax this with explicit rules
         // (e.g. `"browser_*": "allow"`).
-        let verdict = if is_mutating(tool, read_only) {
+        //
+        // WP-AUTOVERIFY (F8-1): with `verify.frontend = auto` the family
+        // defaults to `Allow` instead — except `browser_eval`, which runs
+        // arbitrary JavaScript and keeps asking. Only the *default* arm is
+        // affected: any explicit rule above already returned.
+        let verdict = if self.browser_auto.load(Ordering::Relaxed)
+            && browser_auto_allowed(tool)
+        {
+            Verdict::Allow
+        } else if is_mutating(tool, read_only) {
             Verdict::Ask
         } else {
             Verdict::Allow
@@ -290,6 +315,13 @@ impl PermissionEngine {
 /// `evaluate`'s default arm) because they can reach local network services.
 pub fn is_mutating(tool: &str, read_only: bool) -> bool {
     !read_only || tool == "fetch" || tool.starts_with("browser_")
+}
+
+/// The `browser_*` tools whose default becomes `Allow` under
+/// `verify.frontend = auto`: every member of the family except
+/// `browser_eval` (arbitrary page JavaScript stays `Ask`).
+pub fn browser_auto_allowed(tool: &str) -> bool {
+    tool.starts_with("browser_") && tool != "browser_eval"
 }
 
 fn verdict(action: Action) -> Verdict {
@@ -486,6 +518,87 @@ mod tests {
         let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
         assert_eq!(eval.verdict, Verdict::Allow);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// WP-AUTOVERIFY (F8-1): `set_browser_auto(true)` flips the default of
+    /// every `browser_*` tool except `browser_eval` to `Allow`; other
+    /// defaults are untouched and the switch is reversible.
+    #[test]
+    fn browser_auto_switch_allows_the_family_except_eval() {
+        let dir = tmp_dir("browser-auto");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        assert!(!engine.browser_auto());
+        engine.set_browser_auto(true);
+        assert!(engine.browser_auto());
+        for tool in bebok_tools::browser::TOOL_NAMES {
+            for read_only in [true, false] {
+                let eval = engine.evaluate(
+                    None,
+                    tool,
+                    &serde_json::json!({ "url": "http://localhost:4200/" }),
+                    read_only,
+                );
+                let expected = if *tool == "browser_eval" {
+                    Verdict::Ask
+                } else {
+                    Verdict::Allow
+                };
+                assert_eq!(eval.verdict, expected, "{tool} read_only={read_only}");
+            }
+        }
+        // Unrelated defaults are unchanged: mutating tools still ask, fetch still asks.
+        let eval = engine.evaluate(None, "write_file", &serde_json::json!({ "path": "x" }), false);
+        assert_eq!(eval.verdict, Verdict::Ask);
+        let eval = engine.evaluate(None, "fetch", &serde_json::json!({ "url": "http://x/" }), true);
+        assert_eq!(eval.verdict, Verdict::Ask);
+        // Reversible.
+        engine.set_browser_auto(false);
+        let eval = engine.evaluate(None, "browser_open", &serde_json::json!({ "url": "http://x/" }), false);
+        assert_eq!(eval.verdict, Verdict::Ask);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The user's explicit rules keep winning over the auto default: a
+    /// project `deny`/`ask` on `browser_*` is honoured with the switch on.
+    #[test]
+    fn browser_auto_never_overrides_explicit_rules() {
+        let dir = tmp_dir("browser-auto-rules");
+        let project_cfg = dir.join(".bebok").join("config.json");
+        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project_cfg,
+            r#"{ "permission": { "rules": [
+                { "pattern": "browser_open(*)", "action": "deny" },
+                { "pattern": "browser_screenshot*", "action": "ask" },
+                { "pattern": "browser_eval*", "action": "allow" }
+            ] } }"#,
+        )
+        .unwrap();
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        engine.set_browser_auto(true);
+        let eval = engine.evaluate(None, "browser_open", &serde_json::json!({ "url": "http://x/" }), false);
+        assert_eq!(eval.verdict, Verdict::Deny);
+        assert_eq!(eval.pattern, "browser_open(*)");
+        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Ask);
+        // ...and an explicit allow on eval beats the eval carve-out.
+        let eval = engine.evaluate(None, "browser_eval", &serde_json::json!({ "js": "1" }), false);
+        assert_eq!(eval.verdict, Verdict::Allow);
+        // Tools without a rule get the auto default.
+        let eval = engine.evaluate(None, "browser_click", &serde_json::json!({ "selector": "a" }), false);
+        assert_eq!(eval.verdict, Verdict::Allow);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn browser_auto_allowed_excludes_eval_and_non_browser_tools() {
+        assert!(browser_auto_allowed("browser_open"));
+        assert!(browser_auto_allowed("browser_console"));
+        assert!(browser_auto_allowed("browser_wait"));
+        assert!(browser_auto_allowed("browser_find"));
+        assert!(!browser_auto_allowed("browser_eval"));
+        assert!(!browser_auto_allowed("bash"));
+        assert!(!browser_auto_allowed("fetch"));
     }
 
     #[test]
