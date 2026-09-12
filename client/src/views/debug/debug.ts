@@ -26,6 +26,19 @@ import { I18nService } from '../../i18n/i18n.service';
 
 const MAX_JSON_CHARS = 50000;
 
+export type LogTone = 'danger' | 'success' | 'accent' | 'muted';
+
+/** One rendered log row (F2-21). */
+export interface LogRow {
+  index: number;
+  time: string;
+  source: string;
+  pill: string;
+  tone: LogTone;
+  path: string;
+  meta: string;
+}
+
 @Component({
   selector: 'app-debug',
   imports: [FormsModule],
@@ -60,11 +73,19 @@ export class DebugView implements OnInit, OnDestroy {
     }),
   );
 
-  /** Newest first, filtered by the header's filter input. */
-  readonly visible = computed<DebugEntry[]>(() => {
+  /** Newest first, filtered, shaped into the row model the template renders. */
+  readonly rows = computed<LogRow[]>(() => {
     const needle = this.filter().trim().toLowerCase();
-    const entries = [...this.entries()].reverse();
-    return needle ? entries.filter((e) => this.matches(e, needle)) : entries;
+    const out: LogRow[] = [];
+    const entries = this.entries();
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (needle && !this.matches(entry, needle)) {
+        continue;
+      }
+      out.push(this.toRow(entry, i));
+    }
+    return out;
   });
 
   async ngOnInit(): Promise<void> {
@@ -177,5 +198,36 @@ export class DebugView implements OnInit, OnDestroy {
       entry.source.toLowerCase().includes(needle) ||
       entry.kind.toLowerCase().includes(needle)
     );
+  }
+
+  /**
+   * HTTP entries carry `GET /path` as the title and `200 (3ms)` as the detail
+   * (see the engine's request middleware); LLM entries are free-form, so their
+   * pill falls back to the entry kind.
+   */
+  private toRow(entry: DebugEntry, index: number): LogRow {
+    const status = /^(\d{3})/.exec(entry.detail)?.[1] ?? null;
+    const isError = entry.kind === 'error';
+    let pill: string;
+    let tone: LogTone;
+
+    if (entry.source === 'http') {
+      pill = isError ? this.i18n.t('debug.pillError') : (status ?? entry.kind.toUpperCase());
+      tone = isError ? 'danger' : status?.startsWith('2') ? 'success' : 'muted';
+    } else {
+      pill = isError ? this.i18n.t('debug.pillError') : entry.kind.toUpperCase();
+      tone = isError ? 'danger' : entry.kind === 'response' ? 'success' : 'accent';
+    }
+
+    const timing = /^(\d{3})\s*\((\d+)ms\)$/.exec(entry.detail);
+    return {
+      index,
+      time: this.formatTime(entry.ts),
+      source: entry.source.toUpperCase(),
+      pill,
+      tone,
+      path: entry.title,
+      meta: timing ? `${timing[1]} · ${timing[2]}ms` : entry.detail,
+    };
   }
 }

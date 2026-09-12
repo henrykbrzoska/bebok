@@ -68,18 +68,20 @@
         <p class="notice-text">{{ t('debug.diagnosticOff') }}</p>
         <button class="head-btn" type="button" (click)="refresh()">{{ t('debug.refresh') }}</button>
       </div>
-    } @else if (visible().length === 0) {
+    } @else if (rows().length === 0) {
       <div class="notice">
         <p class="notice-text">
           {{ filter().trim() ? t('debug.noMatches') : t('debug.empty') }}
         </p>
       </div>
     } @else {
-      @for (entry of visible(); track $index) {
+      @for (row of rows(); track row.index) {
         <div class="row">
-          <span class="ts">{{ formatTime(entry.ts) }}</span>
-          <span class="path">{{ entry.title }}</span>
-          <span class="meta">{{ entry.detail }}</span>
+          <span class="ts">{{ row.time }}</span>
+          <span class="source">{{ row.source }}</span>
+          <span class="pill" [class]="'pill tone-' + row.tone">{{ row.pill }}</span>
+          <span class="path">{{ row.path }}</span>
+          <span class="meta">{{ row.meta }}</span>
         </div>
       }
     }

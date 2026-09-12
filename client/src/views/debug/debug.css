@@ -179,6 +179,8 @@
   word-break: break-word;
 }
 
+/* --- Row list (F2-21) --------------------------------------------------- */
+
 .log {
   flex: 1 1 auto;
   min-height: 0;
@@ -193,7 +195,12 @@
 
 .row {
   display: flex;
+  align-items: center;
   gap: var(--space-12);
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
 }
 
 .row .ts,
@@ -202,13 +209,14 @@
   flex: none;
 }
 
-.row .path {
-  flex: 1 1 auto;
-  min-width: 0;
+.row .ts {
+  width: 64px;
 }
 
-.row .meta {
-  color: var(--code-text);
+.row .source {
+  width: 44px;
+  flex: none;
+  color: var(--text-muted);
 }
 
 .pill {
@@ -221,9 +229,33 @@
   color: var(--text-muted);
 }
 
+.pill.tone-danger {
+  color: var(--danger);
+  border-color: #4a2e2e;
+}
+
+.pill.tone-success {
+  color: var(--success);
+  border-color: #2e4a38;
+}
+
 .pill.tone-accent {
   color: var(--accent);
   border-color: #4a3a2a;
+}
+
+.row .path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.row .meta {
+  flex: none;
+  color: var(--code-text);
 }
 
 .notice {
