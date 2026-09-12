@@ -88,6 +88,26 @@ function extractHtmlBlocks(source: string): string[] {
       background: none;
       padding: 0;
     }
+    app-text-part .md h2,
+    app-text-part .md h3,
+    app-text-part .md h4,
+    app-text-part .md h5,
+    app-text-part .md h6 {
+      margin: 8px 0 4px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    app-text-part .md h2 {
+      font-size: 1.15em;
+    }
+    app-text-part .md h3 {
+      font-size: 1.05em;
+    }
+    app-text-part .md h4,
+    app-text-part .md h5,
+    app-text-part .md h6 {
+      font-size: 1em;
+    }
     app-text-part .md ul,
     app-text-part .md ol {
       margin: 3px 0 6px;
