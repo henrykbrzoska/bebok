@@ -462,6 +462,9 @@ export const en = {
   'projectSwitcher.unpin': 'Unpin project',
   'projectSwitcher.remove': 'Remove project',
   'projectSwitcher.removeConfirm': 'Remove {name} from the project registry? Files on disk are not deleted.',
+  'projectSwitcher.group.ungrouped': 'Ungrouped',
+  'projectSwitcher.group.move': 'Move to group…',
+  'projectSwitcher.group.placeholder': 'Group name',
 };
 
 export type MessageKey = keyof typeof en;

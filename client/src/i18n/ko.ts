@@ -452,4 +452,7 @@ export const ko: Record<MessageKey, string> = {
   'projectSwitcher.unpin': '프로젝트 고정 해제',
   'projectSwitcher.remove': '프로젝트 제거',
   'projectSwitcher.removeConfirm': '프로젝트 레지스트리에서 {name}을(를) 제거할까요? 디스크의 파일은 삭제되지 않습니다.',
+  'projectSwitcher.group.ungrouped': '그룹 없음',
+  'projectSwitcher.group.move': '그룹으로 이동…',
+  'projectSwitcher.group.placeholder': '그룹 이름',
 };

@@ -453,4 +453,7 @@ export const uk: Record<MessageKey, string> = {
   'projectSwitcher.unpin': 'Відкріпити проєкт',
   'projectSwitcher.remove': 'Видалити проєкт',
   'projectSwitcher.removeConfirm': 'Видалити {name} з реєстру проєктів? Файли на диску не буде видалено.',
+  'projectSwitcher.group.ungrouped': 'Без групи',
+  'projectSwitcher.group.move': 'Перемістити до групи…',
+  'projectSwitcher.group.placeholder': 'Назва групи',
 };

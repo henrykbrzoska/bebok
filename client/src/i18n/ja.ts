@@ -452,4 +452,7 @@ export const ja: Record<MessageKey, string> = {
   'projectSwitcher.unpin': 'プロジェクトの固定を解除',
   'projectSwitcher.remove': 'プロジェクトを削除',
   'projectSwitcher.removeConfirm': 'プロジェクト登録から {name} を削除しますか？ ディスク上のファイルは削除されません。',
+  'projectSwitcher.group.ungrouped': '未分類',
+  'projectSwitcher.group.move': 'グループへ移動…',
+  'projectSwitcher.group.placeholder': 'グループ名',
 };
