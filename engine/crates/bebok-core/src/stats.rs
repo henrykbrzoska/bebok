@@ -672,6 +672,7 @@ mod tests {
         m
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn call_at(
         agent: &str,
         model: &str,
