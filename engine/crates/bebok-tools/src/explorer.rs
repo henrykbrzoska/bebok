@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::pathguard::resolve_in_root;
+
 use serde::Serialize;
 
 /// One directory entry surfaced to tools / the explorer API.
@@ -33,7 +35,9 @@ pub fn explorer_walker(root: &Path) -> ignore::WalkBuilder {
 /// Immediate children of `rel` (or the root when `rel` is empty/`.`).
 /// Returns entries relative to `root`.
 pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
-    let base = normalize_rel(root, rel);
+    let Ok(base) = normalize_rel(root, rel) else {
+        return Vec::new();
+    };
     let mut entries: Vec<FsEntry> = Vec::new();
 
     let walker = explorer_walker(&base).max_depth(Some(1)).build();
@@ -64,7 +68,10 @@ pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
 
 /// A recursive tree (up to `max_depth` levels beyond the base) rendered as text.
 pub fn tree_text(root: &Path, rel: &str, max_depth: usize) -> String {
-    let base = normalize_rel(root, rel);
+    let base = match normalize_rel(root, rel) {
+        Ok(base) => base,
+        Err(e) => return format!("error: {e}"),
+    };
     let mut out = String::new();
     out.push_str(&base.to_string_lossy());
     out.push('\n');
@@ -89,25 +96,24 @@ pub fn tree_text(root: &Path, rel: &str, max_depth: usize) -> String {
 }
 
 /// Resolve `rel` against `root`, guarding against escaping the root.
-fn normalize_rel(root: &Path, rel: &str) -> PathBuf {
-    let rel = rel.trim().trim_start_matches('/');
+fn normalize_rel(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel = rel.trim();
     if rel.is_empty() || rel == "." {
-        return root.to_path_buf();
+        return Ok(root.to_path_buf());
     }
-    let joined = root.join(rel);
-    // Never escape the project root (path traversal guard).
-    if joined.starts_with(root) {
-        joined
-    } else {
-        root.to_path_buf()
-    }
+    resolve_in_root(root, rel)
+}
+
+/// Validate an explorer path before constructing a successful HTTP response.
+pub fn validate_rel(root: &Path, rel: &str) -> Result<(), String> {
+    normalize_rel(root, rel).map(|_| ())
 }
 
 /// Read a file's contents for the `/fs/file` viewer endpoint, guarding against
 /// escaping the root. Returns `Ok(text)` for readable UTF-8 text, an error
 /// string otherwise.
 pub fn read_file_text(root: &Path, rel: &str) -> Result<String, String> {
-    let path = normalize_rel(root, rel);
+    let path = normalize_rel(root, rel)?;
     if !path.is_file() {
         return Err(format!("not a file: {rel}"));
     }
@@ -117,7 +123,7 @@ pub fn read_file_text(root: &Path, rel: &str) -> Result<String, String> {
 /// Write text content to a file (for the explorer's edit mode), guarding
 /// against escaping the root. Creates parent directories as needed.
 pub fn write_file_text(root: &Path, rel: &str, content: &str) -> Result<(), String> {
-    let path = normalize_rel(root, rel);
+    let path = normalize_rel(root, rel)?;
     if path.is_dir() {
         return Err(format!("not a file: {rel}"));
     }
@@ -125,4 +131,32 @@ pub fn write_file_text(root: &Path, rel: &str, content: &str) -> Result<(), Stri
         std::fs::create_dir_all(parent).map_err(|e| format!("failed to create parent: {e}"))?;
     }
     std::fs::write(&path, content).map_err(|e| format!("failed to write {rel}: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_traversal_for_read_write_and_tree() {
+        let base = std::env::temp_dir().join(format!("bebok-explorer-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let secret = base.join("secret.txt");
+        std::fs::write(&secret, "secret").unwrap();
+        for rel in [
+            "../secret.txt",
+            r"..\secret.txt",
+            "/tmp/secret.txt",
+            r"C:\secret.txt",
+        ] {
+            assert!(validate_rel(&root, rel).is_err(), "{rel}");
+            assert!(read_file_text(&root, rel).is_err(), "{rel}");
+            assert!(write_file_text(&root, rel, "overwritten").is_err(), "{rel}");
+            assert!(list_children(&root, rel).is_empty(), "{rel}");
+            assert!(tree_text(&root, rel, 2).starts_with("error:"), "{rel}");
+        }
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "secret");
+        std::fs::remove_dir_all(base).unwrap();
+    }
 }
