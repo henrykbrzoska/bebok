@@ -9,6 +9,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bebok_llm::{Provider, StreamEvent};
 use bebok_tools::ToolRegistry;
@@ -129,7 +130,33 @@ impl TurnRunner {
                         ),
                     })),
             );
-            let mut stream = match provider.stream(req).await {
+            // Transient provider failures (429, 5xx, dropped connection) used
+            // to kill the whole turn on the first try. Retry the stream setup
+            // with exponential backoff before giving up.
+            let stream_started = stream_with_retry(
+                &provider,
+                &req,
+                RetryPolicy::default(),
+                &abort,
+                |attempt, err, delay| {
+                    bus.publish(
+                        Event::new("debug.log", state.directory(), &state.id().to_string())
+                            .with_properties(serde_json::json!({
+                                "source": "llm",
+                                "kind": "retry",
+                                "title": format!("llm {model}"),
+                                "detail": format!(
+                                    "attempt {attempt} failed ({}): retrying in {} ms - {}",
+                                    err.kind(),
+                                    delay.as_millis(),
+                                    err
+                                ),
+                            })),
+                    );
+                },
+            )
+            .await;
+            let mut stream = match stream_started {
                 Ok(s) => s,
                 Err(err) => {
                     // ── LLM trace: finish the in-flight call with the error ──
@@ -428,6 +455,138 @@ async fn persist_abort_message(
     emit_message(bus, state, "message.updated", idx);
 }
 
+/// How the turn retries a failed `provider.stream()` call.
+///
+/// Only the *setup* of the stream is retried: once bytes are flowing the reply
+/// is partially rendered, so re-issuing the request would duplicate output.
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    /// Total attempts, including the first one (1 = no retries).
+    pub max_attempts: u32,
+    /// Delay after the first failure; doubles per attempt.
+    pub base_delay: Duration,
+    /// Ceiling for the computed (pre-`retry_after`) delay.
+    pub max_delay: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(500),
+            max_delay: Duration::from_secs(30),
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Delay before attempt `attempt + 1` (1-based `attempt` = the one that
+    /// just failed): exponential backoff with equal jitter, capped at
+    /// `max_delay`, and never shorter than a `retry_after` the provider sent.
+    ///
+    /// Equal jitter (half fixed, half random) keeps the backoff monotonic while
+    /// still de-synchronising parallel agents that got rate-limited together.
+    pub fn delay_for(&self, attempt: u32, retry_after: Option<Duration>) -> Duration {
+        let exp = self
+            .base_delay
+            .saturating_mul(1u32 << attempt.saturating_sub(1).min(16))
+            .min(self.max_delay);
+        let half = exp / 2;
+        let jittered = half + Duration::from_nanos(jitter_nanos(half.as_nanos() as u64));
+        match retry_after {
+            // The provider's hint is a floor, not a replacement: a server that
+            // says "1s" while we already backed off 8s gets the 8s.
+            Some(hint) => jittered.max(hint),
+            None => jittered,
+        }
+    }
+}
+
+/// Pseudo-random value in `0..=span` nanoseconds, seeded from the clock.
+///
+/// Deliberately not a `rand` dependency: this only has to de-correlate retries
+/// between processes, not be statistically sound.
+fn jitter_nanos(span: u64) -> u64 {
+    if span == 0 {
+        return 0;
+    }
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
+        .unwrap_or(0);
+    // xorshift so nearby nanosecond values do not produce nearby jitter.
+    let mut x = seed | 1;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x % (span + 1)
+}
+
+/// Run `op`, retrying transient provider failures with backoff.
+///
+/// Retryable is decided by [`bebok_llm::ProviderErrorKind::is_transient`] -
+/// rate limits, 5xx and transport errors - so an auth error or an unknown model
+/// fails immediately instead of burning three attempts on a certain failure.
+/// A cancelled `abort` ends the wait (and the retrying) at once.
+pub async fn with_retry<T, F, Fut, R>(
+    policy: RetryPolicy,
+    abort: &CancellationToken,
+    mut op: F,
+    mut on_retry: R,
+) -> std::result::Result<T, bebok_llm::LlmError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, bebok_llm::LlmError>>,
+    R: FnMut(u32, &bebok_llm::LlmError, Duration),
+{
+    let attempts = policy.max_attempts.max(1);
+    let mut attempt = 1;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if attempt >= attempts || !err.is_transient() || abort.is_cancelled() {
+                    return Err(err);
+                }
+                let delay = policy.delay_for(attempt, err.retry_after());
+                on_retry(attempt, &err, delay);
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = abort.cancelled() => return Err(err),
+                }
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// Open the provider stream for `req`, retrying transient failures.
+pub async fn stream_with_retry<R>(
+    provider: &Arc<dyn Provider>,
+    req: &bebok_llm::ChatRequest,
+    policy: RetryPolicy,
+    abort: &CancellationToken,
+    on_retry: R,
+) -> std::result::Result<
+    futures::stream::BoxStream<'static, bebok_llm::StreamResult<bebok_llm::StreamEvent>>,
+    bebok_llm::LlmError,
+>
+where
+    R: FnMut(u32, &bebok_llm::LlmError, Duration),
+{
+    with_retry(
+        policy,
+        abort,
+        || {
+            let provider = Arc::clone(provider);
+            let req = req.clone();
+            async move { provider.stream(req).await }
+        },
+        on_retry,
+    )
+    .await
+}
+
 /// Compat shim: the old 8-argument entry point delegates to `TurnRunner`.
 pub async fn run_turn(
     state: Arc<SessionState>,
@@ -442,4 +601,298 @@ pub async fn run_turn(
     TurnRunner::new(state, agent, tools, provider, permission, bus, abort, model)
         .run()
         .await
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use async_trait::async_trait;
+    use bebok_llm::{
+        ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, Thinking, Usage,
+    };
+    use futures::stream::{self, BoxStream};
+
+    use super::*;
+
+    /// A provider that fails a scripted number of times before succeeding.
+    struct FlakyProvider {
+        /// Errors to return, in order; once exhausted the stream succeeds.
+        script: Mutex<Vec<LlmError>>,
+        calls: AtomicU32,
+    }
+
+    impl FlakyProvider {
+        fn new(script: Vec<LlmError>) -> Arc<Self> {
+            Arc::new(Self {
+                script: Mutex::new(script.into_iter().rev().collect()),
+                calls: AtomicU32::new(0),
+            })
+        }
+
+        fn calls(&self) -> u32 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl Provider for FlakyProvider {
+        fn name(&self) -> &str {
+            "flaky"
+        }
+
+        async fn stream(
+            &self,
+            _req: ChatRequest,
+        ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.script.lock().unwrap().pop() {
+                return Err(err);
+            }
+            let events = vec![
+                Ok(StreamEvent::Text("ok".to_string())),
+                Ok(StreamEvent::Done(Usage::default())),
+            ];
+            Ok(Box::pin(stream::iter(events)))
+        }
+    }
+
+    fn http(status: u16, body: &str, retry_after: Option<u64>) -> LlmError {
+        LlmError::Http {
+            status,
+            body: body.to_string(),
+            retry_after,
+        }
+    }
+
+    fn rate_limited(retry_after: Option<u64>) -> LlmError {
+        http(
+            429,
+            "{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Rate limit reached\"}}",
+            retry_after,
+        )
+    }
+
+    fn fast_policy(max_attempts: u32) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(4),
+        }
+    }
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            model: "openai/gpt-4.1".to_string(),
+            system: "sys".to_string(),
+            messages: vec![ChatMessage::user("hi")],
+            tools: Vec::new(),
+            max_tokens: 128,
+            thinking: Thinking::Off,
+        }
+    }
+
+    async fn collect(stream: BoxStream<'static, StreamResult<StreamEvent>>) -> Vec<StreamEvent> {
+        stream
+            .filter_map(|ev| async move { ev.ok() })
+            .collect()
+            .await
+    }
+
+    /// The headline case: one 429, then success. The turn must get its stream
+    /// instead of failing, having called the provider exactly twice.
+    #[tokio::test]
+    async fn retries_once_after_a_429_then_succeeds() {
+        let provider = FlakyProvider::new(vec![rate_limited(None)]);
+        let dyn_provider: Arc<dyn Provider> = provider.clone();
+        let abort = CancellationToken::new();
+        let mut retries = Vec::new();
+
+        let stream = stream_with_retry(
+            &dyn_provider,
+            &req(),
+            fast_policy(3),
+            &abort,
+            |attempt, err, delay| retries.push((attempt, err.kind(), delay)),
+        )
+        .await
+        .expect("retry should recover from a single 429");
+
+        assert_eq!(provider.calls(), 2, "one failed call plus one success");
+        assert_eq!(retries.len(), 1, "exactly one retry");
+        assert_eq!(retries[0].0, 1);
+        assert_eq!(retries[0].1, bebok_llm::ProviderErrorKind::RateLimited);
+
+        let events = collect(stream).await;
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1], StreamEvent::Done(_)));
+    }
+
+    /// A transient 5xx is retried the same way as a 429.
+    #[tokio::test]
+    async fn retries_server_errors() {
+        let provider = FlakyProvider::new(vec![
+            http(503, "upstream unavailable", None),
+            http(500, "{\"error\":{\"message\":\"internal\"}}", None),
+        ]);
+        let dyn_provider: Arc<dyn Provider> = provider.clone();
+        let abort = CancellationToken::new();
+
+        let opened =
+            stream_with_retry(&dyn_provider, &req(), fast_policy(3), &abort, |_, _, _| {}).await;
+        assert!(
+            opened.is_ok(),
+            "two server errors are within the attempt budget"
+        );
+        assert_eq!(provider.calls(), 3);
+    }
+
+    /// Permanent failures must not burn the attempt budget.
+    #[tokio::test]
+    async fn does_not_retry_auth_or_model_errors() {
+        for err in [
+            http(401, "{\"error\":{\"message\":\"invalid api key\"}}", None),
+            http(404, "{\"error\":{\"code\":\"model_not_found\"}}", None),
+            http(
+                400,
+                "{\"error\":{\"message\":\"max_tokens too large\"}}",
+                None,
+            ),
+        ] {
+            let provider = FlakyProvider::new(vec![err]);
+            let dyn_provider: Arc<dyn Provider> = provider.clone();
+            let abort = CancellationToken::new();
+            let mut retries = 0;
+            let out =
+                stream_with_retry(&dyn_provider, &req(), fast_policy(3), &abort, |_, _, _| {
+                    retries += 1
+                })
+                .await;
+            assert!(out.is_err());
+            assert_eq!(provider.calls(), 1, "permanent error must fail fast");
+            assert_eq!(retries, 0);
+        }
+    }
+
+    /// The budget is finite: a provider that is down stays down.
+    #[tokio::test]
+    async fn gives_up_after_max_attempts() {
+        let provider = FlakyProvider::new(vec![
+            rate_limited(None),
+            rate_limited(None),
+            rate_limited(None),
+            rate_limited(None),
+        ]);
+        let dyn_provider: Arc<dyn Provider> = provider.clone();
+        let abort = CancellationToken::new();
+
+        let out =
+            stream_with_retry(&dyn_provider, &req(), fast_policy(3), &abort, |_, _, _| {}).await;
+        let err = match out {
+            Ok(_) => panic!("still failing after the budget"),
+            Err(e) => e,
+        };
+        assert_eq!(err.kind(), bebok_llm::ProviderErrorKind::RateLimited);
+        assert_eq!(provider.calls(), 3, "max_attempts calls, no more");
+    }
+
+    /// An aborted turn must not sit in a backoff sleep.
+    #[tokio::test]
+    async fn abort_stops_retrying() {
+        let provider = FlakyProvider::new(vec![rate_limited(Some(30))]);
+        let dyn_provider: Arc<dyn Provider> = provider.clone();
+        let abort = CancellationToken::new();
+        abort.cancel();
+
+        let out = stream_with_retry(
+            &dyn_provider,
+            &req(),
+            RetryPolicy::default(),
+            &abort,
+            |_, _, _| {},
+        )
+        .await;
+        assert!(out.is_err());
+        assert_eq!(provider.calls(), 1);
+    }
+
+    /// `max_attempts: 1` disables retrying entirely.
+    #[tokio::test]
+    async fn single_attempt_policy_never_retries() {
+        let provider = FlakyProvider::new(vec![rate_limited(None)]);
+        let dyn_provider: Arc<dyn Provider> = provider.clone();
+        let abort = CancellationToken::new();
+        let out =
+            stream_with_retry(&dyn_provider, &req(), fast_policy(1), &abort, |_, _, _| {}).await;
+        assert!(out.is_err());
+        assert_eq!(provider.calls(), 1);
+    }
+
+    /// Backoff doubles per attempt, stays within [half, full] of the window
+    /// thanks to equal jitter, and is capped.
+    #[test]
+    fn backoff_is_exponential_jittered_and_capped() {
+        let policy = RetryPolicy {
+            max_attempts: 6,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(1000),
+        };
+        for (attempt, window_ms) in [(1u32, 100u64), (2, 200), (3, 400), (4, 800)] {
+            for _ in 0..50 {
+                let d = policy.delay_for(attempt, None).as_millis() as u64;
+                assert!(
+                    (window_ms / 2..=window_ms).contains(&d),
+                    "attempt {attempt}: {d}ms outside [{}, {window_ms}]",
+                    window_ms / 2
+                );
+            }
+        }
+        // Capped: attempt 5 would be 1600ms, the cap is 1000ms.
+        for _ in 0..50 {
+            let d = policy.delay_for(5, None).as_millis() as u64;
+            assert!((500..=1000).contains(&d), "cap not applied: {d}ms");
+        }
+        // And it does not overflow for an absurd attempt number.
+        assert!(policy.delay_for(u32::MAX, None) <= policy.max_delay);
+    }
+
+    /// `retry_after` is a floor: honoured when longer than the computed
+    /// backoff, ignored when the backoff already exceeds it.
+    #[test]
+    fn retry_after_is_a_floor_for_the_backoff() {
+        let policy = RetryPolicy {
+            max_attempts: 5,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(30),
+        };
+        let d = policy.delay_for(1, Some(Duration::from_secs(5)));
+        assert_eq!(d, Duration::from_secs(5), "provider hint wins when longer");
+
+        let d = policy.delay_for(4, Some(Duration::from_millis(1)));
+        assert!(
+            d >= Duration::from_millis(400),
+            "computed backoff wins when longer: {d:?}"
+        );
+    }
+
+    /// The hint travels from the HTTP header through the error into the policy.
+    #[test]
+    fn retry_after_hint_survives_error_classification() {
+        let err = rate_limited(Some(12));
+        assert_eq!(err.retry_after(), Some(Duration::from_secs(12)));
+        assert!(err.is_transient());
+        let policy = RetryPolicy::default();
+        assert_eq!(
+            policy.delay_for(1, err.retry_after()),
+            Duration::from_secs(12)
+        );
+    }
+
+    /// Transport-level failures (dropped connection) are transient too.
+    #[test]
+    fn stream_errors_are_classified_transient() {
+        assert!(LlmError::Stream("connection reset by peer".into()).is_transient());
+        assert!(!LlmError::Parse("bad SSE data".into()).is_transient());
+    }
 }
