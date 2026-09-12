@@ -8,6 +8,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
+import { BrowserViewerService } from '../../../core/browser-viewer.service';
 import { EngineClient } from '../../../core/engine-client.service';
 import { Message, SessionMeta } from '../../../core/engine.dtos';
 import { EventsStore } from '../../../core/events.store';
@@ -153,10 +154,12 @@ describe('BrowserPanel helpers (F6-19)', () => {
 describe('BrowserPanel (F6-19)', () => {
   let fixture: ComponentFixture<BrowserPanel>;
   let session: ChatSessionStore;
+  let viewer: { open: jasmine.Spy };
 
   beforeEach(() => {
     localStorage.clear();
     const events = { onEvent: jasmine.createSpy('onEvent').and.returnValue(() => undefined) };
+    viewer = { open: jasmine.createSpy('open').and.returnValue(Promise.resolve(true)) };
     TestBed.configureTestingModule({
       imports: [BrowserPanel],
       providers: [
@@ -164,6 +167,7 @@ describe('BrowserPanel (F6-19)', () => {
         provideRouter([]),
         { provide: EngineClient, useValue: {} },
         { provide: EventsStore, useValue: events },
+        { provide: BrowserViewerService, useValue: viewer },
       ],
     });
     session = TestBed.inject(ChatSessionStore);
@@ -233,5 +237,44 @@ describe('BrowserPanel (F6-19)', () => {
     await settle();
     expect(el().textContent).toContain('file:///C:/x.html');
     expect(el().querySelector('[data-testid="browser-open-link"]')).toBeNull();
+  });
+
+  // --- WP-BROWSER2 (F7-6): "Open in window" ---------------------------------
+
+  it('offers "Open in window" as soon as a session is open, even without browser activity', async () => {
+    session.meta.set(META);
+    session.messages.set([user('hello')]);
+    await settle();
+    const button = el().querySelector<HTMLButtonElement>('[data-testid="browser-open-window"]');
+    expect(button).not.toBeNull();
+    expect(button!.textContent).toContain('Open in window');
+    button!.click();
+    await settle();
+    expect(viewer.open).toHaveBeenCalledWith('s1');
+  });
+
+  it('opens the viewer for the current session from the populated panel too', async () => {
+    session.meta.set(META);
+    session.messages.set([user('open it'), screenshotMessage('https://example.com/')]);
+    await settle();
+    el().querySelector<HTMLButtonElement>('[data-testid="browser-open-window"]')!.click();
+    await settle();
+    expect(viewer.open).toHaveBeenCalledWith('s1');
+    expect(el().textContent).not.toContain('blocked');
+  });
+
+  it('tells the user when the viewer window was blocked', async () => {
+    viewer.open.and.returnValue(Promise.resolve(false));
+    session.meta.set(META);
+    session.messages.set([user('open it'), openMessage('https://example.com/')]);
+    await settle();
+    el().querySelector<HTMLButtonElement>('[data-testid="browser-open-window"]')!.click();
+    await settle();
+    expect(el().textContent).toContain('blocked');
+  });
+
+  it('does nothing without a session', async () => {
+    await fixture.componentInstance.openWindow();
+    expect(viewer.open).not.toHaveBeenCalled();
   });
 });

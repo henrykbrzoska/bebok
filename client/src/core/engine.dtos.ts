@@ -388,6 +388,69 @@ export interface ResolvedConfig {
   runtimes: unknown;
   /** Client-only UI overrides: custom CSS (plain text, never executed by the engine). */
   ui?: UiConfig;
+  /** WP-BROWSER2 (F7-6): how the agent's browser is shown. */
+  browser?: BrowserConfig;
+}
+
+/** `browser` config section (WP-BROWSER2 / F7-6). */
+export type BrowserDisplay = 'headed' | 'viewer' | 'drawer';
+
+export const BROWSER_DISPLAYS: readonly BrowserDisplay[] = ['headed', 'viewer', 'drawer'];
+
+export function isBrowserDisplay(value: unknown): value is BrowserDisplay {
+  return typeof value === 'string' && (BROWSER_DISPLAYS as readonly string[]).includes(value);
+}
+
+export interface BrowserConfig {
+  display?: BrowserDisplay;
+  /** Top-left corner for the headed window (screen px), `[x, y]`. */
+  windowPosition?: [number, number];
+}
+
+/** `GET /session/{id}/browser` (WP-BROWSER2 / F7-6). */
+export interface BrowserState {
+  sessionID: string;
+  directory: string;
+  display: BrowserDisplay;
+  /** A browser process is live for the session. */
+  open: boolean;
+  /** Visible OS window (headed mode); `null` when no browser is open. */
+  headed: boolean | null;
+  url: string;
+  title: string;
+  running: boolean;
+  streaming: boolean;
+}
+
+/** One frame: `GET /session/{id}/browser/frame` and `browser.frame` SSE properties. */
+export interface BrowserFrame {
+  sessionID: string;
+  directory: string;
+  url: string;
+  title: string;
+  media_type: string;
+  /** Raw base64 (no `data:` prefix). */
+  data: string;
+  width: number;
+  height: number;
+  seq: number;
+  headed: boolean;
+}
+
+/** `POST /session/{id}/browser/{action}` actions. */
+export type BrowserAction =
+  'navigate' | 'back' | 'forward' | 'reload' | 'click' | 'type' | 'screenshot' | 'close';
+
+export interface BrowserActionResult {
+  sessionID: string;
+  action?: string;
+  ok?: boolean;
+  text?: string;
+  url?: string;
+  title?: string;
+  structured?: unknown;
+  image?: { media_type: string; data: string };
+  closed?: boolean;
 }
 
 /** Client-only UI overrides (`ui` section of the config). */

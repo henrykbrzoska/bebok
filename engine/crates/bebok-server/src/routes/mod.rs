@@ -10,6 +10,7 @@ use axum::routing::{get, patch, post};
 use crate::state::AppState;
 
 pub mod agents;
+pub mod browser;
 pub mod changes;
 pub mod common;
 pub mod config;
@@ -58,6 +59,13 @@ pub fn build_api_router() -> Router<AppState> {
         .route(
             "/session/{id}/permission/{requestID}",
             post(session::permission_decision),
+        )
+        // WP-BROWSER2 (F7-6): browser viewer window API.
+        .route("/session/{id}/browser", get(browser::browser_state))
+        .route("/session/{id}/browser/frame", get(browser::browser_frame))
+        .route(
+            "/session/{id}/browser/{action}",
+            post(browser::browser_action),
         )
         .route("/agent", get(meta::list_agents))
         .route("/mcp", get(mcp::list_mcp))

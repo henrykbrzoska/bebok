@@ -215,7 +215,7 @@ pub async fn require_token(req: Request, next: Next) -> Response {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::routes::build_api_router;
     use crate::state::AppState;

@@ -128,6 +128,9 @@ pub struct ResolvedConfig {
     pub terminal: Value,
     /// Executable paths for language runtimes (python/python3/node/php/docker).
     pub runtimes: Value,
+    /// WP-BROWSER2 (F7-6): `browser.display` = `headed` | `viewer` | `drawer`
+    /// (+ optional `windowPosition`), parsed by `bebok_tools::browser::BrowserSettings`.
+    pub browser: Value,
     /// Client-only UI overrides (custom CSS, plain text).
     #[serde(default)]
     pub ui: UiConfig,
@@ -154,6 +157,7 @@ impl Default for ResolvedConfig {
             skills: Value::Object(serde_json::Map::new()),
             terminal: Value::Object(serde_json::Map::new()),
             runtimes: Value::Object(serde_json::Map::new()),
+            browser: Value::Object(serde_json::Map::new()),
             ui: UiConfig::default(),
             fleet: FleetConfig::default(),
         }

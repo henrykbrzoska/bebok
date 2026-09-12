@@ -92,6 +92,7 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
         ("skills", &mut cfg.skills),
         ("terminal", &mut cfg.terminal),
         ("runtimes", &mut cfg.runtimes),
+        ("browser", &mut cfg.browser),
     ] {
         if let Some(section) = v.get(key) {
             *field = section.clone();

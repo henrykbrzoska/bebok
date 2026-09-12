@@ -17,15 +17,30 @@
 //! Lifecycle: the browser is launched on the first call, reused across turns
 //! of the same session, and closed on turn abort, session deletion, after
 //! [`driver::IDLE_TIMEOUT`] of inactivity, or when the engine exits.
+//!
+//! Display (WP-BROWSER2 / F7-6): the `browser.display` config section picks
+//! **headed** (visible window, default on desktop), **viewer** (headless +
+//! live `browser.frame` stream for the Bebok viewer window) or **drawer**
+//! (headless, thumbnail only). See [`settings`] and [`frames`]. `bebok-core`
+//! feeds the section in through [`configure`] and installs the frame sink
+//! through [`set_frame_sink`]; the HTTP layer drives user actions through
+//! the very same tool objects (`tools_with`) plus [`BrowserDriver::navigate_history`].
 
 pub mod args;
 pub mod discovery;
 pub mod driver;
+pub mod frames;
+pub mod settings;
 pub mod tools;
 
 use std::sync::Arc;
 
-pub use driver::{BrowserDriver, close_all, close_session, resolve_executable};
+pub use driver::{
+    ActivityGuard, BrowserDriver, BrowserInfo, HistoryAction, close_all, close_session, configure,
+    resolve_executable, set_frame_sink,
+};
+pub use frames::{Frame, FrameSink};
+pub use settings::{BrowserDisplay, BrowserSettings};
 
 use crate::tool::Tool;
 
