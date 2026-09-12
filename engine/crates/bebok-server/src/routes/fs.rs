@@ -45,6 +45,22 @@ pub async fn fs_file(
         .await
         .map_err(|e| err_response(&e))?;
     let rel = q.path.as_deref().unwrap_or(".");
+    bebok_core::explorer::validate_rel(&instance.root, rel)
+        .map_err(|e| ApiError::bad_request(e).into_response())?;
+    // GET /config is the only HTTP surface for config contents; it redacts
+    // credentials. The generic file viewer must not expose the raw file.
+    let target = instance.root.join(rel.replace('\\', "/"));
+    let config_path = bebok_core::config::project_config_path(&instance.root);
+    if let (Ok(target), Ok(config_path)) = (
+        std::fs::canonicalize(target),
+        std::fs::canonicalize(config_path),
+    ) {
+        if target == config_path {
+            return Err(
+                ApiError::forbidden("use /config to inspect project configuration").into_response(),
+            );
+        }
+    }
     match bebok_core::explorer::read_file_text(&instance.root, rel) {
         Ok(text) => Ok(Json(serde_json::json!({ "path": rel, "content": text }))),
         Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
