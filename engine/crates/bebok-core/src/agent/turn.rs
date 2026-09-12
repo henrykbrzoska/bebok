@@ -400,7 +400,7 @@ impl TurnRunner {
                         agent_name: &agent.name,
                         assistant_idx,
                     };
-                    match resolve_permission(&gate, &tool_name, &input).await {
+                    match resolve_permission(&gate, &call_id, &tool_name, &input).await {
                         ToolOutcome::Denied(message) => {
                             fail_tool(&state, &bus, assistant_idx, &call_id, message).await;
                             continue;

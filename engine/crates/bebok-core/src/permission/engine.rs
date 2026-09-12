@@ -259,10 +259,10 @@ impl PermissionEngine {
         // even when a call is read-only: reading a URL or a rendered page can
         // expose local services. Projects relax this with explicit rules
         // (e.g. `"browser_*": "allow"`).
-        let verdict = if read_only && tool != "fetch" && !tool.starts_with("browser_") {
-            Verdict::Allow
-        } else {
+        let verdict = if is_mutating(tool, read_only) {
             Verdict::Ask
+        } else {
+            Verdict::Allow
         };
         Evaluation {
             verdict,
@@ -281,6 +281,15 @@ impl PermissionEngine {
         self.project.write().unwrap().upsert(rule);
         Ok(())
     }
+}
+
+/// Whether a call should be flagged mutating/dangerous for display (F7-1)
+/// and, by the same rule, is *not* eligible for the engine's auto-`Allow`
+/// default: true for anything that isn't safely read-only, plus `fetch` and
+/// the `browser_*` family, which stay `Ask` even when read-only (see
+/// `evaluate`'s default arm) because they can reach local network services.
+pub fn is_mutating(tool: &str, read_only: bool) -> bool {
+    !read_only || tool == "fetch" || tool.starts_with("browser_")
 }
 
 fn verdict(action: Action) -> Verdict {
@@ -577,6 +586,19 @@ mod tests {
         );
         assert_eq!(eval.verdict, Verdict::Deny);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F7-1: `is_mutating` backs both the engine's own auto-`Allow` default
+    /// and the client-facing `mutating` flag - they must never disagree.
+    #[test]
+    fn is_mutating_matches_the_auto_allow_default() {
+        assert!(!is_mutating("read_file", true), "plain read-only: safe");
+        assert!(is_mutating("write_file", false), "mutating tool");
+        assert!(is_mutating("bash", false), "mutating tool");
+        // `fetch` and `browser_*` stay flagged even when classified read-only.
+        assert!(is_mutating("fetch", true));
+        assert!(is_mutating("browser_screenshot", true));
+        assert!(is_mutating("browser_get_text", true));
     }
 
     #[test]

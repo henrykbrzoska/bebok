@@ -117,6 +117,14 @@ export const de: Record<MessageKey, string> = {
   'toolGroup.expand': 'Werkzeugaufrufe ausklappen',
   'toolGroup.collapse': 'Werkzeugaufrufe einklappen',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'automatisch erlaubt · nur lesend',
+  'tool.safetyAsk': 'nachgefragt · genehmigt',
+  'tool.safetyMutating': 'verändernd oder riskant',
+  'toolGroup.safetyTitle': 'Sicherheit',
+
+
   'thinking.label': 'Denken - {text}',
 
   'dialog.pickDirectory': 'Projektverzeichnis wählen',

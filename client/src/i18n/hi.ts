@@ -116,6 +116,14 @@ export const hi: Record<MessageKey, string> = {
   'toolGroup.expand': 'उपकरण कॉल विस्तृत करें',
   'toolGroup.collapse': 'उपकरण कॉल संक्षिप्त करें',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'स्वतः अनुमत · केवल पठन',
+  'tool.safetyAsk': 'पूछा गया · स्वीकृत',
+  'tool.safetyMutating': 'परिवर्तनकारी या उच्च-जोखिम',
+  'toolGroup.safetyTitle': 'सुरक्षा',
+
+
   'thinking.label': 'सोच रहा है - {text}',
 
   'dialog.pickDirectory': 'प्रोजेक्ट निर्देशिका चुनें',

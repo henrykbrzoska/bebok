@@ -297,6 +297,13 @@ export const en = {
   'toolGroup.expand': 'Expand tool calls',
   'toolGroup.collapse': 'Collapse tool calls',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'auto-allowed · read-only',
+  'tool.safetyAsk': 'asked · approved',
+  'tool.safetyMutating': 'mutating or high-risk',
+  'toolGroup.safetyTitle': 'Safety',
+
   'thinking.label': 'Thinking - {text}',
 
   'dialog.pickDirectory': 'Choose a project directory',

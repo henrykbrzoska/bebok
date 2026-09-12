@@ -116,6 +116,14 @@ export const ko: Record<MessageKey, string> = {
   'toolGroup.expand': '도구 호출 펼치기',
   'toolGroup.collapse': '도구 호출 접기',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': '자동 허용 · 읽기 전용',
+  'tool.safetyAsk': '확인 후 승인됨',
+  'tool.safetyMutating': '변경 작업 또는 고위험',
+  'toolGroup.safetyTitle': '안전 등급',
+
+
   'thinking.label': '생각 중 - {text}',
 
   'dialog.pickDirectory': '프로젝트 디렉터리 선택',

@@ -117,6 +117,14 @@ export const pl: Record<MessageKey, string> = {
   'toolGroup.expand': 'Rozwiń wywołania narzędzi',
   'toolGroup.collapse': 'Zwiń wywołania narzędzi',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'dozwolone automatycznie · tylko odczyt',
+  'tool.safetyAsk': 'zapytano · zatwierdzone',
+  'tool.safetyMutating': 'zmieniające dane lub ryzykowne',
+  'toolGroup.safetyTitle': 'Bezpieczeństwo',
+
+
   'thinking.label': 'Myślenie - {text}',
 
   'dialog.pickDirectory': 'Wybierz katalog projektu',

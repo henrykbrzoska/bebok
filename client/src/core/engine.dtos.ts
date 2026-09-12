@@ -51,11 +51,23 @@ export interface ToolStateError {
 
 export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
 
+/**
+ * Safety tier the engine's permission gate applied to a call (F7-1).
+ * `undefined` for a call whose permission has not been resolved yet, or for
+ * a session persisted before this field existed.
+ */
+export type PermissionLevel = 'allow' | 'ask' | 'deny';
+
 export interface ToolPart {
   type: 'tool';
   id: string;
   name: string;
   state: ToolState;
+  /** Verdict the permission gate applied to this call (F7-1). */
+  permission?: PermissionLevel;
+  /** Whether the call is mutating/dangerous, independent of the verdict
+   *  actually applied (F7-1). */
+  mutating?: boolean;
 }
 
 export interface UsagePart {
@@ -271,6 +283,31 @@ export const TOOL_STATE_KINDS: readonly ToolStateKind[] = [
 
 export function toolStateKind(state: ToolState): ToolStateKind {
   return state.state;
+}
+
+/**
+ * Safety-dot colour for a tool call (F7-1): `green` = auto-allowed and
+ * read-only, `yellow` = required "ask" and was approved, `orange` =
+ * mutating/dangerous (or the call matched a deny). `mutating` wins over the
+ * verdict, so a project rule that auto-allows a mutating tool still reads as
+ * orange. `null` when the tier hasn't been resolved yet (the call is still
+ * `pending` and the gate hasn't run) or the part was persisted before this
+ * field existed.
+ */
+export type SafetyLevel = 'green' | 'yellow' | 'orange';
+
+export function safetyLevel(part: ToolPart): SafetyLevel | null {
+  const { permission, mutating } = part;
+  if (permission === undefined || mutating === undefined) {
+    return null;
+  }
+  if (permission === 'deny' || mutating) {
+    return 'orange';
+  }
+  if (permission === 'ask') {
+    return 'yellow';
+  }
+  return 'green';
 }
 
 // ---------------------------------------------------------------------------

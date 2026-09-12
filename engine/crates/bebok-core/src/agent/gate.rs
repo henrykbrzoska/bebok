@@ -7,14 +7,18 @@
 //! `permission.resolved` / `permission.resolved`-hook events exactly as before.
 
 use crate::event::{Event, EventBus};
-use crate::permission::{CachedDecision, DecisionKey, Evaluation, PermissionEngine, Verdict};
+use crate::permission::{
+    CachedDecision, DecisionKey, Evaluation, PermissionEngine, Verdict, is_mutating,
+};
 use crate::plugin::{Hook, PermissionHook, PluginHost};
+use crate::session::PermissionLevel;
 use crate::store::SessionState;
 use bebok_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use super::exec::ToolOutcome;
+use super::observe::emit_part;
 use crate::permission::CompiledLayer;
 
 /// Everything the permission gate needs for one tool call.
@@ -31,8 +35,15 @@ pub struct GateCtx<'a> {
 
 /// Evaluate one tool call against the permission engine, falling back to the
 /// session decision cache and - for `Ask` - to the user decision flow.
+///
+/// F7-1: stamps the resolved verdict (`allow`/`ask`/`deny`) and the
+/// mutating/dangerous flag onto the tool part *before* returning, so the
+/// safety tier is visible over SSE even while the call is still
+/// `pending`/`running` - independent of whether it goes on to complete,
+/// fail, or (for `ask`) get denied by the user.
 pub async fn resolve_permission(
     ctx: &GateCtx<'_>,
+    call_id: &str,
     tool_name: &str,
     input: &serde_json::Value,
 ) -> ToolOutcome {
@@ -46,6 +57,21 @@ pub async fn resolve_permission(
     let evaluation = ctx
         .permission
         .evaluate(ctx.agent_layer, tool_name, input, read_only);
+    let mutating = is_mutating(tool_name, read_only);
+    let permission = match evaluation.verdict {
+        Verdict::Allow => PermissionLevel::Allow,
+        Verdict::Ask => PermissionLevel::Ask,
+        Verdict::Deny => PermissionLevel::Deny,
+    };
+    let stamped = ctx
+        .state
+        .update_tool_state(ctx.assistant_idx, call_id, |m, _name| {
+            m.set_tool_permission(call_id, permission, mutating)
+        })
+        .await;
+    if stamped {
+        emit_part(ctx.bus, ctx.state, "message.part.updated", ctx.assistant_idx).await;
+    }
     match evaluation.verdict {
         Verdict::Allow => ToolOutcome::Run,
         Verdict::Deny => ToolOutcome::Denied("denied by policy"),

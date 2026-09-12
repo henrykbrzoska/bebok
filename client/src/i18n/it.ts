@@ -117,6 +117,14 @@ export const it: Record<MessageKey, string> = {
   'toolGroup.expand': 'Espandi chiamate strumento',
   'toolGroup.collapse': 'Comprimi chiamate strumento',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'consentito automaticamente · sola lettura',
+  'tool.safetyAsk': 'richiesto · approvato',
+  'tool.safetyMutating': 'modifica o ad alto rischio',
+  'toolGroup.safetyTitle': 'Sicurezza',
+
+
   'thinking.label': 'Ragionamento - {text}',
 
   'dialog.pickDirectory': 'Scegli una directory di progetto',

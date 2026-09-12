@@ -88,7 +88,10 @@ impl<'a> RequestBuilder<'a> {
                                 data: data.clone(),
                             });
                         }
-                        if let crate::session::Part::Tool { id, name, state } = part {
+                        if let crate::session::Part::Tool {
+                            id, name, state, ..
+                        } = part
+                        {
                             tool_calls.push(bebok_llm::ToolCall {
                                 id: id.clone(),
                                 name: name.clone(),
