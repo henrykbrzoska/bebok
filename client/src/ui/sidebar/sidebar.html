@@ -108,6 +108,35 @@
         </div>
       }
     </div>
+
+    <nav class="nav-rail">
+      @for (item of navItems; track item.screen) {
+        <button
+          type="button"
+          class="nav-row"
+          [class.active]="isActive(item.screen)"
+          (click)="go(item.path)"
+          [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          <span class="nav-label">{{ t(item.labelKey) }}</span>
+        </button>
+      }
+    </nav>
+
+    <div class="footer">
+      <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      <select
+        class="lang-select"
+        [ngModel]="currentLang()"
+        (ngModelChange)="setLanguage($event)"
+        [attr.aria-label]="t('sidebar.language')"
+      >
+        @for (lang of languages; track lang.code) {
+          <option [value]="lang.code">{{ lang.label }}</option>
+        }
+      </select>
+    </div>
   }
 
   @if (!expanded()) {

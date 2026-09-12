@@ -302,4 +302,5 @@ export const ja: Record<MessageKey, string> = {
   'start.connectError': 'エンジンに接続できません: {url}',
   'start.connectingTo': '{url} に接続中…',
   'start.retry': '再試行',
+  'sidebar.language': '言語',
 };

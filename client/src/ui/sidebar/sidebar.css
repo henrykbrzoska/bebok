@@ -333,3 +333,94 @@
   font-size: var(--fs-12);
   color: var(--text-faint);
 }
+
+/* --- Bottom nav rail + footer ------------------------------------------ */
+
+.nav-rail {
+  border-top: 1px solid var(--border);
+  padding: var(--space-6);
+  flex: none;
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  width: 100%;
+  padding: var(--space-8);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  text-align: left;
+}
+
+.nav-row:hover {
+  background: var(--surface-2);
+}
+
+.nav-row.active {
+  background: var(--surface-3);
+}
+
+.nav-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.nav-row.active .nav-dot {
+  background: var(--accent);
+}
+
+.nav-label {
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.nav-row.active .nav-label {
+  color: var(--text);
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding: var(--space-9) var(--space-12);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-11-5);
+  flex: none;
+}
+
+.lang-select {
+  margin-left: auto;
+  font: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-control-sm);
+  padding: 4px var(--space-6);
+  font-size: var(--fs-11);
+  outline: none;
+  max-width: 110px;
+}
+
+/* Density: compact tightens the vertical rhythm of the lists (F1-12). */
+:host-context(.density-compact) .session-row {
+  padding: 5px var(--space-8);
+}
+
+:host-context(.density-compact) .session-meta {
+  margin-top: 1px;
+}
+
+:host-context(.density-compact) .nav-row {
+  padding: 5px var(--space-8);
+}
+
+:host-context(.density-compact) .group-label {
+  padding-top: var(--space-6);
+}

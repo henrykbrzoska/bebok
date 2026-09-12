@@ -303,4 +303,5 @@ export const fr: Record<MessageKey, string> = {
   'start.connectError': 'Moteur injoignable à {url}',
   'start.connectingTo': 'Connexion à {url}…',
   'start.retry': 'Réessayer',
+  'sidebar.language': 'Langue',
 };

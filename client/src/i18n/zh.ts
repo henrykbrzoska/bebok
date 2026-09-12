@@ -302,4 +302,5 @@ export const zh: Record<MessageKey, string> = {
   'start.connectError': '无法连接引擎 {url}',
   'start.connectingTo': '正在连接 {url}…',
   'start.retry': '重试',
+  'sidebar.language': '语言',
 };

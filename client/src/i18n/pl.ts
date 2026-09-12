@@ -303,4 +303,5 @@ export const pl: Record<MessageKey, string> = {
   'start.connectError': 'Silnik nieosiągalny pod adresem {url}',
   'start.connectingTo': 'Łączenie z {url}…',
   'start.retry': 'Ponów',
+  'sidebar.language': 'Język',
 };

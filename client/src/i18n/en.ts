@@ -312,6 +312,7 @@ export const en = {
   'start.connectError': 'Engine unreachable at {url}',
   'start.connectingTo': 'Connecting to {url}…',
   'start.retry': 'Retry',
+  'sidebar.language': 'Language',
 };
 
 export type MessageKey = keyof typeof en;

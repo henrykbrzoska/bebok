@@ -303,4 +303,5 @@ export const de: Record<MessageKey, string> = {
   'start.connectError': 'Engine unter {url} nicht erreichbar',
   'start.connectingTo': 'Verbinde mit {url}…',
   'start.retry': 'Erneut versuchen',
+  'sidebar.language': 'Sprache',
 };

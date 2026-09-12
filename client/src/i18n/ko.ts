@@ -302,4 +302,5 @@ export const ko: Record<MessageKey, string> = {
   'start.connectError': '{url} 의 엔진에 연결할 수 없습니다',
   'start.connectingTo': '{url} 에 연결 중…',
   'start.retry': '다시 시도',
+  'sidebar.language': '언어',
 };

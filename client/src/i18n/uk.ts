@@ -303,4 +303,5 @@ export const uk: Record<MessageKey, string> = {
   'start.connectError': 'Рушій недоступний за адресою {url}',
   'start.connectingTo': 'З\'єднання з {url}…',
   'start.retry': 'Повторити',
+  'sidebar.language': 'Мова',
 };

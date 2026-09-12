@@ -303,4 +303,5 @@ export const pt: Record<MessageKey, string> = {
   'start.connectError': 'Motor inacessível em {url}',
   'start.connectingTo': 'A ligar a {url}…',
   'start.retry': 'Tentar novamente',
+  'sidebar.language': 'Idioma',
 };

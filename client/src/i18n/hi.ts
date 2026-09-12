@@ -302,4 +302,5 @@ export const hi: Record<MessageKey, string> = {
   'start.connectError': '{url} पर इंजन अनुपलब्ध है',
   'start.connectingTo': '{url} से कनेक्ट हो रहा है…',
   'start.retry': 'पुनः प्रयास',
+  'sidebar.language': 'भाषा',
 };
