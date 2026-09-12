@@ -144,6 +144,8 @@ impl InstanceStore {
         // session was never opened this run, fall back to the scanned metadata.
         let _removed = self.sessions.write().await.remove(&id);
         let meta = self.meta.write().await.remove(&id).unwrap_or(snapshot);
+        // WP-BROWSER: a deleted session's headless browser (if any) goes too.
+        bebok_tools::browser::close_session(&id.to_string()).await;
 
         // Drop the on-disk session directory (session.json + msg-*.json).
         let disk_dir = state.disk_dir().to_path_buf();

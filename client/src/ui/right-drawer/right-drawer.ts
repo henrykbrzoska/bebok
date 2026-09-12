@@ -15,18 +15,27 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { I18nService } from '../../i18n/i18n.service';
 import { ShellStore } from '../shell/shell.store';
 import { AgentsPanel } from './panels/agents-panel';
+import { BrowserPanel } from './panels/browser-panel';
 import { ChangesPanel } from './panels/changes-panel';
 import { ExplorerPanel } from './panels/explorer-panel';
 import { PreviewPanel } from './panels/preview-panel';
 import { SessionPanel } from './panels/session-panel';
 import { TerminalPanel } from './panels/terminal-panel';
 
-type PanelId = 'session' | 'explorer' | 'terminal' | 'agents' | 'changes' | 'preview';
+type PanelId = 'session' | 'explorer' | 'terminal' | 'agents' | 'changes' | 'preview' | 'browser';
 
 @Component({
   selector: 'app-right-drawer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SessionPanel, ExplorerPanel, TerminalPanel, AgentsPanel, ChangesPanel, PreviewPanel],
+  imports: [
+    SessionPanel,
+    ExplorerPanel,
+    TerminalPanel,
+    AgentsPanel,
+    ChangesPanel,
+    PreviewPanel,
+    BrowserPanel,
+  ],
   templateUrl: './right-drawer.html',
   styleUrl: './right-drawer.css',
 })
@@ -46,7 +55,8 @@ export class RightDrawer {
       | 'drawer.terminal'
       | 'drawer.agents'
       | 'drawer.changes'
-      | 'drawer.preview';
+      | 'drawer.preview'
+      | 'drawer.browser';
   }[] = [
     { id: 'session', labelKey: 'drawer.session' },
     { id: 'explorer', labelKey: 'drawer.explorer' },
@@ -54,6 +64,7 @@ export class RightDrawer {
     { id: 'agents', labelKey: 'drawer.agents' },
     { id: 'changes', labelKey: 'drawer.changes' },
     { id: 'preview', labelKey: 'drawer.preview' },
+    { id: 'browser', labelKey: 'drawer.browser' },
   ];
 
   private dragPointerId: number | null = null;

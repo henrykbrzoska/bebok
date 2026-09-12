@@ -538,4 +538,11 @@ export const ja: Record<MessageKey, string> = {
   'start.removeWorktreeToo': 'git worktree も削除する',
   'start.worktreeRemoved': 'git worktree を削除しました。',
   'start.worktreeRemoveFailed': 'セッションは削除しましたが、worktree を削除できませんでした: {error}',
+  // WP-BROWSER (F6-19): headless-browser panel
+  'drawer.browser': 'ブラウザ',
+  'browser.none': 'このセッションにはまだブラウザの操作がありません',
+  'browser.openExternal': '自分のブラウザで開く',
+  'browser.noScreenshot': 'スクリーンショットはまだありません',
+  'browser.screenshotAlt': 'エージェントのブラウザの最新スクリーンショット',
+  'browser.screenshotOf': 'スクリーンショット:',
 };

@@ -548,6 +548,13 @@ export const en = {
   'start.removeWorktreeToo': 'Also remove the git worktree',
   'start.worktreeRemoved': 'Git worktree removed.',
   'start.worktreeRemoveFailed': 'Session deleted, but the worktree could not be removed: {error}',
+  // WP-BROWSER (F6-19): headless-browser panel
+  'drawer.browser': 'Browser',
+  'browser.none': 'No browser activity in this session yet',
+  'browser.openExternal': 'Open in my browser',
+  'browser.noScreenshot': 'No screenshot yet',
+  'browser.screenshotAlt': 'Latest screenshot from the agent’s browser',
+  'browser.screenshotOf': 'Screenshot of',
 };
 
 export type MessageKey = keyof typeof en;

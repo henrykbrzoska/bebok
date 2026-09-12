@@ -538,4 +538,11 @@ export const ko: Record<MessageKey, string> = {
   'start.removeWorktreeToo': 'git worktree도 제거',
   'start.worktreeRemoved': 'git worktree를 제거했습니다.',
   'start.worktreeRemoveFailed': '세션은 삭제했지만 worktree를 제거하지 못했습니다: {error}',
+  // WP-BROWSER (F6-19): headless-browser panel
+  'drawer.browser': '브라우저',
+  'browser.none': '이 세션에는 아직 브라우저 활동이 없습니다',
+  'browser.openExternal': '내 브라우저에서 열기',
+  'browser.noScreenshot': '아직 스크린샷이 없습니다',
+  'browser.screenshotAlt': '에이전트 브라우저의 최신 스크린샷',
+  'browser.screenshotOf': '스크린샷:',
 };

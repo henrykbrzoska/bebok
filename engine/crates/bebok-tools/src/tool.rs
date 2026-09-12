@@ -5,13 +5,26 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+/// An image produced by a tool (e.g. a `browser_screenshot`), delivered to
+/// the model as an image part next to the textual tool result.
+///
+/// Same shape as the session's `Part::Image`: a media type plus the raw
+/// base64 payload (no `data:` prefix).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolImage {
+    pub media_type: String,
+    pub data: String,
+}
+
 /// Text (possibly large) produced by a tool, plus an optional structured
-/// payload (e.g. diffs for the UI).
+/// payload (e.g. diffs for the UI) and an optional image the model should
+/// see alongside the text (WP-BROWSER).
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
     pub text: String,
     pub title: String,
     pub structured: Option<Value>,
+    pub image: Option<ToolImage>,
 }
 
 impl ToolOutput {
@@ -20,7 +33,23 @@ impl ToolOutput {
             text: text.into(),
             title: title.into(),
             structured: None,
+            image: None,
         }
+    }
+
+    /// Attach a structured payload (builder style).
+    pub fn with_structured(mut self, structured: Value) -> Self {
+        self.structured = Some(structured);
+        self
+    }
+
+    /// Attach an image the model should see (builder style).
+    pub fn with_image(mut self, media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        self.image = Some(ToolImage {
+            media_type: media_type.into(),
+            data: data.into(),
+        });
+        self
     }
 }
 
