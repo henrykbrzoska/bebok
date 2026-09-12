@@ -227,16 +227,13 @@ pub async fn browser_action(
     }
 
     if let Some(history) = history_action(&action) {
-        let (url, title) = driver
-            .navigate_history(&sid, history)
-            .await
-            .map_err(|e| {
-                if e.contains("no page is open") {
-                    ApiError::not_found(e).into_response()
-                } else {
-                    ApiError::bad_request(e).into_response()
-                }
-            })?;
+        let (url, title) = driver.navigate_history(&sid, history).await.map_err(|e| {
+            if e.contains("no page is open") {
+                ApiError::not_found(e).into_response()
+            } else {
+                ApiError::bad_request(e).into_response()
+            }
+        })?;
         return Ok(Json(json!({
             "sessionID": sid,
             "action": action,
@@ -247,7 +244,9 @@ pub async fn browser_action(
     }
 
     let Some(tool) = instance.tools.get(tool_name) else {
-        return Err(ApiError::internal(format!("tool {tool_name} is not registered")).into_response());
+        return Err(
+            ApiError::internal(format!("tool {tool_name} is not registered")).into_response(),
+        );
     };
     let ctx = ToolCtx {
         root: instance.root.clone(),
@@ -307,7 +306,10 @@ mod tests {
         assert_eq!(tool_for("back"), Some("browser_open"));
         assert_eq!(tool_for("reload"), Some("browser_open"));
         assert_eq!(
-            tool_args("navigate", &json!({ "url": "https://example.com", "junk": 1 })),
+            tool_args(
+                "navigate",
+                &json!({ "url": "https://example.com", "junk": 1 })
+            ),
             json!({ "url": "https://example.com" })
         );
         assert_eq!(tool_args("back", &json!({})), json!({ "history": "back" }));
@@ -318,7 +320,10 @@ mod tests {
     #[test]
     fn click_keeps_only_known_keys() {
         assert_eq!(
-            tool_args("click", &json!({ "x": 10, "y": 20.5, "selector": null, "evil": true })),
+            tool_args(
+                "click",
+                &json!({ "x": 10, "y": 20.5, "selector": null, "evil": true })
+            ),
             json!({ "x": 10, "y": 20.5, "selector": null })
         );
     }
@@ -351,7 +356,8 @@ mod tests {
         assert_eq!(v["title"], "X");
         assert_eq!(v["structured"]["url"], "https://x/");
 
-        let out = ToolOutput::new("Screenshot", "browser_screenshot").with_image("image/png", "AAAA");
+        let out =
+            ToolOutput::new("Screenshot", "browser_screenshot").with_image("image/png", "AAAA");
         let v = output_json("s", "screenshot", out);
         assert_eq!(v["image"]["media_type"], "image/png");
         assert_eq!(v["image"]["data"], "AAAA");
@@ -383,7 +389,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         let sid = v["sessionID"].as_str().unwrap().to_string();
 
@@ -423,7 +431,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["open"], false);
         assert_eq!(v["display"], "headed");
@@ -455,7 +465,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["ok"], false);
         assert!(v["text"].as_str().unwrap().contains("browser_open first"));

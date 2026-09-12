@@ -25,6 +25,8 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
+    /// WP-DELEGATION: registered but waiting for a `delegation.max_concurrent` slot.
+    Queued,
     /// Still in the parent's live task map.
     Running,
     /// `task.ended` with `status: "completed"`.
@@ -66,6 +68,13 @@ pub struct AgentEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub usage: UsageTotals,
+    /// WP-DELEGATION: live one-line progress (running children only), the
+    /// same shape `task.progress` events carry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<bebok_core::agent::TaskProgress>,
+    /// WP-DELEGATION: spawned with `background: true`.
+    #[serde(default)]
+    pub background: bool,
 }
 
 /// `GET /session/{id}/agents` -> `{ agents: [...] }`, running first, then by
@@ -101,9 +110,26 @@ pub async fn collect_agents(
     // (a) live children: authoritative `running`, enriched with the child's
     // usage so far when its session is known.
     for task in &running {
+        // The child's live state (usage + transcript for the progress line)
+        // when its session is open, else the persisted meta only.
+        let (live_session, progress) = match uuid::Uuid::parse_str(&task.child_session_id) {
+            Ok(child_id) => match store.open_session(child_id).await {
+                Ok(child) => (
+                    Some(child.meta_snapshot().await),
+                    Some(bebok_core::agent::summarize_progress(
+                        &child.messages_snapshot().await,
+                    )),
+                ),
+                Err(_) => (None, None),
+            },
+            Err(_) => (None, None),
+        };
         entries.push(running_entry(
             task,
-            by_id.get(&task.child_session_id).copied(),
+            live_session
+                .as_ref()
+                .or_else(|| by_id.get(&task.child_session_id).copied()),
+            progress,
         ));
     }
 
@@ -121,7 +147,8 @@ pub async fn collect_agents(
     }
 
     entries.sort_by(|a, b| {
-        let rank = |s: AgentStatus| u8::from(s != AgentStatus::Running);
+        let rank =
+            |s: AgentStatus| u8::from(!matches!(s, AgentStatus::Running | AgentStatus::Queued));
         rank(a.status)
             .cmp(&rank(b.status))
             .then_with(|| b.started_at.cmp(&a.started_at))
@@ -129,7 +156,11 @@ pub async fn collect_agents(
     Ok(entries)
 }
 
-fn running_entry(task: &ChildTask, session: Option<&Session>) -> AgentEntry {
+fn running_entry(
+    task: &ChildTask,
+    session: Option<&Session>,
+    progress: Option<bebok_core::agent::TaskProgress>,
+) -> AgentEntry {
     AgentEntry {
         task_id: Some(task.task_id.clone()),
         child_session_id: task.child_session_id.clone(),
@@ -139,12 +170,18 @@ fn running_entry(task: &ChildTask, session: Option<&Session>) -> AgentEntry {
             .model
             .clone()
             .or_else(|| session.and_then(|s| s.model.clone())),
-        status: AgentStatus::Running,
+        status: if task.status == "queued" {
+            AgentStatus::Queued
+        } else {
+            AgentStatus::Running
+        },
         description: task.description.clone(),
         started_at: task.started_at,
         ended_at: None,
         error: None,
         usage: session.map(|s| s.usage.clone()).unwrap_or_default(),
+        progress,
+        background: task.background,
     }
 }
 
@@ -171,6 +208,8 @@ fn finished_entry(child: &Session, description: String) -> AgentEntry {
         ended_at: Some(child.updated_at),
         error: child.task_error.clone(),
         usage: child.usage.clone(),
+        progress: None,
+        background: false,
     }
 }
 

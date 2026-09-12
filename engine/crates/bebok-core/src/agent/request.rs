@@ -17,6 +17,10 @@ use crate::plugin::{Hook, PluginHost, RequestHook, RequestMessage};
 use crate::session::{Role, ToolState};
 use crate::store::SessionState;
 
+/// Tools a sub-agent does not get while a delegation policy is active
+/// (WP-DELEGATION): the main thread decomposes and supervises, workers work.
+pub const DELEGATION_TOOLS: &[&str] = &["task", "fleet", "task_status", "task_wait", "task_cancel"];
+
 /// Builder for provider requests (transcript + system prompt + tool defs).
 pub struct RequestBuilder<'a> {
     pub state: &'a SessionState,
@@ -147,6 +151,12 @@ impl<'a> RequestBuilder<'a> {
         // for unused tools (e.g. fs_tree, fs_file, debug_log, mcp list are
         // rarely needed in a simple code-editing session).
         let used_tools = collect_used_tools(&messages);
+        // WP-DELEGATION: with a delegation policy on, sub-agents are workers -
+        // the main thread owns decomposition and supervision, so a child gets
+        // no delegation/supervision tools at all (the depth guard stays as the
+        // backstop when the policy is `off`).
+        let hide_delegation = self.state.meta_snapshot().await.parent.is_some()
+            && self.state.config_snapshot().delegation.mode != crate::config::DelegationMode::Off;
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -156,6 +166,9 @@ impl<'a> RequestBuilder<'a> {
                 // every other agent so parallel fleets are never user-triggered
                 // or spawned by a sub-agent.
                 if t.name() == "fleet" && self.agent.name != "orchestrator" {
+                    return false;
+                }
+                if hide_delegation && DELEGATION_TOOLS.contains(&t.name()) {
                     return false;
                 }
                 self.agent.tools.is_empty() || self.agent.tools.iter().any(|n| n == t.name())

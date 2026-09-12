@@ -10,7 +10,7 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{FleetConfig, ResolvedConfig, UiConfig};
+use super::model::{DelegationConfig, DelegationMode, FleetConfig, ResolvedConfig, UiConfig};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -120,6 +120,41 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     // Fleet section: project layer fully replaces global when present.
     if let Some(fleet) = v.get("fleet") {
         cfg.fleet = parse_fleet(fleet);
+    }
+    // WP-DELEGATION: `delegation` merges per key (project overrides only the
+    // keys it sets).
+    if let Some(d) = v.get("delegation") {
+        apply_delegation(&mut cfg.delegation, d);
+    }
+}
+
+/// Apply one layer's `delegation` section on top of the current value.
+/// Malformed values are ignored key by key (`mode` must be one of
+/// `off|auto|always`, `max_concurrent` a positive integer, `model` a string;
+/// an empty/`null` `model` clears the override).
+pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
+    let Some(obj) = v.as_object() else {
+        return;
+    };
+    if let Some(mode) = obj.get("mode").and_then(|x| x.as_str())
+        && let Some(m) = DelegationMode::parse(mode)
+    {
+        cfg.mode = m;
+    }
+    if let Some(n) = obj
+        .get("max_concurrent")
+        .or_else(|| obj.get("maxConcurrent"))
+        .and_then(|x| x.as_u64())
+        && n > 0
+    {
+        cfg.max_concurrent = (n as usize).min(super::model::MAX_DELEGATION_MAX_CONCURRENT);
+    }
+    if let Some(model) = obj.get("model") {
+        cfg.model = model
+            .as_str()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_string);
     }
 }
 
@@ -430,5 +465,81 @@ mod tests {
         assert_eq!(cfg.fleet_members().len(), 1);
         assert_eq!(cfg.fleet_members()[0].name, "ok");
         assert_eq!(cfg.fleet_members()[0].agent, "");
+    }
+
+    // -- WP-DELEGATION (F8-2) -------------------------------------------------
+
+    #[test]
+    fn delegation_defaults_auto_three_no_model() {
+        let cfg = ResolvedConfig::default();
+        assert_eq!(cfg.delegation.mode, DelegationMode::Auto);
+        assert_eq!(cfg.delegation.max_concurrent, 3);
+        assert!(cfg.delegation.model.is_none());
+        assert_eq!(cfg.delegation.effective_max_concurrent(), 3);
+    }
+
+    #[test]
+    fn delegation_project_overrides_per_key() {
+        let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        std::fs::write(
+            &global,
+            r#"{ "delegation": { "mode": "always", "max_concurrent": 5, "model": "openai/gpt-4o" } }"#,
+        )
+        .unwrap();
+        // No project key: global wins entirely.
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
+        assert_eq!(cfg.delegation.max_concurrent, 5);
+        assert_eq!(cfg.delegation.model.as_deref(), Some("openai/gpt-4o"));
+
+        // Project sets only `mode`: the other keys stay global.
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "delegation": { "mode": "off" } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.delegation.mode, DelegationMode::Off);
+        assert_eq!(cfg.delegation.max_concurrent, 5);
+        assert_eq!(cfg.delegation.model.as_deref(), Some("openai/gpt-4o"));
+
+        // Project clears the model with an empty string.
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "delegation": { "model": "" } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
+        assert!(cfg.delegation.model.is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn delegation_malformed_values_are_ignored_key_by_key() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "mode": "sometimes", "max_concurrent": 0, "model": 7 } }),
+        );
+        assert_eq!(cfg.delegation.mode, DelegationMode::Auto);
+        assert_eq!(cfg.delegation.max_concurrent, 3);
+        assert!(cfg.delegation.model.is_none());
+        // camelCase accepted, huge values clamped.
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "maxConcurrent": 999, "mode": "ALWAYS" } }),
+        );
+        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
+        assert_eq!(
+            cfg.delegation.max_concurrent,
+            super::super::model::MAX_DELEGATION_MAX_CONCURRENT
+        );
+        // Non-object section: no-op.
+        apply(&mut cfg, &serde_json::json!({ "delegation": "off" }));
+        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
     }
 }

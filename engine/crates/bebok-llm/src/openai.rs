@@ -683,22 +683,32 @@ mod tests {
         };
 
         let mut body = fresh();
-        assert!(!apply_known_tools_without_reasoning(&mut body, endpoint, model));
+        assert!(!apply_known_tools_without_reasoning(
+            &mut body, endpoint, model
+        ));
         assert_eq!(body["reasoning_effort"], "high", "unknown model: untouched");
 
         remember_tools_without_reasoning(endpoint, model);
         let mut body = fresh();
-        assert!(apply_known_tools_without_reasoning(&mut body, endpoint, model));
+        assert!(apply_known_tools_without_reasoning(
+            &mut body, endpoint, model
+        ));
         assert_eq!(body["reasoning_effort"], "none");
 
         // Only tool-enabled requests are affected; plain chat keeps reasoning.
         let mut no_tools = serde_json::json!({"tools": [], "reasoning_effort": "high"});
-        assert!(!apply_known_tools_without_reasoning(&mut no_tools, endpoint, model));
+        assert!(!apply_known_tools_without_reasoning(
+            &mut no_tools,
+            endpoint,
+            model
+        ));
         assert_eq!(no_tools["reasoning_effort"], "high");
 
         // A different model or endpoint is not tainted.
         let mut other = fresh();
-        assert!(!apply_known_tools_without_reasoning(&mut other, endpoint, "gpt-4.1"));
+        assert!(!apply_known_tools_without_reasoning(
+            &mut other, endpoint, "gpt-4.1"
+        ));
         let mut other_endpoint = fresh();
         assert!(!apply_known_tools_without_reasoning(
             &mut other_endpoint,

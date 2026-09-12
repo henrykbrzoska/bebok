@@ -9,6 +9,11 @@
  * the parent turn settles), so it never polls and never shows a stale
  * "running" row. Clicking a row opens the read-only transcript overlay
  * (`ui/agent-transcript`).
+ *
+ * WP-DELEGATION (F8-2): `task.progress` events (<= 1/s per child) patch the
+ * matching row in place - last tool, one-line summary, tokens - without a
+ * refetch, and a `queued` row (waiting for a `delegation.max_concurrent`
+ * slot) is shown as such.
  */
 
 import {
@@ -22,12 +27,19 @@ import {
 } from '@angular/core';
 
 import { EngineClient } from '../../../core/engine-client.service';
-import { AgentEntry, AgentStatus, EngineEvent } from '../../../core/engine.dtos';
+import {
+  AgentEntry,
+  AgentStatus,
+  EngineEvent,
+  TaskProgress,
+  TaskProgressEvent,
+} from '../../../core/engine.dtos';
 import { EventsStore } from '../../../core/events.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { MessageKey } from '../../../i18n';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 import { AgentTranscript } from '../../agent-transcript/agent-transcript';
+import { TaskProgressLine } from '../../task-progress-line/task-progress-line';
 
 /** SSE events that change the answer of `GET /session/{id}/agents`. */
 const REFRESH_EVENTS: ReadonlySet<string> = new Set([
@@ -41,6 +53,7 @@ const REFRESH_EVENTS: ReadonlySet<string> = new Set([
 const REFRESH_DEBOUNCE_MS = 150;
 
 const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
+  queued: 'agents.queued',
   running: 'agents.running',
   done: 'agents.done',
   failed: 'agents.failed',
@@ -51,7 +64,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
 @Component({
   selector: 'app-agents-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AgentTranscript],
+  imports: [AgentTranscript, TaskProgressLine],
   template: `
     @if (!session.meta()) {
       <div class="empty">{{ t('drawer.noSession') }}</div>
@@ -67,6 +80,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
               type="button"
               class="agent"
               [class.running]="agent.status === 'running'"
+              [class.queued]="agent.status === 'queued'"
               [class.failed]="agent.status === 'failed'"
               [class.aborted]="agent.status === 'aborted'"
               [attr.data-status]="agent.status"
@@ -93,6 +107,14 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
                   <span class="tokens">· {{ format(tokens(agent)) }} {{ t('agents.tokens') }}</span>
                 }
               </span>
+              @if (agent.status === 'running' || agent.status === 'queued') {
+                <app-task-progress-line
+                  class="progress"
+                  [status]="agent.status"
+                  [progress]="agent.progress ?? null"
+                  [tokens]="tokens(agent)"
+                />
+              }
               @if (agent.error) {
                 <span class="error" [title]="agent.error">{{ agent.error }}</span>
               }
@@ -109,6 +131,8 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         [agent]="agent.agent"
         [model]="agent.model ?? ''"
         [status]="liveStatus(agent.childSessionID)"
+        [progress]="liveProgress(agent.childSessionID)"
+        [progressTokens]="liveTokens(agent.childSessionID)"
         (closed)="close()"
       />
     }
@@ -169,6 +193,21 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
       .agent.running .status-dot {
         background: var(--accent);
         animation: agent-pulse 1.2s ease-in-out infinite;
+      }
+
+      .agent.queued .status-dot {
+        background: var(--warning);
+        animation: agent-pulse 1.2s ease-in-out infinite;
+      }
+
+      .agent.queued .status {
+        color: var(--warning);
+      }
+
+      .progress {
+        margin-top: 2px;
+        padding-top: 3px;
+        border-top: 1px dashed var(--border);
       }
 
       .agent[data-status='done'] .status-dot {
@@ -326,6 +365,16 @@ export class AgentsPanel {
     return this.agents().find((a) => a.childSessionID === childId)?.status ?? 'unknown';
   }
 
+  /** WP-DELEGATION: progress of the selected row, tracked live. */
+  liveProgress(childId: string): TaskProgress | null {
+    return this.agents().find((a) => a.childSessionID === childId)?.progress ?? null;
+  }
+
+  liveTokens(childId: string): number {
+    const row = this.agents().find((a) => a.childSessionID === childId);
+    return row ? this.tokens(row) : 0;
+  }
+
   shortId(id: string): string {
     return id.slice(0, 8);
   }
@@ -373,7 +422,14 @@ export class AgentsPanel {
 
   private handleEvent(ev: EngineEvent): void {
     const id = this.sessionId();
-    if (!id || ev.sessionID !== id || !REFRESH_EVENTS.has(ev.type)) {
+    if (!id || ev.sessionID !== id) {
+      return;
+    }
+    if (ev.type === 'task.progress') {
+      this.applyProgress(ev.properties as unknown as TaskProgressEvent | undefined);
+      return;
+    }
+    if (!REFRESH_EVENTS.has(ev.type)) {
       return;
     }
     if (ev.type === 'session.updated' && ev.properties?.['running'] !== false) {
@@ -381,6 +437,49 @@ export class AgentsPanel {
       return;
     }
     this.scheduleRefresh();
+  }
+
+  /** WP-DELEGATION: patch one running row from a `task.progress` event. */
+  applyProgress(p: TaskProgressEvent | undefined): void {
+    if (!p || !p.taskID) {
+      return;
+    }
+    let found = false;
+    this.agents.update((list) => {
+      const idx = list.findIndex(
+        (a) => a.taskID === p.taskID || a.childSessionID === p.childSessionID,
+      );
+      if (idx < 0) {
+        return list;
+      }
+      found = true;
+      const prev = list[idx];
+      const next: AgentEntry = {
+        ...prev,
+        status: p.status === 'queued' ? 'queued' : 'running',
+        progress: p.progress ?? prev.progress,
+        usage: {
+          ...prev.usage,
+          input_tokens: p.tokens?.input ?? prev.usage.input_tokens,
+          output_tokens: p.tokens?.output ?? prev.usage.output_tokens,
+        },
+      };
+      const out = [...list];
+      out[idx] = next;
+      return out;
+    });
+    if (!found) {
+      // A child we have not fetched yet (the event raced the refetch).
+      this.scheduleRefresh();
+      return;
+    }
+    const open = this.selected();
+    if (open && open.childSessionID === p.childSessionID) {
+      const next = this.agents().find((a) => a.childSessionID === open.childSessionID);
+      if (next) {
+        this.selected.set(next);
+      }
+    }
   }
 
   private scheduleRefresh(): void {

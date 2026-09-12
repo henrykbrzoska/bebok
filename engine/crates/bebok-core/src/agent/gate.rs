@@ -80,7 +80,13 @@ pub async fn resolve_permission(
         })
         .await;
     if stamped {
-        emit_part(ctx.bus, ctx.state, "message.part.updated", ctx.assistant_idx).await;
+        emit_part(
+            ctx.bus,
+            ctx.state,
+            "message.part.updated",
+            ctx.assistant_idx,
+        )
+        .await;
     }
     match evaluation.verdict {
         Verdict::Allow => ToolOutcome::Run,

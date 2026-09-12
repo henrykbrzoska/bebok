@@ -307,6 +307,13 @@ fn assemble_prompt(
         );
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
+
+    // WP-DELEGATION (F8-2): the delegation policy section (`delegation.mode`),
+    // main-thread sessions only; the text lives in
+    // `bebok_core::agent::delegation_policy`.
+    if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation) {
+        agent.prompt = format!("{}\n\n{policy}", agent.prompt);
+    }
 }
 
 // Keep the error import used in both cfg paths (avoids unused warnings where

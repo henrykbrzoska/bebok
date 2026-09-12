@@ -172,7 +172,10 @@ mod tests {
         std::fs::write(root.join("apps/frontend/src/main.ts"), "x").unwrap();
 
         let top = list_children(&root, "");
-        assert_eq!(top.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), vec!["apps"]);
+        assert_eq!(
+            top.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            vec!["apps"]
+        );
         let nested = list_children(&root, "apps/frontend");
         assert_eq!(nested.len(), 1);
         assert_eq!(nested[0].path, "apps/frontend/src");

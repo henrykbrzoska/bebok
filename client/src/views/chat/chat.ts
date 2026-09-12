@@ -27,9 +27,11 @@ import {
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
+import { TaskProgressStore } from '../../core/task-progress.store';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
+import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
 import { ToolRunRowComponent } from './parts/tool-run-row';
@@ -173,6 +175,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     PermissionPopup,
     MessageRowComponent,
     ToolRunRowComponent,
+    TaskProgressLine,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -180,6 +183,8 @@ function persistDrafts(drafts: Record<string, string>): void {
 export class ChatView implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly toolSafety = inject(ToolSafetyStore);
+  /** WP-DELEGATION: live progress of the children listed in the active-tasks block. */
+  readonly liveTasks = inject(TaskProgressStore);
   private readonly events = inject(EventsStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);

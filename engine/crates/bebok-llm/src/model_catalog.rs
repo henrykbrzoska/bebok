@@ -249,7 +249,9 @@ mod tests {
             let caps = catalog.get(model);
             assert!(caps.context_window > 64_000, "{model}: {caps:?}");
             assert!(caps.supports_tools, "{model}");
-            let price = catalog.pricing(model).unwrap_or_else(|| panic!("{model}: no pricing"));
+            let price = catalog
+                .pricing(model)
+                .unwrap_or_else(|| panic!("{model}: no pricing"));
             assert!(price.input > 0.0 && price.output > 0.0, "{model}");
         }
         let luna = catalog.get("openai/gpt-5.6-luna");

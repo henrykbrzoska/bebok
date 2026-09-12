@@ -30,15 +30,17 @@ import {
 } from '@angular/core';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { AgentStatus, EngineEvent, Message } from '../../core/engine.dtos';
+import { AgentStatus, EngineEvent, Message, TaskProgress } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { MessageKey } from '../../i18n';
 import { MessageRowComponent } from '../../views/chat/parts/message-row';
+import { TaskProgressLine } from '../task-progress-line/task-progress-line';
 
 const REFRESH_DEBOUNCE_MS = 120;
 
 const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
+  queued: 'agents.queued',
   running: 'agents.running',
   done: 'agents.done',
   failed: 'agents.failed',
@@ -49,7 +51,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
 @Component({
   selector: 'app-agent-transcript',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MessageRowComponent],
+  imports: [MessageRowComponent, TaskProgressLine],
   host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
     <div class="backdrop" (click)="onBackdrop($event)" data-testid="agent-transcript">
@@ -79,6 +81,15 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
             ✕
           </button>
         </header>
+        @if (status() === 'running' || status() === 'queued') {
+          <div class="live" data-testid="agent-transcript-progress">
+            <app-task-progress-line
+              [status]="status()"
+              [progress]="progress()"
+              [tokens]="progressTokens()"
+            />
+          </div>
+        }
         <div class="body" #scrollArea (scroll)="onScroll()">
           @if (error()) {
             <div class="notice error">{{ error() }}</div>
@@ -121,6 +132,12 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         border-radius: var(--radius-bubble);
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
         overflow: hidden;
+      }
+
+      .live {
+        padding: var(--space-6) var(--space-14);
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-2);
       }
 
       .head {
@@ -270,6 +287,9 @@ export class AgentTranscript {
   readonly agent = input('');
   readonly model = input('');
   readonly status = input<AgentStatus>('unknown');
+  /** WP-DELEGATION: live progress line (fed by the Agents panel). */
+  readonly progress = input<TaskProgress | null>(null);
+  readonly progressTokens = input<number>(0);
   readonly closed = output<void>();
 
   readonly messages = signal<Message[]>([]);

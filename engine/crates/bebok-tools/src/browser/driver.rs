@@ -294,8 +294,8 @@ impl BrowserDriver {
                 page.execute(NavigateToHistoryEntryParams::new(entry.id))
                     .await
                     .map_err(|e| format!("history navigation failed: {e}"))?;
-                let _ = tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation())
-                    .await;
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation()).await;
             }
         }
         let url = page.url().await.ok().flatten().unwrap_or_default();
@@ -318,7 +318,9 @@ impl BrowserDriver {
             (sb.page.clone(), sb.directory.clone(), sb.headed, sb.seq)
         };
         let capture = frames::capture(&page).await?;
-        Ok(frames::frame_from(session_id, &directory, seq, headed, capture))
+        Ok(frames::frame_from(
+            session_id, &directory, seq, headed, capture,
+        ))
     }
 
     /// Record that a viewer window is watching `session_id` (keeps the frame
@@ -416,11 +418,7 @@ impl BrowserDriver {
         }
         let mut activity = self.activity.lock().unwrap();
         let entry = activity.entry(session_id.to_string()).or_default();
-        if entry
-            .streamer
-            .as_ref()
-            .is_some_and(|h| !h.is_finished())
-        {
+        if entry.streamer.as_ref().is_some_and(|h| !h.is_finished()) {
             return;
         }
         let weak = Arc::downgrade(self);
@@ -456,7 +454,9 @@ impl BrowserDriver {
             (sb.page.clone(), sb.directory.clone(), sb.headed, sb.seq)
         };
         let capture = frames::capture(&page).await?;
-        Ok(frames::frame_from(session_id, &directory, seq, headed, capture))
+        Ok(frames::frame_from(
+            session_id, &directory, seq, headed, capture,
+        ))
     }
 
     // ── teardown ────────────────────────────────────────────────────────
@@ -627,7 +627,10 @@ pub struct LaunchArg {
 
 impl LaunchArg {
     fn key(key: &str) -> Self {
-        Self { key: key.to_string(), values: Vec::new() }
+        Self {
+            key: key.to_string(),
+            values: Vec::new(),
+        }
     }
 
     fn values<V: ToString>(key: &str, values: impl IntoIterator<Item = V>) -> Self {
@@ -757,22 +760,23 @@ async fn launch(
     }
     let page = match page {
         Some(p) => p,
-        None => match tokio::time::timeout(REQUEST_TIMEOUT, browser.new_page("about:blank")).await
-        {
-            Ok(Ok(p)) => p,
-            Ok(Err(e)) => {
-                handler_task.abort();
-                let _ = browser.kill().await;
-                cleanup_user_data_dir(&user_data_dir);
-                return Err(format!("failed to open a page: {e}"));
+        None => {
+            match tokio::time::timeout(REQUEST_TIMEOUT, browser.new_page("about:blank")).await {
+                Ok(Ok(p)) => p,
+                Ok(Err(e)) => {
+                    handler_task.abort();
+                    let _ = browser.kill().await;
+                    cleanup_user_data_dir(&user_data_dir);
+                    return Err(format!("failed to open a page: {e}"));
+                }
+                Err(_) => {
+                    handler_task.abort();
+                    let _ = browser.kill().await;
+                    cleanup_user_data_dir(&user_data_dir);
+                    return Err("timed out opening the first page".to_string());
+                }
             }
-            Err(_) => {
-                handler_task.abort();
-                let _ = browser.kill().await;
-                cleanup_user_data_dir(&user_data_dir);
-                return Err("timed out opening the first page".to_string());
-            }
-        },
+        }
     };
 
     // Console capture must be listening before the first navigation so
@@ -876,14 +880,22 @@ mod tests {
             display: BrowserDisplay::Headed,
             window_position: Some((1300, 40)),
         };
-        let headed: Vec<String> = launch_args(&settings, false).iter().map(LaunchArg::render).collect();
+        let headed: Vec<String> = launch_args(&settings, false)
+            .iter()
+            .map(LaunchArg::render)
+            .collect();
         assert!(headed.iter().any(|a| a == "--window-position=1300,40"));
         assert!(headed.iter().any(|a| a == "--disable-infobars"));
         assert!(headed.iter().any(|a| a == "--no-first-run"));
-        assert!(headed
+        assert!(
+            headed
+                .iter()
+                .any(|a| a == "--disable-features=Translate,MediaRouter,msEdgeWelcomePage")
+        );
+        let headless: Vec<String> = launch_args(&settings, true)
             .iter()
-            .any(|a| a == "--disable-features=Translate,MediaRouter,msEdgeWelcomePage"));
-        let headless: Vec<String> = launch_args(&settings, true).iter().map(LaunchArg::render).collect();
+            .map(LaunchArg::render)
+            .collect();
         assert!(!headless.iter().any(|a| a.starts_with("--window-position")));
         assert!(!headless.iter().any(|a| a == "--disable-infobars"));
         assert!(headless.iter().any(|a| a == "--no-first-run"));
@@ -910,7 +922,11 @@ mod tests {
                     "key must not carry its own dashes: {}",
                     arg.key
                 );
-                assert!(!arg.key.contains('='), "values go in `values`, not the key: {}", arg.key);
+                assert!(
+                    !arg.key.contains('='),
+                    "values go in `values`, not the key: {}",
+                    arg.key
+                );
                 let rendered = arg.render();
                 assert!(rendered.starts_with("--"), "{rendered}");
                 assert!(!rendered.starts_with("---"), "double prefix: {rendered}");

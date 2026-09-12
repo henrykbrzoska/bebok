@@ -1043,7 +1043,10 @@ mod tests {
 
         let digests = scan(&root);
         assert_eq!(digests.len(), 2);
-        assert!(digests.iter().all(|d| d.directory == PLAIN_DIR), "{digests:?}");
+        assert!(
+            digests.iter().all(|d| d.directory == PLAIN_DIR),
+            "{digests:?}"
+        );
 
         let stats = aggregate(&digests, &StatsFilter::default(), NOW);
         assert_eq!(stats.by_project.len(), 1, "one project row, not two");

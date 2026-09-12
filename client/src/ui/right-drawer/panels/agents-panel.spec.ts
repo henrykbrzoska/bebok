@@ -169,4 +169,52 @@ describe('AgentsPanel (F6-13)', () => {
     expect(rows().length).toBe(0);
     expect(fixture.nativeElement.textContent).toContain('No sub-agents');
   });
+
+  // -- WP-DELEGATION (F8-2) --------------------------------------------------
+
+  it('patches a running row in place from task.progress without a refetch', async () => {
+    await settle();
+    expect(engine.sessionAgents).toHaveBeenCalledTimes(1);
+    listener!({
+      type: 'task.progress',
+      directory: '/p',
+      sessionID: 'parent-1',
+      properties: {
+        taskID: 'task-1',
+        childSessionID: 'child-1',
+        name: 'fix-ci',
+        agent: 'code',
+        status: 'running',
+        progress: {
+          lastTool: 'write_file',
+          lastToolState: 'running',
+          summary: 'Adding the About route',
+          toolCalls: 4,
+          steps: 2,
+        },
+        tokens: { input: 4000, output: 500 },
+        at: Date.now(),
+      },
+    });
+    await wait(250);
+    await settle();
+    expect(engine.sessionAgents).toHaveBeenCalledTimes(1);
+    const line = fixture.nativeElement.querySelector('[data-testid="task-progress-line"]');
+    expect(line).toBeTruthy();
+    expect(line.textContent).toContain('write_file');
+    expect(line.textContent).toContain('Adding the About route');
+    expect(line.textContent).toContain('4 calls');
+    expect(line.textContent).toContain('4.5k');
+  });
+
+  it('renders a queued child (waiting for a concurrency slot) as queued', async () => {
+    engine.sessionAgents.and.resolveTo([entry('queued', { taskID: 'task-q' })]);
+    session.meta.set({ ...META, id: 'parent-3' });
+    await settle();
+    await settle();
+    const [row] = rows();
+    expect(row.getAttribute('data-status')).toBe('queued');
+    expect(row.textContent).toContain('queued');
+    expect(row.textContent).toContain('waiting for a free slot');
+  });
 });

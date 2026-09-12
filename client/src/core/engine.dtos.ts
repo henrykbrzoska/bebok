@@ -274,7 +274,34 @@ export interface ActiveTask {
 }
 
 /** F6-12: lifecycle of one delegated child as reported by `GET /session/{id}/agents`. */
-export type AgentStatus = 'running' | 'done' | 'failed' | 'aborted' | 'unknown';
+export type AgentStatus = 'queued' | 'running' | 'done' | 'failed' | 'aborted' | 'unknown';
+
+/**
+ * WP-DELEGATION: one-line live view of what a child is doing (payload of
+ * `task.progress` events and of `AgentEntry.progress`).
+ */
+export interface TaskProgress {
+  /** Name of the most recent tool call in the child's transcript. */
+  lastTool?: string;
+  /** `pending` | `running` | `completed` | `error` of that call. */
+  lastToolState?: string;
+  /** Last non-empty line of the child's latest assistant text. */
+  summary: string;
+  toolCalls: number;
+  steps: number;
+}
+
+/** WP-DELEGATION: properties of a `task.progress` SSE event (parent session). */
+export interface TaskProgressEvent {
+  taskID: string;
+  childSessionID: string;
+  name: string;
+  agent: string;
+  status: 'queued' | 'running';
+  progress: TaskProgress;
+  tokens: { input: number; output: number };
+  at: number;
+}
 
 /** One row of `GET /session/{id}/agents` (live task map merged with finished children). */
 export interface AgentEntry {
@@ -290,6 +317,10 @@ export interface AgentEntry {
   endedAt?: number;
   error?: string;
   usage: UsageTotals;
+  /** WP-DELEGATION: live progress line (running children only). */
+  progress?: TaskProgress;
+  /** WP-DELEGATION: spawned with `background: true`. */
+  background?: boolean;
 }
 
 export interface SessionAgentsResponse {
@@ -402,6 +433,17 @@ export interface FleetMember {
   model: string;
 }
 
+/** WP-DELEGATION (F8-2): `delegation.mode`. */
+export type DelegationMode = 'off' | 'auto' | 'always';
+
+/** WP-DELEGATION (F8-2): `delegation` section of the config. */
+export interface DelegationConfig {
+  mode: DelegationMode;
+  max_concurrent: number;
+  /** Optional model override for every sub-agent (`provider/model`). */
+  model?: string | null;
+}
+
 /** Parallel-agents fleet config (`fleet` section of the config). */
 export interface FleetConfig {
   enabled: boolean;
@@ -425,6 +467,8 @@ export interface ResolvedConfig {
   thinking?: string;
   /** Parallel-agents fleet (absent = disabled with no members). */
   fleet?: FleetConfig;
+  /** WP-DELEGATION: sub-agent delegation policy (absent on older engines = defaults). */
+  delegation?: DelegationConfig;
   permission: unknown;
   mcp: unknown;
   skills: unknown;
