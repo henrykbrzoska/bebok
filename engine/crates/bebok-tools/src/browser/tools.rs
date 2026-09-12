@@ -187,7 +187,9 @@ impl Tool for BrowserScreenshot {
         let driver = self.driver.clone();
         let work = async {
             if !driver.has_session(&ctx.session_id).await {
-                return Err("no page is open in this session yet; call browser_open first".to_string());
+                return Err(
+                    "no page is open in this session yet; call browser_open first".to_string(),
+                );
             }
             let page = page_for(&driver, &ctx).await?;
             let mut params = ScreenshotParams::builder().full_page(full_page);
@@ -274,7 +276,9 @@ impl Tool for BrowserClick {
         };
         let work = async {
             if !driver.has_session(&ctx.session_id).await {
-                return Err("no page is open in this session yet; call browser_open first".to_string());
+                return Err(
+                    "no page is open in this session yet; call browser_open first".to_string(),
+                );
             }
             let page = page_for(&driver, &ctx).await?;
             match &target {
@@ -296,11 +300,10 @@ impl Tool for BrowserClick {
             Ok::<_, String>(page_state(&page).await)
         };
         match bounded(&ctx, &title, work).await {
-            Ok((url, page_title)) => ToolOutput::new(
-                format!("Clicked {target_desc}\nnow at {url}"),
-                title,
-            )
-            .with_structured(state_json(&url, &page_title)),
+            Ok((url, page_title)) => {
+                ToolOutput::new(format!("Clicked {target_desc}\nnow at {url}"), title)
+                    .with_structured(state_json(&url, &page_title))
+            }
             Err(out) => out,
         }
     }
@@ -349,7 +352,9 @@ impl Tool for BrowserType {
         let driver = self.driver.clone();
         let work = async {
             if !driver.has_session(&ctx.session_id).await {
-                return Err("no page is open in this session yet; call browser_open first".to_string());
+                return Err(
+                    "no page is open in this session yet; call browser_open first".to_string(),
+                );
             }
             let page = page_for(&driver, &ctx).await?;
             let el = find(&page, &selector).await?;
@@ -436,7 +441,9 @@ impl Tool for BrowserGetText {
         let driver = self.driver.clone();
         let work = async {
             if !driver.has_session(&ctx.session_id).await {
-                return Err("no page is open in this session yet; call browser_open first".to_string());
+                return Err(
+                    "no page is open in this session yet; call browser_open first".to_string(),
+                );
             }
             let page = page_for(&driver, &ctx).await?;
             let text = match &selector {
@@ -505,7 +512,9 @@ impl Tool for BrowserEval {
         let driver = self.driver.clone();
         let work = async {
             if !driver.has_session(&ctx.session_id).await {
-                return Err("no page is open in this session yet; call browser_open first".to_string());
+                return Err(
+                    "no page is open in this session yet; call browser_open first".to_string(),
+                );
             }
             let page = page_for(&driver, &ctx).await?;
             let params = EvaluateParams::builder()
@@ -584,19 +593,31 @@ mod tests {
         let out = BrowserOpen { driver: d.clone() }
             .execute(ctx(), json!({ "url": "javascript:alert(1)" }))
             .await;
-        assert!(out.text.starts_with("error: unsupported URL scheme"), "{}", out.text);
+        assert!(
+            out.text.starts_with("error: unsupported URL scheme"),
+            "{}",
+            out.text
+        );
         assert!(out.image.is_none());
         assert!(!d.has_session("test-session").await);
 
-        let out = BrowserClick { driver: d.clone() }.execute(ctx(), json!({})).await;
-        assert!(out.text.starts_with("error: missing target"), "{}", out.text);
+        let out = BrowserClick { driver: d.clone() }
+            .execute(ctx(), json!({}))
+            .await;
+        assert!(
+            out.text.starts_with("error: missing target"),
+            "{}",
+            out.text
+        );
 
         let out = BrowserType { driver: d.clone() }
             .execute(ctx(), json!({ "text": "x" }))
             .await;
         assert_eq!(out.text, "error: missing required parameter 'selector'");
 
-        let out = BrowserEval { driver: d.clone() }.execute(ctx(), json!({})).await;
+        let out = BrowserEval { driver: d.clone() }
+            .execute(ctx(), json!({}))
+            .await;
         assert_eq!(out.text, "error: missing required parameter 'js'");
         assert!(!d.has_session("test-session").await);
     }

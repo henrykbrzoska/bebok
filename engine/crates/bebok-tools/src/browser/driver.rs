@@ -64,7 +64,9 @@ static DRIVER: OnceLock<Arc<BrowserDriver>> = OnceLock::new();
 impl BrowserDriver {
     /// The process-wide driver shared by every `browser_*` tool.
     pub fn global() -> Arc<BrowserDriver> {
-        DRIVER.get_or_init(|| Arc::new(BrowserDriver::default())).clone()
+        DRIVER
+            .get_or_init(|| Arc::new(BrowserDriver::default()))
+            .clone()
     }
 
     /// The page bound to `session_id`, launching the browser on first use.
@@ -125,7 +127,9 @@ impl BrowserDriver {
                 .filter(|(_, sb)| now.duration_since(sb.last_used) > max_idle)
                 .map(|(id, _)| id.clone())
                 .collect();
-            ids.into_iter().filter_map(|id| sessions.remove(&id)).collect()
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id))
+                .collect()
         };
         let n = idle.len();
         for sb in idle {
@@ -179,7 +183,13 @@ fn tracing_debug(msg: &str) {
 fn user_data_dir_for(session_id: &str) -> PathBuf {
     let safe: String = session_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     std::env::temp_dir()
         .join("bebok-browser")
@@ -264,8 +274,7 @@ async fn launch(session_id: &str) -> Result<SessionBrowser, String> {
         }
     });
 
-    let page = match tokio::time::timeout(REQUEST_TIMEOUT, browser.new_page("about:blank")).await
-    {
+    let page = match tokio::time::timeout(REQUEST_TIMEOUT, browser.new_page("about:blank")).await {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
             handler_task.abort();

@@ -26,7 +26,11 @@ pub const ENV_VARS: &[&str] = &["BEBOK_BROWSER", "CHROME"];
 
 /// Locate a Chromium-family executable. `None` when nothing was found.
 pub fn discover_binary() -> Option<PathBuf> {
-    discover_with(|k| std::env::var_os(k).map(PathBuf::from), Path::exists, which_on_path)
+    discover_with(
+        |k| std::env::var_os(k).map(PathBuf::from),
+        Path::exists,
+        which_on_path,
+    )
 }
 
 /// Human-readable list of the locations probed, for the "not found" error.

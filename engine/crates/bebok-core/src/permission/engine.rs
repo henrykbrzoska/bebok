@@ -474,12 +474,7 @@ mod tests {
         )
         .unwrap();
         let engine = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine.evaluate(
-            None,
-            "browser_screenshot",
-            &serde_json::json!({}),
-            true,
-        );
+        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
         assert_eq!(eval.verdict, Verdict::Allow);
         let _ = std::fs::remove_dir_all(dir);
     }

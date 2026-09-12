@@ -305,7 +305,8 @@ impl InstanceStore {
             .await
             .values()
             .filter(|s| {
-                s.directory == normalized || crate::git::is_worktree_of(Path::new(&s.directory), root)
+                s.directory == normalized
+                    || crate::git::is_worktree_of(Path::new(&s.directory), root)
             })
             .cloned()
             .collect();
@@ -429,14 +430,25 @@ mod tests {
 
         let store = InstanceStore::with_data_dir(base.join("data"));
         let (session, path) = store
-            .create_worktree_session(project.to_str().unwrap(), "bebok/session-abc", None, "code", None)
+            .create_worktree_session(
+                project.to_str().unwrap(),
+                "bebok/session-abc",
+                None,
+                "code",
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(
             path,
-            crate::git::worktrees_dir(&project).join("bebok").join("session-abc")
+            crate::git::worktrees_dir(&project)
+                .join("bebok")
+                .join("session-abc")
         );
-        assert!(path.join(".git").exists(), "a real worktree has a .git link file");
+        assert!(
+            path.join(".git").exists(),
+            "a real worktree has a .git link file"
+        );
         assert_eq!(session.directory(), crate::util::normalize_path(&path));
         let info = crate::git::worktree_info(std::path::Path::new(session.directory())).unwrap();
         assert_eq!(info.branch, "bebok/session-abc");
@@ -453,15 +465,26 @@ mod tests {
             .create_session(project.to_str().unwrap(), "code", None)
             .await
             .unwrap();
-        assert_eq!(store.list_sessions(project.to_str().unwrap()).await.len(), 2);
+        assert_eq!(
+            store.list_sessions(project.to_str().unwrap()).await.len(),
+            2
+        );
         let other = base.join("other");
         std::fs::create_dir_all(&other).unwrap();
-        assert!(store.list_sessions(other.to_str().unwrap()).await.is_empty());
+        assert!(
+            store
+                .list_sessions(other.to_str().unwrap())
+                .await
+                .is_empty()
+        );
 
         // Deleting the session never removes the worktree by itself.
         let meta = store.delete_session(session.id()).await.unwrap();
         assert_eq!(meta.directory, session.directory());
-        assert!(path.join(".git").exists(), "worktree survives session deletion");
+        assert!(
+            path.join(".git").exists(),
+            "worktree survives session deletion"
+        );
 
         let _ = crate::git::remove_worktree(&project, &path).await;
         let _ = std::fs::remove_dir_all(base);

@@ -147,16 +147,24 @@ mod tests {
         assert!(out.text.contains("clicked:hello"), "{}", out.text);
 
         let out = by_name("browser_eval")
-            .execute(ctx(), json!({ "js": "document.getElementById('out').textContent.length" }))
+            .execute(
+                ctx(),
+                json!({ "js": "document.getElementById('out').textContent.length" }),
+            )
             .await;
         assert_eq!(out.text.trim(), "13", "{}", out.text);
 
         let out = by_name("browser_eval")
-            .execute(ctx(), json!({ "js": "(() => { throw new Error('boom') })()" }))
+            .execute(
+                ctx(),
+                json!({ "js": "(() => { throw new Error('boom') })()" }),
+            )
             .await;
         assert!(out.text.contains("JavaScript threw"), "{}", out.text);
 
-        let out = by_name("browser_screenshot").execute(ctx(), json!({})).await;
+        let out = by_name("browser_screenshot")
+            .execute(ctx(), json!({}))
+            .await;
         let img = out.image.as_ref().expect("screenshot carries an image");
         assert_eq!(img.media_type, "image/png");
         assert!(img.data.len() > 100, "png payload too small");
@@ -165,7 +173,11 @@ mod tests {
         let out = by_name("browser_click")
             .execute(ctx(), json!({ "selector": "#does-not-exist" }))
             .await;
-        assert!(out.text.contains("no element matches selector"), "{}", out.text);
+        assert!(
+            out.text.contains("no element matches selector"),
+            "{}",
+            out.text
+        );
 
         assert!(driver.has_session(&session).await);
         assert!(driver.close(&session).await);

@@ -73,12 +73,8 @@ pub async fn remove_worktree(
     Path(id): Path<String>,
     Json(body): Json<RemoveWorktreeBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let removed = remove_worktree_in(
-        &bebok_core::config::global_config_path(),
-        &id,
-        &body.path,
-    )
-    .await?;
+    let removed =
+        remove_worktree_in(&bebok_core::config::global_config_path(), &id, &body.path).await?;
     Ok(Json(serde_json::json!({
         "removed": true,
         "path": removed.to_string_lossy(),
@@ -157,7 +153,10 @@ mod tests {
             "GET /projects/some-id/git HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
         )
         .await;
-        assert!(get.starts_with("HTTP/1.1 401") || get.starts_with("HTTP/1.1 403"), "{get}");
+        assert!(
+            get.starts_with("HTTP/1.1 401") || get.starts_with("HTTP/1.1 403"),
+            "{get}"
+        );
         let body = r#"{"path":"x"}"#;
         let post = raw(
             address,
@@ -218,7 +217,10 @@ mod tests {
                 .expect_err(&format!("must refuse {bad:?}"));
             assert_eq!(err.status(), StatusCode::BAD_REQUEST, "{bad:?}");
         }
-        assert!(other.exists(), "nothing outside the worktrees dir was touched");
+        assert!(
+            other.exists(),
+            "nothing outside the worktrees dir was touched"
+        );
 
         // Unknown project -> 404 before any path validation.
         let err = super::remove_worktree_in(&config, "nope", other.to_str().unwrap())

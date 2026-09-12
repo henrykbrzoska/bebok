@@ -197,10 +197,9 @@ pub fn parse_click(args: &Value) -> Result<ClickTarget, String> {
         (None, Some(_), None) | (None, None, Some(_)) => {
             Err("both 'x' and 'y' are required for a coordinate click".to_string())
         }
-        (None, None, None) => {
-            Err("missing target: pass a CSS 'selector' or viewport coordinates 'x' and 'y'"
-                .to_string())
-        }
+        (None, None, None) => Err(
+            "missing target: pass a CSS 'selector' or viewport coordinates 'x' and 'y'".to_string(),
+        ),
     }
 }
 
@@ -229,7 +228,10 @@ pub fn parse_get_text(args: &Value) -> Result<GetTextArgs, String> {
         .map(|v| v as usize)
         .unwrap_or(DEFAULT_TEXT_MAX_CHARS)
         .clamp(1, TEXT_MAX_CHARS_LIMIT);
-    Ok(GetTextArgs { selector, max_chars })
+    Ok(GetTextArgs {
+        selector,
+        max_chars,
+    })
 }
 
 pub fn parse_eval(args: &Value) -> Result<String, String> {
@@ -278,18 +280,40 @@ mod tests {
 
     #[test]
     fn open_rejects_bad_urls() {
-        assert!(validate_url("example.com").unwrap_err().contains("absolute URL"));
-        assert!(validate_url("javascript:alert(1)").unwrap_err().contains("unsupported URL scheme"));
-        assert!(validate_url("ftp://x").unwrap_err().contains("unsupported URL scheme"));
+        assert!(
+            validate_url("example.com")
+                .unwrap_err()
+                .contains("absolute URL")
+        );
+        assert!(
+            validate_url("javascript:alert(1)")
+                .unwrap_err()
+                .contains("unsupported URL scheme")
+        );
+        assert!(
+            validate_url("ftp://x")
+                .unwrap_err()
+                .contains("unsupported URL scheme")
+        );
         assert!(validate_url("http:/x").unwrap_err().contains("malformed"));
-        assert!(validate_url("https:///path").unwrap_err().contains("no host"));
-        assert!(validate_url("https://exa\nmple.com").unwrap_err().contains("control"));
+        assert!(
+            validate_url("https:///path")
+                .unwrap_err()
+                .contains("no host")
+        );
+        assert!(
+            validate_url("https://exa\nmple.com")
+                .unwrap_err()
+                .contains("control")
+        );
     }
 
     #[test]
     fn open_wait_is_defaulted_and_capped() {
         assert_eq!(
-            parse_open(&json!({ "url": "https://a.b" })).unwrap().wait_ms,
+            parse_open(&json!({ "url": "https://a.b" }))
+                .unwrap()
+                .wait_ms,
             DEFAULT_WAIT_MS
         );
         assert_eq!(
@@ -322,12 +346,26 @@ mod tests {
             parse_click(&json!({ "x": 10, "y": 20.5 })).unwrap(),
             ClickTarget::Point { x: 10.0, y: 20.5 }
         );
-        assert!(parse_click(&json!({})).unwrap_err().contains("missing target"));
-        assert!(parse_click(&json!({ "x": 1 })).unwrap_err().contains("both 'x' and 'y'"));
-        assert!(parse_click(&json!({ "selector": "a", "x": 1, "y": 2 }))
-            .unwrap_err()
-            .contains("not both"));
-        assert!(parse_click(&json!({ "x": -1, "y": 2 })).unwrap_err().contains("non-negative"));
+        assert!(
+            parse_click(&json!({}))
+                .unwrap_err()
+                .contains("missing target")
+        );
+        assert!(
+            parse_click(&json!({ "x": 1 }))
+                .unwrap_err()
+                .contains("both 'x' and 'y'")
+        );
+        assert!(
+            parse_click(&json!({ "selector": "a", "x": 1, "y": 2 }))
+                .unwrap_err()
+                .contains("not both")
+        );
+        assert!(
+            parse_click(&json!({ "x": -1, "y": 2 }))
+                .unwrap_err()
+                .contains("non-negative")
+        );
     }
 
     #[test]
@@ -361,12 +399,20 @@ mod tests {
         let b = parse_get_text(&json!({ "selector": "main", "max_chars": 10_000_000 })).unwrap();
         assert_eq!(b.selector.as_deref(), Some("main"));
         assert_eq!(b.max_chars, TEXT_MAX_CHARS_LIMIT);
-        assert_eq!(parse_get_text(&json!({ "max_chars": 0 })).unwrap().max_chars, 1);
+        assert_eq!(
+            parse_get_text(&json!({ "max_chars": 0 }))
+                .unwrap()
+                .max_chars,
+            1
+        );
     }
 
     #[test]
     fn eval_requires_js() {
-        assert_eq!(parse_eval(&json!({})).unwrap_err(), "missing required parameter 'js'");
+        assert_eq!(
+            parse_eval(&json!({})).unwrap_err(),
+            "missing required parameter 'js'"
+        );
         assert_eq!(parse_eval(&json!({ "js": "1+1" })).unwrap(), "1+1");
     }
 
