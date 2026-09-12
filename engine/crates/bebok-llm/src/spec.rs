@@ -79,6 +79,24 @@ impl ProviderSpec {
     pub fn has_key(&self) -> bool {
         resolve_api_key(self).is_some()
     }
+
+    /// Credential style of this provider (`bearer` / `x-api-key` / `none`).
+    pub fn auth(&self) -> ProviderAuth {
+        provider_auth(&self.name, self.kind)
+    }
+
+    /// False for keyless providers (Ollama and other local servers): no API key
+    /// is needed, so a GUI must not render the field and a missing key is not a
+    /// misconfiguration.
+    pub fn needs_api_key(&self) -> bool {
+        self.auth().needs_api_key()
+    }
+
+    /// True when this provider is usable as configured: either it needs no key,
+    /// or a key is resolvable.
+    pub fn is_configured(&self) -> bool {
+        !self.needs_api_key() || self.has_key()
+    }
 }
 
 fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
@@ -421,13 +439,16 @@ pub async fn list_models(spec: &ProviderSpec) -> Result<Vec<String>, LlmError> {
     let url = format!("{}/models", spec.models_url());
     let mut req = client.get(&url);
 
-    match spec.kind {
-        ProviderKind::Openai => {
+    // Keyless providers (Ollama) get no credential header at all, so a stray
+    // `OLLAMA_API_KEY` in the environment cannot make a local server 401.
+    match spec.auth() {
+        ProviderAuth::None => {}
+        ProviderAuth::Bearer => {
             if let Some(key) = resolve_api_key(spec) {
                 req = req.header("authorization", format!("Bearer {key}"));
             }
         }
-        ProviderKind::Anthropic => {
+        ProviderAuth::XApiKey => {
             if let Some(key) = resolve_api_key(spec) {
                 req = req
                     .header("x-api-key", key)
@@ -636,5 +657,68 @@ mod catalog_tests {
         assert_eq!(ui.auth, ProviderAuth::Bearer);
         assert_eq!(ui.env_var, "MY_LLM_API_KEY");
         assert!(ui.extra_fields.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    /// Ollama is keyless: the catalog says so, so the settings UI can drop the
+    /// API-key field entirely instead of showing an input nothing reads.
+    #[test]
+    fn catalog_reports_auth_none_for_ollama() {
+        let ollama = provider_catalog()
+            .into_iter()
+            .find(|p| p.id == "ollama")
+            .expect("ollama in catalog");
+        assert_eq!(ollama.auth, ProviderAuth::None);
+        assert!(!ollama.auth.needs_api_key());
+
+        let v = serde_json::to_value(&ollama).unwrap();
+        assert_eq!(v["auth"], "none");
+        assert_eq!(v["baseUrlDefault"], "http://localhost:11434/v1");
+    }
+
+    /// Every other built-in still declares a credential style.
+    #[test]
+    fn every_other_builtin_needs_a_key() {
+        for entry in provider_catalog() {
+            if entry.id == "ollama" {
+                continue;
+            }
+            assert!(
+                entry.auth.needs_api_key(),
+                "{} unexpectedly keyless",
+                entry.id
+            );
+            assert_ne!(entry.auth, ProviderAuth::None);
+        }
+    }
+
+    #[test]
+    fn keyless_provider_is_configured_without_a_key() {
+        let specs = builtin_provider_specs();
+        let ollama = find_provider_spec(&specs, "ollama").unwrap();
+        assert_eq!(ollama.auth(), ProviderAuth::None);
+        assert!(!ollama.needs_api_key());
+        assert!(ollama.is_configured(), "keyless provider is ready as-is");
+
+        let openai = find_provider_spec(&specs, "openai").unwrap();
+        assert!(openai.needs_api_key());
+        assert_eq!(openai.is_configured(), openai.has_key());
+    }
+
+    #[test]
+    fn auth_serde_round_trips() {
+        for auth in [
+            ProviderAuth::Bearer,
+            ProviderAuth::XApiKey,
+            ProviderAuth::None,
+        ] {
+            let s = serde_json::to_string(&auth).unwrap();
+            assert_eq!(s, format!("\"{}\"", auth.as_str()));
+            assert_eq!(serde_json::from_str::<ProviderAuth>(&s).unwrap(), auth);
+        }
     }
 }
