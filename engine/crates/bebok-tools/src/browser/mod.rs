@@ -248,8 +248,17 @@ mod tests {
         assert!(out.text.contains("(no console output)"), "{}", out.text);
 
         // A refused localhost connection is explained, not dumped as net::ERR_*.
+        // Port 1 is on Chrome's unsafe-port list (ERR_UNSAFE_PORT, no connection
+        // attempt), so take an ephemeral port the OS just handed out and released.
+        let closed_port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
         let out = by_name("browser_open")
-            .execute(ctx(), json!({ "url": "http://127.0.0.1:1/", "wait_ms": 0 }))
+            .execute(
+                ctx(),
+                json!({ "url": format!("http://127.0.0.1:{closed_port}/"), "wait_ms": 0 }),
+            )
             .await;
         assert!(
             out.text.contains("Start the dev server first"),

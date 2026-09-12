@@ -73,7 +73,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bebok-cors-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).ok();
         let state = AppState {
-            store: bebok_core::InstanceStore::new(),
+            store: bebok_core::InstanceStore::with_data_dir(dir.join("data")),
             #[cfg(not(target_os = "android"))]
             ptys: Arc::new(bebok_pty::PtyManager::new()),
             debug: Arc::new(bebok_core::DebugLog::new(dir.join("debug.log"))),

@@ -388,10 +388,16 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
+        let status = res.status();
         let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
             .await
             .unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         let sid = v["sessionID"].as_str().unwrap().to_string();
 
