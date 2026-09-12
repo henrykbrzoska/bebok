@@ -9,12 +9,15 @@ use axum::routing::{get, patch, post};
 
 use crate::state::AppState;
 
+pub mod agents;
+pub mod changes;
 pub mod common;
 pub mod config;
 pub mod debug;
 pub mod events;
 pub mod fs;
 pub mod fs_browse;
+pub mod git;
 pub mod mcp;
 pub mod meta;
 pub mod projects;
@@ -44,8 +47,12 @@ pub fn build_api_router() -> Router<AppState> {
             "/session/{id}/task/{taskID}/abort",
             post(session::abort_task),
         )
+        .route("/session/{id}/agents", get(agents::list_agents))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
+        .route("/session/{id}/changes", get(changes::list_changes))
+        .route("/session/{id}/changes/diff", get(changes::change_diff))
+        .route("/session/{id}/changes/revert", post(changes::revert_change))
         .route("/session/{id}/truncate", post(session::truncate_session))
         .route(
             "/session/{id}/permission/{requestID}",
@@ -70,6 +77,11 @@ pub fn build_api_router() -> Router<AppState> {
             patch(projects::patch_project).delete(projects::delete_project),
         )
         .route("/projects/{id}/open", post(projects::open_project))
+        .route("/projects/{id}/git", get(git::project_git))
+        .route(
+            "/projects/{id}/git/worktree/remove",
+            post(git::remove_worktree),
+        )
         .route("/plugins", get(meta::list_plugins))
         .route("/event", get(events::event_stream))
         .route(

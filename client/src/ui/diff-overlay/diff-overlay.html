@@ -1,0 +1,61 @@
+<div
+  class="backdrop"
+  role="dialog"
+  aria-modal="true"
+  [attr.aria-label]="t('changes.diffTitle', { path: path() })"
+  (click)="close()"
+>
+  <div class="card" (click)="$event.stopPropagation()">
+    <header class="head">
+      <div class="title">
+        <span class="path" [title]="path()">{{ path() }}</span>
+        @if (baseline(); as kind) {
+          <span class="baseline" [class.git]="kind === 'git'">
+            {{ kind === 'git' ? t('changes.baselineGit') : t('changes.baselineSnapshot') }}
+          </span>
+        }
+      </div>
+      <div class="actions">
+        <button
+          type="button"
+          class="action"
+          (click)="openInExplorer()"
+          [disabled]="!directory()"
+          data-testid="open-explorer"
+        >
+          {{ t('changes.openInExplorer') }}
+        </button>
+        <button
+          type="button"
+          class="action danger"
+          (click)="revert()"
+          [disabled]="reverting() || loading()"
+          data-testid="revert-file"
+        >
+          {{ reverting() ? t('changes.reverting') : t('changes.revert') }}
+        </button>
+        <button
+          type="button"
+          class="close"
+          (click)="close()"
+          [title]="t('changes.close')"
+          [attr.aria-label]="t('changes.close')"
+        >
+          ✕
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      @if (error()) {
+        <div class="error">{{ error() }}</div>
+      } @else if (loading()) {
+        <div class="empty">{{ t('changes.loadingDiff') }}</div>
+      } @else if (diff() === '') {
+        <div class="empty">{{ t('changes.noDiff') }}</div>
+      } @else if (diff(); as text) {
+        <app-diff-view [text]="text" [fileLabel]="path()" />
+      }
+    </div>
+  </div>
+</div>

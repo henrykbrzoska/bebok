@@ -718,12 +718,13 @@ async fn run_member(
     let bus = store.bus();
 
     let child_info = parent
-        .register_child_task(
+        .register_child_task_with_model(
             &task_id,
             &description,
             &child_session_id,
             &name,
             agent_name,
+            Some(&model),
             abort.clone(),
         )
         .await;
@@ -770,6 +771,10 @@ async fn run_member(
             }
         }
     };
+
+    // Persist the outcome on the child (F6-12: `GET /session/{id}/agents`
+    // reads it back once the member is no longer in the live map).
+    child.set_task_status(&status, error_msg.as_deref()).await;
 
     parent.unregister_child_task(&task_id).await;
     bus.publish(

@@ -13,6 +13,8 @@ import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
+import { ExplorerSelectionStore } from '../../ui/right-drawer/panels/explorer-selection.store';
+import { ShellStore } from '../../ui/shell/shell.store';
 import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
 interface FsNode {
@@ -40,6 +42,8 @@ export class ExplorerView implements OnInit {
   private readonly engine = inject(EngineClient);
   private readonly route = inject(ActivatedRoute);
   private readonly i18n = inject(I18nService);
+  private readonly selection = inject(ExplorerSelectionStore);
+  private readonly shell = inject(ShellStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -200,6 +204,27 @@ export class ExplorerView implements OnInit {
     }
     event.preventDefault();
     this.htmlPreview.set(this.htmlPreview() === null ? this.fileContent() : null);
+  }
+
+  /**
+   * F6-11: "Open in preview" - point the right-drawer Preview panel (F6-10)
+   * at the currently selected file and open it (the drawer itself only
+   * renders on the Chat screen; from here this just arms the state, same as
+   * every other `RightDrawerPanels` toggle - see `preview-panel.ts`).
+   */
+  openInPreview(): void {
+    const dir = this.directory();
+    const path = this.selectedPath();
+    if (!dir || !path) {
+      return;
+    }
+    this.selection.openInPreview(dir, path);
+    if (!this.shell.rightDrawerPanels().preview) {
+      this.shell.toggleRightDrawerPanel('preview');
+    }
+    if (!this.shell.rightDrawerOpen()) {
+      this.shell.toggleRightDrawer();
+    }
   }
 
   startEdit(): void {

@@ -98,7 +98,12 @@
               />
               <span class="session-title">{{ sessionTitle(session) }}</span>
             </span>
-            <span class="session-meta">{{ sessionMeta(session) }}</span>
+            <span class="session-meta">
+              {{ sessionMeta(session) }}
+              @if (worktreeBranch(session); as branch) {
+                <app-branch-badge [branch]="branch" />
+              }
+            </span>
           </button>
         }
       }
@@ -160,3 +165,7 @@
     </nav>
   }
 </aside>
+
+<!-- WP-GIT: "New session" dialog, mounted once here (the sidebar is always
+     present in the shell) and opened from "+ New" and the Start screen. -->
+<app-new-session-dialog />

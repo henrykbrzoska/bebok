@@ -80,6 +80,10 @@ describe('ShellStore', () => {
       session: true,
       explorer: true,
       terminal: false,
+      agents: false,
+      changes: false,
+      preview: false,
+      browser: false,
     });
     store.toggleRightDrawerPanel('terminal');
     expect(store.rightDrawerPanels().terminal).toBeTrue();

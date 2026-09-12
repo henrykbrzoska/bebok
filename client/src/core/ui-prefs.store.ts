@@ -9,6 +9,9 @@
  * - `sidebarExpanded`, `rightDrawerOpen`, `rightDrawerPanels`,
  *   `rightDrawerWidth` and `density` are the WP-SHELL redesign state
  *   (F1-3 / F1-12). `density` replaces the old `topbarCompact` flag.
+ * - `expandToolCallsByDefault` is the chat transcript preference (F6-1):
+ *   when on, every tool call (and every grouped run of tool calls) starts
+ *   expanded; when off, only the first tool call of a turn does.
  */
 
 import { Injectable, signal } from '@angular/core';
@@ -20,6 +23,7 @@ const KEY_RIGHT_DRAWER_OPEN = 'bebok.ui.shell.rightDrawerOpen';
 const KEY_RIGHT_DRAWER_PANELS = 'bebok.ui.shell.rightDrawerPanels';
 const KEY_RIGHT_DRAWER_WIDTH = 'bebok.ui.shell.rightDrawerWidth';
 const KEY_DENSITY = 'bebok.ui.shell.density';
+const KEY_EXPAND_TOOL_CALLS = 'bebok.ui.chat.expandToolCalls';
 
 export const DEFAULT_SIDEBAR_WIDTH = 230;
 export const MIN_SIDEBAR_WIDTH = 150;
@@ -32,14 +36,30 @@ export const MAX_DRAWER_WIDTH = 560;
 
 export type Density = 'comfortable' | 'compact';
 
-/** The three stacked sections of the right drawer - independent, not tabs. */
+/** The stacked sections of the right drawer - independent, not tabs. */
 export interface RightDrawerPanels {
   session: boolean;
   explorer: boolean;
   terminal: boolean;
+  /** F6-13: live sub-agent list (Agents panel). */
+  agents: boolean;
+  /** WP-CHANGES (F6-9): engine-tracked file changes. */
+  changes: boolean;
+  /** F6-10: markdown/table/link file preview, closed by default. */
+  preview: boolean;
+  /** WP-BROWSER (F6-19): headless-browser screenshot + URL. */
+  browser: boolean;
 }
 
-const DEFAULT_PANELS: RightDrawerPanels = { session: true, explorer: true, terminal: false };
+const DEFAULT_PANELS: RightDrawerPanels = {
+  session: true,
+  explorer: true,
+  terminal: false,
+  agents: false,
+  changes: false,
+  preview: false,
+  browser: false,
+};
 
 function readBool(key: string, fallback: boolean): boolean {
   try {
@@ -102,6 +122,12 @@ function readPanels(): RightDrawerPanels {
         typeof parsed['explorer'] === 'boolean' ? parsed['explorer'] : DEFAULT_PANELS.explorer,
       terminal:
         typeof parsed['terminal'] === 'boolean' ? parsed['terminal'] : DEFAULT_PANELS.terminal,
+      agents: typeof parsed['agents'] === 'boolean' ? parsed['agents'] : DEFAULT_PANELS.agents,
+      changes:
+        typeof parsed['changes'] === 'boolean' ? parsed['changes'] : DEFAULT_PANELS.changes,
+      preview: typeof parsed['preview'] === 'boolean' ? parsed['preview'] : DEFAULT_PANELS.preview,
+      browser:
+        typeof parsed['browser'] === 'boolean' ? parsed['browser'] : DEFAULT_PANELS.browser,
     };
   } catch {
     return { ...DEFAULT_PANELS };
@@ -127,6 +153,8 @@ export class UiPrefsStore {
   );
   /** Shell: spacing density for lists/settings. */
   readonly density = signal<Density>(readDensity());
+  /** Chat: tool calls (and tool-call groups) start expanded (F6-1). */
+  readonly expandToolCallsByDefault = signal(readBool(KEY_EXPAND_TOOL_CALLS, false));
 
   toggleSidebar(): void {
     this.setSidebarVisible(!this.sidebarVisible());
@@ -181,5 +209,14 @@ export class UiPrefsStore {
   setDensity(density: Density): void {
     this.density.set(density);
     writeString(KEY_DENSITY, density);
+  }
+
+  toggleExpandToolCallsByDefault(): void {
+    this.setExpandToolCallsByDefault(!this.expandToolCallsByDefault());
+  }
+
+  setExpandToolCallsByDefault(expand: boolean): void {
+    this.expandToolCallsByDefault.set(expand);
+    writeString(KEY_EXPAND_TOOL_CALLS, String(expand));
   }
 }

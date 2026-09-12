@@ -25,6 +25,12 @@ pub struct ChildTask {
     pub child_session_id: String,
     pub name: String,
     pub agent: String,
+    /// Effective model the child runs on (F6-12; `None` for legacy callers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Unix ms when the child turn was registered (F6-12).
+    #[serde(rename = "startedAt")]
+    pub started_at: i64,
 }
 
 struct PendingPermissionRequest {
@@ -241,6 +247,43 @@ impl SessionState {
         }
     }
 
+    /// Record the context size of the latest LLM call (tokens the provider
+    /// read as input, cache hits included) together with the model that
+    /// produced it, and persist metadata. Overwrites: this is a live gauge,
+    /// not a running total (see `Session::context_used`).
+    pub async fn set_context_used(&self, tokens: u64, model: &str) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            meta.context_used = Some(tokens);
+            meta.context_model = Some(model.to_string());
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// Record the outcome of this session's delegated sub-turn (F6-12).
+    ///
+    /// Called by the `task`/`fleet` tools on the *child* session when its
+    /// turn ends, with the same `status` string that goes out in the
+    /// `task.ended` SSE event (`completed` | `aborted` | `error`). Persisted
+    /// to the session metadata so `GET /session/{parent}/agents` can report
+    /// an honest `done` / `failed` / `aborted` after the fact instead of
+    /// guessing from the transcript.
+    pub async fn set_task_status(&self, status: &str, error: Option<&str>) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            meta.task_status = Some(status.to_string());
+            meta.task_error = error.map(str::to_string);
+            meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
     /// Update `updated_at` and persist metadata.
     pub async fn touch(&self) {
         let session = {
@@ -353,12 +396,40 @@ impl SessionState {
         agent: &str,
         token: CancellationToken,
     ) -> ChildTask {
+        self.register_child_task_with_model(
+            task_id,
+            description,
+            child_session_id,
+            name,
+            agent,
+            None,
+            token,
+        )
+        .await
+    }
+
+    /// Same as [`register_child_task`](Self::register_child_task) but records
+    /// the child's effective model so `GET /session/{id}/agents` can show it
+    /// while the child is still running (F6-12).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_child_task_with_model(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        model: Option<&str>,
+        token: CancellationToken,
+    ) -> ChildTask {
         let info = ChildTask {
             task_id: task_id.to_string(),
             description: description.to_string(),
             child_session_id: child_session_id.to_string(),
             name: name.to_string(),
             agent: agent.to_string(),
+            model: model.map(str::to_string),
+            started_at: crate::util::now_ms(),
         };
         self.child_tasks
             .lock()

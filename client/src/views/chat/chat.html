@@ -33,6 +33,31 @@
       </select>
     </label>
 
+    @if (contextLabel()) {
+      <span
+        class="tb-context"
+        [class.warning]="contextLevel() === 'warning'"
+        [class.danger]="contextLevel() === 'danger'"
+        [title]="t('chat.contextTitle')"
+        [attr.aria-label]="t('chat.context') + ': ' + contextLabel()"
+        data-testid="context-meter"
+      >
+        <span class="tb-context-bar" aria-hidden="true">
+          <span class="tb-context-fill" [style.width.%]="contextFill()"></span>
+        </span>
+        <span class="tb-context-value">{{ contextLabel() }}</span>
+      </span>
+    }
+
+    <button
+      class="tb-compact"
+      type="button"
+      data-testid="compact-now"
+      (click)="compactNow()"
+      [disabled]="!canCompact()"
+      [title]="canCompact() ? t('chat.compactTitle') : t('chat.compactIdle')"
+    >{{ compacting() ? t('chat.compacting') : t('chat.compact') }}</button>
+
     <button
       class="tb-abort"
       type="button"
@@ -45,7 +70,7 @@
   <div class="chat-main">
     <div class="chat-col">
       <div class="scroll-wrap">
-        <div #scroll class="scroll" (scroll)="onScroll()">
+        <div #scroll cdkScrollable class="scroll" (scroll)="onScroll()">
           <div class="thread">
           @if (loading()) {
             <div class="placeholder">{{ t('chat.loading') }}</div>
@@ -56,15 +81,31 @@
               <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
             </div>
           } @else {
+            @if (hiddenCount() > 0) {
+              <div class="load-earlier">
+                <button type="button" class="load-earlier-btn" (click)="loadEarlier()">
+                  {{ t('chat.loadEarlier') }}
+                </button>
+                <span class="load-earlier-hint">{{ t('chat.earlierHidden', { n: hiddenCount() }) }}</span>
+              </div>
+            }
             <div class="messages">
-              @for (message of filteredMessages(); track message.id) {
-                <app-message-row
-                  [rowId]="'msg-'+message.id"
-                  [message]="message"
-                  [taskLinks]="taskLinks()"
-                  [rollbackEnabled]="true"
-                  (rollback)="rollbackTo($event)"
-                />
+              @for (row of transcriptRows(); track row.kind === 'run' ? row.key : row.message.id) {
+                @if (row.kind === 'single') {
+                  <app-message-row
+                    [rowId]="'msg-'+row.message.id"
+                    [message]="row.message"
+                    [taskLinks]="taskLinks()"
+                    [rollbackEnabled]="true"
+                    (rollback)="rollbackTo($event)"
+                  />
+                } @else {
+                  <app-tool-run-row
+                    [rowId]="'msg-'+row.key"
+                    [messages]="row.messages"
+                    [taskLinks]="taskLinks()"
+                  />
+                }
               }
             </div>
             @for (p of pending(); track p.id) {
@@ -130,13 +171,6 @@
           />
           </div>
         </div>
-
-        @if (scrollArea()) {
-          <app-scroll-minimap
-            [messages]="filteredMessages()"
-            [scrollTarget]="scrollArea()!"
-          />
-        }
       </div>
 
       @if (showJump()) {

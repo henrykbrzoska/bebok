@@ -10,7 +10,8 @@ import {
   ToolStateCompleted,
   ToolStateError,
 } from '../../../core/engine.dtos';
-import { prettyJson, summarizeInput } from '../../../core/format';
+import { formatBytes, prettyJson, toolCallPreview } from '../../../core/format';
+import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 
 /**
@@ -18,9 +19,18 @@ import { I18nService } from '../../../i18n/i18n.service';
  *
  * Bordered card whose header is one clickable row: status dot (success /
  * accent / danger by outcome) + monospace tool name + truncated monospace
- * args + chevron. Expanding reveals the arguments and the result body on a
- * `--bg` panel. The first tool call of a turn starts expanded, every later one
- * collapsed - see `toolIndex`.
+ * args + state label + chevron. Expanding reveals the arguments and the
+ * result body on a `--bg` panel.
+ *
+ * F6-1b: every tool call - single or grouped, first in the turn or not -
+ * starts collapsed. The only way a call starts open is the "Expand tool
+ * calls by default" preference (`UiPrefsStore.expandToolCallsByDefault`),
+ * which opens every call at once. A collapsed call is a single ~28px line:
+ * status dot + mono tool name + truncated key-argument preview + state label
+ * (RUNNING/COMPLETED/FAILED, uppercased by CSS) + chevron. No duration is
+ * shown: the engine's `ToolState` carries `started_at` only while running and
+ * no end timestamp once completed, so there is nothing truthful to display;
+ * a completed call's output size is appended to the preview instead.
  */
 @Component({
   selector: 'app-tool-part',
@@ -30,16 +40,18 @@ import { I18nService } from '../../../i18n/i18n.service';
       <button
         type="button"
         class="tool-head"
+        [class.collapsed]="!detailsOpen()"
         (click)="detailsOpen.set(!detailsOpen())"
         [attr.aria-expanded]="detailsOpen()"
+        [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
       >
         <span class="dot state-{{ kind() }}" aria-hidden="true"></span>
         <span class="tool-name">{{ name() }}</span>
         @if (isTask()) {
           <span class="badge delegation">{{ t('tool.delegation') }}</span>
         }
-        <span class="tool-args">{{ summary() }}</span>
-        <span class="state-label state-{{ kind() }}">{{ kind() }}</span>
+        <span class="tool-args">{{ summary() }}{{ sizeSuffix() }}</span>
+        <span class="state-label state-{{ kind() }}">{{ stateLabel() }}</span>
         <span class="chevron" aria-hidden="true">{{ detailsOpen() ? '▾' : '▸' }}</span>
       </button>
 
@@ -119,6 +131,12 @@ import { I18nService } from '../../../i18n/i18n.service';
     .tool-head:hover {
       background: var(--surface-2);
     }
+    /* F6-1: a collapsed call is one dense ~28px line. */
+    .tool-head.collapsed {
+      padding-top: 5px;
+      padding-bottom: 5px;
+      min-height: 28px;
+    }
 
     .dot {
       width: 7px;
@@ -132,9 +150,14 @@ import { I18nService } from '../../../i18n/i18n.service';
     }
     .dot.state-running {
       background: var(--accent);
+      animation: tool-dot-pulse 1.4s ease-in-out infinite;
     }
     .dot.state-error {
       background: var(--danger);
+    }
+    @keyframes tool-dot-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
     }
 
     .tool-name {
@@ -253,18 +276,26 @@ import { I18nService } from '../../../i18n/i18n.service';
 })
 export class ToolPartComponent {
   private readonly i18n = inject(I18nService);
+  private readonly prefs = inject(UiPrefsStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
   /**
-   * Ordinal of this tool call within its message. `0` (the first call of the
-   * turn) opens expanded, every later one collapsed - the handoff's default.
+   * Ordinal of this tool call within its message. No longer affects the
+   * default open state (F6-1b: every call starts collapsed) - kept for
+   * numbering/debugging and to stay a stable input for callers.
    */
   readonly toolIndex = input(-1);
   /** Task name/ID → childSessionID map, passed down from the chat view. */
   readonly taskLinks = input<Map<string, string>>(new Map());
 
-  readonly detailsOpen = linkedSignal(() => this.toolIndex() <= 0);
+  /**
+   * Default open state (F6-1b): every call starts collapsed unless the
+   * "expand tool calls by default" preference is on, in which case every
+   * call starts expanded. A user toggle overrides the default until the
+   * preference changes.
+   */
+  readonly detailsOpen = linkedSignal(() => this.prefs.expandToolCallsByDefault());
 
   private readonly toolPart = computed(() => this.part() as ToolPart);
   private readonly state = computed<ToolState>(() => this.toolPart().state);
@@ -313,7 +344,14 @@ export class ToolPartComponent {
   });
 
   readonly inputText = computed(() => prettyJson(this.state().input));
-  readonly summary = computed(() => summarizeInput(this.state().input));
+  readonly summary = computed(() => toolCallPreview(this.name(), this.state().input));
+  /** RUNNING/COMPLETED/FAILED (uppercased by CSS) - `error` reads as "failed". */
+  readonly stateLabel = computed(() => (this.kind() === 'error' ? 'failed' : this.kind()));
+  /** Appended to the collapsed preview once a call has completed, e.g. " · 1.2 kB". */
+  readonly sizeSuffix = computed(() => {
+    const bytes = this.outputText().length;
+    return this.kind() === 'completed' && bytes > 0 ? ` · ${formatBytes(bytes)}` : '';
+  });
 
   private readonly completed = computed<ToolStateCompleted | null>(() =>
     this.state().state === 'completed' ? (this.state() as ToolStateCompleted) : null,

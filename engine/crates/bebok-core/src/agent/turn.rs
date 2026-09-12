@@ -271,6 +271,15 @@ impl TurnRunner {
                                 cache_write,
                             )
                             .await;
+                        // Context meter (F6-3): the provider re-sends the whole
+                        // transcript on every call, so the latest call's input
+                        // size *is* the live context usage. Fall back to the
+                        // chars/4 estimate when the provider reported nothing.
+                        let context_used = crate::context::context_used_from_usage(&usage)
+                            .unwrap_or_else(|| {
+                                crate::context::estimate_chat(&req.messages, &req.system) as u64
+                            });
+                        state.set_context_used(context_used, &model).await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                         bus.publish(
                             Event::new("debug.log", state.directory(), &state.id().to_string())
@@ -710,9 +719,26 @@ pub async fn run_turn(
     abort: CancellationToken,
     model: &str,
 ) -> Result<()> {
-    TurnRunner::new(state, agent, tools, provider, permission, bus, abort, model)
-        .run()
-        .await
+    let session_id = state.id().to_string();
+    let result = TurnRunner::new(
+        state,
+        agent,
+        tools,
+        provider,
+        permission,
+        bus,
+        abort.clone(),
+        model,
+    )
+    .run()
+    .await;
+    // WP-BROWSER: an aborted turn must not leave the session's headless
+    // browser behind (a finished turn keeps it, so the next prompt can
+    // continue on the same page; the driver's idle reaper covers the rest).
+    if abort.is_cancelled() {
+        bebok_tools::browser::close_session(&session_id).await;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -926,6 +952,101 @@ mod parallel_tests {
                 group.into_iter().map(Ok).collect::<Vec<_>>(),
             )))
         }
+    }
+
+    /// F6-3: the last call's provider usage (input + cache buckets) lands in
+    /// `Session::context_used`, tagged with the model, and the context window
+    /// resolves from the catalog for that model.
+    #[tokio::test]
+    async fn turn_records_last_call_context_used() {
+        let base = std::env::temp_dir().join(format!("bebok-ctx-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.append_user_message("hello").await.unwrap();
+        assert_eq!(session.meta_snapshot().await.context_used, None);
+
+        let provider: Arc<dyn Provider> = Arc::new(ScriptProvider {
+            calls: AtomicUsize::new(0),
+            script: vec![vec![
+                StreamEvent::Text("hi".to_string()),
+                StreamEvent::Done(Usage {
+                    input_tokens: 1_200,
+                    output_tokens: 10,
+                    cost: None,
+                    cache_read_input_tokens: Some(40_000),
+                    cache_creation_input_tokens: Some(800),
+                }),
+            ]],
+        });
+        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        session.try_begin_turn();
+        run_turn(
+            session.clone(),
+            Agent::code(),
+            Arc::new(registry()),
+            provider,
+            permission,
+            store.bus(),
+            CancellationToken::new(),
+            "openai/gpt-4.1",
+        )
+        .await
+        .unwrap();
+
+        let meta = session.meta_snapshot().await;
+        assert_eq!(meta.context_used, Some(42_000));
+        assert_eq!(meta.context_model.as_deref(), Some("openai/gpt-4.1"));
+        assert_eq!(
+            crate::context::context_window_for(meta.context_model.as_deref()),
+            1_048_576
+        );
+        // Cumulative usage is untouched by the gauge.
+        assert_eq!(meta.usage.input_tokens, 1_200);
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
+    /// A provider that omits usage entirely still yields a (estimated) gauge.
+    #[tokio::test]
+    async fn turn_estimates_context_when_provider_omits_usage() {
+        let base = std::env::temp_dir().join(format!("bebok-ctx-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.append_user_message("hello").await.unwrap();
+        let provider: Arc<dyn Provider> = Arc::new(ScriptProvider {
+            calls: AtomicUsize::new(0),
+            script: vec![vec![
+                StreamEvent::Text("hi".to_string()),
+                StreamEvent::Done(Usage::default()),
+            ]],
+        });
+        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        session.try_begin_turn();
+        run_turn(
+            session.clone(),
+            Agent::code(),
+            Arc::new(registry()),
+            provider,
+            permission,
+            store.bus(),
+            CancellationToken::new(),
+            "mock/model",
+        )
+        .await
+        .unwrap();
+        let meta = session.meta_snapshot().await;
+        // System prompt + "hello" is never empty: the estimate is positive.
+        assert!(meta.context_used.unwrap_or(0) > 0);
+        let _ = tokio::fs::remove_dir_all(&base).await;
     }
 
     fn tool_call(id: &str, name: &str, path: &str) -> StreamEvent {

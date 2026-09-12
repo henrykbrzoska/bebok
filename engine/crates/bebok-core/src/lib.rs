@@ -2,11 +2,13 @@
 //! event bus, plugin host and the per-directory instance store.
 
 pub mod agent;
+pub mod change_tracking;
 pub mod config;
 pub mod context;
 pub mod debug;
 pub mod error;
 pub mod event;
+pub mod git;
 pub mod llm_trace;
 pub mod permission;
 pub mod plugin;

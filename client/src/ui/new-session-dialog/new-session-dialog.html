@@ -1,0 +1,105 @@
+@if (open()) {
+  <div class="backdrop" role="dialog" aria-modal="true" [attr.aria-label]="t('newSession.title')" (click)="close()">
+    <div class="card" (click)="$event.stopPropagation()">
+      <header class="head">
+        <h2><img class="dialog-logo" src="/logo.svg" alt="" aria-hidden="true" />{{ t('newSession.title') }}</h2>
+        <button type="button" class="close" [title]="t('newSession.cancel')" [disabled]="creating()" (click)="close()">✕</button>
+      </header>
+
+      <form class="body" (submit)="$event.preventDefault(); create()">
+        <div class="field">
+          <span class="field-label">{{ t('newSession.directory') }}</span>
+          <span class="directory" [title]="directory() ?? ''">{{ directory() }}</span>
+        </div>
+
+        <div class="two-col">
+          <label class="field">
+            <span class="field-label">{{ t('newSession.agent') }}</span>
+            <select class="control" [ngModel]="selectedAgent()" (ngModelChange)="selectedAgent.set($event)" name="agent" [disabled]="creating()">
+              @for (agent of agents(); track agent.name) {
+                <option [value]="agent.name">{{ agentLabel(agent) }}</option>
+              }
+              @if (agents().length === 0) {
+                <option value="code">code</option>
+              }
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field-label">{{ t('newSession.model') }}</span>
+            <select class="control" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)" name="model" [disabled]="creating()">
+              <option value="">{{ t('newSession.modelDefault') }}</option>
+              @for (model of models(); track model) {
+                <option [value]="model">{{ model }}</option>
+              }
+            </select>
+          </label>
+        </div>
+
+        <label class="check-row" [class.disabled]="!worktreeAvailable()">
+          <input
+            type="checkbox"
+            name="worktree"
+            [ngModel]="useWorktree()"
+            (ngModelChange)="useWorktree.set($event)"
+            [disabled]="!worktreeAvailable() || creating()"
+          />
+          <span class="check-text">
+            <span class="check-label">{{ t('newSession.worktree') }}</span>
+            <span class="check-hint">{{ worktreeHint() }}</span>
+          </span>
+        </label>
+
+        @if (useWorktree()) {
+          <div class="two-col worktree-fields">
+            <label class="field">
+              <span class="field-label">{{ t('newSession.branch') }}</span>
+              <input
+                type="text"
+                class="control mono"
+                name="branch"
+                [ngModel]="branch()"
+                (ngModelChange)="branch.set($event)"
+                [class.invalid]="!branchValid()"
+                spellcheck="false"
+                autocomplete="off"
+                [disabled]="creating()"
+              />
+            </label>
+            <label class="field">
+              <span class="field-label">{{ t('newSession.baseBranch') }}</span>
+              <input
+                type="text"
+                class="control mono"
+                name="base"
+                [ngModel]="base()"
+                (ngModelChange)="base.set($event)"
+                [placeholder]="git()?.branch ?? 'HEAD'"
+                spellcheck="false"
+                autocomplete="off"
+                [disabled]="creating()"
+              />
+            </label>
+          </div>
+          @if (!branchValid()) {
+            <p class="hint invalid-hint">{{ t('newSession.branchInvalid') }}</p>
+          }
+          @if (git()?.dirty_count) {
+            <p class="hint">{{ t('newSession.dirty', { count: git()?.dirty_count }) }}</p>
+          }
+        }
+
+        @if (error()) {
+          <p class="error">{{ error() }}</p>
+        }
+      </form>
+
+      <footer class="foot">
+        <button type="button" class="secondary" [disabled]="creating()" (click)="close()">{{ t('newSession.cancel') }}</button>
+        <button type="button" class="primary" [disabled]="!canCreate()" (click)="create()">
+          {{ creating() ? t('newSession.creating') : t('newSession.create') }}
+        </button>
+      </footer>
+    </div>
+  </div>
+}

@@ -255,7 +255,11 @@ impl PermissionEngine {
                 pattern,
             };
         }
-        let verdict = if read_only && tool != "fetch" {
+        // `fetch` and the `browser_*` family (WP-BROWSER / F6-18) are `Ask`
+        // even when a call is read-only: reading a URL or a rendered page can
+        // expose local services. Projects relax this with explicit rules
+        // (e.g. `"browser_*": "allow"`).
+        let verdict = if read_only && tool != "fetch" && !tool.starts_with("browser_") {
             Verdict::Allow
         } else {
             Verdict::Ask
@@ -432,6 +436,46 @@ mod tests {
             );
             assert_eq!(eval.verdict, Verdict::Ask, "{method}");
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// WP-BROWSER (F6-18): every `browser_*` tool is `Ask` in a fresh config,
+    /// whether the call is classified read-only (screenshot, get_text) or not.
+    #[test]
+    fn browser_tools_default_to_ask_even_when_read_only() {
+        let dir = tmp_dir("browser-default");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        for tool in bebok_tools::browser::TOOL_NAMES {
+            for read_only in [true, false] {
+                let eval = engine.evaluate(
+                    None,
+                    tool,
+                    &serde_json::json!({ "url": "http://127.0.0.1:8787/" }),
+                    read_only,
+                );
+                assert_eq!(eval.verdict, Verdict::Ask, "{tool} read_only={read_only}");
+            }
+        }
+        // The read-only default for everything else is untouched.
+        let eval = engine.evaluate(None, "read_file", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Allow);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The config-only override: a `browser_*` glob rule beats the default.
+    #[test]
+    fn browser_glob_rule_can_allow_the_family() {
+        let dir = tmp_dir("browser-rule");
+        let project_cfg = dir.join(".bebok").join("config.json");
+        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project_cfg,
+            r#"{ "permission": { "rules": [ { "pattern": "browser_*", "action": "allow" } ] } }"#,
+        )
+        .unwrap();
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Allow);
         let _ = std::fs::remove_dir_all(dir);
     }
 

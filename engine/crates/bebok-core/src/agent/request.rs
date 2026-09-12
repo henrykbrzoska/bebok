@@ -74,7 +74,20 @@ impl<'a> RequestBuilder<'a> {
                     let content = msg.text_content();
                     let mut tool_calls = Vec::new();
                     let mut tool_results = Vec::new();
+                    // Image parts on an assistant message are tool-produced
+                    // (WP-BROWSER screenshots): they travel with the tool
+                    // results in the synthetic user turn that follows.
+                    let mut result_images: Vec<ContentPart> = Vec::new();
                     for part in &msg.parts {
+                        if let crate::session::Part::Image {
+                            media_type, data, ..
+                        } = part
+                        {
+                            result_images.push(ContentPart::Image {
+                                media_type: media_type.clone(),
+                                data: data.clone(),
+                            });
+                        }
                         if let crate::session::Part::Tool { id, name, state } = part {
                             tool_calls.push(bebok_llm::ToolCall {
                                 id: id.clone(),
@@ -113,7 +126,7 @@ impl<'a> RequestBuilder<'a> {
                             content: String::new(),
                             tool_calls: Vec::new(),
                             tool_results,
-                            content_parts: Vec::new(),
+                            content_parts: result_images,
                         });
                     }
                 }
@@ -372,6 +385,62 @@ mod image_tests {
                 data: "aGVsbG8=".to_string()
             }
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// WP-BROWSER: an image attached to a tool result (screenshot) rides in
+    /// the synthetic tool-results user turn, so the model actually sees it.
+    #[tokio::test]
+    async fn builder_delivers_tool_result_images_with_tool_results() {
+        let base = std::env::temp_dir().join(format!("bebok-tool-img-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.append_user_message("shot please").await.unwrap();
+        {
+            let mut m = Message::assistant_with("code", "m");
+            m.add_tool_call(
+                "call-1".to_string(),
+                "browser_screenshot".to_string(),
+                serde_json::json!({}),
+            );
+            assert!(m.mark_tool_completed(
+                "call-1",
+                "Screenshot of https://example.com".to_string(),
+                "browser_screenshot".to_string(),
+                None,
+            ));
+            crate::agent::exec::attach_tool_image(
+                &mut m,
+                "call-1",
+                "browser_screenshot",
+                "image/png",
+                "aGVsbG8=",
+            );
+            session.messages.write().await.push(m);
+        }
+
+        let (_s, agent, tools) = test_state(&store, &session);
+        let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
+        let req = builder.build().await.unwrap();
+        // user, assistant(tool_use), user(tool_result + image)
+        assert_eq!(req.messages.len(), 3);
+        let results = &req.messages[2];
+        assert_eq!(results.tool_results.len(), 1);
+        assert_eq!(results.tool_results[0].tool_use_id, "call-1");
+        assert_eq!(
+            results.content_parts,
+            vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string()
+            }]
+        );
+        // The assistant turn itself carries no image (models never emit them).
+        assert!(req.messages[1].content_parts.is_empty());
         let _ = std::fs::remove_dir_all(&base);
     }
 

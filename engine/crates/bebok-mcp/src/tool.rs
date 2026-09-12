@@ -82,6 +82,7 @@ impl Tool for McpTool {
                         text,
                         title: self.name.clone(),
                         structured: res.structured_content,
+                        image: None,
                     }
                 }
             }

@@ -104,6 +104,32 @@ pub fn summarize_tool_output(_tool_name: &str, output: &str) -> String {
     summary.trim_end().to_string()
 }
 
+/// Total tokens the provider read for one call: `input_tokens` plus the
+/// cache hit/write counts. Anthropic reports the three buckets separately
+/// (`input_tokens` excludes cached prompt tokens); OpenAI-style providers fold
+/// everything into `input_tokens` and leave the cache fields `None`, so the
+/// sum is right for both. Returns `None` when the provider reported nothing
+/// (all zero) so the caller can fall back to a local estimate.
+pub fn context_used_from_usage(usage: &bebok_llm::Usage) -> Option<u64> {
+    let total = usage.input_tokens
+        + usage.cache_read_input_tokens.unwrap_or(0)
+        + usage.cache_creation_input_tokens.unwrap_or(0);
+    (total > 0).then_some(total)
+}
+
+/// Context window (tokens) of `model`, resolved live from the model catalog.
+/// Unknown or unset models get the catalog's built-in fallback (64k) rather
+/// than a zero, so a meter can always be drawn.
+pub fn context_window_for(model: Option<&str>) -> u64 {
+    let capabilities = bebok_llm::ModelCatalog::global().get(model.unwrap_or_default());
+    capabilities.context_window.max(1)
+}
+
+/// Estimated token size of a persisted transcript (sum of `estimate_message`).
+pub fn estimate_transcript(messages: &[Message]) -> u64 {
+    messages.iter().map(|m| estimate_message(m) as u64).sum()
+}
+
 /// A deterministic compaction summary for messages `0..end`: a `[summary of
 /// messages 0..N]` marker followed by a digest of each message's text. (An LLM
 /// summarization can replace this later without changing the fork mechanics.)
@@ -128,6 +154,42 @@ pub fn compact_summary(messages: &[Message], end: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_used_sums_input_and_cache_buckets() {
+        let usage = bebok_llm::Usage {
+            input_tokens: 1_000,
+            output_tokens: 50,
+            cost: None,
+            cache_read_input_tokens: Some(30_000),
+            cache_creation_input_tokens: Some(2_000),
+        };
+        assert_eq!(context_used_from_usage(&usage), Some(33_000));
+        // OpenAI-style: everything in input_tokens, cache fields absent.
+        let flat = bebok_llm::Usage {
+            input_tokens: 4_200,
+            ..Default::default()
+        };
+        assert_eq!(context_used_from_usage(&flat), Some(4_200));
+        // Nothing reported -> caller falls back to an estimate.
+        assert_eq!(context_used_from_usage(&bebok_llm::Usage::default()), None);
+    }
+
+    #[test]
+    fn context_window_resolves_from_catalog_with_fallback() {
+        assert_eq!(context_window_for(Some("openai/gpt-4.1")), 1_048_576);
+        assert_eq!(context_window_for(Some("custom/unknown-model")), 64_000);
+        assert_eq!(context_window_for(None), 64_000);
+    }
+
+    #[test]
+    fn estimate_transcript_sums_messages() {
+        let messages = vec![
+            Message::user("a".repeat(400)),
+            Message::user("b".repeat(40)),
+        ];
+        assert_eq!(estimate_transcript(&messages), 110);
+    }
 
     #[test]
     fn summarize_tool_output_short() {

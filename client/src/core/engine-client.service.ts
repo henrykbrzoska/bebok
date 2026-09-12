@@ -11,8 +11,12 @@ import { authFetch } from './auth.interceptor';
 import {
   AbortResponse,
   AbortTaskResponse,
+  AgentEntry,
   AgentInfo,
   AgentListResponse,
+  ChangeDiffResponse,
+  ChangeEntry,
+  ChangesResponse,
   CompactResponse,
   ConfigResponse,
   CreatePtyResponse,
@@ -33,14 +37,19 @@ import {
   PermissionResponse,
   PendingPermissionSnapshot,
   ProjectEntry,
+  ProjectGitInfo,
   ProjectPatch,
   ProjectsListResponse,
   PromptBody,
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
+  RevertChangeResponse,
+  RemoveWorktreeResponse,
+  SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
+  WorktreeSpec,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -130,11 +139,23 @@ export class EngineClient {
   // REST endpoints
   // ---------------------------------------------------------------------------
 
-  createSession(directory: string, agent?: string, model?: string): Promise<CreateSessionResponse> {
+  /**
+   * Create a session in `directory`. With a `worktree` spec (WP-GIT) the
+   * engine first runs `git worktree add <directory>/.bebok/worktrees/<branch>`
+   * and binds the session to that worktree instead; the response then also
+   * carries `directory` + `worktree` (see `CreateWorktreeSessionResponse`).
+   */
+  createSession(
+    directory: string,
+    agent?: string,
+    model?: string,
+    worktree?: WorktreeSpec,
+  ): Promise<CreateSessionResponse> {
     return this.request<CreateSessionResponse>('POST', '/session', {
       directory,
       agent: agent ?? 'code',
       ...(model ? { model } : {}),
+      ...(worktree ? { worktree } : {}),
     });
   }
 
@@ -205,6 +226,13 @@ export class EngineClient {
     );
   }
 
+  /** F6-12: live + finished sub-agents delegated from `id` (`task`/`fleet`). */
+  sessionAgents(id: string): Promise<AgentEntry[]> {
+    return this.request<SessionAgentsResponse>('GET', `/session/${id}/agents`).then(
+      (d) => d.agents,
+    );
+  }
+
   exportSession(id: string): Promise<ExportResponse> {
     return this.request<ExportResponse>('GET', `/session/${id}/export`);
   }
@@ -213,6 +241,35 @@ export class EngineClient {
     return this.request<CompactResponse>('POST', `/session/${id}/compact`, {
       ...(budget ? { budget } : {}),
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // WP-CHANGES (F6-9): engine-tracked file changes
+  // ---------------------------------------------------------------------------
+
+  /** `GET /session/{id}/changes` -> tracked files with +/- line counts. */
+  sessionChanges(id: string): Promise<ChangeEntry[]> {
+    return this.request<ChangesResponse>(
+      'GET',
+      `/session/${encodeURIComponent(id)}/changes`,
+    ).then((d) => d.changes);
+  }
+
+  /** `GET /session/{id}/changes/diff?path=` -> unified diff against the baseline. */
+  sessionChangeDiff(id: string, path: string): Promise<ChangeDiffResponse> {
+    return this.request<ChangeDiffResponse>(
+      'GET',
+      `/session/${encodeURIComponent(id)}/changes/diff?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** `POST /session/{id}/changes/revert` -> restore the baseline (bytes or absence). */
+  revertSessionChange(id: string, path: string): Promise<RevertChangeResponse> {
+    return this.request<RevertChangeResponse>(
+      'POST',
+      `/session/${encodeURIComponent(id)}/changes/revert`,
+      { path },
+    );
   }
 
   prompt(
@@ -412,6 +469,31 @@ export class EngineClient {
   /** Stamp `last_opened_at` and get back the normalised path to switch to. */
   openProject(id: string): Promise<ProjectEntry> {
     return this.request<ProjectEntry>('POST', `/projects/${encodeURIComponent(id)}/open`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // WP-GIT: git probe + worktree removal (/projects/{id}/git*)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Probe the registered project's git state. Never fails for a non-repo:
+   * `is_repo` is false and the other fields null (missing `git` included).
+   */
+  projectGit(id: string): Promise<ProjectGitInfo> {
+    return this.request<ProjectGitInfo>('GET', `/projects/${encodeURIComponent(id)}/git`);
+  }
+
+  /**
+   * Remove a Bebok worktree (`git worktree remove --force`). Explicit and
+   * separate from `deleteSession` by design; the engine refuses (400) any
+   * path outside the project's own `.bebok/worktrees/`.
+   */
+  removeWorktree(id: string, path: string): Promise<RemoveWorktreeResponse> {
+    return this.request<RemoveWorktreeResponse>(
+      'POST',
+      `/projects/${encodeURIComponent(id)}/git/worktree/remove`,
+      { path },
+    );
   }
 
   /**

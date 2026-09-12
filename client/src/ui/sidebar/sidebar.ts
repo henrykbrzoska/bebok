@@ -12,12 +12,14 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { AgentInfo, SessionMeta } from '../../core/engine.dtos';
-import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
+import { BranchBadge } from '../new-session-dialog/branch-badge';
+import { NewSessionDialog } from '../new-session-dialog/new-session-dialog';
+import { NewSessionDialogStore } from '../new-session-dialog/new-session-dialog.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore, type Screen } from '../shell/shell.store';
 import { StatusDot, type StatusTone } from '../status-dot/status-dot';
@@ -25,7 +27,7 @@ import { StatusDot, type StatusTone } from '../status-dot/status-dot';
 @Component({
   selector: 'app-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, StatusDot],
+  imports: [FormsModule, StatusDot, BranchBadge, NewSessionDialog],
   templateUrl: './sidebar.html',
   styleUrl: './sidebar.css',
 })
@@ -35,7 +37,7 @@ export class Sidebar {
   readonly project = inject(ProjectSessionsStore);
   readonly tabs = inject(OpenSessionsStore);
   readonly activity = inject(SessionActivityStore);
-  private readonly engine = inject(EngineClient);
+  private readonly newSessionDialog = inject(NewSessionDialogStore);
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
 
@@ -52,8 +54,9 @@ export class Sidebar {
 
   /** Session search box (filters the grouped list below it). */
   readonly search = signal('');
-  /** Agent preset used by the "+ New" button. */
+  /** Agent preset preselected in the "New session" dialog by "+ New". */
   readonly selectedAgent = signal('code');
+  /** The dialog owns the in-flight state now; kept so the button binding is unchanged. */
   readonly creating = signal(false);
 
   /** Label for the agent `<select>`: `name · model` when a model is pinned. */
@@ -61,23 +64,17 @@ export class Sidebar {
     return agent.model ? `${agent.name} · ${agent.model}` : agent.name;
   }
 
-  /** Create a session in the current directory and open its chat. */
-  async newSession(): Promise<void> {
+  /**
+   * Open the "New session" dialog for the current directory (WP-GIT /
+   * F6-16). The dialog offers agent, model and the git-worktree option, then
+   * creates the session and opens its chat itself.
+   */
+  newSession(): void {
     const dir = this.directory();
-    if (!dir || this.creating()) {
+    if (!dir) {
       return;
     }
-    this.creating.set(true);
-    try {
-      const created = await this.engine.createSession(dir, this.selectedAgent());
-      await this.project.refresh();
-      await this.router.navigate(['/chat', created.sessionID]);
-    } catch {
-      // The Start screen owns error reporting; the sidebar stays quiet.
-      await this.router.navigate(['/']);
-    } finally {
-      this.creating.set(false);
-    }
+    this.newSessionDialog.openFor(dir, { agent: this.selectedAgent() });
   }
 
   /** Bottom nav rail entries; `rail` is the 2-letter collapsed glyph. */
@@ -168,6 +165,11 @@ export class Sidebar {
     const tokens = session.usage.input_tokens + session.usage.output_tokens;
     const formatted = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
     return `${session.agent} · ${formatted} tok · ${this.sessionTime(session.updated_at)}`;
+  }
+
+  /** Branch of a git-worktree session (engine-derived), or null. */
+  worktreeBranch(session: SessionMeta): string | null {
+    return session.worktree_branch?.trim() || null;
   }
 
   sessionTone(session: SessionMeta): StatusTone {

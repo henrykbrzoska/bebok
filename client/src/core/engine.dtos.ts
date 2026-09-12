@@ -116,7 +116,24 @@ export interface SessionMeta {
   created_at: number;
   updated_at: number;
   usage: UsageTotals;
+  /**
+   * F6-3: tokens the provider read on the *last* LLM call (input + cache
+   * buckets) - the live context size, not a running total. Absent until the
+   * first turn completes.
+   */
+  context_used?: number | null;
+  /** Model that produced `context_used` (may differ from `model`). */
+  context_model?: string | null;
+  /** Context window of that model, resolved live from the engine's catalog. */
+  context_window?: number | null;
   share?: unknown;
+  /**
+   * WP-GIT: branch name when the session runs in a Bebok git worktree
+   * (`<root>/.bebok/worktrees/<branch>`), derived by the engine from
+   * `directory` at response time. `null`/absent for ordinary sessions - the
+   * client never splits paths to work this out.
+   */
+  worktree_branch?: string | null;
 }
 
 export interface PendingPermissionSnapshot extends PermissionAsked {
@@ -214,6 +231,33 @@ export interface ActiveTask {
   childSessionID: string;
   name?: string;
   agent?: string;
+  /** F6-12: effective model of the child turn. */
+  model?: string;
+  /** F6-12: unix ms when the child turn was registered. */
+  startedAt?: number;
+}
+
+/** F6-12: lifecycle of one delegated child as reported by `GET /session/{id}/agents`. */
+export type AgentStatus = 'running' | 'done' | 'failed' | 'aborted' | 'unknown';
+
+/** One row of `GET /session/{id}/agents` (live task map merged with finished children). */
+export interface AgentEntry {
+  /** Present while running only (the id is not persisted once the task ends). */
+  taskID?: string;
+  childSessionID: string;
+  name: string;
+  agent: string;
+  model?: string;
+  status: AgentStatus;
+  description: string;
+  startedAt: number;
+  endedAt?: number;
+  error?: string;
+  usage: UsageTotals;
+}
+
+export interface SessionAgentsResponse {
+  agents: AgentEntry[];
 }
 
 export type ToolStateKind = 'pending' | 'running' | 'completed' | 'error';
@@ -408,14 +452,73 @@ export interface ExportResponse {
 }
 
 export interface CompactResponse {
+  /** The *new* (forked) session holding the summary + tail. */
   sessionID: string;
   parent: [string, number];
+  /** Context size before compaction (last-call gauge, else an estimate). */
+  before?: number;
+  /** Estimated context size of the forked transcript. */
+  after?: number;
 }
 
 export interface DeleteSessionResponse {
   sessionID: string;
   directory: string;
   deleted: boolean;
+  /**
+   * WP-GIT: the deleted session's directory was a Bebok git worktree. The
+   * engine never removes it as a side effect - the client may *offer* removal
+   * through `EngineClient.removeWorktree` (explicit, separate call).
+   */
+  is_worktree?: boolean;
+  /** Worktree path (same as `directory`) when `is_worktree`. */
+  worktree_path?: string | null;
+  worktree_branch?: string | null;
+  /** Project root that owns the worktree (`<root>/.bebok/worktrees/...`). */
+  project_root?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// WP-GIT: git probe + worktree-backed sessions
+// ---------------------------------------------------------------------------
+
+/** `GET /projects/{id}/git` (mirrors `bebok_core::git::GitInfo` + project fields). */
+export interface ProjectGitInfo {
+  project_id: string;
+  /** Registered, engine-normalised project path. */
+  path: string;
+  /** `<path>/.bebok/worktrees`, engine-built. */
+  worktrees_dir: string;
+  /** False for a non-repo directory or a host without `git`; other fields are then null. */
+  is_repo: boolean;
+  root: string | null;
+  /** Current branch; null on a detached HEAD. */
+  branch: string | null;
+  remote_url: string | null;
+  is_github: boolean;
+  /** `git status --porcelain` line count (staged + unstaged + untracked). */
+  dirty_count: number | null;
+}
+
+/** `POST /session` `worktree` field: run the session in a fresh git worktree. */
+export interface WorktreeSpec {
+  /** Branch to check out (created from `base` when new); also the path below `.bebok/worktrees`. */
+  branch: string;
+  /** Start point for a new branch; engine default is the current HEAD. */
+  base?: string;
+}
+
+/** `POST /session` answer when a `worktree` spec was sent. */
+export interface CreateWorktreeSessionResponse extends CreateSessionResponse {
+  /** Normalised worktree path the session is bound to. */
+  directory: string;
+  worktree: { path: string; branch: string };
+}
+
+/** `POST /projects/{id}/git/worktree/remove` answer. */
+export interface RemoveWorktreeResponse {
+  removed: boolean;
+  path: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -486,16 +589,64 @@ export interface ProjectEntry {
   added_at: number;
   last_opened_at: number | null;
   pinned: boolean;
+  /**
+   * Free-form group name for the project switcher's collapsible sections
+   * (F6-7). `null` (or missing, for entries from an older engine) means
+   * "ungrouped".
+   */
+  group?: string | null;
 }
 
 export interface ProjectsListResponse {
   projects: ProjectEntry[];
 }
 
-/** `PATCH /projects/{id}` body. */
+/**
+ * `PATCH /projects/{id}` body.
+ *
+ * Wire contract for `group` (mirrors `bebok_core::config::projects::ProjectPatch`):
+ * omit the field to leave the group unchanged; send `''` (or whitespace-only)
+ * to ungroup; send a non-empty name to set/move the group. There is no
+ * separate "create group" call - a project's `group` value *is* the group.
+ */
 export interface ProjectPatch {
   name?: string;
   pinned?: boolean;
+  group?: string;
+}
+
+/** WP-CHANGES (F6-9): which baseline a change diff / revert is computed against. */
+export type ChangeBaseline = 'git' | 'snapshot';
+
+/** One engine-tracked file change (`GET /session/{id}/changes`). */
+export interface ChangeEntry {
+  /** Project-relative path, forward slashes. */
+  path: string;
+  added: number;
+  removed: number;
+  baseline: ChangeBaseline;
+  /** Whether the file currently exists on disk. */
+  exists: boolean;
+}
+
+export interface ChangesResponse {
+  changes: ChangeEntry[];
+}
+
+/** `GET /session/{id}/changes/diff?path=`: a plain unified diff string. */
+export interface ChangeDiffResponse {
+  path: string;
+  diff: string;
+  baseline: ChangeBaseline;
+  added: number;
+  removed: number;
+}
+
+/** `POST /session/{id}/changes/revert`. */
+export interface RevertChangeResponse {
+  path: string;
+  baseline: ChangeBaseline;
+  exists: boolean;
 }
 
 /** One row of the directory picker: always a directory, never a file. */

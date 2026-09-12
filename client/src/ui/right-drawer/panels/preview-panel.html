@@ -1,0 +1,39 @@
+<div class="panel-body">
+  <div class="head">
+    <button
+      type="button"
+      class="nav-btn"
+      (click)="back()"
+      [disabled]="!canBack()"
+      [title]="t('preview.back')"
+      [attr.aria-label]="t('preview.back')"
+    >‹</button>
+    <button
+      type="button"
+      class="nav-btn"
+      (click)="forward()"
+      [disabled]="!canForward()"
+      [title]="t('preview.forward')"
+      [attr.aria-label]="t('preview.forward')"
+    >›</button>
+    <span class="path" [title]="currentPath() ?? ''">{{ currentPath() ?? '' }}</span>
+  </div>
+
+  @if (!currentPath()) {
+    <div class="empty">{{ t('preview.empty') }}</div>
+  } @else if (loading()) {
+    <div class="empty">{{ t('preview.loading') }}</div>
+  } @else if (error()) {
+    <div class="error">{{ t('preview.cannotPreview', { path: currentPath() }) }}</div>
+  } @else if (isMarkdown()) {
+    <div class="body">
+      <app-markdown-view
+        [source]="content()"
+        [basePath]="currentPath() ?? ''"
+        (linkClick)="navigate($event)"
+      />
+    </div>
+  } @else {
+    <pre class="raw"><code>{{ content() }}</code></pre>
+  }
+</div>

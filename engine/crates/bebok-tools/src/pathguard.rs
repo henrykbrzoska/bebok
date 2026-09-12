@@ -9,7 +9,7 @@ const ESCAPE: &str = "path escapes project root";
 /// every existing ancestor after symlink resolution. Call this immediately
 /// before a filesystem operation; it does not protect against a concurrent
 /// symlink replacement between the check and that operation.
-pub(crate) fn resolve_in_root(root: &Path, input: &str) -> Result<PathBuf, String> {
+pub fn resolve_in_root(root: &Path, input: &str) -> Result<PathBuf, String> {
     let portable = input.replace('\\', "/");
     let bytes = portable.as_bytes();
     let drive_prefix = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';

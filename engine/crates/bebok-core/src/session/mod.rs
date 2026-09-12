@@ -380,8 +380,28 @@ pub struct Session {
     pub updated_at: i64,
     #[serde(default)]
     pub usage: UsageTotals,
+    /// Tokens the provider read for the *last* LLM call of the most recent
+    /// turn (input + cache read + cache write): the live size of the context
+    /// window in use. Unlike `usage`, this is not cumulative. `None` until
+    /// the first turn completes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_used: Option<u64>,
+    /// Model that produced `context_used`. The context window is resolved
+    /// live from the model catalog at response time (never persisted), so a
+    /// catalog update takes effect without a migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share: Option<Value>,
+    /// F6-12: outcome of the delegated sub-turn for sessions spawned by the
+    /// `task`/`fleet` tools (`completed` | `aborted` | `error`), persisted
+    /// when `task.ended` fires. `None` for top-level sessions and for
+    /// children still running (or interrupted by an engine restart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<String>,
+    /// F6-12: error text that accompanied `task_status` (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_error: Option<String>,
 }
 
 impl Session {
@@ -398,7 +418,11 @@ impl Session {
             created_at: now,
             updated_at: now,
             usage: UsageTotals::default(),
+            context_used: None,
+            context_model: None,
             share: None,
+            task_status: None,
+            task_error: None,
         }
     }
 

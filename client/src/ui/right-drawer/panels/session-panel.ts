@@ -2,8 +2,8 @@
  * Right-drawer "Session" panel (F2-12).
  *
  * The stacked replacement for the old left-hand `ui/session-sidebar`: TOKENS
- * grid, COST, FILES CHANGED with per-file line deltas, SUB-AGENTS and an
- * "Active in this session" chip list of the enabled MCP servers and skills
+ * grid, COST, SUB-AGENTS and an "Active in this session" chip list of the
+ * enabled MCP servers and skills
  * (chips toggle them, as the old sidebar's checkboxes did), plus the YOLO
  * switch. The numbers come from `ChatSessionStore`, which the chat view
  * publishes into - the panel never refetches the transcript.
@@ -58,25 +58,41 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         </section>
 
         <section class="group">
-          <h3 class="group-title">{{ t('drawer.cost') }}</h3>
-          <div class="cost">{{ session.costLabel() }}</div>
+          <h3 class="group-title">{{ t('drawer.context') }}</h3>
+          @if (session.contextLabel()) {
+            <div
+              class="token-grid context"
+              [class.warning]="session.contextLevel() === 'warning'"
+              [class.danger]="session.contextLevel() === 'danger'"
+              data-testid="context-meter"
+            >
+              <div class="cell">
+                <span class="cell-label">{{ t('drawer.contextUsed') }}</span>
+                <span class="cell-value context-value">{{ format(session.contextUsed() ?? 0) }}</span>
+              </div>
+              <div class="cell">
+                <span class="cell-label">{{ t('drawer.contextWindow') }}</span>
+                <span class="cell-value">{{ format(session.contextWindow()) }}</span>
+              </div>
+              <div class="cell wide">
+                <span class="cell-label">{{ session.contextLabel() }}</span>
+                <span class="context-bar" aria-hidden="true">
+                  <span class="context-fill" [style.width.%]="contextFill()"></span>
+                </span>
+              </div>
+            </div>
+          } @else {
+            <div class="none">{{ t('drawer.contextNone') }}</div>
+          }
         </section>
 
         <section class="group">
-          <h3 class="group-title">{{ t('drawer.filesChanged') }}</h3>
-          @if (session.filesChanged().length === 0) {
-            <div class="none">{{ t('drawer.noFiles') }}</div>
-          } @else {
-            <ul class="files">
-              @for (file of session.filesChanged(); track file.path) {
-                <li class="file" [title]="file.path">
-                  <span class="file-path">{{ file.path }}</span>
-                  <span class="plus">+{{ file.added }}</span>
-                  <span class="minus">-{{ file.removed }}</span>
-                </li>
-              }
-            </ul>
-          }
+          <h3 class="group-title">{{ t('drawer.cost') }}</h3>
+          <div
+            class="cost"
+            [class.unknown]="session.totals().cost === null"
+            [title]="session.totals().cost === null ? t('drawer.costUnknown') : ''"
+          >{{ session.costLabel() }}</div>
         </section>
 
         <section class="group">
@@ -227,6 +243,43 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         color: var(--text);
       }
 
+      .cell.wide {
+        grid-column: 1 / -1;
+      }
+
+      .context-bar {
+        display: block;
+        height: 6px;
+        margin-top: 3px;
+        border-radius: 3px;
+        background: var(--surface-3);
+        border: 1px solid var(--border);
+        overflow: hidden;
+      }
+
+      .context-fill {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s ease;
+      }
+
+      .context.warning .context-fill {
+        background: var(--warning);
+      }
+
+      .context.warning .context-value {
+        color: var(--warning);
+      }
+
+      .context.danger .context-fill {
+        background: var(--danger);
+      }
+
+      .context.danger .context-value {
+        color: var(--danger);
+      }
+
       .cost {
         font-family: var(--font-mono);
         font-size: var(--fs-20);
@@ -234,7 +287,12 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         color: var(--text);
       }
 
-      .files,
+      /* F6-5: unknown pricing renders "—", muted rather than as a figure. */
+      .cost.unknown {
+        color: var(--text-faint);
+        font-weight: 400;
+      }
+
       .subagents {
         list-style: none;
         margin: 0;
@@ -242,33 +300,6 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         display: flex;
         flex-direction: column;
         gap: 3px;
-      }
-
-      .file {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-6);
-        font-family: var(--font-mono);
-        font-size: var(--fs-11);
-      }
-
-      .file-path {
-        flex: 1 1 auto;
-        min-width: 0;
-        color: var(--code-text-strong);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .plus {
-        color: var(--diff-add-text);
-        flex: none;
-      }
-
-      .minus {
-        color: var(--diff-remove-text);
-        flex: none;
       }
 
       .subagent {
@@ -373,6 +404,10 @@ export class SessionPanel {
 
   readonly totals = this.session.totals;
   readonly models = computed(() => this.session.modelsUsed());
+  /** F6-3: bar width for the context meter (clamped to 0..100). */
+  readonly contextFill = computed(() =>
+    Math.min(100, Math.max(0, this.session.contextPercent() ?? 0)),
+  );
 
   /** Sub-agent sessions delegated from this session (via the `task` tool). */
   readonly subagents = signal<SessionMeta[]>([]);
