@@ -9,7 +9,7 @@
  *
  * The engine does the heavy lifting (one disk scan cached across requests);
  * this store only re-fetches when a filter changes, when the user asks, or
- * when a turn finishes (`session.updated` with `running: false`).
+ * when a turn finishes (end-of-turn `session.updated`).
  */
 
 import { Injectable, computed, inject, signal } from '@angular/core';

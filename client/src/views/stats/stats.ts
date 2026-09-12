@@ -8,8 +8,8 @@
  * sessions by tokens. The engine aggregates (`GET /stats`); this component
  * only maps the payload onto the design tokens.
  *
- * Refreshes itself when a turn finishes (`session.updated` with
- * `running: false`) so the tiles follow the chat without polling.
+ * Refreshes itself when a turn finishes (the end-of-turn `session.updated`)
+ * so the tiles follow the chat without polling.
  */
 
 import {
@@ -233,9 +233,13 @@ export class StatsView implements OnInit, OnDestroy {
     return index === count - 1 || (count - 1 - index) % 5 === 0;
   }
 
-  /** A finished turn changes the numbers: refresh once, not per streamed part. */
+  /**
+   * A finished turn changes the numbers: refresh once, not per streamed part.
+   * The engine sends `session.updated {running: true}` at turn start and a
+   * bare `session.updated` (or one carrying `error`) at the end.
+   */
   private onEvent(ev: EngineEvent): void {
-    if (ev.type === 'session.updated' && ev.properties?.['running'] === false) {
+    if (ev.type === 'session.updated' && ev.properties?.['running'] !== true) {
       void this.store.load();
     } else if (ev.type === 'session.deleted' || ev.type === 'session.created') {
       void this.store.load();
