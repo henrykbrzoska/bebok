@@ -91,7 +91,13 @@ pub async fn put_tool_safety(
     let entries: Vec<(String, serde_json::Value)> = match body.overrides {
         Some(map) => map
             .into_iter()
-            .map(|(k, v)| (k, v.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null)))
+            .map(|(k, v)| {
+                (
+                    k,
+                    v.map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                )
+            })
             .collect(),
         None => body.bare.into_iter().collect(),
     };
@@ -164,11 +170,17 @@ mod tests {
         let wrapped: SafetyBody =
             serde_json::from_str(r#"{ "overrides": { "bash": "caution", "rm": null } }"#).unwrap();
         let map = wrapped.overrides.unwrap();
-        assert_eq!(map.get("bash").cloned().flatten().as_deref(), Some("caution"));
+        assert_eq!(
+            map.get("bash").cloned().flatten().as_deref(),
+            Some("caution")
+        );
         assert_eq!(map.get("rm").cloned().flatten(), None);
 
         let bare: SafetyBody = serde_json::from_str(r#"{ "bash": "caution" }"#).unwrap();
         assert!(bare.overrides.is_none());
-        assert_eq!(bare.bare.get("bash").and_then(|v| v.as_str()), Some("caution"));
+        assert_eq!(
+            bare.bare.get("bash").and_then(|v| v.as_str()),
+            Some("caution")
+        );
     }
 }

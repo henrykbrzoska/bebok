@@ -107,6 +107,10 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("fetch", SafetyCategory::Caution),
     ("task", SafetyCategory::Caution),
     ("fleet", SafetyCategory::Caution),
+    // WP-DELEGATION supervision tools: read the parent's own task map.
+    ("task_status", SafetyCategory::Safe),
+    ("task_wait", SafetyCategory::Safe),
+    ("task_cancel", SafetyCategory::Caution),
     ("base64", SafetyCategory::Caution),
     ("browser_open", SafetyCategory::Caution),
     ("browser_screenshot", SafetyCategory::Caution),
@@ -397,7 +401,16 @@ mod tests {
 
     #[test]
     fn default_table_matches_the_brief() {
-        for name in ["read_file", "list_dir", "tree", "grep", "glob", "find", "stat", "browser_get_text"] {
+        for name in [
+            "read_file",
+            "list_dir",
+            "tree",
+            "grep",
+            "glob",
+            "find",
+            "stat",
+            "browser_get_text",
+        ] {
             assert_eq!(builtin_default(name), Some(SafetyCategory::Safe), "{name}");
         }
         for name in [
@@ -410,10 +423,25 @@ mod tests {
             "browser_type",
             "browser_eval",
         ] {
-            assert_eq!(builtin_default(name), Some(SafetyCategory::Caution), "{name}");
+            assert_eq!(
+                builtin_default(name),
+                Some(SafetyCategory::Caution),
+                "{name}"
+            );
         }
-        for name in ["write_file", "edit_file", "append_file", "mkdir", "rm", "bash"] {
-            assert_eq!(builtin_default(name), Some(SafetyCategory::Dangerous), "{name}");
+        for name in [
+            "write_file",
+            "edit_file",
+            "append_file",
+            "mkdir",
+            "rm",
+            "bash",
+        ] {
+            assert_eq!(
+                builtin_default(name),
+                Some(SafetyCategory::Dangerous),
+                "{name}"
+            );
         }
     }
 
@@ -422,13 +450,19 @@ mod tests {
         let ro = fake("mcp__srv__list", Some(true), None);
         assert_eq!(default_category(ro.as_ref()), SafetyCategory::Caution);
         let destructive = fake("mcp__srv__drop", None, Some(true));
-        assert_eq!(default_category(destructive.as_ref()), SafetyCategory::Dangerous);
+        assert_eq!(
+            default_category(destructive.as_ref()),
+            SafetyCategory::Dangerous
+        );
         // destructive wins over read-only when a server sets both.
         let both = fake("mcp__srv__weird", Some(true), Some(true));
         assert_eq!(default_category(both.as_ref()), SafetyCategory::Dangerous);
         // No annotation at all: uncategorized, never inferred from is_read_only.
         let unknown = fake("mcp__srv__mystery", None, None);
-        assert_eq!(default_category(unknown.as_ref()), SafetyCategory::Uncategorized);
+        assert_eq!(
+            default_category(unknown.as_ref()),
+            SafetyCategory::Uncategorized
+        );
         // An explicit `destructiveHint: false` is not a read-only claim.
         let non_destructive = fake("mcp__srv__ping", None, Some(false));
         assert_eq!(
@@ -459,7 +493,10 @@ mod tests {
             overrides.lookup("mcp__jira__search"),
             Some((SafetyCategory::Caution, "mcp__*"))
         );
-        assert_eq!(overrides.lookup("bash"), Some((SafetyCategory::Caution, "bash")));
+        assert_eq!(
+            overrides.lookup("bash"),
+            Some((SafetyCategory::Caution, "bash"))
+        );
         assert_eq!(overrides.lookup("nonsense"), None);
         assert_eq!(overrides.lookup("read_file"), None);
         assert!(SafetyOverrides::parse(&serde_json::json!("nope")).is_empty());

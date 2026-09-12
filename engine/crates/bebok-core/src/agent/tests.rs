@@ -1219,6 +1219,8 @@ if __name__ == "__main__":
             agent: "code".to_string(),
             model: None,
             started_at: 0,
+            status: "running".to_string(),
+            background: false,
         };
         let json = serde_json::to_value(&task).unwrap();
         assert!(json.get("taskID").is_some(), "expected camelCase taskID");

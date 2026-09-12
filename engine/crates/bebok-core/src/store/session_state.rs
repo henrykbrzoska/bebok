@@ -31,6 +31,39 @@ pub struct ChildTask {
     /// Unix ms when the child turn was registered (F6-12).
     #[serde(rename = "startedAt")]
     pub started_at: i64,
+    /// WP-DELEGATION: `queued` while waiting for a concurrency slot
+    /// (`delegation.max_concurrent`), `running` once its turn loop started.
+    pub status: String,
+    /// WP-DELEGATION: `true` when spawned with `background: true` (the parent
+    /// collects the result later via `task_wait`).
+    pub background: bool,
+}
+
+/// WP-DELEGATION: outcome of one finished child task, kept on the parent so
+/// `task_wait` / `task_status` can hand it to the model after the fact
+/// (background tasks return nothing from the spawning `task` call).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskResult {
+    #[serde(rename = "taskID")]
+    pub task_id: String,
+    pub name: String,
+    pub agent: String,
+    #[serde(rename = "childSessionID")]
+    pub child_session_id: String,
+    /// `completed` | `error` | `aborted` (same vocabulary as `task.ended`).
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The child's final assistant text (its report); empty on failure.
+    pub text: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(rename = "startedAt")]
+    pub started_at: i64,
+    #[serde(rename = "endedAt")]
+    pub ended_at: i64,
+    /// Set once a `task_wait` handed this result to the model.
+    pub collected: bool,
 }
 
 struct PendingPermissionRequest {
@@ -71,6 +104,12 @@ pub struct SessionState {
     child_names: Mutex<HashSet<String>>,
     /// Monotonic counter for fallback child names (`<role>-<n>`).
     child_name_counter: Mutex<u64>,
+    /// WP-DELEGATION: finished child results awaiting / after collection by
+    /// `task_wait` (in completion order), plus the wake-up for waiters.
+    task_results: Mutex<Vec<TaskResult>>,
+    task_done: tokio::sync::Notify,
+    /// WP-DELEGATION: per-session concurrency gate for running children.
+    child_slots: crate::agent::delegation::SlotGate,
 }
 
 impl SessionState {
@@ -98,6 +137,9 @@ impl SessionState {
             child_tasks: Mutex::new(HashMap::new()),
             child_names: Mutex::new(HashSet::new()),
             child_name_counter: Mutex::new(1),
+            task_results: Mutex::new(Vec::new()),
+            task_done: tokio::sync::Notify::new(),
+            child_slots: crate::agent::delegation::SlotGate::new(),
         }
     }
 
@@ -456,12 +498,105 @@ impl SessionState {
             agent: agent.to_string(),
             model: model.map(str::to_string),
             started_at: crate::util::now_ms(),
+            status: "running".to_string(),
+            background: false,
         };
         self.child_tasks
             .lock()
             .await
             .insert(task_id.to_string(), (token, info.clone()));
         info
+    }
+
+    /// WP-DELEGATION: register a child with an explicit initial `status`
+    /// (`queued` | `running`) and `background` flag.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_child_task_full(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        model: Option<&str>,
+        status: &str,
+        background: bool,
+        token: CancellationToken,
+    ) -> ChildTask {
+        let info = ChildTask {
+            task_id: task_id.to_string(),
+            description: description.to_string(),
+            child_session_id: child_session_id.to_string(),
+            name: name.to_string(),
+            agent: agent.to_string(),
+            model: model.map(str::to_string),
+            started_at: crate::util::now_ms(),
+            status: status.to_string(),
+            background,
+        };
+        self.child_tasks
+            .lock()
+            .await
+            .insert(task_id.to_string(), (token, info.clone()));
+        info
+    }
+
+    /// WP-DELEGATION: flip a live child's `status` (`queued` -> `running`).
+    pub async fn set_child_task_status(&self, task_id: &str, status: &str) -> Option<ChildTask> {
+        let mut tasks = self.child_tasks.lock().await;
+        let (_, info) = tasks.get_mut(task_id)?;
+        info.status = status.to_string();
+        Some(info.clone())
+    }
+
+    /// WP-DELEGATION: look up one live child by task id or by name.
+    pub async fn find_child_task(&self, id_or_name: &str) -> Option<ChildTask> {
+        let tasks = self.child_tasks.lock().await;
+        if let Some((_, info)) = tasks.get(id_or_name) {
+            return Some(info.clone());
+        }
+        tasks
+            .values()
+            .find(|(_, info)| info.name == id_or_name)
+            .map(|(_, info)| info.clone())
+    }
+
+    /// WP-DELEGATION: the per-session gate that caps concurrently running
+    /// children (`delegation.max_concurrent`).
+    pub fn child_slots(&self) -> &crate::agent::delegation::SlotGate {
+        &self.child_slots
+    }
+
+    /// WP-DELEGATION: record a finished child's outcome and wake `task_wait`.
+    pub async fn push_task_result(&self, result: TaskResult) {
+        self.task_results.lock().await.push(result);
+        self.task_done.notify_waiters();
+    }
+
+    /// WP-DELEGATION: every recorded result (collected or not), oldest first.
+    pub async fn task_results_snapshot(&self) -> Vec<TaskResult> {
+        self.task_results.lock().await.clone()
+    }
+
+    /// WP-DELEGATION: mark results as handed to the model. Returns the ones
+    /// that were newly collected.
+    pub async fn collect_task_results(&self, task_ids: &[String]) -> Vec<TaskResult> {
+        let mut results = self.task_results.lock().await;
+        let mut out = Vec::new();
+        for r in results.iter_mut() {
+            if !r.collected && task_ids.iter().any(|id| id == &r.task_id) {
+                r.collected = true;
+                out.push(r.clone());
+            }
+        }
+        out
+    }
+
+    /// WP-DELEGATION: resolves when the next child result is pushed (a
+    /// `Notified` future armed *before* the caller re-checks the results, so
+    /// a result landing in between is not missed).
+    pub fn task_done_notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.task_done.notified()
     }
 
     /// Unregister a child task (when it finishes or is aborted).

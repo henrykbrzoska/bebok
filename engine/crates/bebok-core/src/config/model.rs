@@ -100,6 +100,83 @@ pub struct FleetConfig {
     pub members: Vec<FleetMember>,
 }
 
+/// WP-DELEGATION (F8-2): when the main agent should hand work to sub-agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DelegationMode {
+    /// No policy text; the `task`/`fleet` tools stay available.
+    Off,
+    /// Decompose when the task has independent parts / spans areas (default).
+    #[default]
+    Auto,
+    /// Decompose every non-trivial task.
+    Always,
+}
+
+impl DelegationMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DelegationMode::Off => "off",
+            DelegationMode::Auto => "auto",
+            DelegationMode::Always => "always",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(DelegationMode::Off),
+            "auto" => Some(DelegationMode::Auto),
+            "always" => Some(DelegationMode::Always),
+            _ => None,
+        }
+    }
+}
+
+/// Default number of sub-agents that may run at the same time per session.
+pub const DEFAULT_DELEGATION_MAX_CONCURRENT: usize = 3;
+/// Hard ceiling for `delegation.max_concurrent` (guards against typos).
+pub const MAX_DELEGATION_MAX_CONCURRENT: usize = 16;
+
+/// WP-DELEGATION (F8-2): `delegation` config section. Global config with a
+/// per-key project override (a project that sets only `mode` keeps the global
+/// `max_concurrent` / `model`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DelegationConfig {
+    pub mode: DelegationMode,
+    /// Upper bound on concurrently *running* children; extra ones queue.
+    pub max_concurrent: usize,
+    /// Optional model override for every sub-agent (`provider/model`).
+    /// `None`/empty = each sub-agent's own preset / per-agent default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl Default for DelegationConfig {
+    fn default() -> Self {
+        Self {
+            mode: DelegationMode::Auto,
+            max_concurrent: DEFAULT_DELEGATION_MAX_CONCURRENT,
+            model: None,
+        }
+    }
+}
+
+impl DelegationConfig {
+    /// `max_concurrent` clamped to `1..=MAX_DELEGATION_MAX_CONCURRENT`.
+    pub fn effective_max_concurrent(&self) -> usize {
+        self.max_concurrent.clamp(1, MAX_DELEGATION_MAX_CONCURRENT)
+    }
+
+    /// The sub-agent model override, if a non-empty one is configured.
+    pub fn model_override(&self) -> Option<&str> {
+        self.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+    }
+}
+
 /// Fully resolved configuration for one instance.
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedConfig {
@@ -145,6 +222,9 @@ pub struct ResolvedConfig {
     /// Merged per key (global, then project overrides). Informational only -
     /// parsed by `crate::tool_safety`, never consulted by the permission engine.
     pub tool_safety: Value,
+    /// WP-DELEGATION (F8-2): sub-agent delegation policy + concurrency cap.
+    #[serde(default)]
+    pub delegation: DelegationConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -170,6 +250,7 @@ impl Default for ResolvedConfig {
             ui: UiConfig::default(),
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
+            delegation: DelegationConfig::default(),
         }
     }
 }
@@ -326,6 +407,11 @@ impl ResolvedConfigBuilder {
 
     pub fn verify(mut self, v: Value) -> Self {
         self.inner.verify = v;
+        self
+    }
+
+    pub fn delegation(mut self, d: DelegationConfig) -> Self {
+        self.inner.delegation = d;
         self
     }
 

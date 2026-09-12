@@ -21,15 +21,16 @@ pub mod writer;
 
 // --- model (ResolvedConfig + Default + model_for/provider_spec, Builder) ---
 pub use model::{
-    DEFAULT_CONTEXT_BUDGET, DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_TOOL_OUTPUT_CAP,
-    FleetConfig, FleetMember, MAX_CUSTOM_CSS_FILES, MAX_CUSTOM_CSS_LEN, ResolvedConfig,
+    DEFAULT_CONTEXT_BUDGET, DEFAULT_DELEGATION_MAX_CONCURRENT, DEFAULT_MAX_TOKENS, DEFAULT_MODEL,
+    DEFAULT_TOOL_OUTPUT_CAP, DelegationConfig, DelegationMode, FleetConfig, FleetMember,
+    MAX_CUSTOM_CSS_FILES, MAX_CUSTOM_CSS_LEN, MAX_DELEGATION_MAX_CONCURRENT, ResolvedConfig,
     ResolvedConfigBuilder, UiConfig,
 };
 
 // --- loader (load/load_with_global/apply/apply_file/merge_providers/...) ---
 pub use loader::{
-    apply, apply_file, global_config_path, load, load_with_global, merge_providers, parse_thinking,
-    project_config_path, provider_from_model, read_layer_json,
+    apply, apply_delegation, apply_file, global_config_path, load, load_with_global,
+    merge_providers, parse_thinking, project_config_path, provider_from_model, read_layer_json,
 };
 
 // --- writer (deltas + full, JSONC round-trip only) ---

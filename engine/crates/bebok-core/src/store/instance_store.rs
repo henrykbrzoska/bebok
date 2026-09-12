@@ -147,6 +147,16 @@ impl InstanceStore {
                 .register_tool(Arc::new(crate::agent::fleet_tool::FleetTool::new(
                     weak.clone(),
                 )));
+            // WP-DELEGATION: supervision tools for background children.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskStatusTool::new(weak.clone())));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskWaitTool::new(weak.clone())));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskCancelTool::new(weak.clone())));
         }
 
         // Async side effects: connect enabled MCP servers and register their

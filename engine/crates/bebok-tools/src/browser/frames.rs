@@ -15,7 +15,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
-use chromiumoxide::cdp::browser_protocol::page::{CaptureScreenshotFormat, Viewport as ClipViewport};
+use chromiumoxide::cdp::browser_protocol::page::{
+    CaptureScreenshotFormat, Viewport as ClipViewport,
+};
 use chromiumoxide::page::{Page, ScreenshotParams};
 use serde::Serialize;
 
@@ -193,7 +195,13 @@ mod tests {
             "C:/proj",
             7,
             true,
-            (vec![0xFF, 0xD8, 0xFF], "https://x/".into(), "X".into(), 1280, 800),
+            (
+                vec![0xFF, 0xD8, 0xFF],
+                "https://x/".into(),
+                "X".into(),
+                1280,
+                800,
+            ),
         );
         assert_eq!(f.session_id, "s1");
         assert_eq!(f.directory, "C:/proj");

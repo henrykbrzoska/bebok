@@ -18,6 +18,8 @@
 //! run_turn, build_request, ...}` keep resolving here.
 
 pub mod catalog;
+pub mod delegation;
+pub mod delegation_policy;
 pub mod exec;
 pub mod fleet_tool;
 pub mod gate;
@@ -26,6 +28,7 @@ pub mod observe;
 pub mod preset;
 pub mod prompt_env;
 pub mod request;
+pub mod supervision_tools;
 pub mod task_tool;
 pub mod turn;
 pub mod verify_prompt;
@@ -34,6 +37,8 @@ pub mod verify_prompt;
 mod tests;
 
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
+pub use delegation::{TaskProgress, summarize_progress};
+pub use delegation_policy::{delegation_policy_note, subagent_note};
 pub use exec::{ToolOutcome, fail_tool};
 pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};
@@ -45,6 +50,7 @@ pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
 pub use prompt_env::host_os_note;
 pub use request::{RequestBuilder, build_request, prune_for_budget};
+pub use supervision_tools::{TaskCancelTool, TaskStatusTool, TaskWaitTool};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};
 pub use verify_prompt::verification_section;

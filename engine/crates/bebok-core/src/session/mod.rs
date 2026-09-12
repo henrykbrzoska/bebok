@@ -607,7 +607,12 @@ mod tool_permission_tests {
         // those fields (this used to reconstruct the whole `Part::Tool`).
         let mut m = Message::new(Role::Assistant);
         m.add_tool_call("c1".into(), "write_file".into(), serde_json::json!({}));
-        assert!(m.set_tool_permission("c1", PermissionLevel::Allow, true, SafetyCategory::Dangerous));
+        assert!(m.set_tool_permission(
+            "c1",
+            PermissionLevel::Allow,
+            true,
+            SafetyCategory::Dangerous
+        ));
         assert!(m.mark_tool_running("c1", 1234));
         let Part::Tool {
             permission,
