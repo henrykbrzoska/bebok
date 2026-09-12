@@ -37,6 +37,9 @@ interface DirState {
   expanded: boolean;
 }
 
+/** Windows extended-length path prefix the engine normalizes directories to. */
+const UNC_PREFIX = '\\\\?\\';
+
 @Component({
   selector: 'app-explorer-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -47,7 +50,7 @@ interface DirState {
     } @else {
       <div class="panel-body">
         <div class="head">
-          <span class="dir" [title]="directory()!">{{ directory() }}</span>
+          <span class="dir" [title]="directory()!">{{ prettyDirectory() }}</span>
           <a
             class="open"
             [routerLink]="['/explorer']"
@@ -124,8 +127,6 @@ interface DirState {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        direction: rtl;
-        text-align: left;
       }
 
       .open {
@@ -206,6 +207,11 @@ export class ExplorerPanel {
   readonly directory = computed(
     () => this.session.directory() ?? this.engine.readLastDirectory(),
   );
+  /** The engine normalizes to the Win32 `\\?\C:\dir` form - show it plain. */
+  readonly prettyDirectory = computed(() => {
+    const dir = this.directory() ?? '';
+    return dir.startsWith(UNC_PREFIX) ? dir.slice(UNC_PREFIX.length) : dir;
+  });
   readonly selected = this.selection.selectedPath;
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);

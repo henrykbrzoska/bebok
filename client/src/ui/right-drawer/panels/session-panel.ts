@@ -259,8 +259,6 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        direction: rtl;
-        text-align: left;
       }
 
       .plus {
