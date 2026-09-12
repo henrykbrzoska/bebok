@@ -27,6 +27,7 @@ import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
+import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
 import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
@@ -143,6 +144,7 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
+  private readonly sessionStore = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -173,8 +175,8 @@ export class ChatView implements OnInit, OnDestroy {
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
 
-  /** M6: filter the transcript by model (driven from the sidebar). */
-  readonly filterModel = signal<string | null>(null);
+  /** M6: filter the transcript by model (driven from the drawer's Session panel). */
+  readonly filterModel = this.sessionStore.filterModel;
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
@@ -204,17 +206,6 @@ export class ChatView implements OnInit, OnDestroy {
   resolveTaskLink(nameOrId: string): string | null {
     return this.taskLinks().get(nameOrId) ?? null;
   }
-
-  readonly modelsUsed = computed<string[]>(() => {
-    const set = new Set<string>();
-    for (const m of this.messages()) {
-      const model = m.meta?.model;
-      if (model) {
-        set.add(model);
-      }
-    }
-    return [...set];
-  });
 
   readonly filteredMessages = computed<Message[]>(() => {
     const filter = this.filterModel();
@@ -259,6 +250,12 @@ export class ChatView implements OnInit, OnDestroy {
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => this.handleEvent(ev));
+
+    // Publish the visible session to the shared store so the right drawer's
+    // Session panel derives tokens/cost/files from the same data (F2-12).
+    effect(() => this.sessionStore.meta.set(this.meta()));
+    effect(() => this.sessionStore.messages.set(this.messages()));
+    effect(() => this.sessionStore.running.set(this.running()));
 
     // Full transcript sync whenever the SSE stream (re)connects: events that
     // fell into the reconnect gap are recovered from the engine, not guessed.
@@ -346,6 +343,7 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.sessionStore.clear();
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();
     this.routeSub = null;

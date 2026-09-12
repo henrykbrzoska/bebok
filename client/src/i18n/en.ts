@@ -337,6 +337,22 @@ export const en = {
   'chat.typing': 'Assistant is typing',
   'chat.mic': 'Dictate',
   'chat.micUnsupported': 'Dictation is not available in this browser',
+  'drawer.noSession': 'Open a session to see its stats.',
+  'drawer.tokens': 'Tokens',
+  'drawer.tokensIn': 'In',
+  'drawer.tokensOut': 'Out',
+  'drawer.tokensCacheRead': 'Cache R',
+  'drawer.tokensHitRate': 'Hit rate',
+  'drawer.cost': 'Cost',
+  'drawer.filesChanged': 'Files changed',
+  'drawer.noFiles': 'No files touched yet',
+  'drawer.subagents': 'Sub-agents',
+  'drawer.activeHere': 'Active in this session',
+  'drawer.nothingActive': 'No MCP servers or skills',
+  'drawer.enabled': 'enabled',
+  'drawer.disabled': 'disabled',
+  'drawer.yolo': 'YOLO mode',
+  'drawer.yoloHint': 'Auto-allow every tool permission request in this directory.',
 };
 
 export type MessageKey = keyof typeof en;
