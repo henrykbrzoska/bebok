@@ -72,6 +72,7 @@ fn upsert_provider_models(
             endpoint: None,
             api_key: None,
             models: models.to_vec(),
+            ..Default::default()
         }),
     }
 

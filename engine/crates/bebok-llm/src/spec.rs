@@ -4,6 +4,7 @@
 //! (`openai/gpt-4o` -> the `openai` spec).
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::provider::LlmError;
 
@@ -27,7 +28,7 @@ impl Default for ProviderKind {
 /// One named provider. `api_key` is intentionally plain (empty = not given /
 /// fall back to the provider-specific environment variable); the engine never
 /// logs it and never sends it to clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProviderSpec {
     pub name: String,
     #[serde(default)]
@@ -42,6 +43,15 @@ pub struct ProviderSpec {
     /// authoritative - `list_models` can refresh it).
     #[serde(default)]
     pub models: Vec<String>,
+    /// Provider-specific settings that do not deserve a column of their own:
+    /// `organization`/`project` (OpenAI), `api-version` (Azure-style hosts),
+    /// `http_referer`/`x_title` (OpenRouter), and whatever a future provider
+    /// needs. The keys a given provider understands are declared by
+    /// [`ProviderUiSpec::extra_fields`]; unknown keys are preserved verbatim, so
+    /// a provider can grow options without a config-schema migration. Omitted
+    /// from the serialised form when empty, so existing configs are unchanged.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub extra: Map<String, Value>,
 }
 
 impl ProviderSpec {
@@ -134,6 +144,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
                 "glm-4.6".into(),
                 "glm-4.5-air".into(),
             ],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "openai".into(),
@@ -147,6 +158,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
                 "gpt-4o-mini".into(),
                 "o3-mini".into(),
             ],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "anthropic".into(),
@@ -158,6 +170,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
                 "claude-sonnet-4-5".into(),
                 "claude-haiku-4-5".into(),
             ],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "xai".into(),
@@ -165,6 +178,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("https://api.x.ai/v1".into()),
             api_key: None,
             models: vec!["grok-4.6".into(), "grok-4.3".into()],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "deepseek".into(),
@@ -172,6 +186,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("https://api.deepseek.com/v1".into()),
             api_key: None,
             models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "google".into(),
@@ -179,6 +194,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("https://generativelanguage.googleapis.com/v1beta/openai".into()),
             api_key: None,
             models: vec!["gemini-2.5-pro".into(), "gemini-2.5-flash".into()],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "mistralai".into(),
@@ -189,6 +205,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
                 "mistral-large-latest".into(),
                 "mistral-medium-latest".into(),
             ],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "groq".into(),
@@ -196,6 +213,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("https://api.groq.com/openai/v1".into()),
             api_key: None,
             models: vec!["llama-3.3-70b-versatile".into()],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "qwen".into(),
@@ -203,6 +221,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1".into()),
             api_key: None,
             models: vec!["qwen-plus".into(), "qwen3-235b-a22b".into()],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "openrouter".into(),
@@ -216,6 +235,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
                 "z-ai/glm-5.3-flash".into(),
                 "deepseek/deepseek-v4-flash".into(),
             ],
+            extra: Map::new(),
         },
         ProviderSpec {
             name: "ollama".into(),
@@ -223,6 +243,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             endpoint: Some("http://localhost:11434/v1".into()),
             api_key: None,
             models: Vec::new(),
+            extra: Map::new(),
         },
     ]
 }
@@ -408,6 +429,11 @@ pub fn resolve_provider_specs(config_specs: &[ProviderSpec]) -> Vec<ProviderSpec
                 }
                 if !spec.models.is_empty() {
                     builtin.models = spec.models.clone();
+                }
+                // Extra fields merge key-by-key: a config that sets only
+                // `organization` must not drop a `project` set elsewhere.
+                for (k, v) in &spec.extra {
+                    builtin.extra.insert(k.clone(), v.clone());
                 }
             }
             None => out.push(spec.clone()),
@@ -650,6 +676,7 @@ mod catalog_tests {
             endpoint: Some("http://10.0.0.5:8000/v1".into()),
             api_key: None,
             models: vec!["local-7b".into()],
+            extra: Map::new(),
         };
         let ui = provider_ui_spec(&spec);
         assert_eq!(ui.id, "my-llm");
@@ -719,6 +746,157 @@ mod auth_tests {
             let s = serde_json::to_string(&auth).unwrap();
             assert_eq!(s, format!("\"{}\"", auth.as_str()));
             assert_eq!(serde_json::from_str::<ProviderAuth>(&s).unwrap(), auth);
+        }
+    }
+}
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    fn spec_with_extra() -> ProviderSpec {
+        let mut extra = Map::new();
+        extra.insert("organization".into(), Value::String("org-abc".into()));
+        extra.insert("project".into(), Value::String("proj_1".into()));
+        extra.insert("api-version".into(), Value::String("2024-10-21".into()));
+        ProviderSpec {
+            name: "openai".into(),
+            kind: ProviderKind::Openai,
+            endpoint: Some("https://api.openai.com/v1".into()),
+            api_key: Some("sk-test".into()),
+            models: vec!["gpt-4.1".into()],
+            extra,
+        }
+    }
+
+    /// A provider persists extra fields without any change to the base schema.
+    #[test]
+    fn extra_fields_round_trip_through_serialization() {
+        let spec = spec_with_extra();
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["extra"]["organization"], "org-abc");
+        assert_eq!(json["extra"]["project"], "proj_1");
+        assert_eq!(json["extra"]["api-version"], "2024-10-21");
+
+        let back: ProviderSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(back.extra.len(), 3);
+        assert_eq!(back.extra["organization"], Value::String("org-abc".into()));
+        assert_eq!(
+            back.extra["api-version"],
+            Value::String("2024-10-21".into())
+        );
+        assert_eq!(back.name, "openai");
+        assert_eq!(back.models, vec!["gpt-4.1".to_string()]);
+    }
+
+    /// Non-string values (numbers, booleans, nested objects) survive too - the
+    /// map is opaque to the engine.
+    #[test]
+    fn extra_accepts_arbitrary_json_values() {
+        let raw = serde_json::json!({
+            "name": "custom",
+            "kind": "openai",
+            "extra": {
+                "timeout_ms": 30000,
+                "insecure": true,
+                "headers": { "X-Title": "Bebok" }
+            }
+        });
+        let spec: ProviderSpec = serde_json::from_value(raw).unwrap();
+        assert_eq!(spec.extra["timeout_ms"], 30000);
+        assert_eq!(spec.extra["insecure"], true);
+        assert_eq!(spec.extra["headers"]["X-Title"], "Bebok");
+
+        let back = serde_json::to_value(&spec).unwrap();
+        assert_eq!(back["extra"]["headers"]["X-Title"], "Bebok");
+    }
+
+    /// Existing configs (no `extra`) still parse, and an empty map is omitted
+    /// from the output so no config file grows a noise key.
+    #[test]
+    fn missing_extra_defaults_to_empty_and_is_not_serialized() {
+        let spec: ProviderSpec =
+            serde_json::from_value(serde_json::json!({ "name": "groq" })).unwrap();
+        assert!(spec.extra.is_empty());
+
+        let json = serde_json::to_value(&spec).unwrap();
+        assert!(json.get("extra").is_none(), "empty extra must be omitted");
+    }
+
+    /// Config layers merge extras key-by-key instead of replacing the map.
+    #[test]
+    fn resolve_merges_extra_into_the_builtin() {
+        let mut extra = Map::new();
+        extra.insert("organization".into(), Value::String("org-1".into()));
+        let override_spec = ProviderSpec {
+            name: "openai".into(),
+            kind: ProviderKind::Openai,
+            extra,
+            ..Default::default()
+        };
+        let resolved = resolve_provider_specs(&[override_spec]);
+        let openai = find_provider_spec(&resolved, "openai").unwrap();
+        assert_eq!(openai.extra["organization"], Value::String("org-1".into()));
+        // Untouched fields of the built-in survive the merge.
+        assert_eq!(
+            openai.endpoint.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+
+        let mut extra = Map::new();
+        extra.insert("project".into(), Value::String("proj-2".into()));
+        let second = ProviderSpec {
+            name: "openai".into(),
+            kind: ProviderKind::Openai,
+            extra,
+            ..Default::default()
+        };
+        let resolved = resolve_provider_specs(&[
+            ProviderSpec {
+                name: "openai".into(),
+                kind: ProviderKind::Openai,
+                extra: openai.extra.clone(),
+                ..Default::default()
+            },
+            second,
+        ]);
+        let openai = find_provider_spec(&resolved, "openai").unwrap();
+        assert_eq!(openai.extra["organization"], Value::String("org-1".into()));
+        assert_eq!(openai.extra["project"], Value::String("proj-2".into()));
+    }
+
+    /// A custom provider carrying extras is appended whole.
+    #[test]
+    fn custom_provider_keeps_its_extra() {
+        let mut extra = Map::new();
+        extra.insert("deployment".into(), Value::String("gpt4o-eu".into()));
+        let custom = ProviderSpec {
+            name: "azure".into(),
+            kind: ProviderKind::Openai,
+            endpoint: Some("https://x.openai.azure.com/openai".into()),
+            extra,
+            ..Default::default()
+        };
+        let resolved = resolve_provider_specs(&[custom]);
+        let azure = find_provider_spec(&resolved, "azure").unwrap();
+        assert_eq!(azure.extra["deployment"], Value::String("gpt4o-eu".into()));
+    }
+
+    /// The catalog declares which keys a provider understands; the values live
+    /// in `ProviderSpec::extra` under exactly those keys.
+    #[test]
+    fn declared_extra_fields_match_the_extra_map_keys() {
+        let ui = provider_catalog()
+            .into_iter()
+            .find(|p| p.id == "openai")
+            .unwrap();
+        let spec = spec_with_extra();
+        for field in &ui.extra_fields {
+            assert!(
+                spec.extra.contains_key(&field.key),
+                "declared field {} has no home in extra",
+                field.key
+            );
         }
     }
 }
