@@ -455,4 +455,12 @@ export const ko: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': '그룹 없음',
   'projectSwitcher.group.move': '그룹으로 이동…',
   'projectSwitcher.group.placeholder': '그룹 이름',
+
+  // F6-3: context meter
+  'chat.context': '컨텍스트',
+  'chat.contextTitle': '사용 중인 컨텍스트 창 (마지막 요청)',
+  'drawer.context': '컨텍스트',
+  'drawer.contextUsed': '사용량',
+  'drawer.contextWindow': '창 크기',
+  'drawer.contextNone': '아직 턴이 없습니다',
 };

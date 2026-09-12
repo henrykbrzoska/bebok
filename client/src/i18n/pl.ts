@@ -456,4 +456,12 @@ export const pl: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'Bez grupy',
   'projectSwitcher.group.move': 'Przenieś do grupy…',
   'projectSwitcher.group.placeholder': 'Nazwa grupy',
+
+  // F6-3: context meter
+  'chat.context': 'Kontekst',
+  'chat.contextTitle': 'Zajętość okna kontekstu (ostatnie żądanie)',
+  'drawer.context': 'Kontekst',
+  'drawer.contextUsed': 'Użyte',
+  'drawer.contextWindow': 'Okno',
+  'drawer.contextNone': 'Brak tury',
 };

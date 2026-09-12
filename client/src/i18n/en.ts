@@ -465,6 +465,14 @@ export const en = {
   'projectSwitcher.group.ungrouped': 'Ungrouped',
   'projectSwitcher.group.move': 'Move to group…',
   'projectSwitcher.group.placeholder': 'Group name',
+
+  // F6-3: context meter
+  'chat.context': 'Context',
+  'chat.contextTitle': 'Context window in use (last request)',
+  'drawer.context': 'Context',
+  'drawer.contextUsed': 'Used',
+  'drawer.contextWindow': 'Window',
+  'drawer.contextNone': 'No turn yet',
 };
 
 export type MessageKey = keyof typeof en;

@@ -20,6 +20,37 @@ export interface TokenTotals {
   cost: number;
 }
 
+/** Catalog fallback for models with no known window (mirrors the engine's 64k). */
+export const DEFAULT_CONTEXT_WINDOW = 64_000;
+/** Meter turns `--warning` at this fill level ... */
+export const CONTEXT_WARNING_PERCENT = 80;
+/** ... and `--danger` at this one. */
+export const CONTEXT_DANGER_PERCENT = 95;
+
+export type ContextLevel = 'ok' | 'warning' | 'danger';
+
+/** `42k` / `1.2M` / `950` - compact token count for the meter. */
+export function formatTokens(value: number): string {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (value >= 1000) {
+    return `${Math.round(value / 1000)}k`;
+  }
+  return String(Math.round(value));
+}
+
+/** Meter colour band for a fill percentage (null = no data yet). */
+export function contextLevelFor(percent: number | null): ContextLevel {
+  if (percent === null) {
+    return 'ok';
+  }
+  if (percent >= CONTEXT_DANGER_PERCENT) {
+    return 'danger';
+  }
+  return percent >= CONTEXT_WARNING_PERCENT ? 'warning' : 'ok';
+}
+
 /** One touched file plus its line deltas, derived from the tool calls. */
 export interface FileChange {
   path: string;
@@ -43,6 +74,43 @@ export class ChatSessionStore {
   readonly filterModel = signal<string | null>(null);
 
   readonly directory = computed(() => this.meta()?.directory ?? null);
+
+  /**
+   * Context meter (F6-3). Sourced from `meta()` - the engine records the last
+   * LLM call's input size and resolves the window from its model catalog -
+   * not re-derived from message parts, since this is a property of the
+   * session's model, not a sum over history.
+   */
+  readonly contextUsed = computed<number | null>(() => {
+    const used = this.meta()?.context_used;
+    return typeof used === 'number' && used >= 0 ? used : null;
+  });
+
+  readonly contextWindow = computed<number>(() => {
+    const window = this.meta()?.context_window;
+    return typeof window === 'number' && window > 0 ? window : DEFAULT_CONTEXT_WINDOW;
+  });
+
+  /** Whole-number fill percentage, or null before the first turn. */
+  readonly contextPercent = computed<number | null>(() => {
+    const used = this.contextUsed();
+    if (used === null) {
+      return null;
+    }
+    return Math.round((used / this.contextWindow()) * 100);
+  });
+
+  readonly contextLevel = computed<ContextLevel>(() => contextLevelFor(this.contextPercent()));
+
+  /** `42k / 200k · 21%` for the toolbar and the drawer; empty before a turn. */
+  readonly contextLabel = computed<string>(() => {
+    const used = this.contextUsed();
+    const percent = this.contextPercent();
+    if (used === null || percent === null) {
+      return '';
+    }
+    return `${formatTokens(used)} / ${formatTokens(this.contextWindow())} · ${percent}%`;
+  });
 
   readonly modelsUsed = computed<string[]>(() => {
     const seen = new Set<string>();

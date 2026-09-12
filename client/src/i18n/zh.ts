@@ -455,4 +455,12 @@ export const zh: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': '未分组',
   'projectSwitcher.group.move': '移动到分组…',
   'projectSwitcher.group.placeholder': '分组名称',
+
+  // F6-3: context meter
+  'chat.context': '上下文',
+  'chat.contextTitle': '上下文窗口占用（上一次请求）',
+  'drawer.context': '上下文',
+  'drawer.contextUsed': '已用',
+  'drawer.contextWindow': '窗口',
+  'drawer.contextNone': '尚无回合',
 };

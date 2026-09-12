@@ -7,12 +7,29 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { Message } from '../../core/engine.dtos';
+import { Message, SessionMeta } from '../../core/engine.dtos';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
-import { ChatSessionStore } from './chat-session.store';
+import {
+  ChatSessionStore,
+  DEFAULT_CONTEXT_WINDOW,
+  contextLevelFor,
+  formatTokens,
+} from './chat-session.store';
 
 function assistant(id: string, parts: Message['parts']): Message {
   return { id, role: 'assistant', parts } as Message;
+}
+
+function meta(extra: Partial<SessionMeta>): SessionMeta {
+  return {
+    id: 's1',
+    directory: '/p',
+    agent: 'code',
+    created_at: 0,
+    updated_at: 0,
+    usage: { input_tokens: 0, output_tokens: 0 },
+    ...extra,
+  } as SessionMeta;
 }
 
 describe('ChatSessionStore', () => {
@@ -96,6 +113,64 @@ describe('ChatSessionStore', () => {
     expect(store.costLabel()).toBe('$0.0000');
     expect(store.cacheRate()).toBe('–');
     expect(store.filesChanged()).toEqual([]);
+  });
+});
+
+describe('ChatSessionStore context meter (F6-3)', () => {
+  let store: ChatSessionStore;
+
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    store = TestBed.inject(ChatSessionStore);
+  });
+
+  it('has no meter before the first turn', () => {
+    store.meta.set(meta({}));
+    expect(store.contextUsed()).toBeNull();
+    expect(store.contextPercent()).toBeNull();
+    expect(store.contextLabel()).toBe('');
+    expect(store.contextLevel()).toBe('ok');
+    // Window still resolves (catalog fallback) so nothing renders NaN.
+    expect(store.contextWindow()).toBe(DEFAULT_CONTEXT_WINDOW);
+  });
+
+  it('derives used / window / percent from the session meta', () => {
+    store.meta.set(meta({ context_used: 42_000, context_window: 200_000 }));
+    expect(store.contextUsed()).toBe(42_000);
+    expect(store.contextWindow()).toBe(200_000);
+    expect(store.contextPercent()).toBe(21);
+    expect(store.contextLabel()).toBe('42k / 200k · 21%');
+    expect(store.contextLevel()).toBe('ok');
+  });
+
+  it('falls back to the 64k window for an unknown model', () => {
+    store.meta.set(meta({ context_used: 32_000, context_window: null }));
+    expect(store.contextWindow()).toBe(64_000);
+    expect(store.contextPercent()).toBe(50);
+    expect(store.contextLabel()).toBe('32k / 64k · 50%');
+  });
+
+  it('switches colour bands at 80% (warning) and 95% (danger)', () => {
+    store.meta.set(meta({ context_used: 158_000, context_window: 200_000 }));
+    expect(store.contextLevel()).toBe('ok');
+    store.meta.set(meta({ context_used: 160_000, context_window: 200_000 }));
+    expect(store.contextPercent()).toBe(80);
+    expect(store.contextLevel()).toBe('warning');
+    store.meta.set(meta({ context_used: 190_000, context_window: 200_000 }));
+    expect(store.contextLevel()).toBe('danger');
+    expect(contextLevelFor(null)).toBe('ok');
+    expect(contextLevelFor(79)).toBe('ok');
+    expect(contextLevelFor(80)).toBe('warning');
+    expect(contextLevelFor(95)).toBe('danger');
+  });
+
+  it('formats token counts compactly', () => {
+    expect(formatTokens(950)).toBe('950');
+    expect(formatTokens(42_000)).toBe('42k');
+    expect(formatTokens(200_000)).toBe('200k');
+    expect(formatTokens(1_048_576)).toBe('1M');
+    expect(formatTokens(1_250_000)).toBe('1.3M');
   });
 });
 

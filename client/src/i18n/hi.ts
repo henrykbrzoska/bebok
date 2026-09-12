@@ -455,4 +455,12 @@ export const hi: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'बिना समूह',
   'projectSwitcher.group.move': 'समूह में ले जाएँ…',
   'projectSwitcher.group.placeholder': 'समूह का नाम',
+
+  // F6-3: context meter
+  'chat.context': 'संदर्भ',
+  'chat.contextTitle': 'उपयोग में संदर्भ विंडो (पिछला अनुरोध)',
+  'drawer.context': 'संदर्भ',
+  'drawer.contextUsed': 'उपयोग',
+  'drawer.contextWindow': 'विंडो',
+  'drawer.contextNone': 'अभी कोई टर्न नहीं',
 };

@@ -78,6 +78,54 @@
   border-color: var(--accent);
 }
 
+/* F6-3: context meter (`42k / 200k · 21%`) between the selectors and Abort. */
+.tb-context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.tb-context-bar {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tb-context-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.tb-context-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.tb-context.warning .tb-context-fill {
+  background: var(--warning);
+}
+
+.tb-context.warning .tb-context-value {
+  color: var(--warning);
+}
+
+.tb-context.danger .tb-context-fill {
+  background: var(--danger);
+}
+
+.tb-context.danger .tb-context-value {
+  color: var(--danger);
+}
+
 .tb-abort {
   margin-left: auto;
   flex: 0 0 auto;

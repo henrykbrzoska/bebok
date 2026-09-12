@@ -455,4 +455,12 @@ export const ja: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': '未分類',
   'projectSwitcher.group.move': 'グループへ移動…',
   'projectSwitcher.group.placeholder': 'グループ名',
+
+  // F6-3: context meter
+  'chat.context': 'コンテキスト',
+  'chat.contextTitle': '使用中のコンテキストウィンドウ（直前のリクエスト）',
+  'drawer.context': 'コンテキスト',
+  'drawer.contextUsed': '使用量',
+  'drawer.contextWindow': 'ウィンドウ',
+  'drawer.contextNone': 'まだターンがありません',
 };

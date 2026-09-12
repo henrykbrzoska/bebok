@@ -141,7 +141,39 @@ pub async fn list_sessions(
         return Err(ApiError::bad_request("missing ?directory= parameter").into_response());
     };
     let sessions = state.store.list_sessions(&directory).await;
+    // Default model for sessions that never ran a turn and carry no override.
+    let default_model = state
+        .store
+        .get_or_create_instance(&directory)
+        .await
+        .ok()
+        .and_then(|instance| instance.config.read().ok().map(|cfg| cfg.model.clone()));
+    let sessions: Vec<serde_json::Value> = sessions
+        .iter()
+        .map(|session| {
+            let mut value = serde_json::to_value(session).unwrap_or_default();
+            attach_context_window(&mut value, session, default_model.as_deref());
+            value
+        })
+        .collect();
     Ok(Json(serde_json::json!({ "sessions": sessions })))
+}
+
+/// Add the live `context_window` (tokens) for the model that produced the
+/// session's last turn (`context_model`), else the session's model override,
+/// else the directory default. Resolved from the catalog on every response so
+/// it is never persisted and a catalog update needs no migration.
+pub fn attach_context_window(
+    value: &mut serde_json::Value,
+    session: &bebok_core::session::Session,
+    default_model: Option<&str>,
+) {
+    let model = session
+        .context_model
+        .as_deref()
+        .or(session.model.as_deref())
+        .or(default_model);
+    value["context_window"] = serde_json::json!(bebok_core::context::context_window_for(model));
 }
 
 /// `GET /session/{id}` -> metadata + usage totals
@@ -154,8 +186,11 @@ pub async fn get_session(
         .open_session(id)
         .await
         .map_err(|e| err_response(&e))?;
-    let mut meta = serde_json::to_value(session.meta_snapshot().await).unwrap_or_default();
+    let snapshot = session.meta_snapshot().await;
+    let mut meta = serde_json::to_value(&snapshot).unwrap_or_default();
     meta["running"] = serde_json::json!(session.is_running());
+    let default_model = session.config_snapshot().model_for(&snapshot.agent);
+    attach_context_window(&mut meta, &snapshot, Some(&default_model));
     Ok(Json(meta))
 }
 

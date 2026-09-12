@@ -456,4 +456,12 @@ export const uk: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'Без групи',
   'projectSwitcher.group.move': 'Перемістити до групи…',
   'projectSwitcher.group.placeholder': 'Назва групи',
+
+  // F6-3: context meter
+  'chat.context': 'Контекст',
+  'chat.contextTitle': 'Використання контекстного вікна (останній запит)',
+  'drawer.context': 'Контекст',
+  'drawer.contextUsed': 'Використано',
+  'drawer.contextWindow': 'Вікно',
+  'drawer.contextNone': 'Ще немає ходів',
 };

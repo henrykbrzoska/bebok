@@ -58,6 +58,35 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         </section>
 
         <section class="group">
+          <h3 class="group-title">{{ t('drawer.context') }}</h3>
+          @if (session.contextLabel()) {
+            <div
+              class="token-grid context"
+              [class.warning]="session.contextLevel() === 'warning'"
+              [class.danger]="session.contextLevel() === 'danger'"
+              data-testid="context-meter"
+            >
+              <div class="cell">
+                <span class="cell-label">{{ t('drawer.contextUsed') }}</span>
+                <span class="cell-value context-value">{{ format(session.contextUsed() ?? 0) }}</span>
+              </div>
+              <div class="cell">
+                <span class="cell-label">{{ t('drawer.contextWindow') }}</span>
+                <span class="cell-value">{{ format(session.contextWindow()) }}</span>
+              </div>
+              <div class="cell wide">
+                <span class="cell-label">{{ session.contextLabel() }}</span>
+                <span class="context-bar" aria-hidden="true">
+                  <span class="context-fill" [style.width.%]="contextFill()"></span>
+                </span>
+              </div>
+            </div>
+          } @else {
+            <div class="none">{{ t('drawer.contextNone') }}</div>
+          }
+        </section>
+
+        <section class="group">
           <h3 class="group-title">{{ t('drawer.cost') }}</h3>
           <div class="cost">{{ session.costLabel() }}</div>
         </section>
@@ -227,6 +256,43 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         color: var(--text);
       }
 
+      .cell.wide {
+        grid-column: 1 / -1;
+      }
+
+      .context-bar {
+        display: block;
+        height: 6px;
+        margin-top: 3px;
+        border-radius: 3px;
+        background: var(--surface-3);
+        border: 1px solid var(--border);
+        overflow: hidden;
+      }
+
+      .context-fill {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s ease;
+      }
+
+      .context.warning .context-fill {
+        background: var(--warning);
+      }
+
+      .context.warning .context-value {
+        color: var(--warning);
+      }
+
+      .context.danger .context-fill {
+        background: var(--danger);
+      }
+
+      .context.danger .context-value {
+        color: var(--danger);
+      }
+
       .cost {
         font-family: var(--font-mono);
         font-size: var(--fs-20);
@@ -373,6 +439,10 @@ export class SessionPanel {
 
   readonly totals = this.session.totals;
   readonly models = computed(() => this.session.modelsUsed());
+  /** F6-3: bar width for the context meter (clamped to 0..100). */
+  readonly contextFill = computed(() =>
+    Math.min(100, Math.max(0, this.session.contextPercent() ?? 0)),
+  );
 
   /** Sub-agent sessions delegated from this session (via the `task` tool). */
   readonly subagents = signal<SessionMeta[]>([]);

@@ -216,6 +216,13 @@ export class ChatView implements OnInit, OnDestroy {
   /** M6: filter the transcript by model (driven from the drawer's Session panel). */
   readonly filterModel = this.sessionStore.filterModel;
 
+  /** F6-3: context meter in the toolbar (`42k / 200k · 21%`), from the store. */
+  readonly contextLabel = this.sessionStore.contextLabel;
+  readonly contextLevel = this.sessionStore.contextLevel;
+  readonly contextFill = computed(() =>
+    Math.min(100, Math.max(0, this.sessionStore.contextPercent() ?? 0)),
+  );
+
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
 
@@ -611,6 +618,22 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
+  /** Re-read session metadata (usage, context gauge) once a turn settles. */
+  private async refreshMeta(): Promise<void> {
+    const sessionID = this.sessionID();
+    if (!sessionID || this.loading()) {
+      return;
+    }
+    try {
+      const meta = await this.engine.sessionMeta(sessionID);
+      if (sessionID === this.sessionID()) {
+        this.meta.set(meta);
+      }
+    } catch {
+      /* metadata refresh is best-effort; the next load re-reads it */
+    }
+  }
+
   private scheduleRefresh(): void {
     if (this.refreshTimer !== undefined) {
       return;
@@ -639,6 +662,7 @@ export class ChatView implements OnInit, OnDestroy {
         this.running.set(running);
         if (!running) {
           this.scheduleRefresh();
+          void this.refreshMeta();
           this.activeTasks.set([]);
           const err = event.properties?.['error'];
           if (typeof err === 'string' && err) {
