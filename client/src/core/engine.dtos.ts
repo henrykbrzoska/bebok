@@ -662,3 +662,82 @@ export interface FsBrowseResponse {
   path: string | null;
   entries: FsBrowseEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// F7-5: usage statistics (`GET /stats`)
+// ---------------------------------------------------------------------------
+
+/** Token/cost totals shared by every stats row (`bebok_core::stats::Totals`). */
+export interface StatsTotals {
+  sessions: number;
+  /** User prompts. */
+  turns: number;
+  /** LLM round-trips. */
+  llm_calls: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  /** Sum over calls with known pricing; null when none had a price. */
+  cost: number | null;
+  /** Calls whose model had no pricing entry. */
+  cost_unknown_calls: number;
+}
+
+/** One breakdown row (model / provider / agent / project): `key` + totals. */
+export interface StatsBucket extends StatsTotals {
+  key: string;
+}
+
+export interface StatsDay {
+  /** `YYYY-MM-DD` (UTC). */
+  day: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost: number | null;
+  llm_calls: number;
+  tool_calls: number;
+}
+
+export interface StatsSessionRow extends StatsTotals {
+  id: string;
+  title: string | null;
+  directory: string;
+  agent: string;
+  updated_at: number;
+}
+
+export interface StatsToolRow {
+  name: string;
+  calls: number;
+  errors: number;
+}
+
+export interface StatsResponse {
+  range: {
+    directory: string | null;
+    from: number | null;
+    to: number | null;
+    scanned_sessions: number;
+  };
+  totals: StatsTotals;
+  by_model: StatsBucket[];
+  by_provider: StatsBucket[];
+  by_agent: StatsBucket[];
+  by_project: StatsBucket[];
+  /** 30 contiguous days, oldest first. */
+  by_day: StatsDay[];
+  top_sessions: StatsSessionRow[];
+  tools: StatsToolRow[];
+  compaction: { count: number; avg_context_before: number | null };
+}
+
+export interface StatsQuery {
+  directory?: string | null;
+  /** Epoch ms or ISO date. */
+  from?: number | string | null;
+  to?: number | string | null;
+}

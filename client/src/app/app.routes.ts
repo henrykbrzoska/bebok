@@ -6,6 +6,7 @@ import { SettingsView } from '../views/settings/settings';
 import { TerminalView } from '../views/terminal/terminal';
 import { ExplorerView } from '../views/explorer/explorer';
 import { DebugView } from '../views/debug/debug';
+import { StatsView } from '../views/stats/stats';
 
 /**
  * Flat routes rendered inside `AppShell` (WP-SHELL / F1-11). Each route
@@ -21,6 +22,7 @@ export const routes: Routes = [
   { path: 'terminal', component: TerminalView, data: { screen: 'terminal' } },
   { path: 'explorer', component: ExplorerView, data: { screen: 'explorer' } },
   { path: 'debug', component: DebugView, data: { screen: 'debug' } },
+  { path: 'stats', component: StatsView, data: { screen: 'stats' } },
   // The standalone Config page is retired; its replacement is the Settings
   // "Raw JSON" tab (built by WP-SETTINGS). Keep the old link working.
   { path: 'config', redirectTo: 'settings', pathMatch: 'full' },

@@ -49,6 +49,8 @@ import {
   SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
+  StatsQuery,
+  StatsResponse,
   WorktreeSpec,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
@@ -249,10 +251,9 @@ export class EngineClient {
 
   /** `GET /session/{id}/changes` -> tracked files with +/- line counts. */
   sessionChanges(id: string): Promise<ChangeEntry[]> {
-    return this.request<ChangesResponse>(
-      'GET',
-      `/session/${encodeURIComponent(id)}/changes`,
-    ).then((d) => d.changes);
+    return this.request<ChangesResponse>('GET', `/session/${encodeURIComponent(id)}/changes`).then(
+      (d) => d.changes,
+    );
   }
 
   /** `GET /session/{id}/changes/diff?path=` -> unified diff against the baseline. */
@@ -272,12 +273,7 @@ export class EngineClient {
     );
   }
 
-  prompt(
-    id: string,
-    body: PromptBody | string,
-    agent?: string,
-    model?: string,
-  ): Promise<unknown> {
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string): Promise<unknown> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
@@ -287,8 +283,8 @@ export class EngineClient {
           }
         : {
             message: body.message,
-            ...(body.agent ?? agent ? { agent: (body.agent ?? agent) as string } : {}),
-            ...(body.model ?? model ? { model: (body.model ?? model) as string } : {}),
+            ...((body.agent ?? agent) ? { agent: (body.agent ?? agent) as string } : {}),
+            ...((body.model ?? model) ? { model: (body.model ?? model) as string } : {}),
             ...(body.images?.length ? { images: body.images } : {}),
           };
     return this.request('POST', `/session/${id}/prompt`, payload);
@@ -421,7 +417,11 @@ export class EngineClient {
     );
   }
 
-  fsFileWrite(directory: string, path: string, content: string): Promise<{ path: string; saved: boolean }> {
+  fsFileWrite(
+    directory: string,
+    path: string,
+    content: string,
+  ): Promise<{ path: string; saved: boolean }> {
     return this.request<{ path: string; saved: boolean }>(
       'PUT',
       `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
@@ -502,7 +502,8 @@ export class EngineClient {
    */
   browseDirectory(path?: string | null, showHidden = false): Promise<FsBrowseResponse> {
     const query =
-      (path ? `path=${encodeURIComponent(path)}&` : '') + `show_hidden=${showHidden ? 'true' : 'false'}`;
+      (path ? `path=${encodeURIComponent(path)}&` : '') +
+      `show_hidden=${showHidden ? 'true' : 'false'}`;
     return this.request<FsBrowseResponse>('GET', `/fs/browse?${query}`);
   }
 
@@ -519,14 +520,30 @@ export class EngineClient {
   }
 
   // ---------------------------------------------------------------------------
+  // F7-5: usage statistics
+  // ---------------------------------------------------------------------------
+
+  /** `GET /stats` - aggregates over every persisted session (all projects when `directory` is omitted). */
+  stats(query: StatsQuery = {}): Promise<StatsResponse> {
+    const params = new URLSearchParams();
+    if (query.directory) {
+      params.set('directory', query.directory);
+    }
+    if (query.from !== undefined && query.from !== null) {
+      params.set('from', String(query.from));
+    }
+    if (query.to !== undefined && query.to !== null) {
+      params.set('to', String(query.to));
+    }
+    const qs = params.toString();
+    return this.request<StatsResponse>('GET', qs ? `/stats?${qs}` : '/stats');
+  }
+
+  // ---------------------------------------------------------------------------
   // M5: terminal (PTY)
   // ---------------------------------------------------------------------------
 
-  createPty(
-    directory: string,
-    cols?: number,
-    rows?: number,
-  ): Promise<CreatePtyResponse> {
+  createPty(directory: string, cols?: number, rows?: number): Promise<CreatePtyResponse> {
     return this.request<CreatePtyResponse>('POST', '/pty', {
       ...(directory ? { directory } : {}),
       ...(cols ? { cols } : {}),
@@ -585,9 +602,7 @@ export class EngineClient {
       } catch {
         /* keep status only */
       }
-      throw new Error(
-        `engine ${method} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`,
-      );
+      throw new Error(`engine ${method} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
     }
     if (res.status === 204) {
       return undefined as T;
