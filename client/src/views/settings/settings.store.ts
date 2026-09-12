@@ -193,7 +193,10 @@ export class SettingsStore {
   /** Fan a loaded `GET /config` response out into the per-tab signals. */
   applyConfig(cfg: ConfigResponse): void {
     this.config.set(cfg);
-    this.providers.set(cfg.providers ?? []);
+    // WP-SEC redacts `api_key` server-side (null + `has_key`); drop it here too
+    // so an older engine's response can never put a key into the GUI state.
+    // `PUT /config` restores an unchanged null placeholder by provider name.
+    this.providers.set((cfg.providers ?? []).map((p) => ({ ...p, api_key: null })));
     this.keyDrafts.set({});
     this.rules.set(readRules(cfg.config.permission));
     this.typeModels.set({ ...(cfg.config.models ?? {}) });
