@@ -19,7 +19,7 @@
       [title]="t('topbar.density')"
       [attr.aria-pressed]="compact()"
     >
-      {{ compact() ? t('topbar.compact') : t('topbar.comfortable') }}
+      {{ t('topbar.compact') }}
     </button>
     @if (isChat()) {
       <button

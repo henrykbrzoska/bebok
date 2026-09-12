@@ -29,6 +29,9 @@
 .pill-row {
   display: flex;
   align-items: center;
+  /* 3 pills + the label do not fit 280px on one line - wrap instead of
+     clipping the last pill. */
+  flex-wrap: wrap;
   gap: var(--space-6);
   border-bottom: 1px solid var(--border);
   flex: none;

@@ -123,8 +123,11 @@ export class StartView implements OnInit, OnDestroy {
     try {
       const connection = await this.engine.connect();
       this.attemptedUrl.set(connection.baseUrl);
-      await this.engine.ping();
+      // Start the SSE stream first: the store then owns the shared
+      // connecting/live/error state the sidebar footer renders, instead of
+      // sitting at a misleading "idle" while this probe fails.
       this.events.start();
+      await this.engine.ping();
       this.connected.set(true);
       this.showAddressForm.set(false);
       if (this.directory()) {
