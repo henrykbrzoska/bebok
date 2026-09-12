@@ -92,6 +92,25 @@ impl Tool for Diff {
     }
 }
 
+/// Library entry point (WP-CHANGES): unified diff of two texts, rendered with
+/// `context` lines of context. Returns an empty string when the inputs are
+/// identical (callers show "no changes" rather than the tool's prose).
+pub fn unified_diff(
+    text_a: &str,
+    text_b: &str,
+    label_a: &str,
+    label_b: &str,
+    context: usize,
+) -> String {
+    let a: Vec<&str> = text_a.lines().collect();
+    let b: Vec<&str> = text_b.lines().collect();
+    let edits = myers(&a, &b);
+    if edits.iter().all(|op| matches!(op, Op::Keep(_))) {
+        return String::new();
+    }
+    unified(&edits, label_a, label_b, context)
+}
+
 /// A single edit in the diff script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Op<'a> {

@@ -110,6 +110,23 @@ pub async fn exec_gated_call(
     )
     .await;
 
+    // WP-CHANGES (F6-8): capture the pre-write baseline of the target file
+    // the first time a file-mutating tool touches it in this session. Tools
+    // have no access to the session directory, so the hook lives here.
+    if crate::change_tracking::is_tracked_tool(tool_name)
+        && let Some(path) = input.get("path").and_then(|v| v.as_str())
+    {
+        let tracker =
+            crate::change_tracking::Tracker::new(ctx.state.directory(), ctx.state.disk_dir());
+        let path = path.to_string();
+        let result = tokio::task::spawn_blocking(move || tracker.snapshot_before_write(&path))
+            .await
+            .unwrap_or_else(|e| Err(format!("snapshot task failed: {e}")));
+        if let Err(e) = result {
+            tracing::warn!("change tracking: {tool_name}: {e}");
+        }
+    }
+
     let tool_ctx = ToolCtx {
         root: ctx.state.directory().into(),
         session_id: ctx.state.id().to_string(),
