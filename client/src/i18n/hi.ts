@@ -455,4 +455,22 @@ export const hi: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'बिना समूह',
   'projectSwitcher.group.move': 'समूह में ले जाएँ…',
   'projectSwitcher.group.placeholder': 'समूह का नाम',
+
+  // F6-3: context meter
+  'chat.context': 'संदर्भ',
+  'chat.contextTitle': 'उपयोग में संदर्भ विंडो (पिछला अनुरोध)',
+  'drawer.context': 'संदर्भ',
+  'drawer.contextUsed': 'उपयोग',
+  'drawer.contextWindow': 'विंडो',
+  'drawer.contextNone': 'अभी कोई टर्न नहीं',
+
+  // F6-4: compaction
+  'chat.compact': 'संक्षिप्त करें',
+  'chat.compacting': 'संक्षिप्त हो रहा है…',
+  'chat.compactTitle': 'पुराने संदेशों का सारांश बनाकर नया सत्र खोलें (संदर्भ संक्षेपण)',
+  'chat.compactIdle': 'संक्षेपण के लिए कुछ संदेशों वाला निष्क्रिय सत्र चाहिए',
+  'palette.compactSession': 'अभी संदर्भ संक्षिप्त करें',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'इस सत्र में प्रयुक्त मॉडल की कीमत ज्ञात नहीं है',
 };

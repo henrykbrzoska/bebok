@@ -216,6 +216,27 @@ export class ChatView implements OnInit, OnDestroy {
   /** M6: filter the transcript by model (driven from the drawer's Session panel). */
   readonly filterModel = this.sessionStore.filterModel;
 
+  /** F6-3: context meter in the toolbar (`42k / 200k · 21%`), from the store. */
+  readonly contextLabel = this.sessionStore.contextLabel;
+  readonly contextLevel = this.sessionStore.contextLevel;
+  readonly contextFill = computed(() =>
+    Math.min(100, Math.max(0, this.sessionStore.contextPercent() ?? 0)),
+  );
+
+  /** F6-4: a compaction request is in flight (manual or automatic). */
+  readonly compacting = signal(false);
+  /** "Compact now" is offered once the engine has enough to summarize. */
+  readonly canCompact = computed(
+    () =>
+      this.sessionStore.canCompact() &&
+      !this.running() &&
+      !this.sending() &&
+      !this.loading() &&
+      !this.compacting(),
+  );
+  /** Sessions already auto-compacted once (never loop on a stubborn gauge). */
+  private readonly autoCompacted = new Set<string>();
+
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
 
@@ -611,6 +632,22 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
+  /** Re-read session metadata (usage, context gauge) once a turn settles. */
+  private async refreshMeta(): Promise<void> {
+    const sessionID = this.sessionID();
+    if (!sessionID || this.loading()) {
+      return;
+    }
+    try {
+      const meta = await this.engine.sessionMeta(sessionID);
+      if (sessionID === this.sessionID()) {
+        this.meta.set(meta);
+      }
+    } catch {
+      /* metadata refresh is best-effort; the next load re-reads it */
+    }
+  }
+
   private scheduleRefresh(): void {
     if (this.refreshTimer !== undefined) {
       return;
@@ -639,6 +676,7 @@ export class ChatView implements OnInit, OnDestroy {
         this.running.set(running);
         if (!running) {
           this.scheduleRefresh();
+          void this.refreshMeta();
           this.activeTasks.set([]);
           const err = event.properties?.['error'];
           if (typeof err === 'string' && err) {
@@ -828,12 +866,34 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Send the first queued message when the agent is idle. */
   private async drainQueue(): Promise<void> {
-    if (this.running() || this.sending() || this.queue().length === 0) {
+    if (this.running() || this.sending() || this.compacting() || this.queue().length === 0) {
       return;
     }
     const sessionID = this.sessionID();
     if (!sessionID) {
       return;
+    }
+    // F6-4: the meter crossed the auto-compact threshold - compact first and
+    // carry the queue over to the fork, which drains it once loaded.
+    if (
+      this.sessionStore.needsAutoCompact() &&
+      this.sessionStore.canCompact() &&
+      !this.autoCompacted.has(sessionID)
+    ) {
+      this.autoCompacted.add(sessionID);
+      const forked = await this.compactInto(sessionID);
+      if (forked) {
+        this.queuedBySession.set(forked, this.queue());
+        this.pendingBySession.set(forked, this.pending());
+        this.queue.set([]);
+        this.pending.set([]);
+        await this.router.navigate(['/chat', forked]);
+        return;
+      }
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
+      // Compaction failed: fall through and send anyway (error is shown).
     }
     const head = this.queue()[0];
     this.sending.set(true);
@@ -988,6 +1048,42 @@ export class ChatView implements OnInit, OnDestroy {
   onAgentChange(value: string): void {
     this.selectedAgent.set(value);
     this.selectedModel.set('');
+  }
+
+  /**
+   * "Compact now" (toolbar + palette, F6-4): summarize the older messages into
+   * a fresh forked session and open it. Compaction is fork-based, so the
+   * caller navigates to the new id rather than expecting an in-place change.
+   */
+  async compactNow(): Promise<void> {
+    if (!this.canCompact()) {
+      return;
+    }
+    const sessionID = this.sessionID();
+    const forked = await this.compactInto(sessionID);
+    if (forked && sessionID === this.sessionID()) {
+      await this.router.navigate(['/chat', forked]);
+    }
+  }
+
+  /** Run one compaction of `sessionID`; the forked session id, or null on error. */
+  private async compactInto(sessionID: string): Promise<string | null> {
+    this.compacting.set(true);
+    this.error.set(null);
+    try {
+      const result = await this.engine.compactSession(
+        sessionID,
+        this.sessionStore.compactBudget(),
+      );
+      return result.sessionID;
+    } catch (err) {
+      if (sessionID === this.sessionID()) {
+        this.error.set(this.describe(err));
+      }
+      return null;
+    } finally {
+      this.compacting.set(false);
+    }
   }
 
   async abortTurn(): Promise<void> {

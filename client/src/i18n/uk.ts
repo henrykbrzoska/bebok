@@ -456,4 +456,22 @@ export const uk: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'Без групи',
   'projectSwitcher.group.move': 'Перемістити до групи…',
   'projectSwitcher.group.placeholder': 'Назва групи',
+
+  // F6-3: context meter
+  'chat.context': 'Контекст',
+  'chat.contextTitle': 'Використання контекстного вікна (останній запит)',
+  'drawer.context': 'Контекст',
+  'drawer.contextUsed': 'Використано',
+  'drawer.contextWindow': 'Вікно',
+  'drawer.contextNone': 'Ще немає ходів',
+
+  // F6-4: compaction
+  'chat.compact': 'Стиснути',
+  'chat.compacting': 'Стискання…',
+  'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
+  'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
+  'palette.compactSession': 'Стиснути контекст зараз',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'Ціни для моделей, використаних у цій сесії, невідомі',
 };

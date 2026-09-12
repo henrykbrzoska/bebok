@@ -141,7 +141,39 @@ pub async fn list_sessions(
         return Err(ApiError::bad_request("missing ?directory= parameter").into_response());
     };
     let sessions = state.store.list_sessions(&directory).await;
+    // Default model for sessions that never ran a turn and carry no override.
+    let default_model = state
+        .store
+        .get_or_create_instance(&directory)
+        .await
+        .ok()
+        .and_then(|instance| instance.config.read().ok().map(|cfg| cfg.model.clone()));
+    let sessions: Vec<serde_json::Value> = sessions
+        .iter()
+        .map(|session| {
+            let mut value = serde_json::to_value(session).unwrap_or_default();
+            attach_context_window(&mut value, session, default_model.as_deref());
+            value
+        })
+        .collect();
     Ok(Json(serde_json::json!({ "sessions": sessions })))
+}
+
+/// Add the live `context_window` (tokens) for the model that produced the
+/// session's last turn (`context_model`), else the session's model override,
+/// else the directory default. Resolved from the catalog on every response so
+/// it is never persisted and a catalog update needs no migration.
+pub fn attach_context_window(
+    value: &mut serde_json::Value,
+    session: &bebok_core::session::Session,
+    default_model: Option<&str>,
+) {
+    let model = session
+        .context_model
+        .as_deref()
+        .or(session.model.as_deref())
+        .or(default_model);
+    value["context_window"] = serde_json::json!(bebok_core::context::context_window_for(model));
 }
 
 /// `GET /session/{id}` -> metadata + usage totals
@@ -154,8 +186,11 @@ pub async fn get_session(
         .open_session(id)
         .await
         .map_err(|e| err_response(&e))?;
-    let mut meta = serde_json::to_value(session.meta_snapshot().await).unwrap_or_default();
+    let snapshot = session.meta_snapshot().await;
+    let mut meta = serde_json::to_value(&snapshot).unwrap_or_default();
     meta["running"] = serde_json::json!(session.is_running());
+    let default_model = session.config_snapshot().model_for(&snapshot.agent);
+    attach_context_window(&mut meta, &snapshot, Some(&default_model));
     Ok(Json(meta))
 }
 
@@ -372,16 +407,51 @@ pub async fn compact_session(
     }
 
     let summary = bebok_core::context::compact_summary(&messages, cutoff);
+    let source_meta = source.meta_snapshot().await;
+    // "From" is the live gauge when a turn has run (provider-counted), else
+    // the chars/4 estimate of the whole transcript; "to" is always estimated
+    // because the fork has not been sent to a provider yet.
+    let before = source_meta
+        .context_used
+        .unwrap_or_else(|| bebok_core::context::estimate_transcript(&messages));
     let fork = state
         .store
         .compact_session(id, summary, cutoff)
         .await
         .map_err(|e| err_response(&e))?;
+    let after = bebok_core::context::estimate_transcript(&fork.messages_snapshot().await);
+
+    // Visible marker at the end of the forked transcript (F6-4). Appended by
+    // the route rather than inside `InstanceStore::compact_session` so the
+    // fork mechanics stay untouched; it is a user-role text like the summary
+    // itself, so providers see it as a plain note.
+    let marker = compaction_marker(before, after, cutoff);
+    fork.append_user_message(&marker)
+        .await
+        .map_err(|e| err_response(&e))?;
+    // Seed the fork's gauge with the estimate so the meter reflects the
+    // reduction immediately; the first real turn overwrites it.
+    let model = source_meta
+        .context_model
+        .clone()
+        .or(source_meta.model.clone())
+        .unwrap_or_else(|| source.config_snapshot().model_for(&source_meta.agent));
+    fork.set_context_used(after, &model).await;
 
     Ok(Json(serde_json::json!({
         "sessionID": fork.id().to_string(),
         "parent": serde_json::json!([id.to_string(), cutoff]),
+        "before": before,
+        "after": after,
     })))
+}
+
+/// The human-readable "Context compacted" note appended to a compacted fork.
+pub fn compaction_marker(before: u64, after: u64, cutoff: usize) -> String {
+    let noun = if cutoff == 1 { "message" } else { "messages" };
+    format!(
+        "[Context compacted: from {before} to {after} tokens ({cutoff} earlier {noun} summarized)]"
+    )
 }
 
 /// `POST /session/{id}/truncate` -> rollback in place: erase every message from
@@ -434,4 +504,31 @@ pub fn compact_cutoff(messages: &[bebok_core::session::Message], budget: usize) 
         keep += 1;
     }
     n.saturating_sub(keep)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bebok_core::session::Message;
+
+    #[test]
+    fn compaction_marker_is_human_readable() {
+        let text = compaction_marker(120_000, 30_000, 12);
+        assert!(text.starts_with("[Context compacted: from 120000 to 30000 tokens"));
+        assert!(text.contains("12 earlier messages"));
+        assert!(compaction_marker(1, 1, 1).contains("1 earlier message summarized"));
+    }
+
+    #[test]
+    fn compact_cutoff_keeps_the_latest_exchange_and_fits_half_budget() {
+        // Six ~100-token messages (400 chars each) and a budget of 400 tokens:
+        // the tail may hold 200 tokens -> the last 2 messages stay, 4 go.
+        let messages: Vec<Message> = (0..6)
+            .map(|i| Message::user(format!("{i}").repeat(400)))
+            .collect();
+        assert_eq!(compact_cutoff(&messages, 400), 4);
+        // A generous budget keeps everything except the very first message
+        // (the loop always leaves at least one message to summarize).
+        assert_eq!(compact_cutoff(&messages, 100_000), 1);
+    }
 }

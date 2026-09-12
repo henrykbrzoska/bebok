@@ -241,6 +241,22 @@ impl SessionState {
         }
     }
 
+    /// Record the context size of the latest LLM call (tokens the provider
+    /// read as input, cache hits included) together with the model that
+    /// produced it, and persist metadata. Overwrites: this is a live gauge,
+    /// not a running total (see `Session::context_used`).
+    pub async fn set_context_used(&self, tokens: u64, model: &str) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            meta.context_used = Some(tokens);
+            meta.context_model = Some(model.to_string());
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
     /// Update `updated_at` and persist metadata.
     pub async fn touch(&self) {
         let session = {

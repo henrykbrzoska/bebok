@@ -33,6 +33,31 @@
       </select>
     </label>
 
+    @if (contextLabel()) {
+      <span
+        class="tb-context"
+        [class.warning]="contextLevel() === 'warning'"
+        [class.danger]="contextLevel() === 'danger'"
+        [title]="t('chat.contextTitle')"
+        [attr.aria-label]="t('chat.context') + ': ' + contextLabel()"
+        data-testid="context-meter"
+      >
+        <span class="tb-context-bar" aria-hidden="true">
+          <span class="tb-context-fill" [style.width.%]="contextFill()"></span>
+        </span>
+        <span class="tb-context-value">{{ contextLabel() }}</span>
+      </span>
+    }
+
+    <button
+      class="tb-compact"
+      type="button"
+      data-testid="compact-now"
+      (click)="compactNow()"
+      [disabled]="!canCompact()"
+      [title]="canCompact() ? t('chat.compactTitle') : t('chat.compactIdle')"
+    >{{ compacting() ? t('chat.compacting') : t('chat.compact') }}</button>
+
     <button
       class="tb-abort"
       type="button"

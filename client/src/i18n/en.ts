@@ -465,6 +465,24 @@ export const en = {
   'projectSwitcher.group.ungrouped': 'Ungrouped',
   'projectSwitcher.group.move': 'Move to group…',
   'projectSwitcher.group.placeholder': 'Group name',
+
+  // F6-3: context meter
+  'chat.context': 'Context',
+  'chat.contextTitle': 'Context window in use (last request)',
+  'drawer.context': 'Context',
+  'drawer.contextUsed': 'Used',
+  'drawer.contextWindow': 'Window',
+  'drawer.contextNone': 'No turn yet',
+
+  // F6-4: compaction
+  'chat.compact': 'Compact',
+  'chat.compacting': 'Compacting…',
+  'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
+  'chat.compactIdle': 'Compaction needs an idle session with a few messages',
+  'palette.compactSession': 'Compact context now',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'No pricing known for the model(s) used in this session',
 };
 
 export type MessageKey = keyof typeof en;

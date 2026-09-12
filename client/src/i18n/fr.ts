@@ -456,4 +456,22 @@ export const fr: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': 'Sans groupe',
   'projectSwitcher.group.move': 'Déplacer vers un groupe…',
   'projectSwitcher.group.placeholder': 'Nom du groupe',
+
+  // F6-3: context meter
+  'chat.context': 'Contexte',
+  'chat.contextTitle': 'Fenêtre de contexte utilisée (dernière requête)',
+  'drawer.context': 'Contexte',
+  'drawer.contextUsed': 'Utilisé',
+  'drawer.contextWindow': 'Fenêtre',
+  'drawer.contextNone': 'Aucun tour pour l\'instant',
+
+  // F6-4: compaction
+  'chat.compact': 'Compacter',
+  'chat.compacting': 'Compactage…',
+  'chat.compactTitle': 'Résumer les anciens messages dans une nouvelle session (compactage du contexte)',
+  'chat.compactIdle': 'Le compactage nécessite une session inactive avec quelques messages',
+  'palette.compactSession': 'Compacter le contexte maintenant',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'Tarif inconnu pour les modèles utilisés dans cette session',
 };

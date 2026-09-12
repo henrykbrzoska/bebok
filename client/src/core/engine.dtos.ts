@@ -116,6 +116,16 @@ export interface SessionMeta {
   created_at: number;
   updated_at: number;
   usage: UsageTotals;
+  /**
+   * F6-3: tokens the provider read on the *last* LLM call (input + cache
+   * buckets) - the live context size, not a running total. Absent until the
+   * first turn completes.
+   */
+  context_used?: number | null;
+  /** Model that produced `context_used` (may differ from `model`). */
+  context_model?: string | null;
+  /** Context window of that model, resolved live from the engine's catalog. */
+  context_window?: number | null;
   share?: unknown;
 }
 
@@ -408,8 +418,13 @@ export interface ExportResponse {
 }
 
 export interface CompactResponse {
+  /** The *new* (forked) session holding the summary + tail. */
   sessionID: string;
   parent: [string, number];
+  /** Context size before compaction (last-call gauge, else an estimate). */
+  before?: number;
+  /** Estimated context size of the forked transcript. */
+  after?: number;
 }
 
 export interface DeleteSessionResponse {

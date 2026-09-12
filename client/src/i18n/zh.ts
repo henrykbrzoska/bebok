@@ -455,4 +455,22 @@ export const zh: Record<MessageKey, string> = {
   'projectSwitcher.group.ungrouped': '未分组',
   'projectSwitcher.group.move': '移动到分组…',
   'projectSwitcher.group.placeholder': '分组名称',
+
+  // F6-3: context meter
+  'chat.context': '上下文',
+  'chat.contextTitle': '上下文窗口占用（上一次请求）',
+  'drawer.context': '上下文',
+  'drawer.contextUsed': '已用',
+  'drawer.contextWindow': '窗口',
+  'drawer.contextNone': '尚无回合',
+
+  // F6-4: compaction
+  'chat.compact': '压缩',
+  'chat.compacting': '压缩中…',
+  'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
+  'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
+  'palette.compactSession': '立即压缩上下文',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': '本会话所用模型的定价未知',
 };
