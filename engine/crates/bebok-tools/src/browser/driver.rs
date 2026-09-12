@@ -596,23 +596,59 @@ pub fn resolve_executable() -> Result<PathBuf, String> {
     })
 }
 
+/// One Chrome switch for the launch command line, kept as `key` + `values`
+/// (no leading dashes) because chromiumoxide's `BrowserConfigBuilder::args`
+/// adds the `--` itself and merges values of a repeated key (`disable-features`
+/// is also set by its defaults). Passing pre-prefixed strings produced
+/// `----disable-gpu`, which Chrome silently ignored (E2E B3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchArg {
+    pub key: String,
+    pub values: Vec<String>,
+}
+
+impl LaunchArg {
+    fn key(key: &str) -> Self {
+        Self { key: key.to_string(), values: Vec::new() }
+    }
+
+    fn values<V: ToString>(key: &str, values: impl IntoIterator<Item = V>) -> Self {
+        Self {
+            key: key.to_string(),
+            values: values.into_iter().map(|v| v.to_string()).collect(),
+        }
+    }
+
+    /// The switch as chromiumoxide will put it on the command line.
+    pub fn render(&self) -> String {
+        if self.values.is_empty() {
+            format!("--{}", self.key)
+        } else {
+            format!("--{}={}", self.key, self.values.join(","))
+        }
+    }
+}
+
 /// Extra Chrome arguments for a launch. Headed: a real window of the nominal
 /// viewport size, optionally placed where the desktop client asked, and no
 /// first-run / automation chrome that would cover the page. Headless: the
 /// nominal viewport is emulated so screenshots are stable.
-pub fn launch_args(settings: &BrowserSettings, headless: bool) -> Vec<String> {
+pub fn launch_args(settings: &BrowserSettings, headless: bool) -> Vec<LaunchArg> {
     let mut args = vec![
-        "--disable-gpu".to_string(),
-        "--no-first-run".to_string(),
-        "--no-default-browser-check".to_string(),
+        LaunchArg::key("disable-gpu"),
+        LaunchArg::key("no-first-run"),
+        LaunchArg::key("no-default-browser-check"),
     ];
     if !headless {
-        args.push("--disable-infobars".to_string());
-        args.push("--disable-session-crashed-bubble".to_string());
-        args.push("--disable-sync".to_string());
-        args.push("--disable-features=Translate,MediaRouter,msEdgeWelcomePage".to_string());
+        args.push(LaunchArg::key("disable-infobars"));
+        args.push(LaunchArg::key("disable-session-crashed-bubble"));
+        args.push(LaunchArg::key("disable-sync"));
+        args.push(LaunchArg::values(
+            "disable-features",
+            ["Translate", "MediaRouter", "msEdgeWelcomePage"],
+        ));
         if let Some((x, y)) = settings.effective_window_position() {
-            args.push(format!("--window-position={x},{y}"));
+            args.push(LaunchArg::values("window-position", [x, y]));
         }
     }
     args
@@ -633,8 +669,11 @@ async fn launch(
         .window_size(VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
         .user_data_dir(&user_data_dir)
         .launch_timeout(LAUNCH_TIMEOUT)
-        .request_timeout(REQUEST_TIMEOUT)
-        .args(launch_args(settings, headless));
+        .request_timeout(REQUEST_TIMEOUT);
+    for arg in launch_args(settings, headless) {
+        let values = arg.values.iter().map(String::as_str).collect::<Vec<_>>();
+        builder = builder.arg((arg.key.as_str(), values.as_slice()));
+    }
     if headless {
         // `--headless=new`: the only headless mode current Chrome/Edge ship.
         // The viewport is emulated so captures are exactly 1280x800.
@@ -802,18 +841,46 @@ mod tests {
             display: BrowserDisplay::Headed,
             window_position: Some((1300, 40)),
         };
-        let headed = launch_args(&settings, false);
+        let headed: Vec<String> = launch_args(&settings, false).iter().map(LaunchArg::render).collect();
         assert!(headed.iter().any(|a| a == "--window-position=1300,40"));
         assert!(headed.iter().any(|a| a == "--disable-infobars"));
         assert!(headed.iter().any(|a| a == "--no-first-run"));
-        let headless = launch_args(&settings, true);
+        assert!(headed
+            .iter()
+            .any(|a| a == "--disable-features=Translate,MediaRouter,msEdgeWelcomePage"));
+        let headless: Vec<String> = launch_args(&settings, true).iter().map(LaunchArg::render).collect();
         assert!(!headless.iter().any(|a| a.starts_with("--window-position")));
         assert!(!headless.iter().any(|a| a == "--disable-infobars"));
         assert!(headless.iter().any(|a| a == "--no-first-run"));
         // No position configured and no env hint: Chrome decides.
         let none = launch_args(&BrowserSettings::default(), false);
         if std::env::var_os("BEBOK_BROWSER_WINDOW_POS").is_none() {
-            assert!(!none.iter().any(|a| a.starts_with("--window-position")));
+            assert!(!none.iter().any(|a| a.key == "window-position"));
+        }
+    }
+
+    /// E2E B3: chromiumoxide prefixes every key with `--` itself, so the keys
+    /// we hand it must carry no dashes, and the rendered switch exactly one
+    /// `--` (the observed bug was `----disable-gpu`, ignored by Chrome).
+    #[test]
+    fn launch_args_are_prefixed_exactly_once() {
+        let settings = BrowserSettings {
+            display: BrowserDisplay::Headed,
+            window_position: Some((10, 20)),
+        };
+        for headless in [false, true] {
+            for arg in launch_args(&settings, headless) {
+                assert!(
+                    !arg.key.starts_with('-'),
+                    "key must not carry its own dashes: {}",
+                    arg.key
+                );
+                assert!(!arg.key.contains('='), "values go in `values`, not the key: {}", arg.key);
+                let rendered = arg.render();
+                assert!(rendered.starts_with("--"), "{rendered}");
+                assert!(!rendered.starts_with("---"), "double prefix: {rendered}");
+                assert_eq!(rendered.matches("--").count(), 1, "{rendered}");
+            }
         }
     }
 
