@@ -1,4 +1,14 @@
-import { Component, OnDestroy, effect, inject, input, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  OnDestroy,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  viewChild,
+} from '@angular/core';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { EngineEvent, PermissionAsked } from '../../core/engine.dtos';
@@ -39,9 +49,18 @@ function parseAsked(properties: Record<string, unknown> | undefined): Permission
   };
 }
 
+let dialogSeq = 0;
+
 /**
- * Permission popup (SPEC §7 / M3): consumes `permission.asked` for the active
- * session and lets the user drive the agent loop with Allow / Deny / Always.
+ * Permission prompt (SPEC §7 / M3, redesigned in F2-8, fixes B15).
+ *
+ * Rendered **inline in the transcript**, attached below the tool call that
+ * raised it: prompt text plus Allow (success fill) / Always allow (outline) /
+ * Deny (danger outline, right-aligned). It still behaves as a dialog for
+ * assistive tech - `role="dialog"`, `aria-modal`, initial focus on Allow, a
+ * Tab focus trap and Escape (= Deny) - and the chat composer refuses to send
+ * while it is open.
+ *
  * The decision is sent to `POST /session/{id}/permission/{requestID}` - the
  * engine (not the GUI) decides what happens next.
  */
@@ -49,95 +68,196 @@ function parseAsked(properties: Record<string, unknown> | undefined): Permission
   selector: 'app-permission-popup',
   template: `
     @if (asks().length > 0) {
-      <div class="overlay">
-        <div class="popup">
-          <div class="popup-head">
-            <h3>{{ t('perm.title') }}</h3>
-            <p class="muted">
-              {{ t('perm.hint', { tool: current().toolName, agent: current().agent }) }}
-            </p>
-          </div>
-
-          <div class="meta">
-            <div><span class="muted">{{ t('perm.pattern') }}</span> <code>{{ current().pattern }}</code></div>
-            <div><span class="muted">{{ t('perm.message') }}</span> {{ current().messageIndex }}</div>
-          </div>
-
-          <details>
-            <summary>{{ t('perm.arguments') }}</summary>
-            <pre><code>{{ current().inputText }}</code></pre>
-          </details>
-
-          <div class="popup-actions">
-            <button (click)="deny()" [disabled]="current().busy">{{ t('perm.deny') }}</button>
-            <button (click)="allow(false)" [disabled]="current().busy">{{ t('perm.allow') }}</button>
-            <button class="primary" (click)="allow(true)" [disabled]="current().busy">
-              {{ t('perm.allowAlways') }}
-            </button>
-          </div>
-
+      <div
+        class="perm"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-labelledby]="titleId"
+        [attr.aria-describedby]="bodyId"
+        (keydown)="onKeydown($event)"
+        #dialog
+      >
+        <div class="perm-head">
+          <span class="dot" aria-hidden="true"></span>
+          <h3 class="perm-title" [id]="titleId">{{ t('perm.title') }}</h3>
           @if (asks().length > 1) {
-            <div class="queue muted">{{ t('perm.queued', { n: asks().length - 1 }) }}</div>
+            <span class="queue">{{ t('perm.queued', { n: asks().length - 1 }) }}</span>
           }
+        </div>
+
+        <p class="perm-body" [id]="bodyId">
+          {{ t('perm.hint', { tool: current().toolName, agent: current().agent }) }}
+        </p>
+
+        <div class="meta">
+          <span class="meta-label">{{ t('perm.pattern') }}</span>
+          <code>{{ current().pattern }}</code>
+        </div>
+
+        <details>
+          <summary>{{ t('perm.arguments') }}</summary>
+          <pre><code>{{ current().inputText }}</code></pre>
+        </details>
+
+        <div class="perm-actions">
+          <button
+            type="button"
+            class="allow"
+            #allowBtn
+            (click)="allow(false)"
+            [disabled]="current().busy"
+          >{{ t('perm.allow') }}</button>
+          <button
+            type="button"
+            class="always"
+            (click)="allow(true)"
+            [disabled]="current().busy"
+          >{{ t('perm.allowAlwaysTool') }}</button>
+          <button
+            type="button"
+            class="deny"
+            (click)="deny()"
+            [disabled]="current().busy"
+          >{{ t('perm.deny') }}</button>
         </div>
       </div>
     }
   `,
   styles: `
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.45);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
+    :host {
+      display: block;
     }
-    .popup {
-      width: min(560px, 92vw);
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 18px;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
-    }
-    .popup-head h3 {
-      margin: 0 0 2px;
-    }
-    .meta {
+
+    .perm {
+      border: 1px solid var(--warning);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      padding: var(--space-12) var(--space-14);
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      margin: 10px 0;
-      font-size: 13px;
+      gap: var(--space-8);
     }
+
+    .perm-head {
+      display: flex;
+      align-items: center;
+      gap: var(--space-8);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--warning);
+      flex: none;
+    }
+
+    .perm-title {
+      margin: 0;
+      font-size: var(--fs-13-5);
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .queue {
+      margin-left: auto;
+      font-size: var(--fs-11);
+      color: var(--text-faint);
+    }
+
+    .perm-body {
+      margin: 0;
+      font-size: var(--fs-13);
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+
+    .meta {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-6);
+      font-size: var(--fs-11-5);
+    }
+
+    .meta-label {
+      text-transform: uppercase;
+      letter-spacing: var(--label-tracking);
+      color: var(--text-faint);
+      font-size: var(--fs-11);
+    }
+
+    .meta code {
+      font-family: var(--font-mono);
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+
     details {
-      font-size: 12.5px;
-      margin-top: 8px;
+      font-size: var(--fs-12);
     }
+
     summary {
       cursor: pointer;
-      color: var(--fg-muted);
+      color: var(--text-faint);
+      user-select: none;
     }
+
     pre {
-      background: var(--bg-raised);
+      background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      border-radius: var(--radius-control-sm);
       padding: 8px 10px;
       overflow: auto;
       max-height: 260px;
-      font-size: 12px;
+      font-size: var(--fs-12);
+      color: var(--code-text-strong);
+      margin: 6px 0 0;
     }
-    .popup-actions {
+
+    .perm-actions {
       display: flex;
-      gap: 10px;
-      margin-top: 14px;
-      justify-content: flex-end;
+      align-items: center;
+      gap: var(--space-8);
     }
-    .queue {
-      font-size: 11.5px;
-      margin-top: 8px;
-      text-align: right;
+
+    .perm-actions button {
+      font-size: var(--fs-12-5);
+      padding: 5px 14px;
+      border-radius: var(--radius-control-sm);
+    }
+
+    .allow {
+      background: var(--success);
+      border: 1px solid var(--success);
+      color: var(--bg);
+      font-weight: 600;
+    }
+
+    .allow:hover:not(:disabled) {
+      background: var(--success);
+      filter: brightness(1.08);
+    }
+
+    .always {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      color: var(--text-muted);
+    }
+
+    .always:hover:not(:disabled) {
+      color: var(--text);
+      border-color: var(--text-muted);
+    }
+
+    .deny {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+    }
+
+    .deny:hover:not(:disabled) {
+      background: rgba(226, 100, 95, 0.12);
     }
   `,
 })
@@ -151,14 +271,24 @@ export class PermissionPopup implements OnDestroy {
   readonly activeSessionID = input<string>();
   /**
    * Working directory of the open chat. Asks raised by a delegated sub-agent
-   * carry the *child* session id, so the popup also matches by directory -
+   * carry the *child* session id, so the prompt also matches by directory -
    * otherwise sub-agent permission prompts would be invisible on the parent.
    */
   readonly directory = input<string>();
 
   readonly asks = signal<PendingAsk[]>([]);
   readonly current = () => this.asks()[0];
+  /** True while a decision is outstanding: the composer must not send. */
+  readonly blocking = computed(() => this.asks().length > 0);
+
+  readonly titleId = `perm-title-${++dialogSeq}`;
+  readonly bodyId = `perm-body-${dialogSeq}`;
+
+  private readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
+  private readonly allowBtn = viewChild<ElementRef<HTMLButtonElement>>('allowBtn');
+
   private unsubscribe: () => void;
+  private readonly resolvedIds = new Set<string>();
 
   constructor() {
     this.unsubscribe = this.events.onEvent((event: EngineEvent) => this.handle(event));
@@ -166,13 +296,92 @@ export class PermissionPopup implements OnDestroy {
     // asks from the previous one. Within the same directory we keep asks so
     // sub-agent (child-session) prompts survive parent tab switches.
     effect(() => {
-      this.directory();
+      const directory = this.directory();
       this.asks.set([]);
+      this.resolvedIds.clear();
+      if (directory) {
+        void this.restorePending(directory);
+      }
+    });
+    // A new prompt takes focus so keyboard users land on Allow (B15).
+    effect(() => {
+      const id = this.current()?.requestID;
+      if (!id) {
+        return;
+      }
+      const button = this.allowBtn()?.nativeElement;
+      if (button) {
+        queueMicrotask(() => button.focus());
+      }
     });
   }
 
   ngOnDestroy(): void {
     this.unsubscribe();
+  }
+
+  private async restorePending(directory: string): Promise<void> {
+    try {
+      const pending = await this.engine.pendingPermissions(directory);
+      if (this.directory() !== directory) {
+        return;
+      }
+      this.asks.update((list) => {
+        const seen = new Set(list.map((item) => item.requestID));
+        const restored = [...list];
+        for (const raw of pending) {
+          const asked = parseAsked(raw as unknown as Record<string, unknown>);
+          if (!asked || !raw.sessionID || seen.has(asked.requestID)
+              || this.resolvedIds.has(asked.requestID)) {
+            continue;
+          }
+          seen.add(asked.requestID);
+          restored.push({
+            ...asked,
+            sessionID: raw.sessionID,
+            inputText: prettyJson(asked.input),
+            askedAt: Date.now(),
+            busy: false,
+          });
+        }
+        return restored;
+      });
+    } catch {
+      // The live SSE path remains usable if a reconnect snapshot fails.
+    }
+  }
+
+  /** Focus trap + Escape (= Deny), keeping the prompt keyboard-complete. */
+  onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.deny();
+      return;
+    }
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const root = this.dialog()?.nativeElement;
+    if (!root) {
+      return;
+    }
+    const focusable = [
+      ...root.querySelectorAll<HTMLElement>('button:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'),
+    ].filter((el) => el.offsetParent !== null);
+    if (focusable.length === 0) {
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (event.shiftKey && (active === first || !root.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   private handle(event: EngineEvent): void {
@@ -206,6 +415,7 @@ export class PermissionPopup implements OnDestroy {
     } else if (event.type === 'permission.resolved') {
       const requestID = event.properties?.['requestID'];
       if (typeof requestID === 'string') {
+        this.resolvedIds.add(requestID);
         this.asks.update((list) => list.filter((a) => a.requestID !== requestID));
       }
     }
@@ -226,6 +436,7 @@ export class PermissionPopup implements OnDestroy {
     } catch (err) {
       console.error('permission decision failed', err);
     } finally {
+      this.resolvedIds.add(item.requestID);
       this.asks.update((list) => list.filter((a) => a.requestID !== item.requestID));
     }
   }

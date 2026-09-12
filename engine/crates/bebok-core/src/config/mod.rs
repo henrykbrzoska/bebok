@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod jsonc;
 pub mod loader;
 pub mod model;
+pub mod projects;
 pub mod providers;
 pub mod writer;
 
@@ -35,6 +36,9 @@ pub use writer::{
     write_delta_to, write_full_global, write_full_project, write_full_to, write_global_delta,
     write_project_delta,
 };
+
+// --- projects (registry stored under the global config's "projects" key) ---
+pub use projects::{ProjectEntry, ProjectPatch, ProjectsError};
 
 // --- providers (save_provider_models*) ---
 pub use providers::{save_provider_models, save_provider_models_global};

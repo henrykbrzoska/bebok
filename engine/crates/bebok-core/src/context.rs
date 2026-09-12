@@ -9,7 +9,7 @@ use crate::session::{Message, Part, Role, ToolState};
 
 /// Rough token estimate (chars / 4). Good enough for budget gating.
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.chars().count() + 3) / 4
+    text.chars().count().div_ceil(4)
 }
 
 /// Flat token estimate per attached image (all providers bill images as a
@@ -173,7 +173,10 @@ mod tests {
             }],
             ..with_image.clone()
         };
-        assert_eq!(estimate_chat(&[with_image.clone()], ""), IMAGE_TOKENS_PER_IMAGE);
+        assert_eq!(
+            estimate_chat(std::slice::from_ref(&with_image), ""),
+            IMAGE_TOKENS_PER_IMAGE
+        );
         assert!(estimate_chat(&[with_marker], "") < IMAGE_TOKENS_PER_IMAGE);
         let _ = ChatRole::User;
     }

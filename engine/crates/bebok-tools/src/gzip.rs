@@ -105,7 +105,9 @@ impl Tool for Gzip {
         .await;
 
         match result {
-            Ok(Ok(bytes)) => ToolOutput::new(format!("wrote {bytes} bytes to {out_display}"), title),
+            Ok(Ok(bytes)) => {
+                ToolOutput::new(format!("wrote {bytes} bytes to {out_display}"), title)
+            }
             Ok(Err(e)) => ToolOutput::new(format!("error: gzip {action} failed: {e}"), title),
             Err(e) => ToolOutput::new(format!("error: gzip task failed: {e}"), title),
         }
@@ -138,13 +140,19 @@ mod tests {
         };
 
         let c = Gzip
-            .execute(ctx.clone(), json!({ "action": "compress", "path": "a.txt" }))
+            .execute(
+                ctx.clone(),
+                json!({ "action": "compress", "path": "a.txt" }),
+            )
             .await;
         assert!(c.text.starts_with("wrote"), "{}", c.text);
         assert!(base.join("a.txt.gz").exists());
 
         let d = Gzip
-            .execute(ctx, json!({ "action": "decompress", "path": "a.txt.gz", "out": "a.out" }))
+            .execute(
+                ctx,
+                json!({ "action": "decompress", "path": "a.txt.gz", "out": "a.out" }),
+            )
             .await;
         assert!(d.text.starts_with("wrote"), "{}", d.text);
         assert_eq!(

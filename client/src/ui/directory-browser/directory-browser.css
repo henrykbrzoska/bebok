@@ -1,0 +1,231 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: #00000099;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 60;
+}
+
+.card {
+  width: 620px;
+  max-width: 92vw;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-bubble);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-16);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.close {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--fs-12);
+  padding: 2px var(--space-6);
+}
+
+.close:hover {
+  color: var(--text);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4, 4px);
+  padding: var(--space-9) var(--space-16);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.crumb {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px var(--space-6);
+  border-radius: var(--radius-control);
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.crumb:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.crumb.root {
+  color: var(--accent);
+}
+
+.crumb-sep {
+  color: var(--text-faint);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-16);
+  border-bottom: 1px solid var(--border);
+}
+
+.filter {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  padding: var(--space-6) var(--space-10);
+  font-size: var(--fs-12-5);
+  outline: none;
+}
+
+.filter:focus {
+  border-color: var(--border-strong);
+}
+
+.hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.list {
+  max-height: 300px;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8, 8px);
+  width: 100%;
+  padding: var(--space-6) var(--space-10);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+.row.active {
+  background: var(--surface-3, var(--surface-2));
+  border-color: var(--border-strong);
+}
+
+.row.unreadable {
+  color: var(--text-faint);
+}
+
+.row-icon {
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+
+.row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-tag {
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+
+.state {
+  padding: var(--space-14);
+  font-size: var(--fs-12-5);
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.manual {
+  display: flex;
+  gap: var(--space-8, 8px);
+  padding: var(--space-10) var(--space-16);
+  border-top: 1px solid var(--border);
+}
+
+.path-input {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  padding: var(--space-6) var(--space-10);
+  outline: none;
+}
+
+.path-input:focus {
+  border-color: var(--border-strong);
+}
+
+.error {
+  margin: 0;
+  padding: 0 var(--space-16) var(--space-10);
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8, 8px);
+  padding: var(--space-12) var(--space-16);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #0b0d10;
+  font-weight: 600;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}

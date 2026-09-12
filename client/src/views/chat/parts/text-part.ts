@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import { Component, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
 
 import { Part, TextPart } from '../../../core/engine.dtos';
 import { renderMarkdown } from '../../../core/markdown';
@@ -30,6 +30,9 @@ function extractHtmlBlocks(source: string): string[] {
 
 @Component({
   selector: 'app-text-part',
+  // Markdown nodes come from innerHTML and do not receive Angular's scoped
+  // attributes. Scope these rules by the component element instead.
+  encapsulation: ViewEncapsulation.None,
   imports: [HtmlPreviewComponent],
   template: `
     <div
@@ -49,53 +52,75 @@ function extractHtmlBlocks(source: string): string[] {
     }
   `,
   styles: `
-    .md {
+    app-text-part .md {
       word-wrap: break-word;
+      font-size: 13px;
+      line-height: 1.45;
     }
-    .md p {
-      margin: 0 0 8px;
+    app-text-part .md p {
+      margin: 0 0 4px;
     }
-    .md p:last-child {
+    app-text-part .md p:last-child {
       margin-bottom: 0;
     }
-    .md pre {
-      background: var(--bg-raised);
+    app-text-part .md pre {
+      background: var(--terminal-bg);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
+      border-radius: var(--radius-panel);
+      padding: 8px 10px;
       overflow-x: auto;
-      margin: 8px 0;
-      font-size: 12.5px;
+      margin: 6px 0;
+      font-size: var(--fs-12-5);
       line-height: 1.5;
+      color: var(--code-text-strong);
     }
-    .md code {
+    app-text-part .md code {
       background: rgba(255, 255, 255, 0.07);
       border-radius: 3px;
       padding: 1px 4px;
       font-size: 0.92em;
     }
-    .md pre code {
+    app-text-part .md pre code {
       background: none;
       padding: 0;
     }
-    .md ul,
-    .md ol {
-      margin: 4px 0 8px;
+    app-text-part .md ul,
+    app-text-part .md ol {
+      margin: 3px 0 6px;
       padding-left: 22px;
     }
-    .md a {
+    app-text-part .md a {
       color: var(--accent);
     }
-    .md blockquote {
-      margin: 6px 0;
-      padding: 2px 12px;
+    app-text-part .md blockquote {
+      margin: 4px 0;
+      padding: 1px 10px;
       border-left: 3px solid var(--border);
       color: var(--fg-muted);
     }
-    .preview-wrap {
-      margin-top: 10px;
+    app-text-part .preview-wrap {
+      margin-top: 8px;
       border-top: 1px dashed var(--border);
-      padding-top: 10px;
+      padding-top: 8px;
+    }
+
+    /* Keep links and code readable on the muted user bubble background. */
+    .bubble app-text-part .md a {
+      color: inherit;
+      text-decoration: underline;
+    }
+    .bubble app-text-part .md code {
+      background: rgba(0, 0, 0, 0.14);
+      color: inherit;
+    }
+    .bubble app-text-part .md pre {
+      background: rgba(0, 0, 0, 0.2);
+      border-color: rgba(0, 0, 0, 0.18);
+      color: inherit;
+    }
+    .bubble app-text-part .md blockquote {
+      border-left-color: rgba(0, 0, 0, 0.25);
+      color: inherit;
     }
   `,
 })

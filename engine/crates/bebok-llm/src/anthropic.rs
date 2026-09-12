@@ -1,4 +1,4 @@
-﻿//! Anthropic-compatible request building and SSE parsing.
+//! Anthropic-compatible request building and SSE parsing.
 //!
 //! Z.ai exposes an Anthropic-compatible Messages API; in M1 we use that single
 //! format, but it is parsed here in isolation so that additional providers can
@@ -11,7 +11,13 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, stream};
 use serde_json::Value;
 
-use crate::provider::{ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage};
+use crate::CachePolicy;
+use crate::provider::{
+    ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
+    retry_after_from_headers,
+};
+use crate::spec::model_name;
+use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Native Anthropic Messages endpoint.
 pub const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -48,7 +54,7 @@ impl Provider for AnthropicProvider {
         &self,
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
-        let model = req.model.rsplit('/').next().unwrap_or(&req.model).to_string();
+        let model = model_name(&req.model).to_string();
         let body = anthropic_body(&req, &model);
 
         let resp = self
@@ -63,8 +69,13 @@ impl Provider for AnthropicProvider {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
+            let retry_after = retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Http { status, body: text });
+            return Err(LlmError::Http {
+                status,
+                body: text,
+                retry_after,
+            });
         }
 
         Ok(Box::pin(anthropic_stream(resp)))
@@ -73,40 +84,32 @@ impl Provider for AnthropicProvider {
 
 /// Build the Anthropic Messages request body.
 pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
-    let tools: Vec<Value> = req
-        .tools
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "name": t.name,
-                "description": t.description,
-                "input_schema": t.input_schema,
-            })
-        })
-        .collect();
+    let tools: Vec<Value> = map_tools(&req.tools, Protocol::Anthropic);
+    let policy = CachePolicy::for_model(&req.model);
+    let mut messages = to_anthropic_messages(&req.messages);
+    policy.apply_to_messages(&req.system, &mut messages);
 
     let mut body = serde_json::json!({
         "model": model,
         "max_tokens": req.max_tokens,
-        "system": req.system,
-        "messages": to_anthropic_messages(&req.messages),
+        "system": policy.system_value(&req.system),
+        "messages": messages,
         "tools": tools,
         "stream": true,
     });
-    if let Some(budget) = req.thinking.anthropic_budget() {
-        if let Value::Object(map) = &mut body {
-            map.insert(
-                "thinking".to_string(),
-                serde_json::json!({ "type": "enabled", "budget_tokens": budget }),
-            );
-        }
+    if let Some(budget) = req.thinking.anthropic_budget()
+        && let Value::Object(map) = &mut body
+    {
+        map.insert(
+            "thinking".to_string(),
+            serde_json::json!({ "type": "enabled", "budget_tokens": budget }),
+        );
     }
     body
 }
 
 /// Convert provider-neutral messages into Anthropic content blocks.
 pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
-    use crate::provider::ContentPart;
     let mut out = Vec::with_capacity(msgs.len());
     for m in msgs {
         let mut blocks: Vec<Value> = Vec::new();
@@ -121,16 +124,9 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
                 "is_error": tr.is_error,
             }));
         }
-        for p in &m.content_parts {
-            if let ContentPart::Image { media_type, data } = p {
-                blocks.push(serde_json::json!({
-                    "type": "image",
-                    "source": { "type": "base64", "media_type": media_type, "data": data },
-                }));
-            }
-        }
+        blocks.extend(map_image_parts(&m.content_parts, Protocol::Anthropic));
         if !m.content.is_empty() {
-            blocks.push(serde_json::json!({ "type": "text", "text": m.content }));
+            blocks.push(text_block(&m.content));
         }
         for tc in &m.tool_calls {
             blocks.push(serde_json::json!({
@@ -141,7 +137,7 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
             }));
         }
         if blocks.is_empty() {
-            blocks.push(serde_json::json!({ "type": "text", "text": "" }));
+            blocks.push(text_block(""));
         }
         out.push(serde_json::json!({
             "role": m.role.as_str(),
@@ -265,7 +261,11 @@ impl AnthropicParser {
             }
             "content_block_start" => {
                 let cb = v.get("content_block").cloned().unwrap_or(Value::Null);
-                let bty = cb.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let bty = cb
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 self.block_type = Some(bty.clone());
                 if bty == "tool_use" {
                     self.tool_id = cb.get("id").and_then(|x| x.as_str()).map(str::to_string);
@@ -358,8 +358,8 @@ impl AnthropicParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::provider::{ChatMessage, ChatRequest, Thinking};
     use super::anthropic_body;
+    use crate::provider::{ChatMessage, ChatRequest, ChatRole, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {
@@ -383,6 +383,46 @@ mod tests {
 
         let max = anthropic_body(&req(Thinking::Max), "claude-sonnet");
         assert_eq!(max["thinking"]["budget_tokens"], 8192);
+    }
+
+    #[test]
+    fn cache_capable_model_marks_long_system_and_stable_history() {
+        let mut request = req(Thinking::Off);
+        request.model = "anthropic/claude-sonnet-4-5".into();
+        request.system = "stable system ".repeat(1_300);
+        request.messages = vec![
+            ChatMessage::user("stable first user message"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: "stable answer".into(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+                content_parts: Vec::new(),
+            },
+            ChatMessage::user("new varying question"),
+        ];
+
+        let body = anthropic_body(&request, "claude-sonnet-4-5");
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            body["messages"][1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(
+            body["messages"][2]["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn non_cache_model_emits_no_cache_control() {
+        let mut request = req(Thinking::Off);
+        request.model = "xai/grok-4.6".into();
+        request.system = "large system ".repeat(2_000);
+        request.messages.push(ChatMessage::user("new question"));
+        let body = anthropic_body(&request, "grok-4.6");
+        assert!(!body.to_string().contains("cache_control"));
     }
 }
 

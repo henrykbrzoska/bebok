@@ -41,10 +41,7 @@ impl Tool for Mv {
             args.get("from").and_then(|v| v.as_str()),
             args.get("to").and_then(|v| v.as_str()),
         ) else {
-            return ToolOutput::new(
-                "error: missing required parameters 'from' and 'to'",
-                "mv",
-            );
+            return ToolOutput::new("error: missing required parameters 'from' and 'to'", "mv");
         };
 
         let src = ctx.root.join(from);
@@ -54,20 +51,14 @@ impl Tool for Mv {
             return ToolOutput::new(format!("error: source not found: {from}"), "mv");
         }
 
-        if let Some(parent) = dst.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return ToolOutput::new(
-                    format!("error: failed to create parent of {to}: {e}"),
-                    "mv",
-                );
-            }
+        if let Some(parent) = dst.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return ToolOutput::new(format!("error: failed to create parent of {to}: {e}"), "mv");
         }
 
         if let Err(e) = tokio::fs::rename(&src, &dst).await {
-            return ToolOutput::new(
-                format!("error: failed to move {from} -> {to}: {e}"),
-                "mv",
-            );
+            return ToolOutput::new(format!("error: failed to move {from} -> {to}: {e}"), "mv");
         }
 
         ToolOutput::new(format!("moved {from} -> {to}"), format!("mv {from} {to}"))

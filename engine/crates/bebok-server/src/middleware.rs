@@ -17,10 +17,12 @@ pub async fn log_http(
 ) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
+    // The `?token=` auth fallback (F0-5) must never be written to `debug.log`
+    // (it lands on disk) nor served by `GET /debug/log`.
     let query = req
         .uri()
         .query()
-        .map(|q| format!("?{q}"))
+        .map(|q| crate::auth::scrub_token_query(&format!("?{q}")))
         .unwrap_or_default();
     let skip = path == "/event" || path.starts_with("/debug") || path.ends_with("/connect");
     let start = std::time::Instant::now();
@@ -29,7 +31,11 @@ pub async fn log_http(
         let status = response.status();
         state.debug.log(
             "http",
-            if status.is_success() { "response" } else { "error" },
+            if status.is_success() {
+                "response"
+            } else {
+                "error"
+            },
             format!("{method} {path}{query}"),
             format!("{} ({}ms)", status.as_u16(), start.elapsed().as_millis()),
         );

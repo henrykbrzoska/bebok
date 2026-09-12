@@ -262,7 +262,10 @@ impl Tool for TaskTool {
             }
         };
 
-        if let Err(e) = child.append_user_message_with_images(&prompt, image_parts).await {
+        if let Err(e) = child
+            .append_user_message_with_images(&prompt, image_parts)
+            .await
+        {
             return ToolOutput::new(format!("task: cannot record subtask: {e}"), "task");
         }
 
@@ -286,7 +289,7 @@ impl Tool for TaskTool {
                 &description,
                 &child_session_id,
                 &name,
-                &agent_name,
+                agent_name,
                 abort.clone(),
             )
             .await;
@@ -446,7 +449,11 @@ mod tests {
         let parts = validate_agent_images(imgs).unwrap();
         assert_eq!(parts.len(), 1);
         match &parts[0] {
-            crate::session::Part::Image { media_type, data, name } => {
+            crate::session::Part::Image {
+                media_type,
+                data,
+                name,
+            } => {
                 assert_eq!(media_type, "image/png");
                 assert_eq!(data, PNG_1X1);
                 assert_eq!(name.as_deref(), Some("a.png"));

@@ -20,7 +20,7 @@ import { UsagePartComponent } from './usage-part';
         <app-thinking-part [part]="part()" />
       }
       @case ('tool') {
-        <app-tool-part [part]="part()" [taskLinks]="taskLinks()" />
+        <app-tool-part [part]="part()" [toolIndex]="toolIndex()" [taskLinks]="taskLinks()" />
       }
       @case ('usage') {
         <app-usage-part [part]="part()" />
@@ -33,5 +33,7 @@ import { UsagePartComponent } from './usage-part';
 })
 export class PartRendererComponent {
   readonly part = input.required<Part>();
+  /** Ordinal of this tool part within its message (-1 for non-tool parts). */
+  readonly toolIndex = input(-1);
   readonly taskLinks = input<Map<string, string>>(new Map());
 }

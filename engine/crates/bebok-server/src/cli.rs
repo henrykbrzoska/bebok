@@ -10,9 +10,7 @@ pub struct BindSpec {
 pub fn parse_cli(args: &[String]) -> anyhow::Result<BindSpec> {
     let mut host: Option<std::net::IpAddr> = None;
     let mut port: Option<u16> = None;
-    let mut addr = std::env::var("BEBOK_ADDR")
-        .ok()
-        .filter(|s| !s.is_empty());
+    let mut addr = std::env::var("BEBOK_ADDR").ok().filter(|s| !s.is_empty());
 
     let mut it = args.iter();
     while let Some(arg) = it.next() {

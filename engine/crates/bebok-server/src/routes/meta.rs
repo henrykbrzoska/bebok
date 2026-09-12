@@ -4,8 +4,8 @@
 //! endpoints register here without touching the route table shape in
 //! `routes/mod.rs`.
 
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
@@ -84,11 +84,8 @@ pub async fn list_models(
     })?;
 
     let models = bebok_llm::list_models(&spec).await.map_err(|e| {
-        ApiError::bad_gateway(format!(
-            "failed to list models for '{}': {e}",
-            q.provider
-        ))
-        .into_response()
+        ApiError::bad_gateway(format!("failed to list models for '{}': {e}", q.provider))
+            .into_response()
     })?;
 
     // Persist the fetched models into the instance's project config providers
@@ -102,5 +99,7 @@ pub async fn list_models(
         .map_err(|e| err_response(&e))
         .map(|_| ())?;
 
-    Ok(Json(serde_json::json!({ "provider": q.provider, "models": models })))
+    Ok(Json(
+        serde_json::json!({ "provider": q.provider, "models": models }),
+    ))
 }

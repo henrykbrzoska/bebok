@@ -21,6 +21,7 @@ pub struct McpTool {
 }
 
 impl McpTool {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(
         server: &str,
         raw_name: String,

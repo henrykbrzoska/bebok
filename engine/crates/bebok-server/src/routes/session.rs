@@ -1,9 +1,9 @@
 //! Session routes (Facade leaves; thin `extract -> service -> json`).
 //! Covers `/session*` incl. prompt/abort/task-abort/permission/export/compact/truncate.
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -105,24 +105,31 @@ pub async fn create_session(
     }
 
     // Continue: resume the most recent session for the directory.
-    if body.continue_last.unwrap_or(false) {
-        if let Some(last) = state
+    if body.continue_last.unwrap_or(false)
+        && let Some(last) = state
             .store
             .continue_last_session(&body.directory)
             .await
             .map_err(|e| err_response(&e))?
-        {
-            return Ok(Json(serde_json::json!({ "sessionID": last.id().to_string() })));
-        }
-        // No prior session -> fall through and create one.
+    {
+        return Ok(Json(
+            serde_json::json!({ "sessionID": last.id().to_string() }),
+        ));
     }
+    // No prior session -> fall through and create one.
 
     let session = state
         .store
-        .create_session(&body.directory, body.agent.as_deref().unwrap_or("code"), body.model.as_deref())
+        .create_session(
+            &body.directory,
+            body.agent.as_deref().unwrap_or("code"),
+            body.model.as_deref(),
+        )
         .await
         .map_err(|e| err_response(&e))?;
-    Ok(Json(serde_json::json!({ "sessionID": session.id().to_string() })))
+    Ok(Json(
+        serde_json::json!({ "sessionID": session.id().to_string() }),
+    ))
 }
 
 /// `GET /session?directory=` -> session metadata list
@@ -142,12 +149,14 @@ pub async fn get_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let meta = state
+    let session = state
         .store
-        .session_meta(id)
+        .open_session(id)
         .await
         .map_err(|e| err_response(&e))?;
-    Ok(Json(serde_json::to_value(&meta).unwrap_or_default()))
+    let mut meta = serde_json::to_value(session.meta_snapshot().await).unwrap_or_default();
+    meta["running"] = serde_json::json!(session.is_running());
+    Ok(Json(meta))
 }
 
 /// `GET /session/{id}/message` -> full parts transcript
@@ -162,6 +171,18 @@ pub async fn get_messages(
         .map_err(|e| err_response(&e))?;
     let messages = session.messages_snapshot().await;
     Ok(Json(serde_json::json!({ "messages": messages })))
+}
+
+/// `GET /permission?directory=` restores pending asks after an SSE reconnect.
+pub async fn pending_permissions(
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let Some(directory) = q.directory else {
+        return Err(ApiError::bad_request("missing ?directory= parameter").into_response());
+    };
+    let asks = state.store.pending_permissions(&directory).await;
+    Ok(Json(serde_json::json!({ "asks": asks })))
 }
 
 /// `POST /session/{id}/prompt` -> append user message, start the turn (202).
@@ -195,14 +216,11 @@ pub async fn abort(
         None => false,
     };
 
-    state
-        .store
-        .bus()
-        .publish(bebok_core::event::Event::new(
-            "session.updated",
-            session.directory(),
-            &id.to_string(),
-        ));
+    state.store.bus().publish(bebok_core::event::Event::new(
+        "session.updated",
+        session.directory(),
+        &id.to_string(),
+    ));
 
     Ok(Json(serde_json::json!({
         "sessionID": id.to_string(),
@@ -241,27 +259,19 @@ pub async fn abort_task(
 
     if cancelled {
         // Emit a descriptive event so the client knows which task was aborted.
-        state
-            .store
-            .bus()
-            .publish(bebok_core::event::Event::new(
-                "task.aborted",
-                session.directory(),
-                &id.to_string(),
-            )
-            .with_properties(serde_json::json!({
-                "taskID": task_id,
-            })));
+        state.store.bus().publish(
+            bebok_core::event::Event::new("task.aborted", session.directory(), &id.to_string())
+                .with_properties(serde_json::json!({
+                    "taskID": task_id,
+                })),
+        );
     }
 
-    state
-        .store
-        .bus()
-        .publish(bebok_core::event::Event::new(
-            "session.updated",
-            session.directory(),
-            &id.to_string(),
-        ));
+    state.store.bus().publish(bebok_core::event::Event::new(
+        "session.updated",
+        session.directory(),
+        &id.to_string(),
+    ));
 
     Ok(Json(serde_json::json!({
         "sessionID": id.to_string(),
@@ -351,7 +361,9 @@ pub async fn compact_session(
         return Err(ApiError::bad_request("session too short to compact").into_response());
     }
 
-    let budget = body.budget.unwrap_or(source.config_snapshot().context_budget);
+    let budget = body
+        .budget
+        .unwrap_or(source.config_snapshot().context_budget);
     let cutoff = compact_cutoff(&messages, budget);
     if cutoff == 0 {
         return Err(

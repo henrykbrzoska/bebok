@@ -22,6 +22,7 @@ import {
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
+  FsBrowseResponse,
   FsFileResponse,
   FsTreeResponse,
   McpListResponse,
@@ -30,6 +31,10 @@ import {
   MessageListResponse,
   ModelsResponse,
   PermissionResponse,
+  PendingPermissionSnapshot,
+  ProjectEntry,
+  ProjectPatch,
+  ProjectsListResponse,
   PromptBody,
   PtyInfo,
   PtyListResponse,
@@ -78,10 +83,13 @@ export class EngineClient {
     return conn;
   }
 
-  /** Replace the connection (used when the remote engine URL changes). */
+  /**
+   * Replace the connection (used when the remote engine URL changes). The URL
+   * may carry the engine capability token (`?token=…` from `BEBOK_READY`);
+   * `adoptRemote` stores it and returns the connection with a clean base URL.
+   */
   reconfigure(conn: EngineConnection): void {
-    this.transport.saveRemote(conn.baseUrl);
-    this.connection.set(conn);
+    this.connection.set(this.transport.adoptRemote(conn));
   }
 
   /**
@@ -127,6 +135,22 @@ export class EngineClient {
       directory,
       agent: agent ?? 'code',
       ...(model ? { model } : {}),
+    });
+  }
+
+  /**
+   * Create an independent branch of a session, retaining messages through
+   * `messageIndex`. Callers that need the state before a message pass its
+   * preceding index.
+   */
+  forkSession(
+    directory: string,
+    sessionID: string,
+    messageIndex: number,
+  ): Promise<CreateSessionResult> {
+    return this.request<CreateSessionResult>('POST', '/session', {
+      directory,
+      forkOf: { sessionID, messageIndex },
     });
   }
 
@@ -256,6 +280,13 @@ export class EngineClient {
     }
   }
 
+  pendingPermissions(directory: string): Promise<PendingPermissionSnapshot[]> {
+    return this.request<{ asks: PendingPermissionSnapshot[] }>(
+      'GET',
+      `/permission?directory=${encodeURIComponent(directory)}`,
+    ).then((response) => response.asks);
+  }
+
   /** Absolute URL of the global SSE stream (used by `EventsStore`). */
   eventUrl(): string {
     const conn = this.requireConnection();
@@ -347,6 +378,50 @@ export class EngineClient {
       'GET',
       `/models?directory=${encodeURIComponent(directory)}&provider=${encodeURIComponent(provider)}`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // F5: projects registry (/projects) + directory picker (/fs/browse)
+  // ---------------------------------------------------------------------------
+
+  /** Registered projects, already in display order (pinned, recent, name). */
+  listProjects(): Promise<ProjectEntry[]> {
+    return this.request<ProjectsListResponse>('GET', '/projects').then((d) => d.projects);
+  }
+
+  /** Register a directory. Re-adding a known path returns the existing entry. */
+  addProject(path: string, name?: string): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('POST', '/projects', {
+      path,
+      ...(name ? { name } : {}),
+    });
+  }
+
+  updateProject(id: string, patch: ProjectPatch): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('PATCH', `/projects/${encodeURIComponent(id)}`, patch);
+  }
+
+  /** Forget a project. The directory itself is never touched. */
+  removeProject(id: string): Promise<{ removed: boolean; id: string }> {
+    return this.request<{ removed: boolean; id: string }>(
+      'DELETE',
+      `/projects/${encodeURIComponent(id)}`,
+    );
+  }
+
+  /** Stamp `last_opened_at` and get back the normalised path to switch to. */
+  openProject(id: string): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('POST', `/projects/${encodeURIComponent(id)}/open`);
+  }
+
+  /**
+   * List the subdirectories of `path`, or the host's roots when `path` is
+   * omitted. Directory names only - this endpoint never returns file contents.
+   */
+  browseDirectory(path?: string | null, showHidden = false): Promise<FsBrowseResponse> {
+    const query =
+      (path ? `path=${encodeURIComponent(path)}&` : '') + `show_hidden=${showHidden ? 'true' : 'false'}`;
+    return this.request<FsBrowseResponse>('GET', `/fs/browse?${query}`);
   }
 
   // ---------------------------------------------------------------------------

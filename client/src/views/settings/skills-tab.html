@@ -1,0 +1,49 @@
+<div class="tab-head">
+  <h2>{{ t('settings.skillsTitle') }}</h2>
+  <p>{{ t('settings.skillsHint') }}</p>
+</div>
+
+@if (skills().length === 0) {
+  <p class="empty">{{ t('settings.noSkills') }}</p>
+} @else {
+  <div class="split">
+    <div class="side skills-side">
+      @for (skill of skills(); track skill.name) {
+        <div
+          class="row-btn skill-row"
+          [class.selected]="store.selectedSkill() === skill.name"
+          role="button"
+          tabindex="0"
+          (click)="select(skill.name)"
+          (keydown.enter)="select(skill.name)"
+        >
+          <span class="row-name">{{ skill.name }}</span>
+          <button
+            type="button"
+            class="pill"
+            [class.on]="skill.enabled"
+            [attr.aria-pressed]="skill.enabled"
+            [attr.aria-label]="skill.name"
+            (click)="toggle(skill, $event)"
+          >
+            <span class="knob" aria-hidden="true"></span>
+          </button>
+        </div>
+      }
+    </div>
+
+    <div class="pane">
+      @if (selected(); as skill) {
+        <div class="card">
+          <h3>{{ skill.name }}</h3>
+          <p class="card-sub">{{ skill.enabled ? t('settings.skillOn') : t('settings.skillOff') }}</p>
+          <p class="skill-desc">{{ skill.description ?? t('settings.noDescription') }}</p>
+          <span class="micro-label">{{ t('settings.skillSource') }}</span>
+          <p class="mono small faint path">{{ skill.source }} · {{ skill.path }}</p>
+        </div>
+      } @else {
+        <div class="card empty">{{ t('settings.noSkillSelected') }}</div>
+      }
+    </div>
+  </div>
+}

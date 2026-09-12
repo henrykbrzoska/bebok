@@ -190,6 +190,11 @@ pub fn merge_providers(base: &mut Vec<ProviderSpec>, specs: &[ProviderSpec]) {
                 if !spec.models.is_empty() {
                     existing.models = spec.models.clone();
                 }
+                // Provider-specific extras merge key-by-key, so a project layer
+                // that sets one field keeps the global layer's other fields.
+                for (k, v) in &spec.extra {
+                    existing.extra.insert(k.clone(), v.clone());
+                }
             }
             None => base.push(spec.clone()),
         }
@@ -229,10 +234,7 @@ pub fn global_config_path() -> PathBuf {
 /// file is missing). Returns `None` only when the file exists but is invalid.
 pub fn read_layer_json(path: &Path) -> Option<Value> {
     match std::fs::read_to_string(path) {
-        Ok(text) => match jsonc::parse(&text) {
-            Ok(v) => Some(v),
-            Err(_) => None,
-        },
+        Ok(text) => jsonc::parse(&text).ok(),
         Err(_) => Some(Value::Null),
     }
 }

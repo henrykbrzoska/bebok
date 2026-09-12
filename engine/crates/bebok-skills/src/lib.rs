@@ -145,7 +145,10 @@ fn discover_skills(dir: &Path, source: Source, out: &mut Vec<Skill>) {
 pub fn apply_toggles(discovered: &mut Discovered, skills_config: Option<&Value>) {
     let toggles = skills_config.and_then(Value::as_object);
     for skill in &mut discovered.skills {
-        if let Some(enabled) = toggles.and_then(|t| t.get(&skill.name)).and_then(Value::as_bool) {
+        if let Some(enabled) = toggles
+            .and_then(|t| t.get(&skill.name))
+            .and_then(Value::as_bool)
+        {
             skill.enabled = enabled;
         }
     }
@@ -231,7 +234,10 @@ mod tests {
 
         let prompt = assemble_prompt(&disc);
         assert!(prompt.contains("skill A"));
-        assert!(!prompt.contains("skill B"), "disabled skill must be excluded");
+        assert!(
+            !prompt.contains("skill B"),
+            "disabled skill must be excluded"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

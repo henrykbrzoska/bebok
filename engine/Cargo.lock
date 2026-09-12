@@ -124,7 +124,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bebok-core"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "bebok-llm",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-llm"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -157,11 +157,12 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "bebok-mcp"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "bebok-tools",
@@ -178,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-pty"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -197,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-server"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -205,11 +206,13 @@ dependencies = [
  "bebok-core",
  "bebok-llm",
  "bebok-pty",
+ "dirs",
  "futures",
  "serde",
  "serde_json",
  "tokio",
  "tokio-util",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -218,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-skills"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "dirs",
  "serde",
@@ -228,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-tools"
-version = "0.1.3"
+version = "1.4.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

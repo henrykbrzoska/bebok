@@ -67,7 +67,10 @@ impl Tool for Find {
             .unwrap_or(".")
             .trim();
         let type_filter = args.get("type").and_then(|v| v.as_str()).unwrap_or("any");
-        let hidden = args.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+        let hidden = args
+            .get("hidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let max_depth = args
             .get("max_depth")
             .and_then(|v| v.as_u64())
@@ -159,9 +162,7 @@ mod tests {
     #[tokio::test]
     async fn finds_by_name_and_type() {
         let base = std::env::temp_dir().join(format!("bebok-find-{}", uuid::Uuid::new_v4()));
-        tokio::fs::create_dir_all(base.join("src"))
-            .await
-            .unwrap();
+        tokio::fs::create_dir_all(base.join("src")).await.unwrap();
         tokio::fs::write(base.join("src/a.rs"), b"x").await.unwrap();
         tokio::fs::write(base.join("src/b.ts"), b"x").await.unwrap();
         let ctx = ToolCtx {

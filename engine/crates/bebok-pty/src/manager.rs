@@ -41,8 +41,16 @@ pub struct SpawnOptions {
 impl SpawnOptions {
     fn rows_cols(&self) -> (u16, u16) {
         (
-            if self.rows == 0 { DEFAULT_ROWS } else { self.rows },
-            if self.cols == 0 { DEFAULT_COLS } else { self.cols },
+            if self.rows == 0 {
+                DEFAULT_ROWS
+            } else {
+                self.rows
+            },
+            if self.cols == 0 {
+                DEFAULT_COLS
+            } else {
+                self.cols
+            },
         )
     }
 }
@@ -122,8 +130,8 @@ impl PtyManager {
     pub fn list(&self) -> Vec<PtyInfo> {
         let sessions = self.sessions.read().unwrap();
         sessions
-            .iter()
-            .map(|(_, s)| PtyInfo {
+            .values()
+            .map(|s| PtyInfo {
                 pty_id: s.id().to_string(),
                 cwd: s.cwd.clone(),
                 command: s.command.clone(),

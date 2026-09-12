@@ -19,6 +19,7 @@ import {
   AgentInfo,
   EngineEvent,
   Message,
+  PromptBody,
   PromptImage,
   SessionMeta,
 } from '../../core/engine.dtos';
@@ -27,7 +28,7 @@ import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
-import { SessionSidebarComponent } from '../../ui/session-sidebar/session-sidebar';
+import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
 import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
@@ -47,8 +48,37 @@ const IMAGE_MAX_EDGE = 2048;
 const IMAGE_DOWNSCALE_THRESHOLD = 1 * 1024 * 1024;
 /** Decoded-byte target after downscaling (~2 MiB); the engine's 5 MiB is the hard cap. */
 const IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
+/** Tallest the auto-growing composer gets before it scrolls (F2-10). */
+const COMPOSER_MAX_HEIGHT = 200;
 let pendingSeq = 0;
 let attachmentSeq = 0;
+
+/** Minimal shape of the (non-standard) Web Speech API we rely on. */
+interface SpeechRecognitionResultLike {
+  readonly length: number;
+  [index: number]: { transcript: string };
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [index: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+/** `SpeechRecognition` / `webkitSpeechRecognition`, when the host has it. */
+function speechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  const ctor = scope['SpeechRecognition'] ?? scope['webkitSpeechRecognition'];
+  return typeof ctor === 'function' ? (ctor as new () => SpeechRecognitionLike) : null;
+}
 
 /** A user prompt echoed locally while waiting for the engine to reflect it. */
 interface PendingPrompt {
@@ -64,6 +94,36 @@ interface PendingPrompt {
 export interface QueuedPrompt {
   text: string;
   images: PromptImage[];
+  /** Agent selected when this message was queued. */
+  agent: string;
+  /** Explicit model selected when this message was queued, if any. */
+  model?: string;
+}
+
+/** Freeze the composer settings together with the message that will use them. */
+export function queuePrompt(
+  text: string,
+  images: PromptImage[],
+  agent: string,
+  selectedModel: string,
+): QueuedPrompt {
+  const model = selectedModel.trim();
+  return {
+    text,
+    images,
+    agent,
+    ...(model ? { model } : {}),
+  };
+}
+
+/** Build the exact engine request from the settings frozen at queue time. */
+export function queuedPromptBody(prompt: QueuedPrompt): PromptBody {
+  return {
+    message: prompt.text,
+    agent: prompt.agent,
+    ...(prompt.model ? { model: prompt.model } : {}),
+    ...(prompt.images.length ? { images: prompt.images } : {}),
+  };
 }
 
 /** An image staged in the composer (dataUrl for preview, base64 for sending). */
@@ -102,7 +162,6 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
-    SessionSidebarComponent,
     ScrollMinimapComponent,
   ],
   templateUrl: './chat.html',
@@ -116,6 +175,7 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
+  private readonly sessionStore = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -146,8 +206,8 @@ export class ChatView implements OnInit, OnDestroy {
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
 
-  /** M6: filter the transcript by model (driven from the sidebar). */
-  readonly filterModel = signal<string | null>(null);
+  /** M6: filter the transcript by model (driven from the drawer's Session panel). */
+  readonly filterModel = this.sessionStore.filterModel;
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
@@ -178,17 +238,6 @@ export class ChatView implements OnInit, OnDestroy {
     return this.taskLinks().get(nameOrId) ?? null;
   }
 
-  readonly modelsUsed = computed<string[]>(() => {
-    const set = new Set<string>();
-    for (const m of this.messages()) {
-      const model = m.meta?.model;
-      if (model) {
-        set.add(model);
-      }
-    }
-    return [...set];
-  });
-
   readonly filteredMessages = computed<Message[]>(() => {
     const filter = this.filterModel();
     if (!filter) {
@@ -208,12 +257,21 @@ export class ChatView implements OnInit, OnDestroy {
 
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
   readonly minimap = viewChild(ScrollMinimapComponent);
+  /** Inline permission prompt (F2-8) - blocks sending while unresolved. */
+  readonly permission = viewChild(PermissionPopup);
+
+  /** True while a permission decision is outstanding (F2-8, bug B15). */
+  readonly permissionBlocked = computed(
+    () => (this.permission()?.asks().length ?? 0) > 0,
+  );
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
   /** Per-session queued prompts + optimistic echoes (survive tab switches). */
   private readonly queuedBySession = new Map<string, QueuedPrompt[]>();
   private readonly pendingBySession = new Map<string, PendingPrompt[]>();
+  /** Attachments restored only when retrying a prompt in a newly forked session. */
+  private readonly retryAttachmentsBySession = new Map<string, StagedAttachment[]>();
   /** Local running flag per session (fallback when activity store missed it). */
   private readonly runningBySession = new Map<string, boolean>();
   private readonly unsubscribeEvents: () => void;
@@ -225,6 +283,12 @@ export class ChatView implements OnInit, OnDestroy {
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => this.handleEvent(ev));
+
+    // Publish the visible session to the shared store so the right drawer's
+    // Session panel derives tokens/cost/files from the same data (F2-12).
+    effect(() => this.sessionStore.meta.set(this.meta()));
+    effect(() => this.sessionStore.messages.set(this.messages()));
+    effect(() => this.sessionStore.running.set(this.running()));
 
     // Full transcript sync whenever the SSE stream (re)connects: events that
     // fell into the reconnect gap are recovered from the engine, not guessed.
@@ -312,6 +376,7 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.sessionStore.clear();
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();
     this.routeSub = null;
@@ -352,7 +417,8 @@ export class ChatView implements OnInit, OnDestroy {
     // Restore this tab's queued prompts + optimistic echoes (not cleared).
     this.pending.set(this.pendingBySession.get(nextID) ?? []);
     this.queue.set(this.queuedBySession.get(nextID) ?? []);
-    this.attachments.set([]);
+    this.attachments.set(this.retryAttachmentsBySession.get(nextID) ?? []);
+    this.retryAttachmentsBySession.delete(nextID);
     this.attachError.set(null);
     this.activeTasks.set([]);
     this.error.set(null);
@@ -396,6 +462,9 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.meta.set(meta);
       this.messages.set(messages);
+      // SSE events are ephemeral. The metadata snapshot restores Abort after
+      // a reload or tab switch while a tool call is still in progress.
+      this.running.set(meta.running === true || this.activity.isRunning(sessionID));
       this.directory.set(meta.directory);
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
@@ -664,6 +733,10 @@ export class ChatView implements OnInit, OnDestroy {
     if ((!text && staged.length === 0) || this.loading()) {
       return;
     }
+    // A pending permission prompt blocks turn progress (F2-8).
+    if (this.permissionBlocked()) {
+      return;
+    }
     this.draft.set('');
     this.saveDraft('');
     const images: PromptImage[] = staged.map((a) => ({
@@ -674,7 +747,14 @@ export class ChatView implements OnInit, OnDestroy {
     this.attachments.set([]);
     this.attachError.set(null);
     // Always enqueue; sends immediately when idle, otherwise waits for the turn.
-    this.queue.update((q) => [...q, { text, images }]);
+    // Preserve the dispatch settings with the message. A queued prompt may
+    // wait for a running turn, and reading these controls in `drainQueue()`
+    // would otherwise send it using whichever model happens to be selected
+    // later rather than the model the user chose before pressing Send.
+    this.queue.update((q) => [
+      ...q,
+      queuePrompt(text, images, this.selectedAgent(), this.selectedModel()),
+    ]);
     this.pending.update((p) => [
       ...p,
       {
@@ -714,12 +794,7 @@ export class ChatView implements OnInit, OnDestroy {
     try {
       await this.engine.prompt(
         sessionID,
-        {
-          message: head.text,
-          agent: this.selectedAgent(),
-          ...(this.selectedModel() ? { model: this.selectedModel() } : {}),
-          ...(head.images.length ? { images: head.images } : {}),
-        },
+        queuedPromptBody(head),
       );
       // Tab switched while the POST was in flight: leave the new tab alone.
       if (sessionID !== this.sessionID()) {
@@ -790,33 +865,42 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   /**
-   * Roll back to just before this user prompt: rewind the *current* session in
-   * place, keeping every message before this prompt (index 0..index-1) and
-   * erasing this prompt and the turn after it. Stays on the same session - no
-   * fork, no new session. The composer keeps any unsent draft for re-editing.
+   * Retry a user prompt from an independent branch. The original transcript
+   * remains intact, while the branch opens with the prompt's text and images
+   * restored in the composer for editing.
    */
   async rollbackTo(messageID: string): Promise<void> {
     const index = this.messages().findIndex((m) => m.id === messageID);
-    // Nothing meaningful before the very first prompt -> nothing to rewind to.
-    if (index < 1 || this.sending()) {
+    if (index < 0 || this.sending() || this.loading()) {
       return;
     }
     const sessionID = this.sessionID();
+    const source = this.messages()[index];
+    const directory = this.directory();
+    if (!source || source.role !== 'user' || !directory) {
+      return;
+    }
     this.error.set(null);
     try {
-      // Stop any running turn first: truncation is refused while busy.
-      try {
-        await this.engine.abort(sessionID);
-      } catch {
-        /* best-effort */
-      }
-      await this.engine.truncateSession(sessionID, index);
+      // The fork endpoint is inclusive. A first prompt has no prior message,
+      // so start an equivalent empty session instead.
+      const created = index === 0
+        ? await this.engine.createSession(
+            directory,
+            this.meta()?.agent ?? this.selectedAgent(),
+            this.meta()?.model ?? undefined,
+          )
+        : await this.engine.forkSession(directory, sessionID, index - 1);
       if (sessionID !== this.sessionID()) {
         return;
       }
-      this.running.set(false);
-      // Re-sync the transcript (message list is shorter now).
-      await this.refreshFull();
+      const draft = retryDraft(source);
+      this.drafts[created.sessionID] = draft.text;
+      persistDrafts(this.drafts);
+      if (draft.attachments.length > 0) {
+        this.retryAttachmentsBySession.set(created.sessionID, draft.attachments);
+      }
+      await this.router.navigate(['/chat', created.sessionID]);
     } catch (err) {
       if (sessionID !== this.sessionID()) {
         return;
@@ -885,6 +969,60 @@ export class ChatView implements OnInit, OnDestroy {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void this.sendPrompt();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Composer (F2-10): auto-grow textarea + optional dictation.
+  // ---------------------------------------------------------------------------
+
+  /** Grow the textarea with its content, up to `COMPOSER_MAX_HEIGHT`. */
+  autoGrow(el: HTMLTextAreaElement): void {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }
+
+  /** Speech recognition is a browser extra: absent in most webviews. */
+  readonly micSupported = signal(speechRecognitionCtor() !== null);
+  readonly dictating = signal(false);
+  private recognition: SpeechRecognitionLike | null = null;
+
+  /** Toggle dictation; recognized text is appended to the current draft. */
+  toggleDictation(): void {
+    if (this.dictating()) {
+      this.recognition?.stop();
+      this.dictating.set(false);
+      return;
+    }
+    const Ctor = speechRecognitionCtor();
+    if (!Ctor) {
+      return;
+    }
+    try {
+      const recognition = new Ctor();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
+        let text = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          text += event.results[i][0]?.transcript ?? '';
+        }
+        if (!text) {
+          return;
+        }
+        const next = this.draft() ? `${this.draft()} ${text.trim()}` : text.trim();
+        this.draft.set(next);
+        this.saveDraft(next);
+      };
+      recognition.onend = () => this.dictating.set(false);
+      recognition.onerror = () => this.dictating.set(false);
+      recognition.start();
+      this.recognition = recognition;
+      this.dictating.set(true);
+    } catch {
+      this.micSupported.set(false);
+      this.dictating.set(false);
     }
   }
 
@@ -1019,6 +1157,29 @@ export class ChatView implements OnInit, OnDestroy {
   removeAttachment(id: string): void {
     this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
+}
+
+/** Recover a user prompt into the composer when opening its retry branch. */
+export function retryDraft(message: Message): {
+  text: string;
+  attachments: StagedAttachment[];
+} {
+  const text = message.parts.find((part) => part.type === 'text');
+  const attachments = message.parts.flatMap((part) => {
+    if (part.type !== 'image') {
+      return [];
+    }
+    const base64 = part.data;
+    return [{
+      id: `retry-attachment-${++attachmentSeq}`,
+      media_type: part.media_type,
+      dataUrl: `data:${part.media_type};base64,${base64}`,
+      base64,
+      name: part.name ?? '',
+      size: part.bytes ?? Math.floor((base64.length * 3) / 4),
+    }];
+  });
+  return { text: text?.type === 'text' ? text.text : '', attachments };
 }
 
 /** Read a file as a `data:<mime>;base64,...` URL. */

@@ -78,7 +78,10 @@ async fn connects_lists_calls_and_toggles_off() {
 
     // Connect.
     let tools = manager
-        .sync(&[stdio_spec(script.to_str().unwrap(), true)], &Runtimes::default())
+        .sync(
+            &[stdio_spec(script.to_str().unwrap(), true)],
+            &Runtimes::default(),
+        )
         .await;
     let status = manager.status();
     assert_eq!(status.len(), 1);
@@ -90,7 +93,11 @@ async fn connects_lists_calls_and_toggles_off() {
     assert!(names.contains(&"mcp__test__mutate".to_string()));
 
     // Call the echo tool through the Tool trait.
-    let echo = tools.iter().find(|t| t.name() == "mcp__test__echo").unwrap().clone();
+    let echo = tools
+        .iter()
+        .find(|t| t.name() == "mcp__test__echo")
+        .unwrap()
+        .clone();
     let ctx = ToolCtx {
         root: base.clone(),
         session_id: "sess".to_string(),
@@ -102,12 +109,19 @@ async fn connects_lists_calls_and_toggles_off() {
     assert!(out.text.contains("echo: hello"), "got: {}", out.text);
 
     // The mutate tool is not annotated read-only -> default mutating (Ask).
-    let mutate = tools.iter().find(|t| t.name() == "mcp__test__mutate").unwrap().clone();
+    let mutate = tools
+        .iter()
+        .find(|t| t.name() == "mcp__test__mutate")
+        .unwrap()
+        .clone();
     assert!(!mutate.is_read_only());
 
     // Toggle off -> tools disappear and status reflects disconnected.
     let tools_off = manager
-        .sync(&[stdio_spec(script.to_str().unwrap(), false)], &Runtimes::default())
+        .sync(
+            &[stdio_spec(script.to_str().unwrap(), false)],
+            &Runtimes::default(),
+        )
         .await;
     assert!(tools_off.is_empty(), "disabled server must drop its tools");
     let status = manager.status();

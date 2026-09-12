@@ -1,0 +1,66 @@
+<div class="tab-head">
+  <h2>{{ t('settings.rawTitle') }}</h2>
+  <p>{{ t('settings.rawHint') }}</p>
+</div>
+
+<div class="card">
+  <div class="layer-tabs" role="tablist">
+    <button
+      type="button"
+      role="tab"
+      [class.active]="store.rawTab() === 'project'"
+      [attr.aria-selected]="store.rawTab() === 'project'"
+      (click)="store.setRawTab('project')"
+    >{{ t('settings.rawProject') }}</button>
+    <button
+      type="button"
+      role="tab"
+      [class.active]="store.rawTab() === 'global'"
+      [attr.aria-selected]="store.rawTab() === 'global'"
+      (click)="store.setRawTab('global')"
+    >{{ t('settings.rawGlobal') }}</button>
+    <span class="layer-path mono small faint" [attr.title]="layerPath()">
+      {{ layerPath() }}@if (!layerExists()) { · {{ t('settings.rawMissing') }} }
+    </span>
+  </div>
+
+  <div class="editor">
+    <pre class="highlight mono" aria-hidden="true" [innerHTML]="highlighted()"></pre>
+    <textarea
+      class="input mono"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      wrap="off"
+      [attr.aria-label]="t('settings.rawTitle')"
+      [ngModel]="text()"
+      (ngModelChange)="setText($event)"
+      (scroll)="syncScroll($event)"
+    ></textarea>
+  </div>
+
+  @if (diagnostics().length > 0) {
+    <ul class="diagnostics">
+      @for (diagnostic of diagnostics(); track $index) {
+        <li [class.err]="diagnostic.severity === 'error'" [class.warn]="diagnostic.severity === 'warning'">
+          <span class="mono loc">{{ diagnostic.line }}:{{ diagnostic.column }}</span>
+          <span>{{ message(diagnostic) }}</span>
+        </li>
+      }
+    </ul>
+  } @else {
+    <p class="valid small">{{ t('settings.jsonValid') }}</p>
+  }
+
+  <div class="actions spread">
+    <button type="button" (click)="format()">{{ t('settings.rawFormat') }}</button>
+    <button
+      type="button"
+      class="primary"
+      (click)="store.saveRaw()"
+      [disabled]="store.saving() || errorCount() > 0"
+    >
+      {{ t('settings.rawSave', { scope: store.rawTab() }) }}
+    </button>
+  </div>
+</div>

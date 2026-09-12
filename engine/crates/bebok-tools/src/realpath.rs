@@ -46,6 +46,9 @@ impl Tool for Realpath {
         // Canonicalize when possible (resolves symlinks + `..`); otherwise fall
         // back to a lexically absolute path so it works for not-yet-created files.
         let resolved = std::fs::canonicalize(&full).unwrap_or(full);
-        ToolOutput::new(resolved.to_string_lossy().to_string(), format!("realpath {path}"))
+        ToolOutput::new(
+            resolved.to_string_lossy().to_string(),
+            format!("realpath {path}"),
+        )
     }
 }

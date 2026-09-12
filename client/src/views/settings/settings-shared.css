@@ -1,0 +1,268 @@
+/*
+ * Styles shared by every Settings tab (F2-22..F2-29).
+ *
+ * Angular scopes component styles per component, so the tab components pull
+ * this file in through `styleUrls: ['./settings-shared.css', './<tab>.css']`
+ * instead of duplicating the card/list/label chrome seven times. Only values
+ * from the design handoff's token table are used - nothing is redefined here.
+ */
+
+:host {
+  display: block;
+  color: var(--text);
+}
+
+/* --- layout ------------------------------------------------------------- */
+
+.tab-head {
+  margin-bottom: var(--space-14);
+}
+
+.tab-head h2 {
+  margin: 0 0 4px;
+  font-size: var(--fs-16);
+  font-weight: 600;
+}
+
+.tab-head p {
+  margin: 0;
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+}
+
+/* list (220/230px) + detail card side by side */
+.split {
+  display: flex;
+  gap: var(--space-16);
+  align-items: flex-start;
+}
+
+.side {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.pane {
+  flex: 1;
+  min-width: 0;
+}
+
+/* --- cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-16) var(--space-18);
+}
+
+.card + .card {
+  margin-top: var(--space-14);
+}
+
+.card h3 {
+  margin: 0 0 var(--space-10);
+  font-size: var(--fs-13-5);
+  font-weight: 600;
+}
+
+.card-sub {
+  margin: -6px 0 var(--space-12);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.micro-label {
+  display: block;
+  font-size: var(--fs-label);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+
+.field {
+  display: block;
+  margin-bottom: var(--space-12);
+}
+
+.field input[type='text'],
+.field input[type='password'],
+.field input[type='number'],
+.field select,
+.field textarea {
+  width: 100%;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-12);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  margin-top: var(--space-14);
+}
+
+.actions.spread {
+  justify-content: space-between;
+}
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  padding: 6px 8px;
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.small {
+  font-size: var(--fs-11-5);
+}
+
+/* --- list rows ---------------------------------------------------------- */
+
+.row-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  padding: var(--space-8) var(--space-10);
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.row-btn:hover:not(.selected) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.row-btn.selected {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.row-btn .row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashed-btn {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-control-sm);
+  padding: var(--space-8) var(--space-10);
+  font-size: var(--fs-12-5);
+  width: 100%;
+}
+
+.dashed-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+}
+
+/* status dot, always paired with a text label */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-faint);
+}
+
+.dot.ok {
+  background: var(--success);
+}
+
+.dot.warn {
+  background: var(--warning);
+}
+
+.dot.err {
+  background: var(--danger);
+}
+
+.dot.idle {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+/* --- notes -------------------------------------------------------------- */
+
+.note {
+  margin-top: var(--space-12);
+  padding: var(--space-9) var(--space-12);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--warning);
+  border-radius: var(--radius-control-sm);
+  background: rgba(224, 182, 74, 0.08);
+  color: var(--text-muted);
+  font-size: var(--fs-11-5);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--fs-12-5);
+  padding: var(--space-10) 0;
+}
+
+.inline-error {
+  margin-top: var(--space-10);
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+
+/* spinner used by the "Test connection" buttons */
+.spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  display: inline-block;
+  animation: settings-spin 700ms linear infinite;
+  vertical-align: -1px;
+  margin-right: 6px;
+}
+
+@keyframes settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

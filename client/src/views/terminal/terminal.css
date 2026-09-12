@@ -1,3 +1,10 @@
+/* Terminal (WP-TOOLS-UI / F2-18, F2-19).
+ *
+ * Design handoff, section "6. Terminal": a 40px tab strip (status dot + name +
+ * ✕ per PTY, accent "+ New terminal" on the right) over a #0f1013 body with
+ * 12.5px/1.7 monospace text, a --success prompt and a blinking block cursor.
+ */
+
 :host {
   display: flex;
   flex-direction: column;
@@ -10,150 +17,189 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  background: var(--terminal-bg);
 }
 
-.term-head {
+/* --- Tab strip (F2-18) -------------------------------------------------- */
+
+.tab-strip {
+  height: 40px;
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 2px;
+  padding: 0 var(--space-8);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
-  flex: 0 0 auto;
-}
-
-.term-head h1 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.term-head .back {
-  color: var(--fg-muted);
-  text-decoration: none;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.term-head .back:hover {
-  color: var(--accent);
-}
-
-.term-head .dir {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.new-term {
-  flex: 0 0 auto;
-}
-
-.error-banner {
-  background: rgba(224, 82, 96, 0.14);
-  border: 1px solid var(--err);
-  color: var(--err);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  margin: 12px 16px 0;
-  font-size: 13px;
-}
-
-.tab-bar {
-  display: flex;
-  gap: 4px;
-  padding: 6px 12px 0;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
-  flex: 0 0 auto;
+  background: var(--bg);
   overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  color: var(--fg-muted);
-  cursor: pointer;
+  gap: var(--space-8);
+  flex: none;
+  max-width: 220px;
+  padding: 8px 14px;
+  font-size: var(--fs-12);
+  color: var(--code-text);
   border: 1px solid transparent;
   border-bottom: none;
-  white-space: nowrap;
-  max-width: 220px;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 
 .tab:hover {
-  color: var(--fg);
-  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .tab.active {
-  color: var(--fg);
-  background: var(--bg);
+  background: var(--surface);
   border-color: var(--border);
+  color: var(--text);
 }
 
 .tab .dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
+  flex: none;
   border-radius: 50%;
-  background: var(--fg-muted);
-  flex: 0 0 auto;
+  background: var(--text-faint);
 }
 
-.tab .dot.live {
-  background: var(--ok);
+.tab .dot.tone-live {
+  background: var(--success);
 }
 
-.tab .dot.exited {
-  background: var(--fg-muted);
+.tab .dot.tone-connecting {
+  background: var(--warning);
 }
 
-.tab .dot.connecting {
-  background: var(--warn);
+.tab .dot.tone-error {
+  background: var(--danger);
 }
 
-.tab .dot.error {
-  background: var(--err);
+.tab .dot.tone-exited {
+  background: var(--text-faint);
 }
 
 .tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
 }
 
 .tab-close {
+  margin-left: 6px;
+  padding: 0 2px;
   border: none;
   background: transparent;
-  color: var(--fg-muted);
-  padding: 0 2px;
-  font-size: 15px;
+  color: var(--text-faint);
+  font-size: var(--fs-11-5);
   line-height: 1;
-  cursor: pointer;
+  border-radius: 4px;
 }
 
-.tab-close:hover {
-  color: var(--err);
+.tab-close:hover:not(:disabled) {
   background: transparent;
+  color: var(--danger);
 }
+
+.new-term {
+  margin-left: auto;
+  margin-right: var(--space-8);
+  flex: none;
+  background: var(--accent);
+  border: none;
+  color: var(--bg);
+  border-radius: var(--radius-control);
+  padding: 6px 14px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.new-term:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.error-banner {
+  flex: none;
+  margin: var(--space-10) var(--space-18) 0;
+  padding: 8px 12px;
+  font-size: var(--fs-12);
+  color: var(--danger);
+  background: rgba(226, 100, 95, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+}
+
+/* --- Body (F2-19) ------------------------------------------------------- */
 
 .term-body {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 8px;
-  background: var(--bg);
+  background: var(--terminal-bg);
+  padding: 16px 18px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  line-height: 1.7;
+  color: var(--code-text-strong);
+  overflow: hidden;
 }
 
-.term-body .placeholder {
+.term-empty {
   height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-muted);
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.prompt-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.prompt {
+  color: var(--success);
+}
+
+.cursor {
+  animation: terminal-blink 1s step-end infinite;
+}
+
+@keyframes terminal-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+}
+
+.empty-hint {
+  margin: 0;
+  color: var(--code-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12-5);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

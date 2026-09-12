@@ -159,11 +159,7 @@ impl McpManager {
 /// Connect to one MCP server and wrap its tools.
 async fn connect(spec: &McpServerSpec, runtimes: &Runtimes) -> Result<ServerConn, String> {
     match &spec.transport {
-        McpTransport::Stdio {
-            command,
-            args,
-            env,
-        } => {
+        McpTransport::Stdio { command, args, env } => {
             // A bare runtime name (python/python3/node/php/docker) resolves to
             // the configured executable path; anything else is used verbatim.
             let command = runtimes.resolve(command).unwrap_or(command).to_string();
@@ -172,8 +168,7 @@ async fn connect(spec: &McpServerSpec, runtimes: &Runtimes) -> Result<ServerConn
             for (k, v) in env {
                 cmd.env(k, v);
             }
-            let proc =
-                TokioChildProcess::new(cmd).map_err(|e| format!("spawn {command}: {e}"))?;
+            let proc = TokioChildProcess::new(cmd).map_err(|e| format!("spawn {command}: {e}"))?;
             let running = serve_client((), proc).await.map_err(|e| format!("{e}"))?;
             let listed = running
                 .peer()
@@ -185,7 +180,9 @@ async fn connect(spec: &McpServerSpec, runtimes: &Runtimes) -> Result<ServerConn
         McpTransport::Http { url, headers } => {
             let config = http_config(url, headers);
             let transport = StreamableHttpClientTransport::from_config(config);
-            let running = serve_client((), transport).await.map_err(|e| format!("{e}"))?;
+            let running = serve_client((), transport)
+                .await
+                .map_err(|e| format!("{e}"))?;
             let listed = running
                 .peer()
                 .list_tools(None)
@@ -202,9 +199,10 @@ fn http_config(
 ) -> StreamableHttpClientTransportConfig {
     let mut map = HashMap::new();
     for (k, v) in headers {
-        if let (Ok(name), Ok(value)) =
-            (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
-        {
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(v),
+        ) {
             map.insert(name, value);
         }
     }

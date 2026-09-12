@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::agent::{run_turn, spawn_agent_watcher};
     use crate::event::Event;
@@ -333,9 +334,24 @@ if __name__ == "__main__":
 
         // And the transcript opens.
         let s = store.open_session(id).await.unwrap();
-        assert_eq!(s.directory(), project.to_str().unwrap());
+        assert_eq!(s.directory(), crate::util::normalize_path(&project));
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn session_directory_has_no_verbatim_prefix() {
+        let base = std::env::temp_dir().join(format!("bebok-path-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        assert!(!session.directory().starts_with(r"\\?\"));
+        let _ = std::fs::remove_dir_all(base);
     }
 
     // ------------------------------------------------------------------
@@ -433,13 +449,13 @@ if __name__ == "__main__":
             .await
             .unwrap();
         session
-            .append_user_message("print the working directory")
+            .append_user_message("print the project marker")
             .await
             .unwrap();
 
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
-            tool_step("bash", serde_json::json!({ "command": "pwd" }), 1),
+            tool_step("bash", serde_json::json!({ "command": "echo project" }), 1),
             text_step("done"),
         ]));
         let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
@@ -812,6 +828,20 @@ if __name__ == "__main__":
 
     #[tokio::test]
     async fn mcp_tool_goes_through_permission_gate() {
+        let python = ["python3", "python"].into_iter().find(|command| {
+            std::process::Command::new(command)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && (String::from_utf8_lossy(&output.stdout).starts_with("Python 3")
+                            || String::from_utf8_lossy(&output.stderr).starts_with("Python 3"))
+                })
+        });
+        let Some(python) = python else {
+            eprintln!("skipping MCP gate test: Python 3 is not available");
+            return;
+        };
         let base = std::env::temp_dir().join(format!("bebok-mcp-gate-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
         std::fs::create_dir_all(&project).unwrap();
@@ -835,7 +865,7 @@ if __name__ == "__main__":
         let spec = McpServerSpec {
             name: "test".to_string(),
             transport: McpTransport::Stdio {
-                command: runtimes.python3.clone(),
+                command: python.to_string(),
                 args: vec![script.to_str().unwrap().to_string()],
                 env: Default::default(),
             },
@@ -912,7 +942,15 @@ if __name__ == "__main__":
     // Plugin hooks (event-observer extension points)
     // ------------------------------------------------------------------
 
-    /// A plugin that vetoes every `bash` call at the `before.tool` hook.
+    /// Marker that makes the veto plugin's match unique to its own test.
+    ///
+    /// The plugin host is global, so a fixture that vetoed *every* `bash` call
+    /// would also veto bash calls made by other tests running concurrently
+    /// (e.g. `unknown_bash_asks_then_executes_when_allowed`). Matching on this
+    /// marker keeps the veto scoped to the command this test issues.
+    const VETO_BASH_MARKER: &str = "must-survive.txt";
+
+    /// A plugin that vetoes only its own `bash` call at the `before.tool` hook.
     struct VetoBash;
 
     #[async_trait::async_trait]
@@ -926,15 +964,23 @@ if __name__ == "__main__":
             payload: &mut serde_json::Value,
         ) -> crate::plugin::HookResult {
             use crate::plugin::HookResult;
-            if hook == crate::plugin::Hook::BEFORE_TOOL
-                && payload.get("tool").and_then(|v| v.as_str()) == Some("bash")
+            if hook != crate::plugin::Hook::BEFORE_TOOL
+                || payload.get("tool").and_then(|v| v.as_str()) != Some("bash")
             {
-                if let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed") {
-                    *allowed = false;
-                }
-                return HookResult::Changed;
+                return HookResult::Continue;
             }
-            HookResult::Continue
+            let mine = payload
+                .get("input")
+                .and_then(|v| v.get("command"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|cmd| cmd.contains(VETO_BASH_MARKER));
+            if !mine {
+                return HookResult::Continue;
+            }
+            if let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed") {
+                *allowed = false;
+            }
+            HookResult::Changed
         }
     }
 
@@ -979,9 +1025,9 @@ if __name__ == "__main__":
         // turn, then unregister so no other test sees it.
         let host = PluginHost::global();
         host.register(Arc::new(VetoBash)).await;
-        let result = {
+        {
             session.try_begin_turn();
-            let out = tokio::time::timeout(
+            tokio::time::timeout(
                 Duration::from_secs(10),
                 run_turn(
                     session.clone(),
@@ -998,9 +1044,7 @@ if __name__ == "__main__":
             .expect("turn must finish")
             .unwrap();
             session.end_turn();
-            out
         };
-        let _ = result;
         host.unregister("test-veto-bash").await;
 
         // The plugin vetoed the call before execution: file untouched, part is

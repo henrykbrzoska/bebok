@@ -1,0 +1,88 @@
+<div class="tab-head">
+  <h2>{{ t('settings.mcpTitle') }}</h2>
+  <p>{{ t('settings.mcpHint') }}</p>
+</div>
+
+@if (servers().length === 0) {
+  <p class="empty">{{ t('settings.noMcp') }}</p>
+} @else {
+  <ul class="server-list">
+    @for (server of servers(); track server.name) {
+      <li
+        class="server-row"
+        [class.selected]="store.selectedMcp() === server.name"
+        [class.dim]="!server.enabled"
+      >
+        <button type="button" class="server-main" (click)="select(server.name)">
+          <span
+            class="dot"
+            [class.ok]="statusTone(server) === 'ok'"
+            [class.warn]="statusTone(server) === 'warn'"
+            [class.err]="statusTone(server) === 'err'"
+            [class.idle]="statusTone(server) === 'idle'"
+            aria-hidden="true"
+          ></span>
+          <span class="server-name">{{ server.name }}</span>
+          <span class="server-status small muted">{{ statusText(server) }}</span>
+        </button>
+        <label class="enabled-check small">
+          <input
+            type="checkbox"
+            [checked]="server.enabled"
+            (change)="store.toggleMcp(server, !server.enabled)"
+          />
+          {{ t('settings.mcpEnabledLabel') }}
+        </label>
+      </li>
+    }
+  </ul>
+}
+
+@if (hasUnverified()) {
+  <div class="note">{{ t('settings.mcpTrustNote') }}</div>
+}
+
+@if (selected(); as server) {
+  <div class="card">
+    <h3 class="mono">{{ server.name }}</h3>
+    <p class="card-sub">{{ statusText(server) }}</p>
+
+    <label class="field">
+      <span class="micro-label">{{ t('settings.mcpCommand') }}</span>
+      <input
+        type="text"
+        class="mono"
+        [ngModel]="command()"
+        (ngModelChange)="commandDraft.set($event)"
+        spellcheck="false"
+        placeholder="npx"
+      />
+    </label>
+
+    <label class="field">
+      <span class="micro-label">{{ t('settings.mcpArgs') }}</span>
+      <input
+        type="text"
+        class="mono"
+        [ngModel]="args()"
+        (ngModelChange)="argsDraft.set($event)"
+        spellcheck="false"
+        placeholder="-y @modelcontextprotocol/server-filesystem ."
+      />
+      <span class="small faint">{{ t('settings.mcpArgsHint') }}</span>
+    </label>
+
+    <div class="actions spread">
+      <button type="button" (click)="test()" [disabled]="testing()">
+        @if (testing()) {
+          <span class="spinner" aria-hidden="true"></span>{{ t('settings.checking') }}
+        } @else {
+          {{ t('settings.testConnection') }}
+        }
+      </button>
+      <button type="button" class="primary" (click)="save()" [disabled]="store.saving()">
+        {{ t('settings.mcpSave') }}
+      </button>
+    </div>
+  </div>
+}

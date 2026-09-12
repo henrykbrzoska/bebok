@@ -69,12 +69,30 @@ impl Runtimes {
     pub fn detect() -> Self {
         let d = Self::default();
         Self {
-            python: detect_path(&d.python).unwrap_or_else(|| PathBuf::from(&d.python)).to_string_lossy().to_string(),
-            python3: detect_path(&d.python3).unwrap_or_else(|| PathBuf::from(&d.python3)).to_string_lossy().to_string(),
-            node: detect_path(&d.node).unwrap_or_else(|| PathBuf::from(&d.node)).to_string_lossy().to_string(),
-            php: detect_path(&d.php).unwrap_or_else(|| PathBuf::from(&d.php)).to_string_lossy().to_string(),
-            docker: detect_path(&d.docker).unwrap_or_else(|| PathBuf::from(&d.docker)).to_string_lossy().to_string(),
-            git: detect_path(&d.git).unwrap_or_else(|| PathBuf::from(&d.git)).to_string_lossy().to_string(),
+            python: detect_path(&d.python)
+                .unwrap_or_else(|| PathBuf::from(&d.python))
+                .to_string_lossy()
+                .to_string(),
+            python3: detect_path(&d.python3)
+                .unwrap_or_else(|| PathBuf::from(&d.python3))
+                .to_string_lossy()
+                .to_string(),
+            node: detect_path(&d.node)
+                .unwrap_or_else(|| PathBuf::from(&d.node))
+                .to_string_lossy()
+                .to_string(),
+            php: detect_path(&d.php)
+                .unwrap_or_else(|| PathBuf::from(&d.php))
+                .to_string_lossy()
+                .to_string(),
+            docker: detect_path(&d.docker)
+                .unwrap_or_else(|| PathBuf::from(&d.docker))
+                .to_string_lossy()
+                .to_string(),
+            git: detect_path(&d.git)
+                .unwrap_or_else(|| PathBuf::from(&d.git))
+                .to_string_lossy()
+                .to_string(),
         }
     }
 

@@ -28,16 +28,57 @@ pub fn hash_dir(directory: &str) -> String {
 /// absolute. Returns a stable string used as the instance key.
 pub fn normalize_path(path: &Path) -> String {
     if let Ok(canon) = std::fs::canonicalize(path) {
-        return canon.to_string_lossy().to_string();
+        return without_windows_verbatim_prefix(canon.to_string_lossy().as_ref());
     }
     if path.is_absolute() {
-        return path.to_string_lossy().to_string();
+        return without_windows_verbatim_prefix(path.to_string_lossy().as_ref());
     }
-    std::env::current_dir()
+    let absolute = std::env::current_dir()
         .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+        .unwrap_or_else(|_| path.to_path_buf());
+    without_windows_verbatim_prefix(absolute.to_string_lossy().as_ref())
+}
+
+fn without_windows_verbatim_prefix(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{unc}");
+        }
+        if let Some(local) = path.strip_prefix(r"\\?\") {
+            return local.to_string();
+        }
+    }
+    path.to_string()
+}
+
+#[cfg(all(test, windows))]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_path_removes_windows_verbatim_prefix() {
+        let dir = std::env::temp_dir().join(format!("bebok-path-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let normalized = normalize_path(&dir);
+        assert!(!normalized.starts_with(r"\\?\"), "{normalized}");
+        // CI's Windows TEMP may use an 8.3 path (RUNNER~1), while
+        // canonicalize expands it to the long spelling (runneradmin).
+        assert_eq!(
+            std::fs::canonicalize(&normalized).unwrap(),
+            std::fs::canonicalize(&dir).unwrap()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn removes_drive_and_unc_prefixes() {
+        assert_eq!(without_windows_verbatim_prefix(r"\\?\C:\work"), r"C:\work");
+        assert_eq!(
+            without_windows_verbatim_prefix(r"\\?\UNC\server\share"),
+            r"\\server\share"
+        );
+    }
 }
 
 /// Atomically write `bytes` to `path` (tmp file + rename).
@@ -112,7 +153,7 @@ fn strip_ansi(text: &str) -> String {
             } else if chars.peek() == Some(&']') {
                 // OSC: ESC ] ... BEL or ESC \
                 chars.next(); // consume ']'
-                while let Some(ch) = chars.next() {
+                for ch in chars.by_ref() {
                     if ch == '\x07' || ch == '\x1b' {
                         break;
                     }

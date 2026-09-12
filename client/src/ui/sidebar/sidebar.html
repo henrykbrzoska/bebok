@@ -1,0 +1,162 @@
+<aside class="sidebar" [class.collapsed]="!expanded()">
+  <div class="head">
+    <img class="logo" src="/logo.svg" alt="" aria-hidden="true" />
+    @if (expanded()) {
+      <div class="brand">Bebok</div>
+      <button
+        type="button"
+        class="palette-btn"
+        (click)="shell.openCommandPalette()"
+        [title]="t('shell.openPalette')"
+        [attr.aria-label]="t('shell.openPalette')"
+      >
+        <span class="cmd" aria-hidden="true">⌘</span>K
+      </button>
+    }
+    <button
+      type="button"
+      class="collapse"
+      (click)="shell.toggleSidebar()"
+      [title]="expanded() ? t('shell.collapseSidebar') : t('shell.expandSidebar')"
+      [attr.aria-label]="expanded() ? t('shell.collapseSidebar') : t('shell.expandSidebar')"
+    >
+      {{ expanded() ? '«' : '»' }}
+    </button>
+  </div>
+
+  @if (expanded()) {
+    <div class="project-block">
+      <button
+        type="button"
+        class="project-row"
+        (click)="switchProject()"
+        [title]="t('sidebar.switchProject')"
+      >
+        <span class="project-text">
+          <span class="micro-label">{{ t('sidebar.project') }}</span>
+          <span class="project-path">{{ directory() || t('sidebar.noProject') }}</span>
+        </span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </button>
+    </div>
+
+    <div class="search-block">
+      <input
+        type="text"
+        class="search"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+        [placeholder]="t('sidebar.searchSessions')"
+        [attr.aria-label]="t('sidebar.searchSessions')"
+        spellcheck="false"
+      />
+    </div>
+
+    <div class="new-block">
+      <select
+        class="agent-select"
+        [ngModel]="selectedAgent()"
+        (ngModelChange)="selectedAgent.set($event)"
+        [attr.aria-label]="t('start.agent')"
+      >
+        @for (agent of agents(); track agent.name) {
+          <option [value]="agent.name">{{ agentLabel(agent) }}</option>
+        }
+        @if (agents().length === 0) {
+          <option value="code">code</option>
+        }
+      </select>
+      <button
+        type="button"
+        class="new-btn"
+        (click)="newSession()"
+        [disabled]="creating() || !directory()"
+        [title]="t('sidebar.newSessionTitle')"
+      >
+        {{ t('sidebar.newSession') }}
+      </button>
+    </div>
+
+    <div class="session-list" role="list">
+      @for (group of groups(); track group.key) {
+        <div class="group-label">{{ t(group.labelKey) }}</div>
+        @for (session of group.sessions; track session.id) {
+          <button
+            type="button"
+            role="listitem"
+            class="session-row"
+            [class.active]="isCurrentSession(session)"
+            (click)="openSession(session)"
+            [title]="sessionTitle(session)"
+          >
+            <span class="session-head">
+              <app-status-dot
+                class="session-dot"
+                [label]="sessionStatusLabel(session)"
+                [tone]="sessionTone(session)"
+                [labelHidden]="true"
+              />
+              <span class="session-title">{{ sessionTitle(session) }}</span>
+            </span>
+            <span class="session-meta">{{ sessionMeta(session) }}</span>
+          </button>
+        }
+      }
+      @if (groups().length === 0) {
+        <div class="session-empty">
+          {{ hasSessions() ? t('sidebar.noMatches') : t('sidebar.noSessions') }}
+        </div>
+      }
+    </div>
+
+    <nav class="nav-rail">
+      @for (item of navItems; track item.screen) {
+        <button
+          type="button"
+          class="nav-row"
+          [class.active]="isActive(item.screen)"
+          (click)="go(item.path)"
+          [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+        >
+          <span class="nav-dot" aria-hidden="true"></span>
+          <span class="nav-label">{{ t(item.labelKey) }}</span>
+        </button>
+      }
+    </nav>
+
+    <div class="footer">
+      <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      <select
+        class="lang-select"
+        [ngModel]="currentLang()"
+        (ngModelChange)="setLanguage($event)"
+        [attr.aria-label]="t('sidebar.language')"
+      >
+        @for (lang of languages; track lang.code) {
+          <option [value]="lang.code">{{ lang.label }}</option>
+        }
+      </select>
+    </div>
+  }
+
+  @if (!expanded()) {
+    <nav class="rail">
+      @for (item of navItems; track item.screen) {
+        <button
+          type="button"
+          class="rail-btn"
+          [class.active]="isActive(item.screen)"
+          (click)="go(item.path)"
+          [title]="t(item.labelKey)"
+          [attr.aria-label]="t(item.labelKey)"
+          [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+        >
+          {{ t(item.railKey) }}
+        </button>
+      }
+      <div class="rail-status">
+        <app-status-dot [label]="statusLabel()" [tone]="statusTone()" [labelHidden]="true" />
+      </div>
+    </nav>
+  }
+</aside>

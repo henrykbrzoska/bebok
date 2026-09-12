@@ -7,16 +7,18 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(windows)]
+use std::time::Duration;
 
 use bytes::Bytes;
 use portable_pty::{Child, MasterPty, PtySize};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
-use crate::scrollback::Scrollback;
 use crate::PtyError;
+use crate::scrollback::Scrollback;
 
 #[cfg(windows)]
 use crate::win::JobObject;
@@ -48,6 +50,7 @@ pub struct PtySession {
     #[cfg(windows)]
     job: Mutex<Option<JobObject>>,
     exited: AtomicBool,
+    exit_claimed: AtomicBool,
     exit_code: Mutex<Option<u32>>,
     exit_tx: watch::Sender<Option<i32>>,
     next_client_id: AtomicU64,
@@ -68,7 +71,11 @@ impl PtySession {
 
     /// Child process id (diagnostics / tests).
     pub fn process_id(&self) -> Option<u32> {
-        self.child.lock().unwrap().as_ref().and_then(|c| c.process_id())
+        self.child
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|c| c.process_id())
     }
 
     /// Subscribe to the exit signal (`None` while running, then the exit code).
@@ -150,6 +157,9 @@ impl PtySession {
 
     /// Called by the reader thread once the master end hits EOF (child exit).
     fn mark_exited(&self) {
+        if self.exit_claimed.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let code = {
             // Take the child out so we don't hold the lock during the blocking
             // `wait()` (which reaps the process and yields its exit code).
@@ -225,6 +235,35 @@ pub(crate) fn spawn_threads(
             .spawn(move || writer_loop(writer, input_rx))
             .expect("spawn pty writer thread");
     }
+    // ConPTY may leave the master read blocked even after the child exits.
+    // Observe the process separately so exit status and reconnect state do
+    // not depend on receiving EOF from the pseudo-console.
+    #[cfg(windows)]
+    {
+        let session = Arc::clone(&session);
+        std::thread::Builder::new()
+            .name(format!("pty-exit-{}", session.id))
+            .spawn(move || {
+                loop {
+                    let finished = {
+                        let mut child = session.child.lock().unwrap();
+                        match child.as_mut() {
+                            Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+                            None => return,
+                        }
+                    };
+                    if finished {
+                        // Give the reader time to drain the final ConPTY bytes
+                        // into scrollback before closing live consumers.
+                        std::thread::sleep(Duration::from_millis(250));
+                        session.mark_exited();
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            })
+            .expect("spawn pty exit watcher");
+    }
 }
 
 fn reader_loop(mut reader: Box<dyn Read + Send>, session: Arc<PtySession>) {
@@ -296,9 +335,7 @@ pub(crate) fn spawn(
     child: Box<dyn Child + Send + Sync>,
     scrollback: Scrollback,
 ) -> Arc<PtySession> {
-    let reader = master
-        .try_clone_reader()
-        .expect("clone pty reader");
+    let reader = master.try_clone_reader().expect("clone pty reader");
     let writer = master.take_writer().expect("take pty writer");
 
     // Windows: assign the child to a Job Object (KILL_ON_JOB_CLOSE) as soon as
@@ -323,6 +360,7 @@ pub(crate) fn spawn(
         #[cfg(windows)]
         job: Mutex::new(job),
         exited: AtomicBool::new(false),
+        exit_claimed: AtomicBool::new(false),
         exit_code: Mutex::new(None),
         exit_tx,
         next_client_id: AtomicU64::new(1),

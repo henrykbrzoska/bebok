@@ -1,0 +1,100 @@
+<div class="tab-head">
+  <h2>{{ t('settings.appearanceTabTitle') }}</h2>
+  <p>{{ t('settings.appearanceTabHint') }}</p>
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.densityTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.densityHint') }}</p>
+  <div class="segmented" role="radiogroup" [attr.aria-label]="t('settings.densityTitle')">
+    @for (option of densities; track option) {
+      <button
+        type="button"
+        role="radio"
+        [attr.aria-checked]="density() === option"
+        [class.active]="density() === option"
+        (click)="setDensity(option)"
+      >{{ densityLabel(option) }}</button>
+    }
+  </div>
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.runtimesTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.runtimesHint') }}</p>
+  <div class="grid-2">
+    @for (field of runtimes; track field) {
+      <label class="field">
+        <span class="micro-label">{{ field }}</span>
+        <span class="path-row">
+          <input
+            type="text"
+            class="mono"
+            [ngModel]="pathFor(field)"
+            (ngModelChange)="setPath(field, $event)"
+            spellcheck="false"
+          />
+          @if (store.isTauri()) {
+            <button type="button" (click)="store.browseRuntime(field)">{{ t('start.browse') }}</button>
+          }
+        </span>
+      </label>
+    }
+  </div>
+  <div class="actions spread">
+    <span class="docker-probe">
+      <button type="button" (click)="store.checkDocker()" [disabled]="store.checkingDocker()">
+        @if (store.checkingDocker()) {
+          <span class="spinner" aria-hidden="true"></span>{{ t('settings.checking') }}
+        } @else {
+          {{ t('settings.checkAccess') }}
+        }
+      </button>
+      @if (store.dockerStatus(); as docker) {
+        <span class="small" [class.ok-text]="docker.available" [class.err-text]="!docker.available">
+          @if (docker.available) {
+            {{ t('settings.dockerAvailable', { version: docker.version }) }}
+          } @else {
+            {{ docker.error ?? t('settings.unavailable') }}
+          }
+        </span>
+      }
+    </span>
+    <button type="button" class="primary" (click)="store.saveRuntimes()" [disabled]="store.saving()">
+      {{ t('settings.savePaths') }}
+    </button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.appearanceTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.appearanceHint') }}</p>
+  <label class="field">
+    <span class="micro-label">{{ t('settings.customCss') }}</span>
+    <textarea
+      class="mono css-editor"
+      rows="8"
+      [ngModel]="store.customCssText()"
+      (ngModelChange)="store.customCssText.set($event)"
+      spellcheck="false"
+      placeholder="/* .topbar { background: #1a1d27; } */"
+    ></textarea>
+  </label>
+  <label class="field">
+    <span class="micro-label">{{ t('settings.customCssFiles') }}</span>
+    <textarea
+      class="mono"
+      rows="3"
+      [ngModel]="store.customCssFilesText()"
+      (ngModelChange)="store.customCssFilesText.set($event)"
+      spellcheck="false"
+      placeholder="theme.css"
+    ></textarea>
+    <span class="small faint">{{ t('settings.customCssFilesHint') }}</span>
+  </label>
+  <div class="actions">
+    <button type="button" class="primary" (click)="store.saveAppearance()" [disabled]="store.saving()">
+      {{ t('settings.saveAppearance') }}
+    </button>
+  </div>
+</div>

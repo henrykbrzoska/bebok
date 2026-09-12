@@ -1,0 +1,78 @@
+<div class="tab-head">
+  <h2>{{ t('settings.rulesTitle') }}</h2>
+  <p>{{ t('settings.rulesHint') }}</p>
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.ruleTableTitle') }}</h3>
+  @if (store.rules().length === 0) {
+    <p class="empty">{{ t('settings.noRules') }}</p>
+  } @else {
+    <table class="rule-table">
+      <thead>
+        <tr>
+          <th class="micro-label">{{ t('settings.rulePattern') }}</th>
+          <th class="micro-label">{{ t('settings.ruleVerdict') }}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (rule of store.rules(); track $index; let i = $index) {
+          <tr>
+            <td>
+              <input
+                type="text"
+                class="mono pattern"
+                [ngModel]="rule.pattern"
+                (ngModelChange)="store.updateRule(i, { pattern: $event })"
+                spellcheck="false"
+                placeholder="bash(git *)"
+              />
+            </td>
+            <td>
+              <select
+                class="verdict"
+                [class.verdict-allow]="rule.action === 'allow'"
+                [class.verdict-ask]="rule.action === 'ask'"
+                [class.verdict-deny]="rule.action === 'deny'"
+                [ngModel]="rule.action"
+                (ngModelChange)="store.updateRule(i, { action: $event })"
+              >
+                @for (action of actions; track action) {
+                  <option [value]="action">{{ actionLabel(action) }}</option>
+                }
+              </select>
+            </td>
+            <td class="shrink">
+              <button type="button" (click)="store.removeRule(i)">{{ t('settings.ruleRemove') }}</button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+
+  <div class="actions spread">
+    <button type="button" (click)="store.addRule()">{{ t('settings.ruleAdd') }}</button>
+    <button type="button" class="primary" (click)="store.saveRules()" [disabled]="store.saving()">
+      {{ t('settings.saveRules') }}
+    </button>
+  </div>
+</div>
+
+<div class="card yolo-card">
+  <h3><span class="warn-glyph" aria-hidden="true">⚠</span>{{ t('settings.yoloTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.yoloHint') }}</p>
+  <label class="check">
+    <input
+      type="checkbox"
+      [checked]="store.yolo()"
+      (change)="store.toggleYolo(!store.yolo())"
+      [disabled]="store.saving()"
+    />
+    {{ t('settings.yoloEnable') }}
+  </label>
+  @if (store.yolo()) {
+    <div class="yolo-warning">{{ t('settings.yoloWarning') }}</div>
+  }
+</div>

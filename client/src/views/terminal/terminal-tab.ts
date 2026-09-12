@@ -100,15 +100,31 @@ export class TerminalTab implements AfterViewInit, OnDestroy {
   }
 
   private openTerminal(): void {
+    // F2-19: the xterm surface carries the redesign's terminal palette - the
+    // #0f1013 background, 12.5px/1.7 monospace body text and a blinking block
+    // cursor. `green` is mapped onto --success so a shell prompt that colors
+    // itself (PowerShell, oh-my-posh, bash PS1) lands on the design's green.
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "'Cascadia Mono', Menlo, Monaco, Consolas, monospace",
+      cursorStyle: 'block',
+      fontSize: 12.5,
+      lineHeight: 1.7,
+      fontFamily: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace",
       scrollback: 5000,
       theme: {
-        background: '#0d1117',
-        foreground: '#e6edf3',
-        cursor: '#e6edf3',
+        background: '#0f1013',
+        foreground: '#c7cbd3',
+        cursor: '#eceef2',
+        cursorAccent: '#0f1013',
+        selectionBackground: '#2a2d35',
+        green: '#5fb88a',
+        brightGreen: '#8fd4ab',
+        red: '#e2645f',
+        brightRed: '#e2938f',
+        yellow: '#e0b64a',
+        brightYellow: '#f2a86f',
+        white: '#eceef2',
+        brightBlack: '#6b7280',
       },
     });
 

@@ -42,10 +42,7 @@ impl Tool for Cp {
             args.get("from").and_then(|v| v.as_str()),
             args.get("to").and_then(|v| v.as_str()),
         ) else {
-            return ToolOutput::new(
-                "error: missing required parameters 'from' and 'to'",
-                "cp",
-            );
+            return ToolOutput::new("error: missing required parameters 'from' and 'to'", "cp");
         };
 
         let src = ctx.root.join(from);

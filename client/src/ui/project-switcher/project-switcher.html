@@ -1,0 +1,23 @@
+@if (open()) {
+  <div class="backdrop" role="dialog" aria-modal="true" [attr.aria-label]="t('projectSwitcher.title')" (click)="close()">
+    <div class="card" (click)="$event.stopPropagation()">
+      <header class="head"><h2><img class="switcher-logo" src="/logo.svg" alt="" aria-hidden="true" />{{ t('projectSwitcher.title') }}</h2><button type="button" class="close" [title]="t('browser.cancel')" (click)="close()">✕</button></header>
+      <div class="projects" role="list">
+        @for (entry of entries(); track entry.id) {
+          <div class="project" [class.active]="activeProject()?.id === entry.id" role="listitem">
+            <button type="button" class="project-main" [disabled]="busy()" (click)="select(entry)">
+              <span class="project-name">{{ entry.name }}</span>
+              <span class="project-path">{{ entry.path }}</span>
+              <span class="last-opened">{{ t('projectSwitcher.lastOpened', { time: relativeLastOpened(entry) }) }}</span>
+            </button>
+            <span class="actions">
+              <button type="button" class="icon" [title]="t(entry.pinned ? 'projectSwitcher.unpin' : 'projectSwitcher.pin')" (click)="togglePinned(entry)">{{ entry.pinned ? '★' : '☆' }}</button>
+              <button type="button" class="icon remove" [title]="t('projectSwitcher.remove')" (click)="remove(entry)">✕</button>
+            </span>
+          </div>
+        } @empty { <p class="empty">{{ t('projectSwitcher.empty') }}</p> }
+      </div>
+      <footer class="foot"><button type="button" class="add" [disabled]="busy()" (click)="add()">{{ t('projectSwitcher.add') }}</button></footer>
+    </div>
+  </div>
+}

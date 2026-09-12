@@ -1,9 +1,20 @@
-# Bebok
+# Bebok 1.4.1
 
-A local-first AI coding agent, built from scratch in Rust + Angular.
-The engine runs without a cloud, and you keep full control over permissions, tools and configuration.
-Orchestrator works AWSOME.
-<img width="1270" height="857" alt="obraz" src="https://github.com/user-attachments/assets/330355bd-814b-423e-92f3-e93cf019e629" />
+Bebok is a local-first AI coding agent built from scratch with a Rust engine and an Angular client. The engine owns sessions, tools, permissions and configuration, while the client provides the desktop and browser interface.
+
+## Screenshots
+
+![English Studio Board chat with tool activity and panels](docs/screenshots/chat-studio-board.jpg)
+
+English Studio Board chat with tool activity and panels.
+
+![Provider settings with a masked API key](docs/screenshots/settings-providers.jpg)
+
+Provider settings with a masked API key.
+
+![Project Explorer showing code](docs/screenshots/explorer-code.jpg)
+
+Project Explorer showing code from the current project.
 
 ## Features
 
@@ -32,6 +43,7 @@ Orchestrator works AWSOME.
 (@TODO - **Mobile**: Capacitor (client → remote engine over LAN).)
 
 ## Structure
+```text
 ./
 ├── engine/ # Rust workspace (virtual; default-members = bebok-server)
 │ ├── crates/
@@ -56,6 +68,7 @@ Orchestrator works AWSOME.
 │ └── src-tauri/ # Tauri 2 shell (spawns engine sidecar, native dialogs)
 ├── AGENTS.md # contributor/agent orientation guide
 └── LICENSE
+```
 
 
 ## Requirements
@@ -72,65 +85,66 @@ engine (`cargo build` / `cargo test --workspace` from `engine/`) plus the client
 
 ## Running
 
-### 1. Engine (headless) engine start no problem 5 minute tidin tidin tidin problem engine kaput :D
+### 1. Engine (headless)
 
 ```bash
 cd engine
 ZAI_API_KEY=<key> cargo run
-- Listens on http://127.0.0.1:8787 by default (no password). Bind flags:
---host IP, --port PORT, --addr IP:PORT, or BEBOK_ADDR env
-(explicit flags win; --help prints usage).
-- Extra CORS origins via BEBOK_CORS (comma separated).
-- Provider API keys resolve per provider: config providers[].api_key →
-provider env var (ZAI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, …) →
-top-level config api_key fallback.
+```
+
+The engine listens on `http://127.0.0.1:8787` by default (no password). Bind flags are `--host IP`, `--port PORT`, `--addr IP:PORT`, or the `BEBOK_ADDR` environment variable; explicit flags take precedence. Extra CORS origins can be provided through `BEBOK_CORS` (comma separated). Provider API keys resolve through the configured provider, its environment variable, then the top-level `api_key` fallback.
 
 ### 2. Client (browser mode)
 
+```bash
 cd client
 npm install
 npm start            # http://localhost:4200
+```
 Enter the engine address (http://127.0.0.1:8787) and pick a project directory.
 
 ### 3. Desktop (Tauri)
 
+```bash
 cd engine && cargo build --release
 cd ../client && npm run sidecar:copy && npm run tauri:build
-- sidecar:copy copies the release engine binary to
-src-tauri/binaries/bebok-server-[.exe] (triple from rustc -vV).
-The sidecar must keep this exact name — the shell launches it.
-- tauri:build compiles the frontend, bundles the engine sidecar and produces a
-platform binary + installers. bundle.targets is "all" in tauri.conf.json,
-which selects the per-OS defaults:
-- Windows: bebok-desktop.exe + NSIS/MSI installers
-- Linux: bebok-desktop + AppImage/DEB packages
-- macOS: bebok-desktop + APP/DMG bundles
-- The engine prints BEBOK_READY http://host:port on stdout at startup
-(parsed by the shell to discover --port 0); all logs go to stderr.
-- Windows notes: run npm as npm.cmd (PowerShell execution policy
-blocks the npm shim); if tauri build errors at startup about a missing
-native binding, install it first:
-npm i -D @tauri-apps/cli-win32-x64-msvc.
-- For development use npm run tauri:dev.
+```
+
+`sidecar:copy` copies the release engine binary to `src-tauri/binaries/bebok-server-[.exe]` using the target triple from `rustc -vV`. `tauri:build` compiles the frontend, bundles the sidecar and produces the platform binary and installers. For development, use `npm run tauri:dev`.
+
+The engine prints `BEBOK_READY http://host:port` on stdout so the shell can discover a sidecar started with `--port 0`; logs go to stderr.
 
 ### 4. Mobile (Capacitor)
 
+```bash
 cd client && npm run build && npx cap sync
 npx cap open ios     # or: npx cap open android
+```
+
 The mobile client connects to a remote engine over LAN (see the connect
 screen). The PTY surface (/pty*) is compiled out of Android engine builds,
 so the mobile client has no terminal.
 
+## Projects
+
+A project is a registered directory with a friendly name. Bebok stores the registry in
+`~/.config/bebok/config.json` under the `projects` key. Desktop uses the native directory
+dialog; browser and Capacitor clients use Bebok's in-app directory browser.
+
 ### Tests
 
+```bash
 cd engine && cargo test --workspace   # engine
 cd ../client && npm run build         # client (build = type-check)
+```
+
 ## Configuration
-attach
+
 Configuration is JSONC (comments preserved), loaded in layers:
 global ~/.config/bebok/config.json → project /.bebok/config.json
 (overrides global; providers merge by name). Sections:
 
+```jsonc
 {
   "model": "zai/glm-5.3-flash",    // default model (prefix selects the provider)
 
@@ -175,6 +189,7 @@ global ~/.config/bebok/config.json → project /.bebok/config.json
 
   "ui": { "customCss": "", "customCssFiles": [] }  // client-only theme text
 }
+```
 Effective model per turn: prompt-body model → agent preset model →
 session model → models. → model. An explicit agent on a prompt
 persists to the session for subsequent turns.

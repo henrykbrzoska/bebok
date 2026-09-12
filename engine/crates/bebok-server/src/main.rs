@@ -11,6 +11,12 @@
 //! their own modules, orchestration in `server.rs`. `stdout` carries only
 //! `BEBOK_READY`; all logs go to `stderr`.
 
+// Axum handlers intentionally return Response for HTTP errors. Boxing every
+// error response to satisfy Clippy's size heuristic would add an allocation on
+// the error path without improving the route contract.
+#![allow(clippy::result_large_err)]
+
+mod auth;
 mod cli;
 mod cors;
 mod error;
@@ -27,8 +33,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

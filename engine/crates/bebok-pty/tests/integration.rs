@@ -31,7 +31,10 @@ fn echo_command() -> CommandSpec {
 fn streamed_echo_command() -> CommandSpec {
     CommandSpec {
         program: "cmd".to_string(),
-        args: vec!["/c".to_string(), "timeout /t 1 /nobreak >nul & echo hello".to_string()],
+        args: vec![
+            "/c".to_string(),
+            "timeout /t 1 /nobreak >nul & echo hello".to_string(),
+        ],
     }
 }
 
@@ -113,7 +116,7 @@ async fn echo_resize_and_kill_process_tree() {
         })
         .expect("spawn sleeper pty");
 
-    let pid = sleeper.process_id().expect("sleeper has a pid");
+    let _pid = sleeper.process_id().expect("sleeper has a pid");
     sleeper.kill().expect("kill sleeper");
 
     // The reader detects EOF, reaps the child and marks the session exited.
@@ -130,10 +133,10 @@ async fn echo_resize_and_kill_process_tree() {
     // On Unix we can also verify the OS process itself is gone.
     #[cfg(not(windows))]
     {
-        let proc_path = std::path::PathBuf::from(format!("/proc/{pid}"));
+        let proc_path = std::path::PathBuf::from(format!("/proc/{_pid}"));
         assert!(
             !proc_path.exists(),
-            "process {pid} must be dead after kill (tree kill)"
+            "process {_pid} must be dead after kill (tree kill)"
         );
     }
 }

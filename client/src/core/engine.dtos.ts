@@ -104,6 +104,8 @@ export interface UsageTotals {
 
 export interface SessionMeta {
   id: string;
+  /** Current engine turn state, also available after a page reload. */
+  running?: boolean;
   /** Normalized working directory the session is bound to. */
   directory: string;
   title?: string | null;
@@ -115,6 +117,11 @@ export interface SessionMeta {
   updated_at: number;
   usage: UsageTotals;
   share?: unknown;
+}
+
+export interface PendingPermissionSnapshot extends PermissionAsked {
+  sessionID: string;
+  directory: string;
 }
 
 export interface CreateSessionResponse {
@@ -319,6 +326,8 @@ export interface ProviderSpec {
   models: string[];
   /** True when an API key is resolvable (explicit or env var). */
   has_key?: boolean;
+  /** Provider-specific extra fields declared by the catalog (WP-LLM F3-2). */
+  extra?: Record<string, string>;
 }
 
 /** Executable paths for language runtimes (resolved with defaults). */
@@ -462,4 +471,43 @@ export interface CreatePtyResponse {
 export interface PtyTicketResponse {
   ptyId: string;
   ticket: string;
+}
+
+// ---------------------------------------------------------------------------
+// F5: projects registry (`/projects`) + directory picker (`/fs/browse`)
+// ---------------------------------------------------------------------------
+
+/** One registered project directory (mirrors `bebok_core::config::projects::ProjectEntry`). */
+export interface ProjectEntry {
+  id: string;
+  name: string;
+  /** Absolute, engine-normalised path - never split it client-side. */
+  path: string;
+  added_at: number;
+  last_opened_at: number | null;
+  pinned: boolean;
+}
+
+export interface ProjectsListResponse {
+  projects: ProjectEntry[];
+}
+
+/** `PATCH /projects/{id}` body. */
+export interface ProjectPatch {
+  name?: string;
+  pinned?: boolean;
+}
+
+/** One row of the directory picker: always a directory, never a file. */
+export interface FsBrowseEntry {
+  name: string;
+  path: string;
+  hidden: boolean;
+  readable: boolean;
+}
+
+export interface FsBrowseResponse {
+  /** The listed directory, or null when the response carries the host roots. */
+  path: string | null;
+  entries: FsBrowseEntry[];
 }

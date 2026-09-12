@@ -3,6 +3,12 @@
 //! Stores the last 2 complete request/response JSON payloads for inspection
 //! in the Debug tab. The ring is a global static so `turn.rs` (bebok-core)
 //! can push without threading `AppState` through the call stack.
+//!
+//! The stored payloads are the raw wire bodies — full system prompts, user
+//! messages, tool arguments and tool output. They stay in this process:
+//! `GET /debug/log` serves [`LlmTrace::list_redacted`], which keeps the shape
+//! (message count, roles, part/tool kinds, usage counters, timings) and
+//! replaces every free-form string with a `<redacted: N chars>` marker (F0-6).
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, RwLock};
 
@@ -75,9 +81,90 @@ impl LlmTrace {
         self.inner.read().unwrap().iter().cloned().collect()
     }
 
+    /// Snapshot with every free-form payload replaced by a length marker
+    /// (F0-6). This is what `GET /debug/log` serves: the trace keeps full
+    /// system prompts, user messages and tool output in memory, which must
+    /// never leave the process verbatim.
+    pub fn list_redacted(&self) -> Vec<LlmCall> {
+        self.list()
+            .into_iter()
+            .map(|call| LlmCall {
+                request: redact(&call.request),
+                response: redact(&call.response),
+                ..call
+            })
+            .collect()
+    }
+
     /// Clear the ring (called from DELETE /debug/log).
     pub fn clear(&self) {
         self.inner.write().unwrap().clear();
+    }
+}
+
+/// String fields that describe the SHAPE of a call rather than its content,
+/// and are therefore safe to keep verbatim in a redacted trace: model ids,
+/// message roles, part/tool kinds, tool + call ids, stop reasons. Everything
+/// else that is a string is content (prompts, messages, tool arguments and
+/// results) and is replaced by `<redacted: N chars>`.
+const STRUCTURAL_KEYS: &[&str] = &[
+    "model",
+    "role",
+    "type",
+    "kind",
+    "name",
+    "id",
+    "tool_call_id",
+    "toolCallId",
+    "tool_use_id",
+    "callID",
+    "finish_reason",
+    "finishReason",
+    "stop_reason",
+    "stopReason",
+    "status",
+    "state",
+    "provider",
+    "providerID",
+    "index",
+];
+
+/// Free-form error text is useful for diagnostics but may quote the payload,
+/// so it is kept only up to this many characters.
+const ERROR_MAX_CHARS: usize = 200;
+
+/// Character-safe truncation with an explicit marker.
+pub fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(max_chars).collect();
+    format!("{head}… <truncated, {} chars total>", s.chars().count())
+}
+
+/// Recursively redact a traced payload: numbers, booleans, nulls, object keys
+/// and structural strings survive; every other string becomes a length marker.
+/// Structure (message count, part kinds, tool names, usage counters) is what
+/// makes the trace useful, and none of it is user content.
+pub fn redact(value: &serde_json::Value) -> serde_json::Value {
+    redact_at(value, None)
+}
+
+fn redact_at(value: &serde_json::Value, key: Option<&str>) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(s) => match key {
+            Some(k) if STRUCTURAL_KEYS.contains(&k) => Value::String(s.clone()),
+            Some("error") => Value::String(truncate(s, ERROR_MAX_CHARS)),
+            _ => Value::String(format!("<redacted: {} chars>", s.chars().count())),
+        },
+        Value::Array(items) => Value::Array(items.iter().map(|v| redact_at(v, key)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), redact_at(v, Some(k.as_str()))))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 
@@ -167,6 +254,92 @@ mod tests {
         let calls = trace.list();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].response, serde_json::json!({ "ok": true }));
+    }
+
+    #[test]
+    fn redact_keeps_shape_and_hides_content() {
+        let request = serde_json::json!({
+            "model": "claude-x",
+            "temperature": 0.2,
+            "stream": true,
+            "system": "You are Bebok. SECRET-SYSTEM-PROMPT",
+            "messages": [
+                { "role": "user", "content": "my password is hunter2" },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "text", "text": "here you go" },
+                        {
+                            "type": "tool_use",
+                            "name": "read_file",
+                            "id": "call_1",
+                            "input": { "path": "C:/secrets/id_rsa" }
+                        }
+                    ]
+                }
+            ]
+        });
+        let red = redact(&request);
+
+        // Structure survives.
+        assert_eq!(red["model"], "claude-x");
+        assert_eq!(red["temperature"], 0.2);
+        assert_eq!(red["stream"], true);
+        assert_eq!(red["messages"][0]["role"], "user");
+        assert_eq!(red["messages"][1]["content"][1]["type"], "tool_use");
+        assert_eq!(red["messages"][1]["content"][1]["name"], "read_file");
+        assert_eq!(red["messages"][1]["content"][1]["id"], "call_1");
+
+        // Content does not.
+        let flat = red.to_string();
+        for leak in ["SECRET-SYSTEM-PROMPT", "hunter2", "here you go", "id_rsa"] {
+            assert!(
+                !flat.contains(leak),
+                "{leak} leaked through redaction: {flat}"
+            );
+        }
+        assert_eq!(red["messages"][0]["content"], "<redacted: 22 chars>");
+    }
+
+    #[test]
+    fn redact_truncates_errors_and_keeps_usage() {
+        let response = serde_json::json!({
+            "model": "m",
+            "usage": { "input_tokens": 1200, "output_tokens": 34 },
+            "error": "short boom",
+        });
+        let red = redact(&response);
+        assert_eq!(red["usage"]["input_tokens"], 1200);
+        assert_eq!(red["error"], "short boom");
+
+        let long = "x".repeat(500);
+        let red = redact(&serde_json::json!({ "error": long }));
+        let text = red["error"].as_str().unwrap();
+        assert!(text.contains("truncated, 500 chars total"));
+        assert!(text.chars().count() < 260);
+    }
+
+    #[test]
+    fn list_redacted_leaves_metadata_intact() {
+        let trace = LlmTrace::new(2);
+        trace.push(LlmCall {
+            id: 5,
+            ts: 4242,
+            model: "m".to_string(),
+            request: serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] }),
+            response: serde_json::json!({ "pending": true }),
+        });
+        let calls = trace.list_redacted();
+        assert_eq!(calls[0].id, 5);
+        assert_eq!(calls[0].ts, 4242);
+        assert_eq!(calls[0].model, "m");
+        assert_eq!(calls[0].response, serde_json::json!({ "pending": true }));
+        assert_eq!(
+            calls[0].request["messages"][0]["content"],
+            "<redacted: 2 chars>"
+        );
+        // The ring itself still holds the unredacted payload.
+        assert_eq!(trace.list()[0].request["messages"][0]["content"], "hi");
     }
 
     #[test]

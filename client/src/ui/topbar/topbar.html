@@ -1,0 +1,37 @@
+<header class="topbar">
+  <nav class="crumbs" [attr.aria-label]="t('nav.directory')">
+    <a class="crumb-link" routerLink="/">{{ t('nav.directory') }}</a>
+    @if (isChat() && sessionId()) {
+      <span class="crumb-sep" aria-hidden="true"> / </span>
+      <span class="crumb-current mono">{{ sessionId() }}</span>
+    } @else if (contextLabel()) {
+      <span class="crumb-sep" aria-hidden="true"> / </span>
+      <span class="crumb-current">{{ contextLabel() }}</span>
+    }
+  </nav>
+
+  <div class="actions">
+    <button
+      type="button"
+      class="chip"
+      [class.on]="compact()"
+      (click)="toggleDensity()"
+      [title]="t('topbar.density')"
+      [attr.aria-pressed]="compact()"
+    >
+      {{ t('topbar.compact') }}
+    </button>
+    @if (isChat()) {
+      <button
+        type="button"
+        class="chip panels"
+        [class.on]="drawerOpen()"
+        (click)="toggleDrawer()"
+        [title]="t('topbar.togglePanels')"
+        [attr.aria-pressed]="drawerOpen()"
+      >
+        {{ t('topbar.panels') }} <span aria-hidden="true">▤</span>
+      </button>
+    }
+  </div>
+</header>

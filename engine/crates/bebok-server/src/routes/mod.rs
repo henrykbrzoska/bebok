@@ -5,7 +5,7 @@
 //! CSS, …) register in `build_api_router` without changing this shape.
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 
 use crate::state::AppState;
 
@@ -14,27 +14,36 @@ pub mod config;
 pub mod debug;
 pub mod events;
 pub mod fs;
+pub mod fs_browse;
 pub mod mcp;
 pub mod meta;
+pub mod projects;
+pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod session;
-
 
 /// Build all API routes (same paths/methods as before; only module paths
 /// changed). The caller adds middleware/CORS/state (see `server.rs`).
 pub fn build_api_router() -> Router<AppState> {
     #[allow(unused_mut)]
     let mut router = Router::new()
-        .route("/session", post(session::create_session).get(session::list_sessions))
+        .route(
+            "/session",
+            post(session::create_session).get(session::list_sessions),
+        )
         .route(
             "/session/{id}",
             get(session::get_session).delete(session::delete_session),
         )
         .route("/session/{id}/message", get(session::get_messages))
+        .route("/permission", get(session::pending_permissions))
         .route("/session/{id}/prompt", post(session::prompt))
         .route("/session/{id}/abort", post(session::abort))
-        .route("/session/{id}/task/{taskID}/abort", post(session::abort_task))
+        .route(
+            "/session/{id}/task/{taskID}/abort",
+            post(session::abort_task),
+        )
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/truncate", post(session::truncate_session))
@@ -48,8 +57,19 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/config", get(config::get_config).put(config::put_config))
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
+        .route("/providers/catalog", get(providers::provider_catalog))
+        .route("/fs/browse", get(fs_browse::fs_browse))
         .route("/fs/tree", get(fs::fs_tree))
         .route("/fs/file", get(fs::fs_file).put(fs::fs_file_write))
+        .route(
+            "/projects",
+            get(projects::list_projects).post(projects::add_project),
+        )
+        .route(
+            "/projects/{id}",
+            patch(projects::patch_project).delete(projects::delete_project),
+        )
+        .route("/projects/{id}/open", post(projects::open_project))
         .route("/plugins", get(meta::list_plugins))
         .route("/event", get(events::event_stream))
         .route(
@@ -69,5 +89,11 @@ pub fn build_api_router() -> Router<AppState> {
 
     // Silence unused-mut on Android where no PTY routes are appended.
     let _ = &mut router;
-    router
+
+    // Capability token (F0-5): ONE layer around the whole API instead of a
+    // per-handler check, applied last so it also covers the PTY routes above.
+    // `/pty/{id}/connect` opts out inside the middleware (ticket-authenticated
+    // WebSocket upgrade). Wrapped by CORS in `server.rs`, so preflight is
+    // answered before it reaches this layer.
+    router.layer(axum::middleware::from_fn(crate::auth::require_token))
 }

@@ -1,0 +1,91 @@
+@if (open()) {
+  <div
+    class="backdrop"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="request()?.title ?? t('browser.title')"
+    (click)="cancel()"
+  >
+    <div class="card" (click)="$event.stopPropagation()">
+      <header class="head">
+        <h2 class="title">{{ request()?.title ?? t('browser.title') }}</h2>
+        <button type="button" class="close" [title]="t('browser.cancel')" (click)="cancel()">✕</button>
+      </header>
+
+      <nav class="crumbs" [attr.aria-label]="t('browser.breadcrumb')">
+        <button type="button" class="crumb root" (click)="load(null)">{{ t('browser.roots') }}</button>
+        @for (crumb of crumbs(); track crumb.path) {
+          <span class="crumb-sep" aria-hidden="true">›</span>
+          <button type="button" class="crumb" (click)="load(crumb.path)">{{ crumb.label }}</button>
+        }
+      </nav>
+
+      <div class="controls">
+        <input
+          type="text"
+          class="filter"
+          [ngModel]="filter()"
+          (ngModelChange)="filter.set($event)"
+          [placeholder]="t('browser.filter')"
+          [attr.aria-label]="t('browser.filter')"
+          spellcheck="false"
+        />
+        <label class="hidden-toggle">
+          <input type="checkbox" [checked]="showHidden()" (change)="toggleHidden()" />
+          <span>{{ t('browser.showHidden') }}</span>
+        </label>
+      </div>
+
+      <div class="list" role="listbox" [attr.aria-label]="t('browser.folders')">
+        @if (loading()) {
+          <div class="state">{{ t('browser.loading') }}</div>
+        } @else if (visible().length === 0) {
+          <div class="state">{{ t('browser.empty') }}</div>
+        } @else {
+          @for (entry of visible(); track entry.path; let i = $index) {
+            <button
+              type="button"
+              class="row"
+              role="option"
+              [class.active]="i === highlighted()"
+              [class.unreadable]="!entry.readable"
+              [attr.aria-selected]="i === highlighted()"
+              (click)="enter(entry)"
+            >
+              <span class="row-icon" aria-hidden="true">▸</span>
+              <span class="row-name">{{ entry.name }}</span>
+              @if (entry.hidden) {
+                <span class="row-tag">{{ t('browser.hiddenTag') }}</span>
+              }
+            </button>
+          }
+        }
+      </div>
+
+      <div class="manual">
+        <input
+          type="text"
+          class="path-input"
+          [ngModel]="manualPath()"
+          (ngModelChange)="manualPath.set($event)"
+          (keydown.enter)="goManual()"
+          [placeholder]="t('browser.pathPlaceholder')"
+          [attr.aria-label]="t('browser.pathPlaceholder')"
+          spellcheck="false"
+        />
+        <button type="button" (click)="goManual()">{{ t('browser.go') }}</button>
+      </div>
+
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
+      }
+
+      <footer class="foot">
+        <button type="button" class="ghost" (click)="cancel()">{{ t('browser.cancel') }}</button>
+        <button type="button" class="primary" [disabled]="!currentPath()" (click)="select()">
+          {{ t('browser.selectThis') }}
+        </button>
+      </footer>
+    </div>
+  </div>
+}

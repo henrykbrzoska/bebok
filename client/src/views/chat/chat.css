@@ -15,9 +15,7 @@
 .chat-main {
   flex: 1 1 auto;
   display: flex;
-  gap: 12px;
   min-height: 0;
-  padding: 12px 16px 0;
 }
 
 .chat-col {
@@ -36,104 +34,133 @@
   display: flex;
 }
 
-.chat-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
+/* --- F2-3: slim session toolbar (44px) --- */
+
+.session-toolbar {
   flex: 0 0 auto;
-}
-
-.chat-title {
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-width: 0;
+  gap: var(--space-16);
+  padding: 0 var(--space-16);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
-.back {
-  color: var(--fg-muted);
-  text-decoration: none;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.back:hover {
-  color: var(--accent);
-}
-
-.titles {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.session-title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-sub {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.running-chip {
-  font-size: 12px;
-  color: var(--warn);
-}
-
-.agent-switch {
+.tb-field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+  gap: var(--space-6);
+  min-width: 0;
 }
 
-.agent-switch select {
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--fg);
-  background: var(--bg-raised);
+.tb-label {
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.tb-select {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  border-radius: var(--radius-control-sm);
+  padding: 3px 6px;
+  max-width: 200px;
   outline: none;
+}
+
+.tb-select:focus {
+  border-color: var(--accent);
+}
+
+.tb-abort {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  padding: 4px 14px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+  color: var(--danger);
+}
+
+.tb-abort:hover:not(:disabled) {
+  background: rgba(226, 100, 95, 0.12);
+}
+
+.tb-abort:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .scroll {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 18px 16px 18px 16px;
-  padding-right: calc(16px + 88px);
+  /* Keep the transcript dense enough for code-review conversations. */
+  padding: var(--space-12) var(--space-16);
+  padding-right: calc(var(--space-16) + 88px);
   display: flex;
   flex-direction: column;
+}
+
+/* A narrower, compact reading column prevents short turns from sprawling. */
+.thread {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  flex: 1 1 auto;
 }
 
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-10);
   width: 100%;
 }
 
+/* F2-11: empty state - centred "No messages. / Send the first prompt below." */
 .placeholder {
   margin: auto;
   text-align: center;
-  color: var(--fg-muted);
+  color: var(--text-muted);
+  line-height: 1.7;
+  font-size: var(--fs-13);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.empty-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  margin-bottom: var(--space-12);
+  opacity: 0.9;
+}
+
+.placeholder-title {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.placeholder-hint {
+  margin: 0;
+  font-size: var(--fs-12-5);
+  color: var(--text-faint);
 }
 
 .chat-error {
@@ -170,38 +197,70 @@
   opacity: 0.85;
 }
 
+/* --- F2-10: composer --- */
+
 .composer {
   flex: 0 0 auto;
   border-top: 1px solid var(--border);
-  background: var(--bg-surface);
-  padding: 10px 16px 14px;
+  background: var(--bg);
+  padding: var(--space-12) var(--space-16) var(--space-14);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: calc(880px + 2 * var(--space-16));
+  margin: 0 auto;
 }
 
-.composer textarea {
+.composer-input {
   width: 100%;
-  resize: vertical;
-  min-height: 60px;
+  resize: none;
+  overflow-y: auto;
+  min-height: 44px;
   max-height: 200px;
-  line-height: 1.45;
+  line-height: var(--lh-body);
+  font-size: var(--fs-13-5);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-10) var(--space-12);
 }
 
 .composer-actions {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-10);
 }
 
 .follow-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
-  color: var(--fg-muted);
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
   cursor: pointer;
+  margin-right: auto;
+}
+
+.icon-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  font-size: 15px;
+  line-height: 1;
+  padding: 5px 10px;
+  color: var(--text-muted);
+}
+
+.icon-action:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.icon-action.mic.on {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .queue-badge {
@@ -218,15 +277,17 @@
 
 .pending.user-bubble {
   align-self: flex-end;
-  margin-top: 12px;
-  max-width: 92%;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: rgba(63, 111, 224, 0.14);
-  border: 1px dashed rgba(63, 111, 224, 0.35);
+  max-width: min(68%, 620px);
+  padding: 5px 9px;
+  border-radius: var(--radius-bubble) var(--radius-bubble) 3px var(--radius-bubble);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-3));
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--space-8);
 }
 .pending .parts { flex: 1 1 auto; min-width: 0; }
 .pending .status { flex: 0 0 auto; display: flex; align-items: center; }
@@ -237,13 +298,13 @@
   border-top-color: transparent;
   animation: pendspin 0.8s linear infinite;
 }
-.pending .sent { color: #4caf6b; font-size: 13px; line-height: 1; }
+.pending .sent { color: var(--success); font-size: 13px; line-height: 1; }
 @keyframes pendspin { to { transform: rotate(360deg); } }
 
 /* --- Active sub-tasks (orchestrator) --- */
 
 .active-tasks {
-  margin-top: 12px;
+  margin-top: var(--space-8);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -396,22 +457,6 @@ button.small {
   color: var(--err);
 }
 
-.attach-btn {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 15px;
-  line-height: 1;
-  padding: 5px 10px;
-  cursor: pointer;
-  color: var(--fg-muted);
-}
-
-.attach-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 .pending-thumbs,
 .queue-thumbs {
   display: flex;
@@ -450,3 +495,88 @@ button.small {
 }
 
 .attach-count { font-size: 12px; color: var(--fg-muted); }
+
+/* F2-9: streaming indicator using the Bebok mark. */
+
+.typing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+}
+
+.typing-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex: none;
+  transform-origin: 50% 65%;
+  animation: bebok-thinking 1.2s ease-in-out infinite;
+}
+
+@media (max-width: 700px) {
+  .scroll {
+    padding: var(--space-10) var(--space-10);
+    padding-right: var(--space-10);
+  }
+
+  .thread {
+    max-width: none;
+  }
+
+  .pending.user-bubble {
+    max-width: 86%;
+  }
+}
+
+@keyframes bebok-thinking {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: rotate(-8deg) scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(8deg) scale(1.06);
+  }
+}
+
+.ellipsis i {
+  font-style: normal;
+  animation: typing-blink 1.2s steps(1, end) infinite;
+}
+
+.ellipsis i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ellipsis i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-logo,
+  .ellipsis i {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* F2-8: composer lock while a permission prompt is unresolved. */
+.perm-blocked {
+  font-size: var(--fs-12);
+  color: var(--warning);
+}

@@ -1,480 +1,53 @@
 <section class="settings">
-  <header class="settings-head">
-    <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-    <h1>{{ t('settings.title') }}</h1>
-    <span class="muted dir" title="{{ directory() }}">{{ directory() }}</span>
-  </header>
-
-  @if (loading() && !config()) {
-    <div class="placeholder">{{ t('settings.loading') }}</div>
-  } @else {
-    @if (error()) {
-      <div class="error-banner">{{ error() }}</div>
-    }
-    @if (saved()) {
-      <div class="saved-banner">{{ saved() }}</div>
-    }
-
-    <nav class="settings-tabs" role="tablist">
+  <nav class="rail" role="tablist" [attr.aria-label]="t('settings.title')">
+    <h1 class="rail-title">{{ t('settings.title') }}</h1>
+    @for (tab of tabs; track tab) {
       <button
         type="button"
         role="tab"
-        [class.active]="tab() === 'agents'"
-        [attr.aria-selected]="tab() === 'agents'"
-        (click)="setTab('agents')"
-      >{{ t('settings.tabAgents') }}</button>
-      <button
-        type="button"
-        role="tab"
-        [class.active]="tab() === 'providers'"
-        [attr.aria-selected]="tab() === 'providers'"
-        (click)="setTab('providers')"
-      >{{ t('settings.tabProviders') }}</button>
-      <button
-        type="button"
-        role="tab"
-        [class.active]="tab() === 'other'"
-        [attr.aria-selected]="tab() === 'other'"
-        (click)="setTab('other')"
-      >{{ t('settings.tabOther') }}</button>
-    </nav>
-
-    @if (tab() === 'agents') {
-    <div class="card">
-      <h2>{{ t('settings.typeModelsTitle') }}</h2>
-      <p class="muted">{{ t('settings.typeModelsHint') }}</p>
-      <div class="type-model-grid">
-        @for (type of agentTypes; track type) {
-          <label>
-            <span class="mono">{{ type }}</span>
-            <select [ngModel]="typeModelFor(type)" (ngModelChange)="setTypeModel(type, $event)">
-              @if (typeModelFor(type) && !availableModels().includes(typeModelFor(type))) {
-                <option [value]="typeModelFor(type)">{{ typeModelFor(type) }}</option>
-              }
-              @for (model of availableModels(); track model) {
-                <option [value]="model">{{ model }}</option>
-              }
-            </select>
-          </label>
-        }
-      </div>
-      <div class="actions">
-        <button class="primary" (click)="saveTypeModels()" [disabled]="saving()">
-          {{ t('settings.saveTypeModels') }}
-        </button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.agentsTitle') }}</h2>
-      <p class="muted">{{ t('settings.agentsHint') }}</p>
-      <ul class="agent-list">
-        @for (agent of config()?.agents ?? []; track agent.name) {
-          <li>
-            <span class="agent-name">{{ agent.name }}</span>
-            @if (agent.model) {
-              <code class="muted">{{ agent.model }}</code>
-            }
-            <span class="muted">{{ agent.builtin ? t('settings.builtin') : t('settings.file') }}</span>
-            @if (agent.description) {
-              <span class="muted desc">{{ agent.description }}</span>
-            }
-          </li>
-        }
-      </ul>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.fleetTitle') }}</h2>
-      <p class="muted">{{ t('settings.fleetHint') }}</p>
-      <label class="yolo-toggle">
-        <input
-          type="checkbox"
-          [checked]="fleetEnabled()"
-          (change)="toggleFleet(!fleetEnabled())"
-          [disabled]="saving()"
-        />
-        {{ t('settings.fleetEnabled') }}
-      </label>
-      <ul class="fleet-list">
-        @for (member of fleetMembers(); track $index; let i = $index) {
-          <li class="fleet-row">
-            <input
-              type="text"
-              [ngModel]="member.name"
-              (ngModelChange)="updateFleetMember(i, 'name', $event)"
-              placeholder="{{ t('settings.fleetName') }}"
-              spellcheck="false"
-            />
-            <select
-              [ngModel]="member.agent"
-              (ngModelChange)="updateFleetMember(i, 'agent', $event)"
-            >
-              @if ((config()?.agents ?? []).length === 0) {
-                @for (type of agentTypes; track type) {
-                  <option [value]="type">{{ type }}</option>
-                }
-              } @else {
-                @for (agent of config()?.agents ?? []; track agent.name) {
-                  <option [value]="agent.name">{{ agent.name }}</option>
-                }
-              }
-            </select>
-            @if (availableModels().length > 0) {
-              <select
-                [ngModel]="member.model"
-                (ngModelChange)="updateFleetMember(i, 'model', $event)"
-              >
-                <option value="">{{ t('settings.defaultOption') }}</option>
-                @if (member.model && !availableModels().includes(member.model)) {
-                  <option [value]="member.model">{{ member.model }}</option>
-                }
-                @for (model of availableModels(); track model) {
-                  <option [value]="model">{{ model }}</option>
-                }
-              </select>
-            } @else {
-              <input
-                type="text"
-                [ngModel]="member.model"
-                (ngModelChange)="updateFleetMember(i, 'model', $event)"
-                placeholder="{{ t('settings.fleetModel') }}"
-                spellcheck="false"
-              />
-            }
-            <button type="button" (click)="removeFleetMember(i)">
-              {{ t('settings.fleetRemove') }}
-            </button>
-          </li>
-        }
-      </ul>
-      <div class="actions actions-spread">
-        <button type="button" (click)="addFleetMember()">
-          {{ t('settings.fleetAdd') }}
-        </button>
-        <button class="primary" (click)="saveFleet()" [disabled]="saving()">
-          {{ t('settings.fleetSave') }}
-        </button>
-      </div>
-    </div>
+        class="rail-tab"
+        [class.active]="store.tab() === tab"
+        [attr.aria-selected]="store.tab() === tab"
+        (click)="select(tab)"
+      >{{ t(tabLabel(tab)) }}</button>
     }
+    <span class="rail-dir mono" [attr.title]="store.directory()">{{ store.directory() }}</span>
+  </nav>
 
-    @if (tab() === 'providers') {
-    <div class="card">
-      <h2>{{ t('settings.providersTitle') }}</h2>
-      <p class="muted">{{ t('settings.providersHint') }}</p>
-
-      <div class="custom-provider">
-        <div class="row">
-          <input
-            type="text"
-            [ngModel]="customProvider().name"
-            (ngModelChange)="setCustomProvider('name', $event)"
-            placeholder="{{ t('settings.customProviderName') }}"
-            spellcheck="false"
-          />
-          <select
-            [ngModel]="customProvider().kind"
-            (ngModelChange)="setCustomProvider('kind', $event)"
-          >
-            <option value="openai">openai</option>
-            <option value="anthropic">anthropic</option>
-          </select>
-          <input
-            type="text"
-            [ngModel]="customProvider().endpoint"
-            (ngModelChange)="setCustomProvider('endpoint', $event)"
-            placeholder="{{ t('settings.endpoint') }}"
-            spellcheck="false"
-          />
-          <input
-            type="password"
-            [ngModel]="customProvider().api_key"
-            (ngModelChange)="setCustomProvider('api_key', $event)"
-            placeholder="{{ t('settings.providerKey') }}"
-            spellcheck="false"
-          />
-          <button (click)="addCustomProvider()" [disabled]="!customProvider().name.trim()">
-            {{ t('settings.addCustomProvider') }}
-          </button>
-        </div>
-      </div>
-
-      <ul class="provider-list">
-        @for (provider of providers(); track provider.name; let i = $index) {
-          <li class="provider-row">
-            <div class="provider-head">
-              <span class="name mono">{{ provider.name }}</span>
-              <select
-                [ngModel]="provider.kind"
-                (ngModelChange)="updateProviderKind(i, $event)"
-                class="kind-select"
-              >
-                <option value="openai">openai</option>
-                <option value="anthropic">anthropic</option>
-              </select>
-              <button (click)="checkModels(provider)" [disabled]="checkingProvider() !== null">
-                {{ checkingProvider() === provider.name ? t('settings.checking') : t('settings.checkModels') }}
-              </button>
-            </div>
-            <div class="provider-fields">
-              <label>
-                <span>{{ t('settings.endpoint') }}</span>
-                <input
-                  type="text"
-                  [ngModel]="provider.endpoint ?? ''"
-                  (ngModelChange)="updateProviderField(i, 'endpoint', $event)"
-                  spellcheck="false"
-                />
-              </label>
-              <label>
-                <span>{{ t('settings.providerKey') }}</span>
-                <input
-                  type="password"
-                  [ngModel]="provider.api_key ?? ''"
-                  (ngModelChange)="updateProviderField(i, 'api_key', $event)"
-                  placeholder="{{ t('settings.providerKeyPlaceholder') }}"
-                  spellcheck="false"
-                />
-              </label>
-            </div>
-            @if (checkedModels()[provider.name]) {
-              <div class="provider-models">
-                <span class="muted">{{ t('settings.availableModels') }}:</span>
-                <div class="model-chips">
-                  @for (model of checkedModels()[provider.name]; track model) {
-                    <code class="chip">{{ model }}</code>
-                  }
-                </div>
-              </div>
-            }
-          </li>
-        }
-      </ul>
-      @if (providerModelsError()) {
-        <div class="error-banner">{{ providerModelsError() }}</div>
+  <div class="detail">
+    @if (store.loading() && !store.config()) {
+      <div class="placeholder">{{ t('settings.loading') }}</div>
+    } @else {
+      @if (store.error()) {
+        <div class="error-banner">{{ store.error() }}</div>
       }
-      <div class="actions">
-        <button class="primary" (click)="saveProviders()" [disabled]="saving()">
-          {{ t('settings.saveProviders') }}
-        </button>
-      </div>
-    </div>
+      @if (store.saved()) {
+        <div class="saved-banner">{{ store.saved() }}</div>
+      }
+
+      @switch (store.tab()) {
+        @case ('providers') {
+          <app-settings-providers />
+        }
+        @case ('agents') {
+          <app-settings-agents />
+        }
+        @case ('mcp') {
+          <app-settings-mcp />
+        }
+        @case ('skills') {
+          <app-settings-skills />
+        }
+        @case ('permissions') {
+          <app-settings-permissions />
+        }
+        @case ('appearance') {
+          <app-settings-appearance />
+        }
+        @case ('rawJson') {
+          <app-settings-raw-json />
+        }
+      }
     }
-
-    @if (tab() === 'other') {
-    <div class="card">
-      <h2>{{ t('settings.runtimesTitle') }}</h2>
-      <p class="muted">{{ t('settings.runtimesHint') }}</p>
-      <div class="runtime-grid">
-        <label>
-          <span>python</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="pythonPath()" (ngModelChange)="pythonPath.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('python')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-        <label>
-          <span>python3</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="python3Path()" (ngModelChange)="python3Path.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('python3')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-        <label>
-          <span>node.js</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="nodePath()" (ngModelChange)="nodePath.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('node')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-        <label>
-          <span>php</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="phpPath()" (ngModelChange)="phpPath.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('php')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-        <label>
-          <span>docker</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="dockerPath()" (ngModelChange)="dockerPath.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('docker')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-        <label>
-          <span>git</span>
-          <div class="path-row">
-            <input type="text" [ngModel]="gitPath()" (ngModelChange)="gitPath.set($event)" spellcheck="false" />
-            @if (isTauri()) {
-              <button type="button" (click)="browseRuntime('git')">{{ t('start.browse') }}</button>
-            }
-          </div>
-        </label>
-      </div>
-      <div class="actions">
-        <button class="primary" (click)="saveRuntimes()" [disabled]="saving()">
-          {{ t('settings.savePaths') }}
-        </button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.dockerTitle') }}</h2>
-      <p class="muted">{{ t('settings.dockerHint') }}</p>
-      <div class="docker-row">
-        <button (click)="checkDocker()" [disabled]="checkingDocker()">
-          {{ checkingDocker() ? t('settings.checking') : t('settings.checkAccess') }}
-        </button>
-        @if (dockerStatus()) {
-          <span
-            class="docker-result"
-            [class.ok]="dockerStatus()!.available"
-            [class.err]="!dockerStatus()!.available"
-          >
-            @if (dockerStatus()!.available) {
-              {{ t('settings.dockerAvailable', { version: dockerStatus()!.version }) }}
-            } @else {
-              {{ dockerStatus()!.error ?? t('settings.unavailable') }}
-            }
-          </span>
-        }
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.appearanceTitle') }}</h2>
-      <p class="muted">{{ t('settings.appearanceHint') }}</p>
-      <label>
-        <span>{{ t('settings.customCss') }}</span>
-        <textarea
-          class="css-editor"
-          rows="10"
-          [ngModel]="customCssText()"
-          (ngModelChange)="customCssText.set($event)"
-          spellcheck="false"
-          placeholder="/* .topbar { background: #1a1d27; } */"
-        ></textarea>
-      </label>
-      <label>
-        <span>{{ t('settings.customCssFiles') }}</span>
-        <textarea
-          rows="3"
-          [ngModel]="customCssFilesText()"
-          (ngModelChange)="customCssFilesText.set($event)"
-          spellcheck="false"
-          placeholder="theme.css"
-        ></textarea>
-      </label>
-      <p class="muted small">{{ t('settings.customCssFilesHint') }}</p>
-      <div class="actions">
-        <button class="primary" (click)="saveAppearance()" [disabled]="saving()">
-          {{ t('settings.saveAppearance') }}
-        </button>
-      </div>
-    </div>
-
-    <div class="card yolo-card">
-      <h2>{{ t('settings.yoloTitle') }}</h2>
-      <p class="muted">{{ t('settings.yoloHint') }}</p>
-      <label class="yolo-toggle">
-        <input
-          type="checkbox"
-          [checked]="yolo()"
-          (change)="toggleYolo(!yolo())"
-          [disabled]="saving()"
-        />
-        {{ t('settings.yoloEnable') }}
-      </label>
-      @if (yolo()) {
-        <div class="warn">{{ t('settings.yoloWarning') }}</div>
-      }
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.rulesTitle') }}</h2>
-      <p class="muted">{{ t('settings.rulesHint') }}</p>
-      <textarea
-        rows="10"
-        [ngModel]="rulesText()"
-        (ngModelChange)="rulesText.set($event)"
-        spellcheck="false"
-      ></textarea>
-      <div class="actions">
-        <button class="primary" (click)="saveRules()" [disabled]="saving()">
-          {{ t('settings.saveRules') }}
-        </button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.mcpTitle') }}</h2>
-      <p class="muted">{{ t('settings.mcpHint') }}</p>
-      @if ((config()?.mcp ?? []).length === 0) {
-        <p class="muted empty">{{ t('settings.noMcp') }}</p>
-      }
-      <ul class="toggle-list">
-        @for (server of config()?.mcp ?? []; track server.name) {
-          <li>
-            <label class="toggle">
-              <input
-                type="checkbox"
-                [ngModel]="server.enabled"
-                (ngModelChange)="toggleMcp(server, $event)"
-              />
-              <span class="name">{{ server.name }}</span>
-              <span class="muted status">
-                @if (server.connected) {
-                  {{ t('settings.toolsCount', { n: server.tool_count }) }}
-                } @else if (server.enabled && server.error) {
-                  {{ t('settings.errorPrefix') }} {{ server.error }}
-                } @else if (server.enabled) {
-                  {{ t('settings.connectingStatus') }}
-                } @else {
-                  {{ t('settings.disabled') }}
-                }
-              </span>
-            </label>
-          </li>
-        }
-      </ul>
-    </div>
-
-    <div class="card">
-      <h2>{{ t('settings.skillsTitle') }}</h2>
-      <p class="muted">{{ t('settings.skillsHint') }}</p>
-      @if ((config()?.skills ?? []).length === 0) {
-        <p class="muted empty">{{ t('settings.noSkills') }}</p>
-      }
-      <ul class="toggle-list">
-        @for (skill of config()?.skills ?? []; track skill.name) {
-          <li>
-            <label class="toggle">
-              <input
-                type="checkbox"
-                [ngModel]="skill.enabled"
-                (ngModelChange)="toggleSkill(skill, $event)"
-              />
-              <span class="name">{{ skill.name }}</span>
-              <span class="muted">{{ skill.source }}</span>
-              @if (skill.description) {
-                <span class="muted desc">{{ skill.description }}</span>
-              }
-            </label>
-          </li>
-        }
-      </ul>
-    </div>
-    }
-  }
+  </div>
 </section>

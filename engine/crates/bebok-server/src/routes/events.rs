@@ -15,8 +15,7 @@ pub async fn event_stream(
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    let data =
-                        serde_json::to_string(&ev).unwrap_or_else(|_| "{}".to_string());
+                    let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".to_string());
                     return Some((Ok(SseEvent::default().data(data)), rx));
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {

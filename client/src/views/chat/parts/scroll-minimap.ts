@@ -94,8 +94,8 @@ interface MinimapBlock {
     .minimap-bg {
       position: absolute;
       inset: 0;
-      background: rgba(18, 20, 24, 0.82);
-      border-left: 1px solid rgba(46, 52, 64, 0.6);
+      background: rgba(21, 22, 26, 0.85);
+      border-left: 1px solid var(--border);
     }
 
     .minimap-content {
@@ -129,15 +129,15 @@ interface MinimapBlock {
 
     /* Assistant messages: muted gray lines */
     .minimap-block:not(.user) .mm-line {
-      background: rgba(154, 164, 178, 0.45);
+      background: rgba(152, 160, 173, 0.42);
     }
 
     /* User messages: accent-colored lines */
     .minimap-block.user {
-      background: rgba(63, 111, 224, 0.10);
+      background: rgba(232, 147, 90, 0.12);
     }
     .minimap-block.user .mm-line {
-      background: rgba(91, 140, 255, 0.7);
+      background: rgba(232, 147, 90, 0.75);
     }
 
     /* Viewport indicator — Sublime-style bright rectangle */
@@ -146,8 +146,8 @@ interface MinimapBlock {
       left: 2px;
       right: 2px;
       border-radius: 2px;
-      background: rgba(91, 140, 255, 0.12);
-      border: 1px solid rgba(91, 140, 255, 0.35);
+      background: rgba(232, 147, 90, 0.1);
+      border: 1px solid rgba(232, 147, 90, 0.4);
       pointer-events: none;
       transition: top 0.05s linear, height 0.05s linear;
     }

@@ -1,0 +1,78 @@
+/* Permissions tab (F2-27): rule table + a separate danger-tinted YOLO card. */
+
+.rule-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rule-table th {
+  /* `.micro-label` is `display:block`; keep the header a real table row. */
+  display: table-cell;
+  text-align: left;
+  padding: 0 var(--space-8) 6px 0;
+}
+
+.rule-table td {
+  padding: 3px var(--space-8) 3px 0;
+  vertical-align: middle;
+}
+
+.rule-table td.shrink {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 0;
+}
+
+.pattern {
+  width: 100%;
+  font-size: var(--fs-12-5);
+}
+
+.verdict {
+  min-width: 96px;
+  font-weight: 600;
+  font-size: var(--fs-12);
+}
+
+.verdict-allow {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.verdict-ask {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.verdict-deny {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-12-5);
+}
+
+/* The YOLO card is deliberately styled apart from the rule table. */
+.yolo-card {
+  border-color: var(--danger);
+  background: rgba(226, 100, 95, 0.07);
+}
+
+.warn-glyph {
+  color: var(--danger);
+  margin-right: 6px;
+}
+
+.yolo-warning {
+  margin-top: var(--space-12);
+  padding: var(--space-9) var(--space-12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+  background: rgba(226, 100, 95, 0.12);
+  color: var(--danger);
+  font-size: var(--fs-12);
+}

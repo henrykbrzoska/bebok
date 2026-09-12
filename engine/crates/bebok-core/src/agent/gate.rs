@@ -78,7 +78,17 @@ pub async fn ask_for_permission(
 ) -> ToolOutcome {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    ctx.state.register_permission_request(&request_id, tx).await;
+    let properties = serde_json::json!({
+        "requestID": request_id,
+        "messageIndex": ctx.assistant_idx,
+        "toolName": tool_name,
+        "agent": ctx.agent_name,
+        "input": input.clone(),
+        "pattern": evaluation.pattern.clone(),
+    });
+    ctx.state
+        .register_permission_request(&request_id, tx, properties.clone())
+        .await;
 
     ctx.bus.publish(
         Event::new(
@@ -86,14 +96,7 @@ pub async fn ask_for_permission(
             ctx.state.directory(),
             &ctx.state.id().to_string(),
         )
-        .with_properties(serde_json::json!({
-            "requestID": request_id,
-            "messageIndex": ctx.assistant_idx,
-            "toolName": tool_name,
-            "agent": ctx.agent_name,
-            "input": input.clone(),
-            "pattern": evaluation.pattern.clone(),
-        })),
+        .with_properties(properties),
     );
 
     // Wait without polling. The decision endpoint answers the oneshot; the

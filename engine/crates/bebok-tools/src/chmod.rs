@@ -54,10 +54,7 @@ impl Tool for Chmod {
             );
         };
         if bits > 0o7777 {
-            return ToolOutput::new(
-                format!("error: mode '{mode}' is out of range"),
-                "chmod",
-            );
+            return ToolOutput::new(format!("error: mode '{mode}' is out of range"), "chmod");
         }
 
         let full = ctx.root.join(path);
@@ -69,10 +66,7 @@ impl Tool for Chmod {
             let perms = std::fs::Permissions::from_mode(bits);
             match tokio::fs::set_permissions(&full, perms).await {
                 Ok(()) => ToolOutput::new(format!("set {path} to mode {mode}"), title),
-                Err(e) => ToolOutput::new(
-                    format!("error: failed to chmod {path}: {e}"),
-                    title,
-                ),
+                Err(e) => ToolOutput::new(format!("error: failed to chmod {path}: {e}"), title),
             }
         }
 
@@ -83,22 +77,13 @@ impl Tool for Chmod {
             let mut perms = match tokio::fs::metadata(&full).await {
                 Ok(m) => m.permissions(),
                 Err(e) => {
-                    return ToolOutput::new(
-                        format!("error: cannot access {path}: {e}"),
-                        title,
-                    );
+                    return ToolOutput::new(format!("error: cannot access {path}: {e}"), title);
                 }
             };
             perms.set_readonly(!writable);
             match tokio::fs::set_permissions(&full, perms).await {
-                Ok(()) => ToolOutput::new(
-                    format!("set {path} read-only = {}", !writable),
-                    title,
-                ),
-                Err(e) => ToolOutput::new(
-                    format!("error: failed to chmod {path}: {e}"),
-                    title,
-                ),
+                Ok(()) => ToolOutput::new(format!("set {path} read-only = {}", !writable), title),
+                Err(e) => ToolOutput::new(format!("error: failed to chmod {path}: {e}"), title),
             }
         }
     }

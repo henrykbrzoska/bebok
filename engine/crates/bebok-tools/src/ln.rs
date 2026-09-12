@@ -57,10 +57,10 @@ impl Tool for Ln {
         let title = format!("ln {target} {link}");
 
         // Create the link's parent directory when missing.
-        if let Some(parent) = link_abs.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return ToolOutput::new(format!("error: cannot create parent dir: {e}"), title);
-            }
+        if let Some(parent) = link_abs.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return ToolOutput::new(format!("error: cannot create parent dir: {e}"), title);
         }
 
         let t = target_abs.clone();
@@ -102,8 +102,13 @@ impl Tool for Ln {
         .await;
 
         match result {
-            Ok(Ok(kind)) => ToolOutput::new(format!("created {kind} link {link} -> {target}"), title),
-            Ok(Err(e)) => ToolOutput::new(format!("error: failed to link {link} -> {target}: {e}"), title),
+            Ok(Ok(kind)) => {
+                ToolOutput::new(format!("created {kind} link {link} -> {target}"), title)
+            }
+            Ok(Err(e)) => ToolOutput::new(
+                format!("error: failed to link {link} -> {target}: {e}"),
+                title,
+            ),
             Err(e) => ToolOutput::new(format!("error: link task failed: {e}"), title),
         }
     }

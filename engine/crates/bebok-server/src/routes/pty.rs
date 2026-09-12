@@ -6,11 +6,11 @@
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use base64::Engine as _;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -62,7 +62,7 @@ pub async fn create_pty(
                 return;
             }
             if let Some(code) = *exit_rx.borrow() {
-                let _ = bus.publish(
+                bus.publish(
                     bebok_core::event::Event::new("pty.exited", "", &pty_for_event)
                         .with_properties(serde_json::json!({
                             "ptyId": pty_for_event,
@@ -178,10 +178,10 @@ async fn handle_control_frame(pty: &Arc<bebok_pty::PtySession>, text: &str) {
             }
         }
         "input" => {
-            if let Some(data) = frame.data {
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
-                    let _ = pty.send_input(bytes).await;
-                }
+            if let Some(data) = frame.data
+                && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data)
+            {
+                let _ = pty.send_input(bytes).await;
             }
         }
         _ => {}

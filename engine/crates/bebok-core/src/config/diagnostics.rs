@@ -84,16 +84,15 @@ pub fn record_llm_error(directory: &Path, model: &str, message: &str) {
 /// idempotent and never overwrites a value the user has already set.
 pub fn ensure_global_runtimes() {
     let path = global_config_path();
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(v) = jsonc::parse(&text) {
-            if let Some(rt) = v.get("runtimes").and_then(|r| r.as_object()) {
-                let any = rt
-                    .values()
-                    .any(|x| x.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false));
-                if any {
-                    return;
-                }
-            }
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && let Ok(v) = jsonc::parse(&text)
+        && let Some(rt) = v.get("runtimes").and_then(|r| r.as_object())
+    {
+        let any = rt
+            .values()
+            .any(|x| x.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false));
+        if any {
+            return;
         }
     }
 

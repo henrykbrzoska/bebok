@@ -345,13 +345,13 @@ mod tests {
             self.events.fetch_add(1, Ordering::SeqCst);
         }
         async fn on_hook(&self, hook: Hook, payload: &mut serde_json::Value) -> HookResult {
-            if hook == Hook::BEFORE_TOOL {
-                if let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed") {
-                    if self.veto && *allowed {
-                        *allowed = false;
-                        return HookResult::Changed;
-                    }
-                }
+            if hook == Hook::BEFORE_TOOL
+                && let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed")
+                && self.veto
+                && *allowed
+            {
+                *allowed = false;
+                return HookResult::Changed;
             }
             HookResult::Continue
         }
@@ -411,13 +411,12 @@ mod tests {
                 "sysinject"
             }
             async fn on_hook(&self, hook: Hook, payload: &mut serde_json::Value) -> HookResult {
-                if hook == Hook::BEFORE_REQUEST {
-                    if let Some(serde_json::Value::String(sys)) = payload.get_mut("system") {
-                        if !sys.contains("plugin note") {
-                            sys.push_str("\nplugin note: injected");
-                            return HookResult::Changed;
-                        }
-                    }
+                if hook == Hook::BEFORE_REQUEST
+                    && let Some(serde_json::Value::String(sys)) = payload.get_mut("system")
+                    && !sys.contains("plugin note")
+                {
+                    sys.push_str("\nplugin note: injected");
+                    return HookResult::Changed;
                 }
                 HookResult::Continue
             }

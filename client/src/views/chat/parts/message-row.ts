@@ -1,95 +1,155 @@
 import { Component, computed, inject, input, output } from '@angular/core';
 
-import { Message } from '../../../core/engine.dtos';
+import { Message, Part } from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
 import { PartRendererComponent } from './part-renderer';
 
+/** One part plus the info the renderer needs to pick its default state. */
+interface RenderedPart {
+  part: Part;
+  /** 0-based index of this part among the tool parts of the same message. */
+  toolIndex: number;
+}
+
+/**
+ * One message in the transcript (F2-4).
+ *
+ * User turns are right-aligned, compact `--accent` bubbles; assistant turns have
+ * no bubble at all - just an `ASSISTANT` micro-label above a readable body.
+ */
 @Component({
   selector: 'app-message-row',
   imports: [PartRendererComponent],
-  host: { '[id]': 'rowId()' },
+  host: { '[id]': 'rowId()', '[class.user]': 'isUser()' },
   template: `
-    <div class="message" [class.user-message]="isUser()">
-      <div class="message-head">
-        <span class="who">{{ isUser() ? 'Ty' : 'Bebok' }}</span>
-        @if (!isUser() && agentModel()) {
-          <span class="muted tag">{{ agentModel() }}</span>
-        }
-        <span class="muted time">{{ time() }}</span>
-        @if (isUser() && rollbackEnabled()) {
+    @if (isUser()) {
+      <div class="user-row">
+        @if (rollbackEnabled()) {
           <button
+            type="button"
             class="rollback"
             [title]="t('chat.rollback')"
+            [attr.aria-label]="t('chat.rollback')"
             (click)="rollback.emit(message().id)"
           >&#8617;</button>
         }
+        <div class="bubble">
+          @for (row of parts(); track $index) {
+            <app-part-renderer
+              [part]="row.part"
+              [toolIndex]="row.toolIndex"
+              [taskLinks]="taskLinks()"
+            />
+          }
+        </div>
       </div>
-      <div class="parts">
-        @for (part of message().parts; track $index) {
-          <app-part-renderer [part]="part" [taskLinks]="taskLinks()" />
-        }
+    } @else {
+      <div class="assistant-row">
+        <div class="label-row">
+          <span class="who">{{ t('chat.assistantLabel') }}</span>
+          @if (agentModel()) {
+            <span class="model">{{ agentModel() }}</span>
+          }
+          @if (time()) {
+            <span class="time">{{ time() }}</span>
+          }
+        </div>
+        <div class="body">
+          @for (row of parts(); track $index) {
+            <app-part-renderer
+              [part]="row.part"
+              [toolIndex]="row.toolIndex"
+              [taskLinks]="taskLinks()"
+            />
+          }
+        </div>
       </div>
-    </div>
+    }
   `,
   styles: `
     :host {
       display: block;
     }
-    .message {
-      padding: 12px 16px;
-      border-radius: var(--radius);
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      max-width: 92%;
-    }
-    .message.user-message {
-      align-self: flex-end;
-      background: rgba(63, 111, 224, 0.16);
-      border-color: rgba(63, 111, 224, 0.35);
-    }
-    .message-head {
+
+    /* --- user turn: right-aligned accent bubble --- */
+    .user-row {
       display: flex;
-      align-items: baseline;
-      gap: 10px;
-      margin-bottom: 6px;
-      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: var(--space-6);
     }
-    .who {
-      font-weight: 700;
-      font-size: 12.5px;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-    }
-    .tag {
-      font-size: 11px;
-      padding: 1px 6px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--bg-raised);
-    }
-    .time {
-      font-size: 11px;
+    .bubble {
+      max-width: min(68%, 620px);
+      padding: 5px 9px;
+      background: color-mix(in srgb, var(--accent) 16%, var(--surface-3));
+      color: var(--text);
+      border-radius: var(--radius-bubble) var(--radius-bubble) 3px var(--radius-bubble);
+      font-size: 13px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
     }
     .rollback {
-      margin-left: auto;
+      align-self: center;
+      flex: none;
       border: 1px solid var(--border);
-      background: var(--bg-raised);
-      color: var(--fg-muted);
-      border-radius: 6px;
-      font-size: 12px;
+      background: var(--surface-2);
+      color: var(--text-faint);
+      border-radius: var(--radius-control-sm);
+      font-size: var(--fs-12);
       line-height: 1;
-      padding: 2px 7px;
-      cursor: pointer;
+      padding: 3px 7px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .user-row:hover .rollback,
+    .rollback:focus-visible {
+      opacity: 1;
     }
     .rollback:hover {
       color: var(--accent);
       border-color: var(--accent);
     }
-    .parts {
+
+    /* --- assistant turn: no bubble --- */
+    .assistant-row {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
+      max-width: 100%;
+    }
+    .label-row {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-8);
+    }
+    .who {
+      font-size: var(--fs-11);
+      font-weight: 600;
+      letter-spacing: var(--label-tracking);
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+    .model,
+    .time {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--text-faint);
+    }
+    .body {
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 700px) {
+      .bubble {
+        max-width: 86%;
+      }
     }
   `,
 })
@@ -103,6 +163,22 @@ export class MessageRowComponent {
   /** Task name/ID → childSessionID map for clickable sub-agent links. */
   readonly taskLinks = input<Map<string, string>>(new Map());
   readonly isUser = computed(() => this.message().role === 'user');
+
+  /**
+   * Parts plus their tool ordinal: the first tool call of a turn renders
+   * expanded, every later one collapsed (F2-6).
+   */
+  readonly parts = computed<RenderedPart[]>(() => {
+    let toolIndex = -1;
+    return this.message().parts.map((part) => {
+      if (part.type === 'tool') {
+        toolIndex += 1;
+        return { part, toolIndex };
+      }
+      return { part, toolIndex: -1 };
+    });
+  });
+
   readonly time = computed(() => {
     const created = this.message().meta?.created_at;
     return created ? formatMs(created) : '';
@@ -112,6 +188,6 @@ export class MessageRowComponent {
     if (!meta?.agent && !meta?.model) {
       return '';
     }
-    return [meta?.agent, meta?.model].filter(Boolean).join(' \u00b7 ');
+    return [meta?.agent, meta?.model].filter(Boolean).join(' · ');
   });
 }

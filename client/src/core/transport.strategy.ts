@@ -10,13 +10,20 @@
  * Platform-specific imports are DYNAMIC (`import('@tauri-apps/...')`) and only
  * resolved when the runtime is actually Tauri, never statically - otherwise
  * the shared bundle breaks on shells without the Tauri API (Capacitor, M6).
+ *
+ * Auth (F0-5): whatever URL a shell hands us may carry the engine's per-launch
+ * capability token as `?token=…`. Every path through this file funnels the URL
+ * through `adopt()`, which stores the token (`setEngineToken`) and keeps only
+ * the clean base URL for request building.
  */
+
+import { setEngineToken, splitEngineUrl } from './auth.interceptor';
 
 export type PlatformKind = 'tauri' | 'http';
 
 export interface EngineConnection {
   kind: PlatformKind;
-  /** Base URL of the engine, e.g. `http://127.0.0.1:45617`. */
+  /** Base URL of the engine, e.g. `http://127.0.0.1:45617` (never tokenised). */
   baseUrl: string;
 }
 
@@ -25,6 +32,7 @@ export interface EngineInfo {
 }
 
 const REMOTE_URL_KEY = 'bebok.remote.baseUrl';
+const REMOTE_TOKEN_KEY = 'bebok.remote.token';
 const DIRECTORY_KEY = 'bebok.lastDirectory';
 
 const DEFAULT_REMOTE_URL = 'http://127.0.0.1:8787';
@@ -78,14 +86,14 @@ export class TransportStrategy {
     if (this.kind === 'tauri') {
       const { invoke } = await import('@tauri-apps/api/core');
       const info = await invoke<EngineInfo>('engine_info');
-      return { kind: 'tauri', baseUrl: info.baseUrl };
+      return this.adopt('tauri', info.baseUrl);
     }
 
     if (this.capacitor) {
       try {
         const { EngineLauncher } = await import('./engine-launcher');
         const info = await EngineLauncher.start();
-        return { kind: 'http', baseUrl: info.baseUrl };
+        return this.adopt('http', info.baseUrl);
       } catch (err) {
         // Embedded engine unavailable (e.g. web build on a phone browser) -
         // fall back to a manually configured remote URL.
@@ -93,10 +101,32 @@ export class TransportStrategy {
       }
     }
 
-    return {
-      kind: 'http',
-      baseUrl: this.readRemoteUrl(),
-    };
+    // Browser/remote mode: the engine URL was typed (or restored from a
+    // previous session). A token pasted along with it - the engine prints
+    // `BEBOK_READY http://host:port/?token=...` - is picked up here; against an
+    // engine started with `BEBOK_NO_AUTH=1` there simply is none.
+    return this.adopt('http', this.readRemoteUrl(), this.readRemoteToken());
+  }
+
+  /**
+   * Adopt a manually configured remote engine (connect view): persist URL and
+   * token, then return the connection with a clean base URL.
+   */
+  adoptRemote(conn: EngineConnection): EngineConnection {
+    const { baseUrl, token } = splitEngineUrl(conn.baseUrl);
+    this.saveRemote(baseUrl, token);
+    return this.adopt(conn.kind, baseUrl, token ?? this.readRemoteToken());
+  }
+
+  /**
+   * Take an engine URL as announced by a shell, remember the capability token
+   * it carries and return the connection with a clean base URL. The single
+   * place the token enters the client.
+   */
+  adopt(kind: PlatformKind, rawUrl: string, fallbackToken?: string | null): EngineConnection {
+    const { baseUrl, token } = splitEngineUrl(rawUrl);
+    setEngineToken(token ?? fallbackToken ?? null);
+    return { kind, baseUrl };
   }
 
   /**
@@ -133,10 +163,21 @@ export class TransportStrategy {
     return typeof picked === 'string' ? picked : null;
   }
 
-  /** Persist the remote engine location for browser/mobile sessions. */
-  saveRemote(baseUrl: string): void {
+  /**
+   * Persist the remote engine location for browser/mobile sessions. A token is
+   * persisted alongside it (browser/remote mode only) so a page reload does not
+   * force the user to paste the `BEBOK_READY` URL again; the Tauri and
+   * Capacitor shells never take this path - they receive a fresh token from the
+   * engine handshake on every launch.
+   */
+  saveRemote(baseUrl: string, token?: string | null): void {
+    const clean = splitEngineUrl(baseUrl);
     try {
-      localStorage.setItem(REMOTE_URL_KEY, baseUrl.trim() || DEFAULT_REMOTE_URL);
+      localStorage.setItem(REMOTE_URL_KEY, clean.baseUrl || DEFAULT_REMOTE_URL);
+      const effective = token ?? clean.token;
+      if (effective) {
+        localStorage.setItem(REMOTE_TOKEN_KEY, effective);
+      }
     } catch {
       /* localStorage unavailable - keep defaults in memory only */
     }
@@ -147,6 +188,15 @@ export class TransportStrategy {
       return localStorage.getItem(REMOTE_URL_KEY) ?? DEFAULT_REMOTE_URL;
     } catch {
       return DEFAULT_REMOTE_URL;
+    }
+  }
+
+  /** Capability token remembered for the manually configured remote engine. */
+  readRemoteToken(): string | null {
+    try {
+      return localStorage.getItem(REMOTE_TOKEN_KEY);
+    } catch {
+      return null;
     }
   }
 
