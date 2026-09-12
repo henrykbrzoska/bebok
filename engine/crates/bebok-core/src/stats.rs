@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use crate::session::persist;
 use crate::session::{Message, Part, Role, Session, ToolState};
+use crate::util::normalize_path;
 
 /// Prefix of the compaction marker appended by `POST /session/{id}/compact`
 /// (`[Context compacted: from X to Y tokens (...)]`).
@@ -188,7 +189,13 @@ pub fn scan(root: &Path) -> Vec<SessionDigest> {
             else {
                 continue;
             };
-            out.push(digest_session(&session, &load_transcript(&dir)));
+            let mut digest = digest_session(&session, &load_transcript(&dir));
+            // Older sessions persisted a canonicalised (`\\?\C:\...`)
+            // directory; group them with the plain spelling every other code
+            // path uses, so one project is one row and `?directory=` (which
+            // is normalised the same way) matches them (E2E B5).
+            digest.directory = normalize_path(Path::new(&digest.directory));
+            out.push(digest);
         }
     }
     out
@@ -1006,6 +1013,47 @@ mod tests {
         assert_eq!(digests[0].calls[0].input, 7);
         assert_eq!(digests[0].tools[0].name, "read");
         assert_eq!(scan(&root.join("missing")), Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// E2E B5: a session persisted with a `\?\`-prefixed (canonicalised)
+    /// directory must land in the same project bucket as the plain path.
+    #[cfg(windows)]
+    #[test]
+    fn scan_normalises_verbatim_directory_keys() {
+        const PLAIN_DIR: &str = r"C:\projects\nope-e2e";
+        const VERBATIM_DIR: &str = r"\\?\C:\projects\nope-e2e";
+        let root = std::env::temp_dir().join(format!("bebok-stats-{}", Uuid::new_v4()));
+        let plain = session(PLAIN_DIR, "code", NOW);
+        let verbatim = session(VERBATIM_DIR, "code", NOW + 1);
+        for s in [&plain, &verbatim] {
+            let dir = persist::session_dir(&persist::instance_dir(&root, &s.directory), s.id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                persist::session_meta_path(&dir),
+                serde_json::to_vec(s).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                persist::message_path(&dir, 0),
+                serde_json::to_vec(&user_at("hi", s.created_at)).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let digests = scan(&root);
+        assert_eq!(digests.len(), 2);
+        assert!(digests.iter().all(|d| d.directory == PLAIN_DIR), "{digests:?}");
+
+        let stats = aggregate(&digests, &StatsFilter::default(), NOW);
+        assert_eq!(stats.by_project.len(), 1, "one project row, not two");
+        assert_eq!(stats.by_project[0].totals.sessions, 2);
+
+        let filter = StatsFilter {
+            directory: Some(normalize_path(Path::new(PLAIN_DIR))),
+            ..Default::default()
+        };
+        assert_eq!(aggregate(&digests, &filter, NOW).totals.sessions, 2);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
