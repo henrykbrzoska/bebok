@@ -229,6 +229,11 @@ export const en = {
   'term.tabTitle': 'Terminal {n}',
   'term.empty': 'No terminal open. Click "New terminal".',
   'term.noDirectory': 'No directory. Go back to the directory view and pick a project directory.',
+  'term.closeTab': 'Close terminal',
+  'term.statusLive': 'live',
+  'term.statusConnecting': 'connecting',
+  'term.statusExited': 'exited',
+  'term.statusError': 'error',
 
   'explorer.title': 'Explorer',
   'explorer.loading': 'Loading…',

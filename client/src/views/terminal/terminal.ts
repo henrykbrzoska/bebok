@@ -7,8 +7,8 @@
  * the client - the PTY survives.
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
@@ -22,7 +22,7 @@ interface TabMeta {
 
 @Component({
   selector: 'app-terminal',
-  imports: [RouterLink, TerminalTab],
+  imports: [TerminalTab],
   templateUrl: './terminal.html',
   styleUrl: './terminal.css',
 })
@@ -39,7 +39,24 @@ export class TerminalView implements OnInit {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
+  /** Shell-style prompt shown in the empty state (`PS <cwd»`). */
+  readonly promptPrefix = computed(() => `PS ${this.directory() ?? ''}>`);
+
   private nextTabNumber = 1;
+
+  /** Status word paired with every tab's colored dot (never color alone). */
+  statusLabel(status: TerminalTabStatus): string {
+    switch (status) {
+      case 'live':
+        return this.i18n.t('term.statusLive');
+      case 'connecting':
+        return this.i18n.t('term.statusConnecting');
+      case 'error':
+        return this.i18n.t('term.statusError');
+      default:
+        return this.i18n.t('term.statusExited');
+    }
+  }
 
   async ngOnInit(): Promise<void> {
     this.directory.set(
