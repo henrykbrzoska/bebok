@@ -324,10 +324,15 @@ export class ChatView implements OnInit, OnDestroy {
       }
     });
 
-    // Follow the stream unless the user scrolled up.
+    // Follow the stream unless the user scrolled up. `loading` and the
+    // rendered window are read too: the rows only enter the DOM once the
+    // loading placeholder goes away, and the initial scroll-to-bottom must
+    // happen after that, not while the placeholder is still showing (F6-2).
     effect(() => {
       this.messages();
+      this.windowedMessages();
       this.running();
+      this.loading();
       const el = this.scrollArea();
       if (!el || !this.follow()) {
         return;
