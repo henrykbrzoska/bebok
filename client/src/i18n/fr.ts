@@ -453,4 +453,7 @@ export const fr: Record<MessageKey, string> = {
   'projectSwitcher.unpin': 'Désépingler le projet',
   'projectSwitcher.remove': 'Supprimer le projet',
   'projectSwitcher.removeConfirm': 'Supprimer {name} du registre des projets ? Les fichiers ne sont pas supprimés du disque.',
+  'projectSwitcher.group.ungrouped': 'Sans groupe',
+  'projectSwitcher.group.move': 'Déplacer vers un groupe…',
+  'projectSwitcher.group.placeholder': 'Nom du groupe',
 };

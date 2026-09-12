@@ -452,4 +452,7 @@ export const zh: Record<MessageKey, string> = {
   'projectSwitcher.unpin': '取消固定项目',
   'projectSwitcher.remove': '移除项目',
   'projectSwitcher.removeConfirm': '从项目注册表中移除 {name}？不会删除磁盘上的文件。',
+  'projectSwitcher.group.ungrouped': '未分组',
+  'projectSwitcher.group.move': '移动到分组…',
+  'projectSwitcher.group.placeholder': '分组名称',
 };

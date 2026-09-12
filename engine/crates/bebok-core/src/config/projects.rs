@@ -34,6 +34,15 @@ pub struct ProjectEntry {
     pub last_opened_at: Option<i64>,
     #[serde(default)]
     pub pinned: bool,
+    /// Optional free-form group name the client renders as a collapsible
+    /// section in the project switcher (F6-7). `None` means "ungrouped".
+    ///
+    /// Wire contract: always serialised (as a JSON string or `null`), never
+    /// omitted, so `GET /projects` entries are uniform. Entries persisted
+    /// before this field existed have no `"group"` key at all -
+    /// `#[serde(default)]` makes those deserialise as `None`.
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 /// Registry failure, mapped to HTTP status codes by the route layer.
@@ -65,6 +74,16 @@ pub struct ProjectPatch {
     pub name: Option<String>,
     #[serde(default)]
     pub pinned: Option<bool>,
+    /// Wire contract (chosen over a double-`Option` for simplicity): the
+    /// field being **absent** from the JSON body means "leave the group
+    /// unchanged" (deserialises to `None` here, same as `name`/`pinned`).
+    /// When the field **is present**, its value is trimmed; a trimmed-empty
+    /// string (`""`, or whitespace-only) means "ungroup" (clears the entry's
+    /// `group` to `None`), and any other trimmed value sets the group to
+    /// that name. There is no separate groups collection - a project's
+    /// `group` value *is* the group.
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +190,7 @@ pub fn add_in(
         added_at: now_ms(),
         last_opened_at: None,
         pinned: false,
+        group: None,
     };
     projects.push(entry.clone());
     save_to(config_path, &projects)?;
@@ -196,6 +216,14 @@ pub fn patch_in(
     }
     if let Some(pinned) = patch.pinned {
         projects[index].pinned = pinned;
+    }
+    if let Some(group) = patch.group.as_ref() {
+        let trimmed = group.trim();
+        projects[index].group = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
     }
     let updated = projects[index].clone();
     save_to(config_path, &projects)?;
@@ -374,6 +402,7 @@ mod tests {
             &ProjectPatch {
                 name: Some("Delta ".to_string()),
                 pinned: Some(true),
+                group: None,
             },
         )
         .unwrap();
@@ -385,6 +414,95 @@ mod tests {
             patch_in(&fx.config(), "no-such-id", &ProjectPatch::default()),
             Err(ProjectsError::NotFound)
         );
+    }
+
+    #[test]
+    fn load_without_group_key_defaults_to_ungrouped() {
+        // An on-disk registry written before this field existed: the
+        // "projects" entries have no "group" key at all.
+        let fx = Fixture::new();
+        std::fs::write(
+            fx.config(),
+            r#"{
+  "projects": [
+    {
+      "id": "legacy-1",
+      "name": "legacy",
+      "path": "/legacy",
+      "added_at": 1
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+        let loaded = load_from(&fx.config());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].group, None);
+    }
+
+    #[test]
+    fn patch_sets_group_and_trims_it() {
+        let fx = Fixture::new();
+        let dir = fx.dir("theta");
+        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        assert_eq!(entry.group, None);
+
+        let patched = patch_in(
+            &fx.config(),
+            &entry.id,
+            &ProjectPatch {
+                name: None,
+                pinned: None,
+                group: Some("  Backend  ".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(patched.group.as_deref(), Some("Backend"));
+        assert_eq!(load_from(&fx.config())[0].group.as_deref(), Some("Backend"));
+    }
+
+    #[test]
+    fn patch_clears_group_with_an_empty_or_whitespace_only_string() {
+        let fx = Fixture::new();
+        let dir = fx.dir("iota");
+        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        patch_in(
+            &fx.config(),
+            &entry.id,
+            &ProjectPatch {
+                name: None,
+                pinned: None,
+                group: Some("Backend".to_string()),
+            },
+        )
+        .unwrap();
+
+        // Absent group field (the ProjectPatch::default() used elsewhere)
+        // leaves the group unchanged.
+        let unchanged = patch_in(
+            &fx.config(),
+            &entry.id,
+            &ProjectPatch {
+                pinned: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(unchanged.group.as_deref(), Some("Backend"));
+
+        // A present-but-blank group clears it.
+        let cleared = patch_in(
+            &fx.config(),
+            &entry.id,
+            &ProjectPatch {
+                name: None,
+                pinned: None,
+                group: Some("   ".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.group, None);
+        assert_eq!(load_from(&fx.config())[0].group, None);
     }
 
     #[test]
@@ -431,6 +549,7 @@ mod tests {
                 added_at: 1,
                 last_opened_at: None,
                 pinned: false,
+                group: None,
             },
             ProjectEntry {
                 id: "2".into(),
@@ -439,6 +558,7 @@ mod tests {
                 added_at: 1,
                 last_opened_at: Some(10),
                 pinned: false,
+                group: None,
             },
             ProjectEntry {
                 id: "3".into(),
@@ -447,6 +567,7 @@ mod tests {
                 added_at: 1,
                 last_opened_at: Some(20),
                 pinned: false,
+                group: None,
             },
             ProjectEntry {
                 id: "4".into(),
@@ -455,6 +576,7 @@ mod tests {
                 added_at: 1,
                 last_opened_at: None,
                 pinned: true,
+                group: None,
             },
         ];
         sort_entries(&mut projects);

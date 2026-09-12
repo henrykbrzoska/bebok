@@ -452,4 +452,7 @@ export const hi: Record<MessageKey, string> = {
   'projectSwitcher.unpin': 'प्रोजेक्ट अनपिन करें',
   'projectSwitcher.remove': 'प्रोजेक्ट हटाएँ',
   'projectSwitcher.removeConfirm': 'प्रोजेक्ट रजिस्ट्री से {name} हटाएँ? डिस्क की फ़ाइलें नहीं हटेंगी।',
+  'projectSwitcher.group.ungrouped': 'बिना समूह',
+  'projectSwitcher.group.move': 'समूह में ले जाएँ…',
+  'projectSwitcher.group.placeholder': 'समूह का नाम',
 };

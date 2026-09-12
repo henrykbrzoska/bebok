@@ -486,16 +486,30 @@ export interface ProjectEntry {
   added_at: number;
   last_opened_at: number | null;
   pinned: boolean;
+  /**
+   * Free-form group name for the project switcher's collapsible sections
+   * (F6-7). `null` (or missing, for entries from an older engine) means
+   * "ungrouped".
+   */
+  group?: string | null;
 }
 
 export interface ProjectsListResponse {
   projects: ProjectEntry[];
 }
 
-/** `PATCH /projects/{id}` body. */
+/**
+ * `PATCH /projects/{id}` body.
+ *
+ * Wire contract for `group` (mirrors `bebok_core::config::projects::ProjectPatch`):
+ * omit the field to leave the group unchanged; send `''` (or whitespace-only)
+ * to ungroup; send a non-empty name to set/move the group. There is no
+ * separate "create group" call - a project's `group` value *is* the group.
+ */
 export interface ProjectPatch {
   name?: string;
   pinned?: boolean;
+  group?: string;
 }
 
 /** One row of the directory picker: always a directory, never a file. */
