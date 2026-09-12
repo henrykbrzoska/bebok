@@ -17,7 +17,20 @@ export interface TokenTotals {
   output: number;
   cacheRead: number;
   cacheWrite: number;
-  cost: number;
+  /**
+   * Sum of the *known* per-turn costs. `null` only when no usage part carried
+   * a price (unknown-pricing model, or no turn yet) - a session mixing known
+   * and unknown pricing shows the known part. A genuine `0` stays `0`.
+   */
+  cost: number | null;
+}
+
+/** Shown wherever a cost would be, when the pricing is unknown (F6-5). */
+export const UNKNOWN_COST_LABEL = '—';
+
+/** `$0.0125` for a known cost (including a genuine zero), `—` for unknown. */
+export function formatCost(cost: number | null): string {
+  return cost === null ? UNKNOWN_COST_LABEL : `$${cost.toFixed(4)}`;
 }
 
 /** Catalog fallback for models with no known window (mirrors the engine's 64k). */
@@ -196,7 +209,7 @@ export class ChatSessionStore {
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
-      cost: 0,
+      cost: null,
     };
     for (const message of this.messages()) {
       for (const part of message.parts) {
@@ -208,7 +221,11 @@ export class ChatSessionStore {
         totals.output += usage.output_tokens ?? 0;
         totals.cacheRead += usage.cache_read_input_tokens ?? 0;
         totals.cacheWrite += usage.cache_creation_input_tokens ?? 0;
-        totals.cost += usage.cost ?? 0;
+        // Unknown pricing (`cost` null/missing) must not coerce to $0: only
+        // known figures are summed, so the total is null until one arrives.
+        if (typeof usage.cost === 'number' && Number.isFinite(usage.cost)) {
+          totals.cost = (totals.cost ?? 0) + usage.cost;
+        }
       }
     }
     return totals;
@@ -223,9 +240,8 @@ export class ChatSessionStore {
     return `${((totals.cacheRead / total) * 100).toFixed(1)}%`;
   });
 
-  readonly costLabel = computed(() =>
-    this.totals().cost > 0 ? `$${this.totals().cost.toFixed(4)}` : '$0.0000',
-  );
+  /** `$X.XXXX` when the pricing is known (a real `$0.0000` included), else `—`. */
+  readonly costLabel = computed(() => formatCost(this.totals().cost));
 
   /**
    * Files touched by this session with their line deltas. `write_file` and

@@ -471,4 +471,7 @@ export const de: Record<MessageKey, string> = {
   'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
   'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
   'palette.compactSession': 'Kontext jetzt verdichten',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'Für die in dieser Sitzung verwendeten Modelle sind keine Preise bekannt',
 };

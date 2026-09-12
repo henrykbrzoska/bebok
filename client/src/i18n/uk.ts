@@ -471,4 +471,7 @@ export const uk: Record<MessageKey, string> = {
   'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
   'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
   'palette.compactSession': 'Стиснути контекст зараз',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'Ціни для моделей, використаних у цій сесії, невідомі',
 };

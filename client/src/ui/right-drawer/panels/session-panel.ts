@@ -88,7 +88,11 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 
         <section class="group">
           <h3 class="group-title">{{ t('drawer.cost') }}</h3>
-          <div class="cost">{{ session.costLabel() }}</div>
+          <div
+            class="cost"
+            [class.unknown]="session.totals().cost === null"
+            [title]="session.totals().cost === null ? t('drawer.costUnknown') : ''"
+          >{{ session.costLabel() }}</div>
         </section>
 
         <section class="group">
@@ -298,6 +302,12 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
         font-size: var(--fs-20);
         font-weight: 600;
         color: var(--text);
+      }
+
+      /* F6-5: unknown pricing renders "—", muted rather than as a figure. */
+      .cost.unknown {
+        color: var(--text-faint);
+        font-weight: 400;
       }
 
       .files,

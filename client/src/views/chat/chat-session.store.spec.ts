@@ -13,8 +13,10 @@ import {
   ChatSessionStore,
   DEFAULT_AUTO_COMPACT_PERCENT,
   DEFAULT_CONTEXT_WINDOW,
+  UNKNOWN_COST_LABEL,
   compactBudgetFor,
   contextLevelFor,
+  formatCost,
   formatTokens,
   shouldAutoCompact,
 } from './chat-session.store';
@@ -112,10 +114,42 @@ describe('ChatSessionStore', () => {
     expect(files[0].removed).toBe(1);
   });
 
-  it('reports a zero cost and an empty hit rate for a fresh session', () => {
-    expect(store.costLabel()).toBe('$0.0000');
+  it('reports an unknown cost and an empty hit rate for a fresh session', () => {
+    // No usage part has priced anything yet: "—", never a fake "$0.0000".
+    expect(store.totals().cost).toBeNull();
+    expect(store.costLabel()).toBe(UNKNOWN_COST_LABEL);
     expect(store.cacheRate()).toBe('–');
     expect(store.filesChanged()).toEqual([]);
+  });
+
+  it('shows "—" when every turn used an unknown-pricing model (F6-5)', () => {
+    store.messages.set([
+      assistant('m1', [{ type: 'usage', input_tokens: 100, output_tokens: 40 }]),
+      assistant('m2', [{ type: 'usage', input_tokens: 100, output_tokens: 60, cost: null }]),
+    ] as Message[]);
+    expect(store.totals().input).toBe(200);
+    expect(store.totals().cost).toBeNull();
+    expect(store.costLabel()).toBe('—');
+  });
+
+  it('keeps a genuine zero cost as "$0.0000" (F6-5)', () => {
+    store.messages.set([
+      assistant('m1', [{ type: 'usage', input_tokens: 100, output_tokens: 40, cost: 0 }]),
+    ]);
+    expect(store.totals().cost).toBe(0);
+    expect(store.costLabel()).toBe('$0.0000');
+  });
+
+  it('sums only the known costs when pricing is mixed (F6-5)', () => {
+    store.messages.set([
+      assistant('m1', [{ type: 'usage', input_tokens: 100, output_tokens: 40, cost: 0.01 }]),
+      assistant('m2', [{ type: 'usage', input_tokens: 100, output_tokens: 60 }]),
+      assistant('m3', [{ type: 'usage', input_tokens: 100, output_tokens: 60, cost: 0.02 }]),
+    ] as Message[]);
+    expect(store.totals().cost).toBeCloseTo(0.03, 10);
+    expect(store.costLabel()).toBe('$0.0300');
+    expect(formatCost(null)).toBe('—');
+    expect(formatCost(1.23456)).toBe('$1.2346');
   });
 });
 

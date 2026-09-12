@@ -470,4 +470,7 @@ export const zh: Record<MessageKey, string> = {
   'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
   'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
   'palette.compactSession': '立即压缩上下文',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': '本会话所用模型的定价未知',
 };

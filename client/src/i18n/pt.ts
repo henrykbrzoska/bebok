@@ -471,4 +471,7 @@ export const pt: Record<MessageKey, string> = {
   'chat.compactTitle': 'Resumir as mensagens antigas numa nova sessão (compactar contexto)',
   'chat.compactIdle': 'Compactar requer uma sessão inativa com algumas mensagens',
   'palette.compactSession': 'Compactar o contexto agora',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'Preço desconhecido para os modelos usados nesta sessão',
 };

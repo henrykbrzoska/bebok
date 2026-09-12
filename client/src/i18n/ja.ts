@@ -470,4 +470,7 @@ export const ja: Record<MessageKey, string> = {
   'chat.compactTitle': '古いメッセージを要約して新しいセッションにまとめる（コンテキスト圧縮）',
   'chat.compactIdle': '圧縮にはメッセージが数件ある待機中のセッションが必要です',
   'palette.compactSession': '今すぐコンテキストを圧縮',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'このセッションで使用したモデルの料金は不明です',
 };

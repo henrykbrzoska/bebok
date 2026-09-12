@@ -470,4 +470,7 @@ export const hi: Record<MessageKey, string> = {
   'chat.compactTitle': 'पुराने संदेशों का सारांश बनाकर नया सत्र खोलें (संदर्भ संक्षेपण)',
   'chat.compactIdle': 'संक्षेपण के लिए कुछ संदेशों वाला निष्क्रिय सत्र चाहिए',
   'palette.compactSession': 'अभी संदर्भ संक्षिप्त करें',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'इस सत्र में प्रयुक्त मॉडल की कीमत ज्ञात नहीं है',
 };

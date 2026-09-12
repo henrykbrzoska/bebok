@@ -480,6 +480,9 @@ export const en = {
   'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
   'chat.compactIdle': 'Compaction needs an idle session with a few messages',
   'palette.compactSession': 'Compact context now',
+
+  // F6-5: unknown pricing
+  'drawer.costUnknown': 'No pricing known for the model(s) used in this session',
 };
 
 export type MessageKey = keyof typeof en;
