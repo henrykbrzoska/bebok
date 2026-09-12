@@ -3,18 +3,22 @@
  * preview, both served through the engine API (`GET /fs/tree`, `GET /fs/file`)
  * - not the client's raw filesystem, so one permission model covers
  * everything. Task 6: right-click a `.html` file to preview it sandboxed.
+ *
+ * F7-3: also opens on demand with a file pre-selected and its content
+ * loaded, when navigated to from the right-drawer Explorer panel (see the
+ * constructor's `openRequest` effect and `ui/right-drawer/panels/explorer-panel.ts`).
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
+import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
-import { ExplorerSelectionStore } from '../../ui/right-drawer/panels/explorer-selection.store';
 import { ShellStore } from '../../ui/shell/shell.store';
 import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
@@ -48,6 +52,28 @@ export class ExplorerView implements OnInit {
   private readonly codeHighlight = inject(CodeHighlightService);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /** Last `ExplorerSelectionStore.openRequest()` nonce this view has already
+   *  acted on (F7-3), so a stale/repeated request is never replayed. */
+  private lastOpenNonce = 0;
+
+  constructor() {
+    // F7-3: the right-drawer Explorer panel points here via `openRequest`
+    // (directory + path + nonce) and navigates to `/explorer`. Reading
+    // `directory()` as a dependency means this waits, without polling, for
+    // `ngOnInit` to set it from the matching query param before opening the
+    // file - whichever of the two settles last re-triggers the effect.
+    effect(() => {
+      const req = this.selection.openRequest();
+      const dir = this.directory();
+      if (!req || req.nonce === this.lastOpenNonce || dir !== req.directory) {
+        return;
+      }
+      this.lastOpenNonce = req.nonce;
+      this.selection.clearOpenRequest();
+      void this.openFile({ name: '', path: req.path, is_dir: false, depth: 0, expanded: false });
+    });
+  }
 
   readonly directory = signal<string | null>(null);
   readonly loading = signal(false);
