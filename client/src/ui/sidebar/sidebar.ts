@@ -11,10 +11,12 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
+import { AgentInfo } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
+import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore, type Screen } from '../shell/shell.store';
 import { StatusDot, type StatusTone } from '../status-dot/status-dot';
 
@@ -28,6 +30,7 @@ import { StatusDot, type StatusTone } from '../status-dot/status-dot';
 export class Sidebar {
   readonly shell = inject(ShellStore);
   readonly events = inject(EventsStore);
+  readonly project = inject(ProjectSessionsStore);
   private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
@@ -40,7 +43,38 @@ export class Sidebar {
   readonly activeScreen = this.shell.activeScreen;
 
   /** Project directory shown in the switcher row (engine-persisted choice). */
-  readonly directory = signal<string | null>(this.engine.readLastDirectory());
+  readonly directory = this.project.directory;
+  readonly agents = this.project.agents;
+
+  /** Session search box (filters the grouped list below it). */
+  readonly search = signal('');
+  /** Agent preset used by the "+ New" button. */
+  readonly selectedAgent = signal('code');
+  readonly creating = signal(false);
+
+  /** Label for the agent `<select>`: `name · model` when a model is pinned. */
+  agentLabel(agent: AgentInfo): string {
+    return agent.model ? `${agent.name} · ${agent.model}` : agent.name;
+  }
+
+  /** Create a session in the current directory and open its chat. */
+  async newSession(): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.creating()) {
+      return;
+    }
+    this.creating.set(true);
+    try {
+      const created = await this.engine.createSession(dir, this.selectedAgent());
+      await this.project.refresh();
+      await this.router.navigate(['/chat', created.sessionID]);
+    } catch {
+      // The Start screen owns error reporting; the sidebar stays quiet.
+      await this.router.navigate(['/']);
+    } finally {
+      this.creating.set(false);
+    }
+  }
 
   /** Bottom nav rail entries; `rail` is the 2-letter collapsed glyph. */
   readonly navItems: { screen: Screen; path: string; labelKey: NavLabelKey; railKey: RailKey }[] = [

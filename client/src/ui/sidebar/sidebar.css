@@ -136,3 +136,119 @@
   display: flex;
   position: relative;
 }
+
+/* --- Project switcher -------------------------------------------------- */
+
+.project-block {
+  padding: var(--space-12) var(--space-12) var(--space-8);
+  flex: none;
+}
+
+.project-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-10);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+}
+
+.project-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.micro-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  line-height: 1.4;
+}
+
+.project-path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  flex: none;
+  margin-left: var(--space-6);
+}
+
+/* --- Search / new session --------------------------------------------- */
+
+.search-block {
+  padding: 0 var(--space-12) var(--space-8);
+  flex: none;
+}
+
+.search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  padding: 7px var(--space-9);
+  font-size: var(--fs-12-5);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.new-block {
+  padding: 0 var(--space-12) var(--space-10);
+  display: flex;
+  gap: var(--space-8);
+  flex: none;
+}
+
+.agent-select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  padding: 7px var(--space-8);
+  font-size: var(--fs-12);
+  outline: none;
+}
+
+.new-btn {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius-control);
+  padding: 0 var(--space-12);
+  font-size: var(--fs-12-5);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+
+.new-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}

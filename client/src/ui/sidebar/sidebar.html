@@ -24,6 +24,60 @@
     </button>
   </div>
 
+  @if (expanded()) {
+    <div class="project-block">
+      <button
+        type="button"
+        class="project-row"
+        (click)="switchProject()"
+        [title]="t('sidebar.switchProject')"
+      >
+        <span class="project-text">
+          <span class="micro-label">{{ t('sidebar.project') }}</span>
+          <span class="project-path">{{ directory() || t('sidebar.noProject') }}</span>
+        </span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </button>
+    </div>
+
+    <div class="search-block">
+      <input
+        type="text"
+        class="search"
+        [ngModel]="search()"
+        (ngModelChange)="search.set($event)"
+        [placeholder]="t('sidebar.searchSessions')"
+        [attr.aria-label]="t('sidebar.searchSessions')"
+        spellcheck="false"
+      />
+    </div>
+
+    <div class="new-block">
+      <select
+        class="agent-select"
+        [ngModel]="selectedAgent()"
+        (ngModelChange)="selectedAgent.set($event)"
+        [attr.aria-label]="t('start.agent')"
+      >
+        @for (agent of agents(); track agent.name) {
+          <option [value]="agent.name">{{ agentLabel(agent) }}</option>
+        }
+        @if (agents().length === 0) {
+          <option value="code">code</option>
+        }
+      </select>
+      <button
+        type="button"
+        class="new-btn"
+        (click)="newSession()"
+        [disabled]="creating() || !directory()"
+        [title]="t('sidebar.newSessionTitle')"
+      >
+        {{ t('sidebar.newSession') }}
+      </button>
+    </div>
+  }
+
   @if (!expanded()) {
     <nav class="rail">
       @for (item of navItems; track item.screen) {
