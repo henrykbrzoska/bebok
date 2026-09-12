@@ -234,7 +234,7 @@ impl PermissionEngine {
                 pattern,
             };
         }
-        let verdict = if read_only {
+        let verdict = if read_only && tool != "fetch" {
             Verdict::Allow
         } else {
             Verdict::Ask
@@ -360,6 +360,22 @@ mod tests {
         assert_eq!(eval.verdict, Verdict::Ask);
         assert_eq!(eval.pattern, "bash(git status)");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fetch_defaults_to_ask_even_for_get_and_head() {
+        let dir = tmp_dir("fetch-default");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        for method in ["GET", "HEAD"] {
+            let eval = engine.evaluate(
+                None,
+                "fetch",
+                &serde_json::json!({"url": "http://127.0.0.1:8787/config", "method": method}),
+                true,
+            );
+            assert_eq!(eval.verdict, Verdict::Ask, "{method}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
