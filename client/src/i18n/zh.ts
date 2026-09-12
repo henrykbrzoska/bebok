@@ -463,4 +463,11 @@ export const zh: Record<MessageKey, string> = {
   'drawer.contextUsed': '已用',
   'drawer.contextWindow': '窗口',
   'drawer.contextNone': '尚无回合',
+
+  // F6-4: compaction
+  'chat.compact': '压缩',
+  'chat.compacting': '压缩中…',
+  'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
+  'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
+  'palette.compactSession': '立即压缩上下文',
 };

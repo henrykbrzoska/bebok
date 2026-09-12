@@ -126,8 +126,29 @@
   color: var(--danger);
 }
 
-.tb-abort {
+/* F6-4: "Compact now" sits right before Abort. */
+.tb-compact {
   margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+}
+
+.tb-compact:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tb-compact:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tb-abort {
   flex: 0 0 auto;
   font-size: var(--fs-12);
   padding: 4px 14px;

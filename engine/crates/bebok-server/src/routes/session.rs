@@ -407,16 +407,50 @@ pub async fn compact_session(
     }
 
     let summary = bebok_core::context::compact_summary(&messages, cutoff);
+    let source_meta = source.meta_snapshot().await;
+    // "From" is the live gauge when a turn has run (provider-counted), else
+    // the chars/4 estimate of the whole transcript; "to" is always estimated
+    // because the fork has not been sent to a provider yet.
+    let before = source_meta
+        .context_used
+        .unwrap_or_else(|| bebok_core::context::estimate_transcript(&messages));
     let fork = state
         .store
         .compact_session(id, summary, cutoff)
         .await
         .map_err(|e| err_response(&e))?;
+    let after = bebok_core::context::estimate_transcript(&fork.messages_snapshot().await);
+
+    // Visible marker at the end of the forked transcript (F6-4). Appended by
+    // the route rather than inside `InstanceStore::compact_session` so the
+    // fork mechanics stay untouched; it is a user-role text like the summary
+    // itself, so providers see it as a plain note.
+    let marker = compaction_marker(before, after, cutoff);
+    fork.append_user_message(&marker)
+        .await
+        .map_err(|e| err_response(&e))?;
+    // Seed the fork's gauge with the estimate so the meter reflects the
+    // reduction immediately; the first real turn overwrites it.
+    let model = source_meta
+        .context_model
+        .clone()
+        .or(source_meta.model.clone())
+        .unwrap_or_else(|| source.config_snapshot().model_for(&source_meta.agent));
+    fork.set_context_used(after, &model).await;
 
     Ok(Json(serde_json::json!({
         "sessionID": fork.id().to_string(),
         "parent": serde_json::json!([id.to_string(), cutoff]),
+        "before": before,
+        "after": after,
     })))
+}
+
+/// The human-readable "Context compacted" note appended to a compacted fork.
+pub fn compaction_marker(before: u64, after: u64, cutoff: usize) -> String {
+    format!(
+        "[Context compacted: from {before} to {after} tokens ({cutoff} earlier messages summarized)]"
+    )
 }
 
 /// `POST /session/{id}/truncate` -> rollback in place: erase every message from
@@ -469,4 +503,30 @@ pub fn compact_cutoff(messages: &[bebok_core::session::Message], budget: usize) 
         keep += 1;
     }
     n.saturating_sub(keep)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bebok_core::session::Message;
+
+    #[test]
+    fn compaction_marker_is_human_readable() {
+        let text = compaction_marker(120_000, 30_000, 12);
+        assert!(text.starts_with("[Context compacted: from 120000 to 30000 tokens"));
+        assert!(text.contains("12 earlier messages"));
+    }
+
+    #[test]
+    fn compact_cutoff_keeps_the_latest_exchange_and_fits_half_budget() {
+        // Six ~100-token messages (400 chars each) and a budget of 400 tokens:
+        // the tail may hold 200 tokens -> the last 2 messages stay, 4 go.
+        let messages: Vec<Message> = (0..6)
+            .map(|i| Message::user(format!("{i}").repeat(400)))
+            .collect();
+        assert_eq!(compact_cutoff(&messages, 400), 4);
+        // A generous budget keeps everything except the very first message
+        // (the loop always leaves at least one message to summarize).
+        assert_eq!(compact_cutoff(&messages, 100_000), 1);
+    }
 }

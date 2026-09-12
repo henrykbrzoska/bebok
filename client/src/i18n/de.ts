@@ -464,4 +464,11 @@ export const de: Record<MessageKey, string> = {
   'drawer.contextUsed': 'Belegt',
   'drawer.contextWindow': 'Fenster',
   'drawer.contextNone': 'Noch kein Durchlauf',
+
+  // F6-4: compaction
+  'chat.compact': 'Verdichten',
+  'chat.compacting': 'Verdichte…',
+  'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
+  'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
+  'palette.compactSession': 'Kontext jetzt verdichten',
 };

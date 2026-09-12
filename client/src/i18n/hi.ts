@@ -463,4 +463,11 @@ export const hi: Record<MessageKey, string> = {
   'drawer.contextUsed': 'उपयोग',
   'drawer.contextWindow': 'विंडो',
   'drawer.contextNone': 'अभी कोई टर्न नहीं',
+
+  // F6-4: compaction
+  'chat.compact': 'संक्षिप्त करें',
+  'chat.compacting': 'संक्षिप्त हो रहा है…',
+  'chat.compactTitle': 'पुराने संदेशों का सारांश बनाकर नया सत्र खोलें (संदर्भ संक्षेपण)',
+  'chat.compactIdle': 'संक्षेपण के लिए कुछ संदेशों वाला निष्क्रिय सत्र चाहिए',
+  'palette.compactSession': 'अभी संदर्भ संक्षिप्त करें',
 };

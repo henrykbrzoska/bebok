@@ -11,9 +11,12 @@ import { Message, SessionMeta } from '../../core/engine.dtos';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
 import {
   ChatSessionStore,
+  DEFAULT_AUTO_COMPACT_PERCENT,
   DEFAULT_CONTEXT_WINDOW,
+  compactBudgetFor,
   contextLevelFor,
   formatTokens,
+  shouldAutoCompact,
 } from './chat-session.store';
 
 function assistant(id: string, parts: Message['parts']): Message {
@@ -171,6 +174,56 @@ describe('ChatSessionStore context meter (F6-3)', () => {
     expect(formatTokens(200_000)).toBe('200k');
     expect(formatTokens(1_048_576)).toBe('1M');
     expect(formatTokens(1_250_000)).toBe('1.3M');
+  });
+});
+
+describe('ChatSessionStore auto-compaction threshold (F6-4)', () => {
+  let store: ChatSessionStore;
+
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    store = TestBed.inject(ChatSessionStore);
+  });
+
+  it('defaults to 85% and persists a change', () => {
+    expect(store.autoCompactPercent()).toBe(DEFAULT_AUTO_COMPACT_PERCENT);
+    store.setAutoCompactPercent(70);
+    expect(localStorage.getItem('bebok.chat.autoCompactPercent')).toBe('70');
+    const fresh = new ChatSessionStore();
+    expect(fresh.autoCompactPercent()).toBe(70);
+  });
+
+  it('fires exactly at the threshold, never below it or before a turn', () => {
+    expect(shouldAutoCompact(null, 85)).toBeFalse();
+    expect(shouldAutoCompact(84, 85)).toBeFalse();
+    expect(shouldAutoCompact(85, 85)).toBeTrue();
+    expect(shouldAutoCompact(100, 85)).toBeTrue();
+    // 0 disables the feature entirely.
+    expect(shouldAutoCompact(100, 0)).toBeFalse();
+
+    store.meta.set(meta({ context_used: 84_000, context_window: 100_000 }));
+    expect(store.needsAutoCompact()).toBeFalse();
+    store.meta.set(meta({ context_used: 85_000, context_window: 100_000 }));
+    expect(store.needsAutoCompact()).toBeTrue();
+    store.meta.set(meta({}));
+    expect(store.needsAutoCompact()).toBeFalse();
+  });
+
+  it('derives the compaction budget from the live window and gates on length', () => {
+    expect(compactBudgetFor(200_000)).toBe(100_000);
+    expect(compactBudgetFor(1)).toBe(1);
+    store.meta.set(meta({ context_used: 10, context_window: 64_000 }));
+    expect(store.compactBudget()).toBe(32_000);
+    store.messages.set([assistant('a', []), assistant('b', []), assistant('c', [])]);
+    expect(store.canCompact()).toBeFalse();
+    store.messages.set([
+      assistant('a', []),
+      assistant('b', []),
+      assistant('c', []),
+      assistant('d', []),
+    ]);
+    expect(store.canCompact()).toBeTrue();
   });
 });
 

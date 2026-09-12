@@ -50,6 +50,15 @@
     }
 
     <button
+      class="tb-compact"
+      type="button"
+      data-testid="compact-now"
+      (click)="compactNow()"
+      [disabled]="!canCompact()"
+      [title]="canCompact() ? t('chat.compactTitle') : t('chat.compactIdle')"
+    >{{ compacting() ? t('chat.compacting') : t('chat.compact') }}</button>
+
+    <button
       class="tb-abort"
       type="button"
       (click)="abortTurn()"

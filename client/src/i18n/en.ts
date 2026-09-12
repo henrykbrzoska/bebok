@@ -473,6 +473,13 @@ export const en = {
   'drawer.contextUsed': 'Used',
   'drawer.contextWindow': 'Window',
   'drawer.contextNone': 'No turn yet',
+
+  // F6-4: compaction
+  'chat.compact': 'Compact',
+  'chat.compacting': 'Compacting…',
+  'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
+  'chat.compactIdle': 'Compaction needs an idle session with a few messages',
+  'palette.compactSession': 'Compact context now',
 };
 
 export type MessageKey = keyof typeof en;

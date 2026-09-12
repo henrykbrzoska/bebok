@@ -463,4 +463,11 @@ export const ko: Record<MessageKey, string> = {
   'drawer.contextUsed': '사용량',
   'drawer.contextWindow': '창 크기',
   'drawer.contextNone': '아직 턴이 없습니다',
+
+  // F6-4: compaction
+  'chat.compact': '압축',
+  'chat.compacting': '압축 중…',
+  'chat.compactTitle': '이전 메시지를 요약해 새 세션으로 만듭니다 (컨텍스트 압축)',
+  'chat.compactIdle': '압축하려면 메시지가 몇 개 있는 유휴 세션이 필요합니다',
+  'palette.compactSession': '지금 컨텍스트 압축',
 };

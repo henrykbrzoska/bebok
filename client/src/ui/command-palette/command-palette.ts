@@ -22,11 +22,13 @@ import { Router } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
+import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
 
 type ActionId =
   | 'newSession'
+  | 'compactSession'
   | 'switchProject'
   | 'openExplorer'
   | 'openTerminal'
@@ -39,6 +41,7 @@ interface PaletteAction {
   id: ActionId;
   labelKey:
     | 'palette.newSession'
+    | 'palette.compactSession'
     | 'palette.switchProject'
     | 'palette.openExplorer'
     | 'palette.openTerminal'
@@ -51,6 +54,7 @@ interface PaletteAction {
 
 const ACTIONS: PaletteAction[] = [
   { id: 'newSession', labelKey: 'palette.newSession', hint: '↵' },
+  { id: 'compactSession', labelKey: 'palette.compactSession' },
   { id: 'switchProject', labelKey: 'palette.switchProject' },
   { id: 'openExplorer', labelKey: 'palette.openExplorer' },
   { id: 'openTerminal', labelKey: 'palette.openTerminal' },
@@ -76,6 +80,8 @@ export class CommandPalette {
   private readonly engine = inject(EngineClient);
   private readonly project = inject(ProjectSessionsStore);
   private readonly i18n = inject(I18nService);
+  /** F6-4: "Compact now" needs the session currently open in the chat view. */
+  private readonly session = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
   readonly open = this.shell.commandPaletteOpen;
@@ -83,12 +89,19 @@ export class CommandPalette {
 
   private readonly searchInput = viewChild<ElementRef<HTMLInputElement>>('searchInput');
 
+  /** Actions that apply right now: session-scoped ones need an open chat. */
+  private readonly available = computed<PaletteAction[]>(() => {
+    const hasSession = this.session.meta() !== null && this.session.canCompact();
+    return ACTIONS.filter((action) => action.id !== 'compactSession' || hasSession);
+  });
+
   readonly actions = computed<PaletteAction[]>(() => {
     const q = this.query().trim().toLowerCase();
+    const available = this.available();
     if (!q) {
-      return ACTIONS;
+      return available;
     }
-    return ACTIONS.filter((action) => this.t(action.labelKey).toLowerCase().includes(q));
+    return available.filter((action) => this.t(action.labelKey).toLowerCase().includes(q));
   });
 
   constructor() {
@@ -133,6 +146,9 @@ export class CommandPalette {
       case 'newSession':
         await this.newSession(directory);
         return;
+      case 'compactSession':
+        await this.compactSession();
+        return;
       case 'switchProject':
         this.shell.openProjectSwitcher();
         return;
@@ -161,6 +177,25 @@ export class CommandPalette {
     await this.router.navigate(['/settings'], {
       queryParams: directory ? { directory, tab } : { tab },
     });
+  }
+
+  /**
+   * Compact the open session (F6-4). Compaction forks: the engine answers
+   * with a *new* session id, so the palette navigates there. A running turn
+   * is left alone (the engine would race the transcript).
+   */
+  private async compactSession(): Promise<void> {
+    const meta = this.session.meta();
+    if (!meta || this.session.running() || !this.session.canCompact()) {
+      return;
+    }
+    try {
+      const forked = await this.engine.compactSession(meta.id, this.session.compactBudget());
+      await this.project.refresh();
+      await this.router.navigate(['/chat', forked.sessionID]);
+    } catch {
+      /* the chat view surfaces compaction errors; the palette stays quiet */
+    }
   }
 
   private async newSession(directory: string | null): Promise<void> {

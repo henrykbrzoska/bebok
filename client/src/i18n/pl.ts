@@ -464,4 +464,11 @@ export const pl: Record<MessageKey, string> = {
   'drawer.contextUsed': 'Użyte',
   'drawer.contextWindow': 'Okno',
   'drawer.contextNone': 'Brak tury',
+
+  // F6-4: compaction
+  'chat.compact': 'Kompaktuj',
+  'chat.compacting': 'Kompaktowanie…',
+  'chat.compactTitle': 'Streść starsze wiadomości w nowej sesji (kompaktowanie kontekstu)',
+  'chat.compactIdle': 'Kompaktowanie wymaga bezczynnej sesji z kilkoma wiadomościami',
+  'palette.compactSession': 'Kompaktuj kontekst teraz',
 };

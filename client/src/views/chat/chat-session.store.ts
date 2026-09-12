@@ -29,6 +29,49 @@ export const CONTEXT_DANGER_PERCENT = 95;
 
 export type ContextLevel = 'ok' | 'warning' | 'danger';
 
+/**
+ * Auto-compaction (F6-4): before the next prompt is sent, a session whose
+ * meter is at or above this fill level is compacted first. Client-side UI
+ * preference (localStorage), not an engine/config field: it gates a purely
+ * client-driven action and needs no engine restart to change. 0 disables.
+ */
+export const DEFAULT_AUTO_COMPACT_PERCENT = 85;
+const KEY_AUTO_COMPACT_PERCENT = 'bebok.chat.autoCompactPercent';
+/** The engine refuses to compact a transcript shorter than this. */
+export const MIN_COMPACTABLE_MESSAGES = 4;
+
+function readAutoCompactPercent(): number {
+  try {
+    const raw = localStorage.getItem(KEY_AUTO_COMPACT_PERCENT);
+    if (raw === null) {
+      return DEFAULT_AUTO_COMPACT_PERCENT;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : DEFAULT_AUTO_COMPACT_PERCENT;
+  } catch {
+    return DEFAULT_AUTO_COMPACT_PERCENT;
+  }
+}
+
+/**
+ * Threshold boundary for auto-compaction: fires at or above `threshold`
+ * percent, never before the first turn (null) and never when disabled (0).
+ */
+export function shouldAutoCompact(percent: number | null, threshold: number): boolean {
+  if (percent === null || threshold <= 0) {
+    return false;
+  }
+  return percent >= threshold;
+}
+
+/**
+ * Budget handed to `POST /session/{id}/compact`: the engine keeps a tail that
+ * fits half of it, so half the window leaves the fork at roughly a quarter.
+ */
+export function compactBudgetFor(contextWindow: number): number {
+  return Math.max(1, Math.floor(contextWindow / 2));
+}
+
 /** `42k` / `1.2M` / `950` - compact token count for the meter. */
 export function formatTokens(value: number): string {
   if (value >= 1_000_000) {
@@ -101,6 +144,30 @@ export class ChatSessionStore {
   });
 
   readonly contextLevel = computed<ContextLevel>(() => contextLevelFor(this.contextPercent()));
+
+  /** Auto-compaction threshold (percent of the window; 0 = off). */
+  readonly autoCompactPercent = signal(readAutoCompactPercent());
+
+  /** True when the next prompt should be preceded by a compaction. */
+  readonly needsAutoCompact = computed(() =>
+    shouldAutoCompact(this.contextPercent(), this.autoCompactPercent()),
+  );
+
+  /** Budget for a compaction request derived from the live window. */
+  readonly compactBudget = computed(() => compactBudgetFor(this.contextWindow()));
+
+  /** The engine needs a few messages before it can summarize anything. */
+  readonly canCompact = computed(() => this.messages().length >= MIN_COMPACTABLE_MESSAGES);
+
+  setAutoCompactPercent(percent: number): void {
+    const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+    this.autoCompactPercent.set(clamped);
+    try {
+      localStorage.setItem(KEY_AUTO_COMPACT_PERCENT, String(clamped));
+    } catch {
+      /* storage unavailable - keep the choice in memory only */
+    }
+  }
 
   /** `42k / 200k · 21%` for the toolbar and the drawer; empty before a turn. */
   readonly contextLabel = computed<string>(() => {

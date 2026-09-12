@@ -418,8 +418,13 @@ export interface ExportResponse {
 }
 
 export interface CompactResponse {
+  /** The *new* (forked) session holding the summary + tail. */
   sessionID: string;
   parent: [string, number];
+  /** Context size before compaction (last-call gauge, else an estimate). */
+  before?: number;
+  /** Estimated context size of the forked transcript. */
+  after?: number;
 }
 
 export interface DeleteSessionResponse {

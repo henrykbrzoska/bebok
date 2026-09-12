@@ -464,4 +464,11 @@ export const uk: Record<MessageKey, string> = {
   'drawer.contextUsed': 'Використано',
   'drawer.contextWindow': 'Вікно',
   'drawer.contextNone': 'Ще немає ходів',
+
+  // F6-4: compaction
+  'chat.compact': 'Стиснути',
+  'chat.compacting': 'Стискання…',
+  'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
+  'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
+  'palette.compactSession': 'Стиснути контекст зараз',
 };
