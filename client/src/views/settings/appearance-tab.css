@@ -1,0 +1,61 @@
+/* Appearance tab (F2-28): runtime paths, density segmented control, CSS. */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.segmented button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-12-5);
+  padding: 6px var(--space-14);
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button.active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.path-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.path-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-12);
+}
+
+.docker-probe {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.ok-text {
+  color: var(--success);
+}
+
+.err-text {
+  color: var(--danger);
+}
+
+.css-editor {
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  resize: vertical;
+}
