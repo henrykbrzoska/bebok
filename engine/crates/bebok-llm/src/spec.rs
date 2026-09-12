@@ -8,6 +8,11 @@ use serde_json::{Map, Value};
 
 use crate::provider::LlmError;
 
+/// Strip an optional provider prefix from a model identifier.
+pub(crate) fn model_name(model: &str) -> &str {
+    model.rsplit('/').next().unwrap_or(model)
+}
+
 /// How a provider speaks to its models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -753,6 +758,12 @@ mod auth_tests {
 #[cfg(test)]
 mod extra_tests {
     use super::*;
+
+    #[test]
+    fn model_name_strips_provider_prefix() {
+        assert_eq!(model_name("openai/gpt-4o"), "gpt-4o");
+        assert_eq!(model_name("gpt-4o"), "gpt-4o");
+    }
 
     fn spec_with_extra() -> ProviderSpec {
         let mut extra = Map::new();

@@ -16,6 +16,7 @@ use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
     retry_after_from_headers,
 };
+use crate::spec::model_name;
 use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Build an OpenAI Chat Completions request body.
@@ -134,10 +135,6 @@ impl OpenAiProvider {
             client: reqwest::Client::new(),
         }
     }
-}
-
-fn model_name(model: &str) -> &str {
-    model.rsplit('/').next().unwrap_or(model)
 }
 
 #[async_trait]
