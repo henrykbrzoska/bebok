@@ -2,7 +2,7 @@
 
 .row-status {
   flex: none;
-  max-width: 74px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
