@@ -1,0 +1,74 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: #00000099;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  z-index: 50;
+}
+
+.card {
+  width: 520px;
+  max-width: 90vw;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-bubble);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.search {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text);
+  padding: var(--space-14) var(--space-16);
+  font-size: var(--fs-14);
+  outline: none;
+}
+
+.search:focus {
+  border-color: transparent;
+  border-bottom-color: var(--border);
+}
+
+.actions {
+  padding: var(--space-6);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  width: 100%;
+  padding: var(--space-9) var(--space-12);
+  border-radius: var(--radius-control);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.action:hover {
+  background: var(--surface-2);
+}
+
+.action-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+
+.empty {
+  padding: var(--space-12);
+  font-size: var(--fs-12-5);
+  color: var(--text-faint);
+}
