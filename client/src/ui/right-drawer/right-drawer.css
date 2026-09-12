@@ -1,0 +1,119 @@
+:host {
+  display: block;
+  flex: none;
+  height: 100%;
+  min-width: 0;
+}
+
+.drawer {
+  height: 100%;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  position: relative;
+  overflow-y: auto;
+}
+
+.resize-handle {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.pill-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  padding: var(--space-8) var(--space-10);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.pill-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px var(--space-9);
+  border-radius: var(--radius-bubble);
+  font-size: var(--fs-11);
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.pill:hover {
+  background: var(--surface-2);
+}
+
+.pill.on {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+
+.pill.on .pill-dot {
+  background: var(--success);
+}
+
+.panel {
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-9) var(--space-14);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: var(--fs-11);
+  font-weight: 700;
+  color: var(--code-text-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.panel-close {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-13);
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  line-height: 1;
+}
+
+.panel-close:hover {
+  background: var(--border);
+  color: var(--text);
+}

@@ -1,0 +1,58 @@
+<aside class="drawer" [style.width.px]="width()">
+  <div
+    class="resize-handle"
+    role="separator"
+    aria-orientation="vertical"
+    [attr.aria-label]="t('drawer.resize')"
+    (pointerdown)="onResizeStart($event)"
+    (pointermove)="onResizeMove($event)"
+    (pointerup)="onResizeEnd($event)"
+    (pointercancel)="onResizeEnd($event)"
+  ></div>
+
+  <div class="pill-row">
+    <span class="pill-label">{{ t('drawer.panels') }}</span>
+    @for (pill of pills; track pill.id) {
+      <button
+        type="button"
+        class="pill"
+        [class.on]="isOpen(pill.id)"
+        (click)="toggle(pill.id)"
+        [attr.aria-pressed]="isOpen(pill.id)"
+      >
+        <span class="pill-dot" aria-hidden="true"></span>{{ t(pill.labelKey) }}
+      </button>
+    }
+  </div>
+
+  @for (pill of pills; track pill.id) {
+    @if (isOpen(pill.id)) {
+      <section class="panel">
+        <header class="panel-head">
+          <h2 class="panel-title">{{ t(pill.labelKey) }}</h2>
+          <button
+            type="button"
+            class="panel-close"
+            (click)="toggle(pill.id)"
+            [title]="t('drawer.close')"
+            [attr.aria-label]="t('drawer.close')"
+          >
+            ✕
+          </button>
+        </header>
+        <!-- Placeholder slot: WP-CHAT replaces these panel bodies. -->
+        @switch (pill.id) {
+          @case ('session') {
+            <app-session-panel />
+          }
+          @case ('explorer') {
+            <app-explorer-panel />
+          }
+          @case ('terminal') {
+            <app-terminal-panel />
+          }
+        }
+      </section>
+    }
+  }
+</aside>
