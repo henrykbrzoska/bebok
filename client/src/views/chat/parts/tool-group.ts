@@ -1,17 +1,26 @@
 import { Component, computed, inject, input, output } from '@angular/core';
 
-import { Part, ToolStateKind, safetyLevel } from '../../../core/engine.dtos';
+import {
+  Part,
+  SAFETY_CATEGORIES,
+  SafetyCategory,
+  SafetyResolver,
+  ToolStateKind,
+  safetyCategory,
+} from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
 import { PartRendererComponent } from './part-renderer';
+import { safetyCategoryLabel, safetyLegend } from './safety-legend';
 
-/** Per-level call counts for the group header's safety cluster (F7-1). */
-export interface SafetyCounts {
-  green: number;
-  yellow: number;
-  orange: number;
-}
+/** Per-category call counts for the group header's safety cluster (F7-7). */
+export type SafetyCounts = Record<SafetyCategory, number>;
 
-const EMPTY_SAFETY: SafetyCounts = { green: 0, yellow: 0, orange: 0 };
+export const EMPTY_SAFETY: SafetyCounts = {
+  safe: 0,
+  caution: 0,
+  dangerous: 0,
+  uncategorized: 0,
+};
 
 /** One part plus the info the renderer needs to pick its default state. */
 export interface RenderedPart {
@@ -42,18 +51,21 @@ const MAX_SUMMARY_NAMES = 4;
 
 /**
  * Summarize a run of tool-call rows for a group header: the worst state
- * across the run (error > running/pending > completed) and a "read ×2, edit"
+ * across the run (error > running/pending > completed), a "read ×2, edit"
  * name list (first-appearance order, counts collapsed, capped at
- * `MAX_SUMMARY_NAMES` names before an ellipsis). Shared by the per-message
- * grouping pass (F6-1, `message-row.ts`) and the cross-message merge
- * (F6-1c, `tool-run-row.ts`) so both read the same rules.
+ * `MAX_SUMMARY_NAMES` names before an ellipsis) and per-category safety
+ * counts (F7-7; `resolve` supplies the category of historical parts that
+ * carry no stamped one). Shared by the per-message grouping pass (F6-1,
+ * `message-row.ts`) and the cross-message merge (F6-1c, `tool-run-row.ts`)
+ * so both read the same rules.
  */
 export function summarizeToolRun(
   rows: readonly RenderedPart[],
+  resolve?: SafetyResolver,
 ): { state: ToolStateKind; names: string; safety: SafetyCounts } {
   const counts = new Map<string, number>();
   let state: ToolStateKind = 'completed';
-  const safety: SafetyCounts = { green: 0, yellow: 0, orange: 0 };
+  const safety: SafetyCounts = { ...EMPTY_SAFETY };
   for (const row of rows) {
     if (row.part.type !== 'tool') {
       continue;
@@ -65,10 +77,7 @@ export function summarizeToolRun(
     } else if ((kind === 'running' || kind === 'pending') && state !== 'error') {
       state = 'running';
     }
-    const level = safetyLevel(row.part);
-    if (level) {
-      safety[level]++;
-    }
+    safety[safetyCategory(row.part, resolve)]++;
   }
   const labels = [...counts.entries()].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
   const names =
@@ -111,14 +120,12 @@ export function summarizeToolRun(
             [title]="safetyTitle()"
             aria-hidden="true"
           >
-            @if (safety().green > 0) {
-              <span class="cluster-dot safety-green">●{{ safety().green }}</span>
-            }
-            @if (safety().yellow > 0) {
-              <span class="cluster-dot safety-yellow">●{{ safety().yellow }}</span>
-            }
-            @if (safety().orange > 0) {
-              <span class="cluster-dot safety-orange">●{{ safety().orange }}</span>
+            @for (category of categories; track category) {
+              @if (safety()[category] > 0) {
+                <span class="cluster-dot safety-{{ category }}" [attr.data-safety]="category"
+                  >●{{ safety()[category] }}</span
+                >
+              }
             }
           </span>
         } @else {
@@ -192,8 +199,8 @@ export function summarizeToolRun(
       50% { opacity: 0.35; }
     }
 
-    /* F7-1: per-level count cluster ("●3 ●1 ●2") replacing the single
-       worst-state dot once the group's calls carry a resolved safety tier. */
+    /* F7-7: per-category count cluster ("●3 ●1 ●2") replacing the single
+       worst-state dot once the group has any tool call. */
     .safety-cluster {
       display: flex;
       align-items: center;
@@ -213,14 +220,17 @@ export function summarizeToolRun(
       font-size: var(--fs-11);
       line-height: 1;
     }
-    .cluster-dot.safety-green {
+    .cluster-dot.safety-safe {
       color: var(--success);
     }
-    .cluster-dot.safety-yellow {
+    .cluster-dot.safety-caution {
       color: var(--warning);
     }
-    .cluster-dot.safety-orange {
+    .cluster-dot.safety-dangerous {
       color: var(--accent);
+    }
+    .cluster-dot.safety-uncategorized {
+      color: var(--text-faint);
     }
     .group-count {
       flex: none;
@@ -290,28 +300,22 @@ export class ToolGroupComponent {
   readonly taskLinks = input<Map<string, string>>(new Map());
   readonly toggle = output<void>();
 
-  /** F7-1 per-level counts for the header cluster; defaults to all-zero for
-   *  callers that don't pass one (kept optional so existing call sites -
+  /** F7-7 per-category counts for the header cluster; defaults to all-zero
+   *  for callers that don't pass one (kept optional so existing call sites -
    *  and specs - don't have to change). */
   readonly safety = input<SafetyCounts>(EMPTY_SAFETY);
-  /** False (legacy single dot) when nothing in the group has a resolved
-   *  safety tier yet - e.g. a session persisted before F7-1. */
+  readonly categories = SAFETY_CATEGORIES;
+  /** False (legacy single worst-state dot) only when no counts were passed. */
   readonly hasSafety = computed(() => {
     const s = this.safety();
-    return s.green + s.yellow + s.orange > 0;
+    return this.categories.some((c) => s[c] > 0);
   });
+  /** "Safety: 3 safe · 1 caution · 2 dangerous" + the colour legend. */
   readonly safetyTitle = computed(() => {
     const s = this.safety();
-    const parts: string[] = [];
-    if (s.green > 0) {
-      parts.push(`${s.green} ${this.t('tool.safetyAllow')}`);
-    }
-    if (s.yellow > 0) {
-      parts.push(`${s.yellow} ${this.t('tool.safetyAsk')}`);
-    }
-    if (s.orange > 0) {
-      parts.push(`${s.orange} ${this.t('tool.safetyMutating')}`);
-    }
-    return `${this.t('toolGroup.safetyTitle')}: ${parts.join(' · ')}`;
+    const parts = this.categories
+      .filter((c) => s[c] > 0)
+      .map((c) => `${s[c]} ${safetyCategoryLabel(this.t, c)}`);
+    return `${this.t('toolGroup.safetyTitle')}: ${parts.join(' · ')}\n${safetyLegend(this.t)}`;
   });
 }

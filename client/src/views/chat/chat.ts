@@ -27,6 +27,7 @@ import {
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
+import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { ChatSessionStore } from './chat-session.store';
@@ -178,6 +179,7 @@ function persistDrafts(drafts: Record<string, string>): void {
 })
 export class ChatView implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
+  private readonly toolSafety = inject(ToolSafetyStore);
   private readonly events = inject(EventsStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -528,6 +530,8 @@ export class ChatView implements OnInit, OnDestroy {
       // a reload or tab switch while a tool call is still in progress.
       this.running.set(meta.running === true || this.activity.isRunning(sessionID));
       this.directory.set(meta.directory);
+      // F7-7: the tool safety map colours historical tool calls' dots.
+      void this.toolSafety.ensure(meta.directory);
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
       // Restore this session's draft (per-session input, survives tab switches).

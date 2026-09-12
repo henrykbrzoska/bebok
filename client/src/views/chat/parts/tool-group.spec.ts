@@ -9,21 +9,33 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
-import { Part } from '../../../core/engine.dtos';
-import { GroupRow, RenderedPart, ToolGroupComponent, summarizeToolRun } from './tool-group';
+import { Part, SafetyCategory } from '../../../core/engine.dtos';
+import {
+  EMPTY_SAFETY,
+  GroupRow,
+  RenderedPart,
+  ToolGroupComponent,
+  summarizeToolRun,
+} from './tool-group';
 
-function tool(name: string, state: 'completed' | 'error' | 'running' = 'completed'): Part {
+function tool(
+  name: string,
+  state: 'completed' | 'error' | 'running' = 'completed',
+  safety?: SafetyCategory,
+): Part {
+  const extra = safety ? { safety } : {};
   switch (state) {
     case 'error':
-      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, error: 'boom' } };
+      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, error: 'boom' }, ...extra };
     case 'running':
-      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, started_at: 1 } };
+      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, started_at: 1 }, ...extra };
     default:
       return {
         type: 'tool',
         id: `${name}-${Math.random()}`,
         name,
         state: { state: 'completed', input: {}, output: 'ok', title: name },
+        ...extra,
       };
   }
 }
@@ -37,8 +49,30 @@ describe('summarizeToolRun (F6-1 / F6-1c)', () => {
     expect(summarizeToolRun([])).toEqual({
       state: 'completed',
       names: '',
-      safety: { green: 0, yellow: 0, orange: 0 },
+      safety: { ...EMPTY_SAFETY },
     });
+  });
+
+  it('F7-7: counts calls per stamped safety category, gray for unstamped ones', () => {
+    const summary = summarizeToolRun([
+      row(tool('read', 'completed', 'safe')),
+      row(tool('read', 'completed', 'safe')),
+      row(tool('fetch', 'running', 'caution')),
+      row(tool('bash', 'error', 'dangerous')),
+      row(tool('mcp__x__y')),
+    ]);
+    expect(summary.safety).toEqual({ safe: 2, caution: 1, dangerous: 1, uncategorized: 1 });
+  });
+
+  it('F7-7: resolves unstamped (historical) parts by tool name through the resolver', () => {
+    const resolve = (name: string): SafetyCategory | null =>
+      ({ read: 'safe', edit: 'dangerous' } as Record<string, SafetyCategory>)[name] ?? null;
+    const summary = summarizeToolRun(
+      [row(tool('read')), row(tool('edit')), row(tool('mystery')), row(tool('bash', 'completed', 'caution'))],
+      resolve,
+    );
+    // A stamped category always wins over the resolver.
+    expect(summary.safety).toEqual({ safe: 1, caution: 1, dangerous: 1, uncategorized: 1 });
   });
 
   it('counts repeated names in first-appearance order', () => {
@@ -148,37 +182,44 @@ describe('ToolGroupComponent (F6-1 / F6-1c)', () => {
     expect(root().querySelector('.group-head > .dot.state-completed')).not.toBeNull();
   });
 
-  it('renders a per-level count cluster once safety data is present (F7-1)', async () => {
+  it('renders a per-category count cluster once safety counts are present (F7-7)', async () => {
     setInputs([row(tool('read')), row(tool('edit'))], false);
-    fixture.componentRef.setInput('safety', { green: 3, yellow: 1, orange: 2 });
+    fixture.componentRef.setInput('safety', { safe: 3, caution: 1, dangerous: 2, uncategorized: 4 });
     await fixture.whenStable();
 
     const cluster = root().querySelector('.safety-cluster');
     expect(cluster).not.toBeNull();
     expect(root().querySelector('.group-head > .dot')).toBeNull();
     const dots = root().querySelectorAll('.cluster-dot');
-    expect(dots.length).toBe(3);
-    expect(dots[0].classList.contains('safety-green')).toBeTrue();
+    expect(dots.length).toBe(4);
+    expect(dots[0].classList.contains('safety-safe')).toBeTrue();
     expect(dots[0].textContent).toContain('3');
-    expect(dots[1].classList.contains('safety-yellow')).toBeTrue();
+    expect(dots[1].classList.contains('safety-caution')).toBeTrue();
     expect(dots[1].textContent).toContain('1');
-    expect(dots[2].classList.contains('safety-orange')).toBeTrue();
+    expect(dots[2].classList.contains('safety-dangerous')).toBeTrue();
     expect(dots[2].textContent).toContain('2');
+    expect(dots[3].classList.contains('safety-uncategorized')).toBeTrue();
+    expect(dots[3].textContent).toContain('4');
+    // Tooltip: per-category counts + the colour legend.
+    const title = cluster!.getAttribute('title') ?? '';
+    expect(title).toContain('3 safe');
+    expect(title).toContain('4 uncategorized');
+    expect(title).toContain('legend');
   });
 
-  it('omits zero-count levels from the cluster', async () => {
+  it('omits zero-count categories from the cluster', async () => {
     setInputs([row(tool('read'))], false);
-    fixture.componentRef.setInput('safety', { green: 0, yellow: 0, orange: 5 });
+    fixture.componentRef.setInput('safety', { safe: 0, caution: 0, dangerous: 5, uncategorized: 0 });
     await fixture.whenStable();
 
     expect(root().querySelectorAll('.cluster-dot').length).toBe(1);
-    expect(root().querySelector('.cluster-dot')!.classList.contains('safety-orange')).toBeTrue();
+    expect(root().querySelector('.cluster-dot')!.classList.contains('safety-dangerous')).toBeTrue();
   });
 
   it('rings the cluster when the worst state is error', async () => {
     setInputs([row(tool('a', 'error'))], false);
     fixture.componentRef.setInput('state', 'error');
-    fixture.componentRef.setInput('safety', { green: 0, yellow: 0, orange: 1 });
+    fixture.componentRef.setInput('safety', { safe: 0, caution: 0, dangerous: 1, uncategorized: 0 });
     await fixture.whenStable();
 
     expect(root().querySelector('.safety-cluster')!.classList.contains('ring-failed')).toBeTrue();

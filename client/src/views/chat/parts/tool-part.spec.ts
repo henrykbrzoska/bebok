@@ -12,9 +12,14 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
-import { Part } from '../../../core/engine.dtos';
+import { Part, ToolSafetyEntry } from '../../../core/engine.dtos';
+import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { ToolPartComponent } from './tool-part';
+
+function entry(name: string, category: ToolSafetyEntry['category']): ToolSafetyEntry {
+  return { name, source: 'built-in', category, default_category: category, is_override: false };
+}
 
 const READ: Part = {
   type: 'tool',
@@ -164,37 +169,68 @@ describe('ToolPartComponent default state (F6-1b)', () => {
     expect(head().querySelector('.tool-args')!.textContent).not.toContain('·');
   });
 
-  it('F7-1: colours the header dot by safety tier, independent of run state', async () => {
-    setPart({ ...READ, permission: 'allow', mutating: false });
+  it('F7-7: colours the header dot by the stamped safety category, not the run state', async () => {
+    setPart({ ...READ, safety: 'safe' });
     await fixture.whenStable();
     let dot = head().querySelector('.dot')!;
-    expect(dot.classList.contains('safety-green')).toBeTrue();
+    expect(dot.classList.contains('safety-safe')).toBeTrue();
+    expect(dot.getAttribute('data-safety')).toBe('safe');
     expect(dot.classList.contains('ring-failed')).toBeFalse();
 
-    setPart({ ...BASH, state: { state: 'completed', input: {}, output: 'ok', title: 'bash' }, permission: 'ask', mutating: true });
+    setPart({ ...BASH, safety: 'dangerous', permission: 'allow', mutating: false });
     await fixture.whenStable();
     dot = head().querySelector('.dot')!;
-    // Mutating wins over the "ask" verdict.
-    expect(dot.classList.contains('safety-orange')).toBeTrue();
-    expect(dot.classList.contains('safety-yellow')).toBeFalse();
+    // The runtime verdict (auto-allowed) does not turn a dangerous tool green.
+    expect(dot.classList.contains('safety-dangerous')).toBeTrue();
+    expect(dot.classList.contains('safety-safe')).toBeFalse();
 
-    setPart({ ...OTHER, permission: 'ask', mutating: false });
+    setPart({ ...FETCH_RUNNING, safety: 'caution' });
     await fixture.whenStable();
     dot = head().querySelector('.dot')!;
-    expect(dot.classList.contains('safety-yellow')).toBeTrue();
+    expect(dot.classList.contains('safety-caution')).toBeTrue();
+    expect(dot.classList.contains('pulse')).toBeTrue();
   });
 
-  it('F7-1: falls back to state-unknown with no resolved permission (legacy part)', async () => {
+  it('F7-7: a historical part without a stamped category takes the current one by tool name', async () => {
+    const store = TestBed.inject(ToolSafetyStore);
     setPart(READ);
     await fixture.whenStable();
-    expect(head().querySelector('.dot')!.classList.contains('state-unknown')).toBeTrue();
+    // Map not loaded yet: gray.
+    expect(head().querySelector('.dot')!.classList.contains('safety-uncategorized')).toBeTrue();
+
+    store.entries.set([entry('read_file', 'safe'), entry('bash', 'dangerous')]);
+    await fixture.whenStable();
+    expect(head().querySelector('.dot')!.classList.contains('safety-safe')).toBeTrue();
+
+    setPart(BASH);
+    await fixture.whenStable();
+    expect(head().querySelector('.dot')!.classList.contains('safety-dangerous')).toBeTrue();
+
+    // A tool the engine no longer lists stays gray.
+    setPart({ ...OTHER, name: 'mcp__gone__thing' });
+    await fixture.whenStable();
+    expect(head().querySelector('.dot')!.classList.contains('safety-uncategorized')).toBeTrue();
   });
 
-  it('F7-1: a failed call keeps a red ring regardless of its safety colour', async () => {
-    setPart({ ...FAILED, permission: 'allow', mutating: true });
+  it('F7-7: the dot tooltip carries the category and the colour legend', async () => {
+    setPart({ ...READ, safety: 'dangerous' });
+    await fixture.whenStable();
+    const title = head().querySelector('.dot')!.getAttribute('title') ?? '';
+    expect(title).toContain('dangerous');
+    expect(title).toContain('legend');
+    expect(title).toContain('green safe');
+    expect(title).toContain('gray uncategorized');
+
+    setPart({ ...READ, safety: 'uncategorized' });
+    await fixture.whenStable();
+    expect(head().querySelector('.dot')!.getAttribute('title')).toContain('Settings > Permissions');
+  });
+
+  it('F7-7: a failed call keeps a red ring regardless of its safety colour', async () => {
+    setPart({ ...FAILED, safety: 'dangerous' });
     await fixture.whenStable();
     const dot = head().querySelector('.dot')!;
     expect(dot.classList.contains('ring-failed')).toBeTrue();
-    expect(dot.classList.contains('safety-orange')).toBeTrue();
+    expect(dot.classList.contains('safety-dangerous')).toBeTrue();
   });
 });

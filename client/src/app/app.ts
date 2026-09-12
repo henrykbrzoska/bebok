@@ -15,6 +15,7 @@ import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterOutlet } from '@an
 import { CustomCssService } from '../core/custom-css.service';
 import { EngineClient } from '../core/engine-client.service';
 import { EventsStore } from '../core/events.store';
+import { ToolSafetyStore } from '../core/tool-safety.store';
 import { AppShell } from '../ui/shell/app-shell';
 
 @Component({
@@ -28,6 +29,7 @@ export class App implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly engine = inject(EngineClient);
   private readonly customCss = inject(CustomCssService);
+  private readonly toolSafety = inject(ToolSafetyStore);
 
   /**
    * WP-BROWSER2 (F7-6): routes flagged `data.bare` (the browser viewer
@@ -51,6 +53,9 @@ export class App implements OnInit, OnDestroy {
     this.unsubscribeEvents = this.events.onEvent((ev) => {
       if (ev.type === 'config.changed') {
         void this.customCss.resync();
+        // F7-7: a saved tool_safety override (or an MCP toggle) changes the
+        // category list the transcript colours historical calls with.
+        void this.toolSafety.resync();
       }
     });
   }

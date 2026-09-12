@@ -9,7 +9,13 @@
         [class.active]="store.tab() === tab"
         [attr.aria-selected]="store.tab() === tab"
         (click)="select(tab)"
-      >{{ t(tabLabel(tab)) }}</button>
+      >{{ t(tabLabel(tab)) }}@if (tab === 'permissions' && toolSafety.uncategorizedCount() > 0) {
+          <span
+            class="rail-badge"
+            data-testid="permissions-badge"
+            [title]="t('settings.toolSafetyBadge', { n: toolSafety.uncategorizedCount() })"
+          >{{ toolSafety.uncategorizedCount() }}</span>
+        }</button>
     }
     <span class="rail-dir mono" [attr.title]="store.directory()">{{ store.directory() }}</span>
   </nav>

@@ -49,8 +49,10 @@ import {
   SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
+  SafetyCategory,
   StatsQuery,
   StatsResponse,
+  ToolSafetyResponse,
   WorktreeSpec,
   BrowserAction,
   BrowserActionResult,
@@ -455,6 +457,30 @@ export class EngineClient {
       (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '') +
       (opts?.replace ? '&replace=true' : '');
     return this.request<ConfigResponse>('PUT', `/config?${query}`, delta);
+  }
+
+  /** F7-7: every tool the engine knows with its safety category. */
+  getToolSafety(directory: string): Promise<ToolSafetyResponse> {
+    return this.request<ToolSafetyResponse>(
+      'GET',
+      `/tools/safety?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * F7-7: merge category overrides into a config layer's `tool_safety` map
+   * (`null` removes an override = reset to default). Global by default - a
+   * category is a user-level judgement shared by every project.
+   */
+  putToolSafety(
+    directory: string,
+    overrides: Record<string, SafetyCategory | null>,
+    opts?: { scope?: 'project' | 'global' },
+  ): Promise<ToolSafetyResponse> {
+    const query =
+      `directory=${encodeURIComponent(directory)}` +
+      (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '');
+    return this.request<ToolSafetyResponse>('PUT', `/tools/safety?${query}`, { overrides });
   }
 
   /** Probe Docker access for a directory (resolves `runtimes.docker`). */
