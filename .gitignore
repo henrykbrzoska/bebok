@@ -39,4 +39,4 @@ client/.ndk-bin/
 /*.js
 /mimo_img.html
 /tmp-out.txt
-/{const
+/const
