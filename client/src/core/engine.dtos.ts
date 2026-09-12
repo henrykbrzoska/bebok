@@ -224,6 +224,33 @@ export interface ActiveTask {
   childSessionID: string;
   name?: string;
   agent?: string;
+  /** F6-12: effective model of the child turn. */
+  model?: string;
+  /** F6-12: unix ms when the child turn was registered. */
+  startedAt?: number;
+}
+
+/** F6-12: lifecycle of one delegated child as reported by `GET /session/{id}/agents`. */
+export type AgentStatus = 'running' | 'done' | 'failed' | 'aborted' | 'unknown';
+
+/** One row of `GET /session/{id}/agents` (live task map merged with finished children). */
+export interface AgentEntry {
+  /** Present while running only (the id is not persisted once the task ends). */
+  taskID?: string;
+  childSessionID: string;
+  name: string;
+  agent: string;
+  model?: string;
+  status: AgentStatus;
+  description: string;
+  startedAt: number;
+  endedAt?: number;
+  error?: string;
+  usage: UsageTotals;
+}
+
+export interface SessionAgentsResponse {
+  agents: AgentEntry[];
 }
 
 export type ToolStateKind = 'pending' | 'running' | 'completed' | 'error';

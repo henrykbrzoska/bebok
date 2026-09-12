@@ -474,4 +474,20 @@ export const ko: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': '이 세션에서 사용한 모델의 요금 정보가 없습니다',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': '에이전트',
+  'agents.none': '이 세션에는 아직 서브 에이전트가 없습니다',
+  'agents.loading': '서브 에이전트 불러오는 중…',
+  'agents.running': '실행 중',
+  'agents.done': '완료',
+  'agents.failed': '실패',
+  'agents.aborted': '중단됨',
+  'agents.unknown': '알 수 없음',
+  'agents.openTranscript': '기록 열기',
+  'agents.transcript': '서브 에이전트 기록',
+  'agents.readOnly': '읽기 전용 보기',
+  'agents.close': '닫기',
+  'agents.empty': '아직 메시지가 없습니다',
+  'agents.tokens': '토큰',
 };

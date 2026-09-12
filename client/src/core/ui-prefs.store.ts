@@ -41,9 +41,16 @@ export interface RightDrawerPanels {
   session: boolean;
   explorer: boolean;
   terminal: boolean;
+  /** F6-13: live sub-agent list (Agents panel). */
+  agents: boolean;
 }
 
-const DEFAULT_PANELS: RightDrawerPanels = { session: true, explorer: true, terminal: false };
+const DEFAULT_PANELS: RightDrawerPanels = {
+  session: true,
+  explorer: true,
+  terminal: false,
+  agents: false,
+};
 
 function readBool(key: string, fallback: boolean): boolean {
   try {
@@ -106,6 +113,7 @@ function readPanels(): RightDrawerPanels {
         typeof parsed['explorer'] === 'boolean' ? parsed['explorer'] : DEFAULT_PANELS.explorer,
       terminal:
         typeof parsed['terminal'] === 'boolean' ? parsed['terminal'] : DEFAULT_PANELS.terminal,
+      agents: typeof parsed['agents'] === 'boolean' ? parsed['agents'] : DEFAULT_PANELS.agents,
     };
   } catch {
     return { ...DEFAULT_PANELS };

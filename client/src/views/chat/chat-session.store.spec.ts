@@ -274,6 +274,7 @@ describe('right drawer default state (F2-15)', () => {
       session: true,
       explorer: true,
       terminal: false,
+      agents: false,
     });
   });
 });

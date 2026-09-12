@@ -475,4 +475,20 @@ export const pt: Record<MessageKey, string> = {
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Preço desconhecido para os modelos usados nesta sessão',
+
+  // F6-13: Agents panel + sub-agent transcript viewer (WP-AGENTS)
+  'drawer.agents': 'Agentes',
+  'agents.none': 'Ainda não há subagentes nesta sessão',
+  'agents.loading': 'A carregar subagentes…',
+  'agents.running': 'em execução',
+  'agents.done': 'concluído',
+  'agents.failed': 'falhou',
+  'agents.aborted': 'cancelado',
+  'agents.unknown': 'desconhecido',
+  'agents.openTranscript': 'Abrir transcrição',
+  'agents.transcript': 'Transcrição do subagente',
+  'agents.readOnly': 'Vista só de leitura',
+  'agents.close': 'Fechar',
+  'agents.empty': 'Ainda sem mensagens',
+  'agents.tokens': 'tokens',
 };

@@ -11,6 +11,7 @@ import { authFetch } from './auth.interceptor';
 import {
   AbortResponse,
   AbortTaskResponse,
+  AgentEntry,
   AgentInfo,
   AgentListResponse,
   CompactResponse,
@@ -39,6 +40,7 @@ import {
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
+  SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
 } from './engine.dtos';
@@ -202,6 +204,13 @@ export class EngineClient {
   messages(id: string): Promise<Message[]> {
     return this.request<MessageListResponse>('GET', `/session/${id}/message`).then(
       (d) => d.messages,
+    );
+  }
+
+  /** F6-12: live + finished sub-agents delegated from `id` (`task`/`fleet`). */
+  sessionAgents(id: string): Promise<AgentEntry[]> {
+    return this.request<SessionAgentsResponse>('GET', `/session/${id}/agents`).then(
+      (d) => d.agents,
     );
   }
 
