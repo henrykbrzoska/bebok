@@ -320,4 +320,7 @@ export const pl: Record<MessageKey, string> = {
   'chat.abortIdle': 'Żadna tura nie jest uruchomiona',
   'chat.assistantLabel': 'Asystent',
   'thinking.head': 'Myślenie',
+  'diff.mode': 'Układ różnic',
+  'diff.unified': 'Scalony',
+  'diff.split': 'Podzielony',
 };

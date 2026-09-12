@@ -319,4 +319,7 @@ export const zh: Record<MessageKey, string> = {
   'chat.abortIdle': '当前没有进行中的回合',
   'chat.assistantLabel': '助手',
   'thinking.head': '思考中',
+  'diff.mode': '差异布局',
+  'diff.unified': '统一',
+  'diff.split': '分栏',
 };

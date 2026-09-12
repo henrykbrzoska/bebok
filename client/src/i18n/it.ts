@@ -320,4 +320,7 @@ export const it: Record<MessageKey, string> = {
   'chat.abortIdle': 'Nessun turno in corso',
   'chat.assistantLabel': 'Assistente',
   'thinking.head': 'Ragionamento',
+  'diff.mode': 'Vista diff',
+  'diff.unified': 'Unificato',
+  'diff.split': 'Affiancato',
 };

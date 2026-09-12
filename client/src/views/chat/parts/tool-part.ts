@@ -66,7 +66,7 @@ import { I18nService } from '../../../i18n/i18n.service';
             @case ('completed') {
               @if (outputText()) {
                 <div class="section-label">{{ t('tool.output') }}</div>
-                <app-diff-view [text]="outputText()" />
+                <app-diff-view [text]="outputText()" [fileLabel]="filePath()" />
               }
             }
             @case ('error') {

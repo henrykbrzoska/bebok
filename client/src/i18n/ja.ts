@@ -319,4 +319,7 @@ export const ja: Record<MessageKey, string> = {
   'chat.abortIdle': '実行中のターンはありません',
   'chat.assistantLabel': 'アシスタント',
   'thinking.head': '思考中',
+  'diff.mode': '差分の表示',
+  'diff.unified': '統合',
+  'diff.split': '分割',
 };

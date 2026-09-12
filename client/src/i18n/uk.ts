@@ -320,4 +320,7 @@ export const uk: Record<MessageKey, string> = {
   'chat.abortIdle': 'Жоден хід не виконується',
   'chat.assistantLabel': 'Асистент',
   'thinking.head': 'Міркування',
+  'diff.mode': 'Вигляд різниці',
+  'diff.unified': 'Об\'єднаний',
+  'diff.split': 'Роздільний',
 };

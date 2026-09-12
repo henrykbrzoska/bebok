@@ -319,4 +319,7 @@ export const hi: Record<MessageKey, string> = {
   'chat.abortIdle': 'कोई टर्न नहीं चल रहा',
   'chat.assistantLabel': 'सहायक',
   'thinking.head': 'सोच रहा है',
+  'diff.mode': 'डिफ़ लेआउट',
+  'diff.unified': 'एकीकृत',
+  'diff.split': 'विभाजित',
 };
