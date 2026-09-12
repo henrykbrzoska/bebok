@@ -101,7 +101,11 @@ describe('ChatView compaction (F6-4)', () => {
           // `snapshot` is walked by ShellStore.refresh() (pulled in via TextPartComponent).
           useValue: {
             paramMap: of(convertToParamMap({ sessionID: 's1' })),
-            snapshot: { firstChild: null, data: {}, paramMap: convertToParamMap({ sessionID: 's1' }) },
+            snapshot: {
+              firstChild: null,
+              data: {},
+              paramMap: convertToParamMap({ sessionID: 's1' }),
+            },
           },
         },
       ],
