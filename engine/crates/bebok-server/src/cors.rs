@@ -44,6 +44,7 @@ pub fn cors_layer() -> CorsLayer {
             Method::GET,
             Method::POST,
             Method::PUT,
+            Method::PATCH,
             Method::DELETE,
             Method::OPTIONS,
         ])
@@ -51,4 +52,73 @@ pub fn cors_layer() -> CorsLayer {
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
         ])
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression test for the missing-`PATCH` bug: `PATCH /projects/{id}`
+    //! (WP-PROJ-GROUPS) never made it into `allow_methods`, so a browser
+    //! preflight rejected the method before the request ever reached the
+    //! token layer (`net::ERR_FAILED`, not a 401 — CORS runs first).
+    use super::*;
+    use crate::routes::build_api_router;
+    use crate::state::AppState;
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use std::sync::Arc;
+    use tower::ServiceExt as _;
+
+    fn test_app() -> Router {
+        let dir = std::env::temp_dir().join(format!("bebok-cors-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).ok();
+        let state = AppState {
+            store: bebok_core::InstanceStore::new(),
+            #[cfg(not(target_os = "android"))]
+            ptys: Arc::new(bebok_pty::PtyManager::new()),
+            debug: Arc::new(bebok_core::DebugLog::new(dir.join("debug.log"))),
+            llm_trace: bebok_core::LLM_TRACE.clone(),
+        };
+        build_api_router().layer(cors_layer()).with_state(state)
+    }
+
+    /// Every method a route in `build_api_router` actually uses must survive
+    /// a cross-origin preflight, or the browser blocks the real request.
+    #[tokio::test]
+    async fn preflight_allows_every_method_the_api_uses() {
+        for (path, method) in [
+            ("/projects/x", "PATCH"),
+            ("/projects/x", "DELETE"),
+            ("/session", "POST"),
+            ("/config", "PUT"),
+            ("/fs/file", "PUT"),
+        ] {
+            let req = Request::builder()
+                .method("OPTIONS")
+                .uri(path)
+                .header(header::ORIGIN, "http://localhost:4200")
+                .header("access-control-request-method", method)
+                .header(
+                    "access-control-request-headers",
+                    "authorization,content-type",
+                )
+                .body(Body::empty())
+                .unwrap();
+            let res = test_app().oneshot(req).await.unwrap();
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "preflight for {method} {path}"
+            );
+            let allowed = res
+                .headers()
+                .get("access-control-allow-methods")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            assert!(
+                allowed.contains(method),
+                "{method} {path}: allow-methods {allowed:?} does not list {method}"
+            );
+        }
+    }
 }
