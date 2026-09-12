@@ -15,6 +15,7 @@ use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
     retry_after_from_headers,
 };
+use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Native Anthropic Messages endpoint.
 pub const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -86,17 +87,7 @@ impl Provider for AnthropicProvider {
 
 /// Build the Anthropic Messages request body.
 pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
-    let tools: Vec<Value> = req
-        .tools
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "name": t.name,
-                "description": t.description,
-                "input_schema": t.input_schema,
-            })
-        })
-        .collect();
+    let tools: Vec<Value> = map_tools(&req.tools, Protocol::Anthropic);
 
     let mut body = serde_json::json!({
         "model": model,
@@ -119,7 +110,6 @@ pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
 
 /// Convert provider-neutral messages into Anthropic content blocks.
 pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
-    use crate::provider::ContentPart;
     let mut out = Vec::with_capacity(msgs.len());
     for m in msgs {
         let mut blocks: Vec<Value> = Vec::new();
@@ -134,16 +124,9 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
                 "is_error": tr.is_error,
             }));
         }
-        for p in &m.content_parts {
-            if let ContentPart::Image { media_type, data } = p {
-                blocks.push(serde_json::json!({
-                    "type": "image",
-                    "source": { "type": "base64", "media_type": media_type, "data": data },
-                }));
-            }
-        }
+        blocks.extend(map_image_parts(&m.content_parts, Protocol::Anthropic));
         if !m.content.is_empty() {
-            blocks.push(serde_json::json!({ "type": "text", "text": m.content }));
+            blocks.push(text_block(&m.content));
         }
         for tc in &m.tool_calls {
             blocks.push(serde_json::json!({
@@ -154,7 +137,7 @@ pub fn to_anthropic_messages(msgs: &[ChatMessage]) -> Vec<Value> {
             }));
         }
         if blocks.is_empty() {
-            blocks.push(serde_json::json!({ "type": "text", "text": "" }));
+            blocks.push(text_block(""));
         }
         out.push(serde_json::json!({
             "role": m.role.as_str(),

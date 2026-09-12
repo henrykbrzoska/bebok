@@ -16,23 +16,11 @@ use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
     retry_after_from_headers,
 };
+use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Build an OpenAI Chat Completions request body.
 pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
-    let tools: Vec<Value> = req
-        .tools
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.input_schema,
-                }
-            })
-        })
-        .collect();
+    let tools: Vec<Value> = map_tools(&req.tools, Protocol::OpenAi);
 
     let mut body = serde_json::json!({
         "model": model,
@@ -67,16 +55,9 @@ fn openai_content(m: &ChatMessage) -> Value {
     }
     let mut parts: Vec<Value> = Vec::new();
     if !m.content.is_empty() {
-        parts.push(serde_json::json!({ "type": "text", "text": m.content }));
+        parts.push(text_block(&m.content));
     }
-    for p in &m.content_parts {
-        if let ContentPart::Image { media_type, data } = p {
-            parts.push(serde_json::json!({
-                "type": "image_url",
-                "image_url": { "url": format!("data:{media_type};base64,{data}") },
-            }));
-        }
-    }
+    parts.extend(map_image_parts(&m.content_parts, Protocol::OpenAi));
     Value::Array(parts)
 }
 

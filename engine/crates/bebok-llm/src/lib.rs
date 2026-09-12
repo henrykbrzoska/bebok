@@ -8,6 +8,7 @@ mod cost;
 mod openai;
 mod provider;
 mod spec;
+mod wire;
 mod zai;
 
 pub use anthropic::{ANTHROPIC_MESSAGES_URL, AnthropicProvider, to_anthropic_messages};
@@ -22,4 +23,5 @@ pub use spec::{
     ProviderKind, ProviderSpec, builtin_provider_specs, find_provider_spec, list_models,
     resolve_api_key, resolve_provider_specs,
 };
+pub use wire::{Protocol, map_content_part, map_image_parts, map_tool, map_tools};
 pub use zai::ZaiProvider;
