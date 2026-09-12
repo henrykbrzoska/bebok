@@ -60,8 +60,13 @@ impl Provider for ZaiProvider {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
+            let retry_after = crate::provider::retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Http { status, body: text });
+            return Err(LlmError::Http {
+                status,
+                body: text,
+                retry_after,
+            });
         }
 
         Ok(Box::pin(anthropic_stream(resp)))

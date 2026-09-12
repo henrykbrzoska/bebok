@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
+    retry_after_from_headers,
 };
 
 /// Build an OpenAI Chat Completions request body.
@@ -43,7 +44,10 @@ pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
     });
     if let Some(effort) = req.thinking.openai_effort() {
         if let Value::Object(map) = &mut body {
-            map.insert("reasoning_effort".to_string(), Value::String(effort.to_string()));
+            map.insert(
+                "reasoning_effort".to_string(),
+                Value::String(effort.to_string()),
+            );
         }
     }
     body
@@ -179,8 +183,13 @@ impl Provider for OpenAiProvider {
         let resp = request.json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
+            let retry_after = retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Http { status, body: text });
+            return Err(LlmError::Http {
+                status,
+                body: text,
+                retry_after,
+            });
         }
 
         Ok(Box::pin(openai_stream(resp)))
@@ -385,8 +394,8 @@ impl OpenAiParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::provider::{ChatMessage, ChatRequest, Thinking};
     use super::openai_body;
+    use crate::provider::{ChatMessage, ChatRequest, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {
@@ -440,16 +449,28 @@ mod image_tests {
         assert_eq!(msgs[0]["role"], "user");
         let parts = msgs[0]["content"].as_array().unwrap();
         assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0], serde_json::json!({"type": "text", "text": "look"}));
+        assert_eq!(
+            parts[0],
+            serde_json::json!({"type": "text", "text": "look"})
+        );
         assert_eq!(parts[1]["type"], "image_url");
-        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,aGVsbG8=");
+        assert_eq!(
+            parts[1]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
     }
 
     #[test]
     fn openai_text_only_path_unchanged() {
         let msgs = to_openai_messages(&[ChatMessage::user("hi")], "sys");
-        assert_eq!(msgs[0], serde_json::json!({"role": "system", "content": "sys"}));
-        assert_eq!(msgs[1], serde_json::json!({"role": "user", "content": "hi"}));
+        assert_eq!(
+            msgs[0],
+            serde_json::json!({"role": "system", "content": "sys"})
+        );
+        assert_eq!(
+            msgs[1],
+            serde_json::json!({"role": "user", "content": "hi"})
+        );
     }
 
     #[test]
@@ -485,9 +506,15 @@ mod image_tests {
         assert_eq!(msgs[0]["tool_call_id"], "call-1");
         assert_eq!(msgs[1]["role"], "user");
         let parts = msgs[1]["content"].as_array().unwrap();
-        assert_eq!(parts[0], serde_json::json!({"type": "text", "text": "see this"}));
+        assert_eq!(
+            parts[0],
+            serde_json::json!({"type": "text", "text": "see this"})
+        );
         assert_eq!(parts[1]["type"], "image_url");
-        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,aGVsbG8=");
+        assert_eq!(
+            parts[1]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
     }
 
     /// User text must never vanish when tool results are present.
@@ -505,7 +532,10 @@ mod image_tests {
             content_parts: Vec::new(),
         };
         let msgs = to_openai_messages(&[m], "");
-        assert_eq!(msgs[1], serde_json::json!({"role": "user", "content": "notes"}));
+        assert_eq!(
+            msgs[1],
+            serde_json::json!({"role": "user", "content": "notes"})
+        );
     }
 
     #[test]

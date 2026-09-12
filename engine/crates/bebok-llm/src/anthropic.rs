@@ -1,4 +1,4 @@
-﻿//! Anthropic-compatible request building and SSE parsing.
+//! Anthropic-compatible request building and SSE parsing.
 //!
 //! Z.ai exposes an Anthropic-compatible Messages API; in M1 we use that single
 //! format, but it is parsed here in isolation so that additional providers can
@@ -11,7 +11,10 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, stream};
 use serde_json::Value;
 
-use crate::provider::{ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage};
+use crate::provider::{
+    ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
+    retry_after_from_headers,
+};
 
 /// Native Anthropic Messages endpoint.
 pub const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -48,7 +51,12 @@ impl Provider for AnthropicProvider {
         &self,
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
-        let model = req.model.rsplit('/').next().unwrap_or(&req.model).to_string();
+        let model = req
+            .model
+            .rsplit('/')
+            .next()
+            .unwrap_or(&req.model)
+            .to_string();
         let body = anthropic_body(&req, &model);
 
         let resp = self
@@ -63,8 +71,13 @@ impl Provider for AnthropicProvider {
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
+            let retry_after = retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Http { status, body: text });
+            return Err(LlmError::Http {
+                status,
+                body: text,
+                retry_after,
+            });
         }
 
         Ok(Box::pin(anthropic_stream(resp)))
@@ -265,7 +278,11 @@ impl AnthropicParser {
             }
             "content_block_start" => {
                 let cb = v.get("content_block").cloned().unwrap_or(Value::Null);
-                let bty = cb.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let bty = cb
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 self.block_type = Some(bty.clone());
                 if bty == "tool_use" {
                     self.tool_id = cb.get("id").and_then(|x| x.as_str()).map(str::to_string);
@@ -358,8 +375,8 @@ impl AnthropicParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::provider::{ChatMessage, ChatRequest, Thinking};
     use super::anthropic_body;
+    use crate::provider::{ChatMessage, ChatRequest, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {

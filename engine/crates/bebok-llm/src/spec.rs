@@ -69,7 +69,10 @@ impl ProviderSpec {
 
     /// Environment variable holding the provider's key (`openai` -> `OPENAI_API_KEY`).
     pub fn env_var(&self) -> String {
-        format!("{}_API_KEY", self.name.to_ascii_uppercase().replace('-', "_"))
+        format!(
+            "{}_API_KEY",
+            self.name.to_ascii_uppercase().replace('-', "_")
+        )
     }
 
     /// True when an API key is resolvable (explicit key or env var).
@@ -164,7 +167,10 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.mistral.ai/v1".into()),
             api_key: None,
-            models: vec!["mistral-large-latest".into(), "mistral-medium-latest".into()],
+            models: vec![
+                "mistral-large-latest".into(),
+                "mistral-medium-latest".into(),
+            ],
         },
         ProviderSpec {
             name: "groq".into(),
@@ -237,7 +243,9 @@ pub fn resolve_api_key(spec: &ProviderSpec) -> Option<String> {
     if let Some(key) = spec.api_key.as_ref().filter(|s| !s.trim().is_empty()) {
         return Some(key.clone());
     }
-    std::env::var(spec.env_var()).ok().filter(|s| !s.trim().is_empty())
+    std::env::var(spec.env_var())
+        .ok()
+        .filter(|s| !s.trim().is_empty())
 }
 
 /// List available model ids for a provider by calling its `GET /models` (or
@@ -266,8 +274,13 @@ pub async fn list_models(spec: &ProviderSpec) -> Result<Vec<String>, LlmError> {
     let resp = req.send().await.map_err(LlmError::Request)?;
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
+        let retry_after = crate::provider::retry_after_from_headers(resp.headers());
         let body = resp.text().await.unwrap_or_default();
-        return Err(LlmError::Http { status, body });
+        return Err(LlmError::Http {
+            status,
+            body,
+            retry_after,
+        });
     }
 
     let value: serde_json::Value = resp.json().await.map_err(LlmError::Request)?;
