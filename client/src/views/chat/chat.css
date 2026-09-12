@@ -125,22 +125,32 @@
   width: 100%;
 }
 
-/* F2-11: empty state. */
+/* F2-11: empty state - centred "No messages. / Send the first prompt below." */
 .placeholder {
   margin: auto;
   text-align: center;
   color: var(--text-muted);
   line-height: 1.7;
+  font-size: var(--fs-13);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .placeholder-title {
   margin: 0;
   font-size: var(--fs-14);
+  font-weight: 600;
   color: var(--text);
 }
 
-.placeholder p {
+.placeholder-hint {
   margin: 0;
+  font-size: var(--fs-12-5);
+  color: var(--text-faint);
 }
 
 .chat-error {
