@@ -64,6 +64,8 @@ export const en = {
   'chat.forceSend': 'Force send',
   'chat.rollback': 'Roll back here: forks the session before this prompt and lets you edit it again',
   'chat.goToLastUser': 'Go to last question ↑',
+  'chat.loadEarlier': 'Load earlier messages',
+  'chat.earlierHidden': '{n} earlier messages not shown',
   'chat.attachImage': 'Attach image',
   'chat.removeAttachment': 'Remove attachment',
   'chat.imageTooLarge': 'Image too large (max 5 MB): {name}',

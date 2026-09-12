@@ -329,6 +329,8 @@ export const zh: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': '回到此处：在此提示词前分叉会话，并可重新编辑',
   'chat.goToLastUser': '跳转到最后一个问题 ↑',
+  'chat.loadEarlier': '加载更早的消息',
+  'chat.earlierHidden': '{n} 条更早的消息未显示',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

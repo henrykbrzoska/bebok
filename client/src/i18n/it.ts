@@ -330,6 +330,8 @@ export const it: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': 'Torna qui: biforca la sessione prima di questo prompt e lo modifica',
   'chat.goToLastUser': "Vai all'ultima domanda ↑",
+  'chat.loadEarlier': 'Carica messaggi precedenti',
+  'chat.earlierHidden': '{n} messaggi precedenti nascosti',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

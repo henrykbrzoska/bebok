@@ -329,6 +329,8 @@ export const hi: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': 'यहाँ वापस: इस प्रॉम्प्ट से पहले सेशन fork करता है और उसे फिर से संपादित करने देता है',
   'chat.goToLastUser': 'अंतिम प्रश्न पर जाएं ↑',
+  'chat.loadEarlier': 'पिछले संदेश लोड करें',
+  'chat.earlierHidden': '{n} पिछले संदेश नहीं दिखाए गए',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

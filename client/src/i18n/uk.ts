@@ -330,6 +330,8 @@ export const uk: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': 'Повернутися сюди: розгалужує сесію перед цим запитом і дозволяє його відредагувати',
   'chat.goToLastUser': 'Перейти до останнього запитання ↑',
+  'chat.loadEarlier': 'Завантажити попередні повідомлення',
+  'chat.earlierHidden': 'Приховано попередніх повідомлень: {n}',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

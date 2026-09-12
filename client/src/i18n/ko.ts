@@ -329,6 +329,8 @@ export const ko: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': '여기로 되돌리기: 이 프롬프트 앞에서 세션을 포크하여 다시 편집할 수 있습니다',
   'chat.goToLastUser': '마지막 질문으로 이동 ↑',
+  'chat.loadEarlier': '이전 메시지 불러오기',
+  'chat.earlierHidden': '이전 메시지 {n}개 숨김',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

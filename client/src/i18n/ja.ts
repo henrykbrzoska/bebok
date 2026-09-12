@@ -329,6 +329,8 @@ export const ja: Record<MessageKey, string> = {
   'chat.forceSend': 'Force send',
   'chat.rollback': 'ここに戻す: このプロンプトの前でセッションをフォークし、再編集できます',
   'chat.goToLastUser': '最後の質問へ ↑',
+  'chat.loadEarlier': '以前のメッセージを読み込む',
+  'chat.earlierHidden': '以前のメッセージ {n} 件は非表示',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',
