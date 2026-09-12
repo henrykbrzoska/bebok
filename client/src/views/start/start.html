@@ -21,7 +21,13 @@
 
       <div class="actions">
         <button class="primary" (click)="retry()" [disabled]="connecting()">
-          {{ connecting() ? t('start.connecting') : t('start.connectContinue') }}
+          @if (connecting()) {
+            {{ t('start.connecting') }}
+          } @else if (phase() === 'error') {
+            {{ t('start.retry') }}
+          } @else {
+            {{ t('start.connectContinue') }}
+          }
         </button>
       </div>
     } @else if (phase() === 'error') {
