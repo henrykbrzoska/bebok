@@ -76,6 +76,38 @@
         {{ t('sidebar.newSession') }}
       </button>
     </div>
+
+    <div class="session-list" role="list">
+      @for (group of groups(); track group.key) {
+        <div class="group-label">{{ t(group.labelKey) }}</div>
+        @for (session of group.sessions; track session.id) {
+          <button
+            type="button"
+            role="listitem"
+            class="session-row"
+            [class.active]="isCurrentSession(session)"
+            (click)="openSession(session)"
+            [title]="sessionTitle(session)"
+          >
+            <span class="session-head">
+              <app-status-dot
+                class="session-dot"
+                [label]="sessionStatusLabel(session)"
+                [tone]="sessionTone(session)"
+                [labelHidden]="true"
+              />
+              <span class="session-title">{{ sessionTitle(session) }}</span>
+            </span>
+            <span class="session-meta">{{ sessionMeta(session) }}</span>
+          </button>
+        }
+      }
+      @if (groups().length === 0) {
+        <div class="session-empty">
+          {{ hasSessions() ? t('sidebar.noMatches') : t('sidebar.noSessions') }}
+        </div>
+      }
+    </div>
   }
 
   @if (!expanded()) {

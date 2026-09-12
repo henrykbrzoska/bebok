@@ -11,9 +11,11 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
-import { AgentInfo } from '../../core/engine.dtos';
+import { AgentInfo, SessionMeta } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
+import { OpenSessionsStore } from '../../core/open-sessions.store';
+import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
@@ -31,6 +33,8 @@ export class Sidebar {
   readonly shell = inject(ShellStore);
   readonly events = inject(EventsStore);
   readonly project = inject(ProjectSessionsStore);
+  readonly tabs = inject(OpenSessionsStore);
+  readonly activity = inject(SessionActivityStore);
   private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
@@ -110,6 +114,82 @@ export class Sidebar {
     }
   });
 
+  /**
+   * Sessions grouped Pinned / Today / Older. "Pinned" are the sessions the
+   * user keeps open (the persisted open-tabs list), the rest split by day.
+   */
+  readonly groups = computed<SessionGroup[]>(() => {
+    const query = this.search().trim().toLowerCase();
+    const pinnedIds = new Set(this.tabs.sessions().map((s) => s.id));
+    const startOfToday = new Date().setHours(0, 0, 0, 0);
+
+    const matches = this.project
+      .sessions()
+      .filter((session) => {
+        if (!query) {
+          return true;
+        }
+        const haystack = `${session.title ?? ''} ${session.alias ?? ''} ${session.agent} ${session.id}`;
+        return haystack.toLowerCase().includes(query);
+      })
+      .slice()
+      .sort((a, b) => b.updated_at - a.updated_at);
+
+    const pinned = matches.filter((s) => pinnedIds.has(s.id));
+    const rest = matches.filter((s) => !pinnedIds.has(s.id));
+
+    return [
+      { key: 'pinned' as const, labelKey: 'sidebar.pinned' as const, sessions: pinned },
+      {
+        key: 'today' as const,
+        labelKey: 'sidebar.today' as const,
+        sessions: rest.filter((s) => s.updated_at >= startOfToday),
+      },
+      {
+        key: 'older' as const,
+        labelKey: 'sidebar.older' as const,
+        sessions: rest.filter((s) => s.updated_at < startOfToday),
+      },
+    ].filter((group) => group.sessions.length > 0);
+  });
+
+  readonly hasSessions = computed(() => this.project.sessions().length > 0);
+
+  sessionTitle(session: SessionMeta): string {
+    return session.alias?.trim() || session.title?.trim() || `${session.id.slice(0, 8)} — ${this.t('start.untitled')}`;
+  }
+
+  /** `agent · Nk tok · time` - monospace meta line under the title. */
+  sessionMeta(session: SessionMeta): string {
+    const tokens = session.usage.input_tokens + session.usage.output_tokens;
+    const formatted = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+    return `${session.agent} · ${formatted} tok · ${this.sessionTime(session.updated_at)}`;
+  }
+
+  sessionTone(session: SessionMeta): StatusTone {
+    return this.activity.isRunning(session.id) ? 'success' : 'idle';
+  }
+
+  sessionStatusLabel(session: SessionMeta): string {
+    return this.activity.isRunning(session.id) ? this.t('nav.working') : this.t('status.idle');
+  }
+
+  isCurrentSession(session: SessionMeta): boolean {
+    return this.shell.currentSessionId() === session.id;
+  }
+
+  openSession(session: SessionMeta): void {
+    void this.router.navigate(['/chat', session.id]);
+  }
+
+  private sessionTime(ms: number): string {
+    const date = new Date(ms);
+    if (ms >= new Date().setHours(0, 0, 0, 0)) {
+      return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
   isActive(screen: Screen): boolean {
     return this.activeScreen() === screen;
   }
@@ -134,3 +214,9 @@ type RailKey =
   | 'sidebar.railTerminal'
   | 'sidebar.railDebug'
   | 'sidebar.railSettings';
+
+interface SessionGroup {
+  key: 'pinned' | 'today' | 'older';
+  labelKey: 'sidebar.pinned' | 'sidebar.today' | 'sidebar.older';
+  sessions: SessionMeta[];
+}
