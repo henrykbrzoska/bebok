@@ -14,6 +14,7 @@ import { RouterOutlet } from '@angular/router';
 import { CommandPalette } from '../command-palette/command-palette';
 import { DirectoryBrowser } from '../directory-browser/directory-browser';
 import { ProjectSwitcher } from '../project-switcher/project-switcher';
+import { ReconnectBanner } from '../reconnect-banner/reconnect-banner';
 import { RightDrawer } from '../right-drawer/right-drawer';
 import { Sidebar } from '../sidebar/sidebar';
 import { Topbar } from '../topbar/topbar';
@@ -22,7 +23,16 @@ import { ShellStore } from './shell.store';
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, Sidebar, Topbar, RightDrawer, CommandPalette, DirectoryBrowser, ProjectSwitcher],
+  imports: [
+    RouterOutlet,
+    Sidebar,
+    Topbar,
+    RightDrawer,
+    CommandPalette,
+    DirectoryBrowser,
+    ProjectSwitcher,
+    ReconnectBanner,
+  ],
   templateUrl: './app-shell.html',
   styleUrl: './app-shell.css',
 })
