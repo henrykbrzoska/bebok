@@ -248,12 +248,10 @@ impl InstanceStore {
         let inst_dir = persist::instance_dir(self.data_dir(), &meta.directory);
         let disk_dir = persist::session_dir(&inst_dir, meta.id);
 
-        let state = Arc::new(SessionState::new(
-            meta,
-            inst_dir,
-            disk_dir,
-            instance.config_snapshot(),
-        ));
+        let state = Arc::new(
+            SessionState::new(meta, inst_dir, disk_dir, instance.config_snapshot())
+                .with_live_config(instance.config.clone()),
+        );
 
         // Load the transcript (msg-000000.json, msg-000001.json, ...).
         let mut messages = Vec::new();

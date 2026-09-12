@@ -57,6 +57,13 @@ pub enum Part {
         /// as mutating. Same `None`-until-resolved rule as `permission`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mutating: Option<bool>,
+        /// Explicit safety category of the tool (F7-7): `safe` / `caution` /
+        /// `dangerous` / `uncategorized`, resolved from the built-in default
+        /// table plus the `tool_safety` config map when the gate runs.
+        /// `None` for parts persisted before this field existed - clients
+        /// derive it from the tool name via `GET /tools/safety` then.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        safety: Option<crate::tool_safety::SafetyCategory>,
     },
     Usage {
         input_tokens: u64,
@@ -214,6 +221,7 @@ impl Message {
             state: ToolState::Pending { input },
             permission: None,
             mutating: None,
+            safety: None,
         });
     }
 
@@ -303,6 +311,7 @@ impl Message {
         id: &str,
         permission: PermissionLevel,
         mutating: bool,
+        safety: crate::tool_safety::SafetyCategory,
     ) -> bool {
         let Some(idx) = self.tool_part_index(id) else {
             return false;
@@ -310,6 +319,7 @@ impl Message {
         let Part::Tool {
             permission: p,
             mutating: m,
+            safety: s,
             ..
         } = &mut self.parts[idx]
         else {
@@ -317,6 +327,7 @@ impl Message {
         };
         *p = Some(permission);
         *m = Some(mutating);
+        *s = Some(safety);
         true
     }
 
@@ -544,6 +555,7 @@ mod image_tests {
 #[cfg(test)]
 mod tool_permission_tests {
     use super::*;
+    use crate::tool_safety::SafetyCategory;
 
     #[test]
     fn add_tool_call_starts_with_no_permission_resolved() {
@@ -565,10 +577,11 @@ mod tool_permission_tests {
     fn set_tool_permission_stamps_the_matching_call() {
         let mut m = Message::new(Role::Assistant);
         m.add_tool_call("c1".into(), "bash".into(), serde_json::json!({}));
-        assert!(m.set_tool_permission("c1", PermissionLevel::Ask, true));
+        assert!(m.set_tool_permission("c1", PermissionLevel::Ask, true, SafetyCategory::Dangerous));
         let Part::Tool {
             permission,
             mutating,
+            safety,
             ..
         } = &m.parts[0]
         else {
@@ -576,9 +589,15 @@ mod tool_permission_tests {
         };
         assert_eq!(*permission, Some(PermissionLevel::Ask));
         assert_eq!(*mutating, Some(true));
+        assert_eq!(*safety, Some(SafetyCategory::Dangerous));
 
         // Unknown id: no-op, reports false.
-        assert!(!m.set_tool_permission("missing", PermissionLevel::Allow, false));
+        assert!(!m.set_tool_permission(
+            "missing",
+            PermissionLevel::Allow,
+            false,
+            SafetyCategory::Safe
+        ));
     }
 
     #[test]
@@ -588,7 +607,7 @@ mod tool_permission_tests {
         // those fields (this used to reconstruct the whole `Part::Tool`).
         let mut m = Message::new(Role::Assistant);
         m.add_tool_call("c1".into(), "write_file".into(), serde_json::json!({}));
-        assert!(m.set_tool_permission("c1", PermissionLevel::Allow, true));
+        assert!(m.set_tool_permission("c1", PermissionLevel::Allow, true, SafetyCategory::Dangerous));
         assert!(m.mark_tool_running("c1", 1234));
         let Part::Tool {
             permission,
@@ -612,11 +631,13 @@ mod tool_permission_tests {
         let tool_json = &v["parts"][0];
         assert!(tool_json.get("permission").is_none());
         assert!(tool_json.get("mutating").is_none());
+        assert!(tool_json.get("safety").is_none());
 
-        m.set_tool_permission("c1", PermissionLevel::Allow, false);
+        m.set_tool_permission("c1", PermissionLevel::Allow, false, SafetyCategory::Safe);
         let v = serde_json::to_value(&m).unwrap();
         assert_eq!(v["parts"][0]["permission"], "allow");
         assert_eq!(v["parts"][0]["mutating"], false);
+        assert_eq!(v["parts"][0]["safety"], "safe");
     }
 
     #[test]
@@ -635,6 +656,7 @@ mod tool_permission_tests {
         let Part::Tool {
             permission,
             mutating,
+            safety,
             ..
         } = &m.parts[0]
         else {
@@ -642,5 +664,6 @@ mod tool_permission_tests {
         };
         assert!(permission.is_none());
         assert!(mutating.is_none());
+        assert!(safety.is_none());
     }
 }

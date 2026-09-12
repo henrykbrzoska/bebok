@@ -183,12 +183,10 @@ impl InstanceStore {
         persist::persist_session_meta(&disk_dir, &session).await?;
         persist::append_index_event(&inst_dir, "created", &session).await;
 
-        let state = Arc::new(SessionState::new(
-            session.clone(),
-            inst_dir,
-            disk_dir,
-            instance.config_snapshot(),
-        ));
+        let state = Arc::new(
+            SessionState::new(session.clone(), inst_dir, disk_dir, instance.config_snapshot())
+                .with_live_config(instance.config.clone()),
+        );
 
         self.meta.write().await.insert(session.id, session.clone());
         self.sessions

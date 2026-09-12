@@ -41,6 +41,11 @@ pub struct GateCtx<'a> {
 /// safety tier is visible over SSE even while the call is still
 /// `pending`/`running` - independent of whether it goes on to complete,
 /// fail, or (for `ask`) get denied by the user.
+///
+/// F7-7: also stamps the tool's explicit safety *category* (built-in
+/// default table + `tool_safety` config overrides, see
+/// `crate::tool_safety`). The category is informational: it is computed
+/// next to the verdict but never feeds it.
 pub async fn resolve_permission(
     ctx: &GateCtx<'_>,
     call_id: &str,
@@ -58,6 +63,11 @@ pub async fn resolve_permission(
         .permission
         .evaluate(ctx.agent_layer, tool_name, input, read_only);
     let mutating = is_mutating(tool_name, read_only);
+    let safety = crate::tool_safety::categorize_by_name(
+        ctx.tools,
+        tool_name,
+        &ctx.state.tool_safety_overrides(),
+    );
     let permission = match evaluation.verdict {
         Verdict::Allow => PermissionLevel::Allow,
         Verdict::Ask => PermissionLevel::Ask,
@@ -66,7 +76,7 @@ pub async fn resolve_permission(
     let stamped = ctx
         .state
         .update_tool_state(ctx.assistant_idx, call_id, |m, _name| {
-            m.set_tool_permission(call_id, permission, mutating)
+            m.set_tool_permission(call_id, permission, mutating, safety)
         })
         .await;
     if stamped {

@@ -16,6 +16,7 @@ pub mod provider;
 pub mod session;
 pub mod stats;
 pub mod store;
+pub mod tool_safety;
 pub mod util;
 
 pub use agent::{Agent, AgentCatalog, AgentInfo};
@@ -29,6 +30,7 @@ pub use permission::{
 };
 pub use provider::build_provider;
 pub use store::{Instance, InstanceStore, SessionState};
+pub use tool_safety::{SafetyCategory, SafetyOverrides, ToolSafetyEntry};
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{
