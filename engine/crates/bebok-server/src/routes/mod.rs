@@ -5,7 +5,7 @@
 //! CSS, …) register in `build_api_router` without changing this shape.
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 
 use crate::state::AppState;
 
@@ -14,8 +14,10 @@ pub mod config;
 pub mod debug;
 pub mod events;
 pub mod fs;
+pub mod fs_browse;
 pub mod mcp;
 pub mod meta;
+pub mod projects;
 pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
@@ -50,8 +52,18 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
         .route("/providers/catalog", get(providers::provider_catalog))
+        .route("/fs/browse", get(fs_browse::fs_browse))
         .route("/fs/tree", get(fs::fs_tree))
         .route("/fs/file", get(fs::fs_file).put(fs::fs_file_write))
+        .route(
+            "/projects",
+            get(projects::list_projects).post(projects::add_project),
+        )
+        .route(
+            "/projects/{id}",
+            patch(projects::patch_project).delete(projects::delete_project),
+        )
+        .route("/projects/{id}/open", post(projects::open_project))
         .route("/plugins", get(meta::list_plugins))
         .route("/event", get(events::event_stream))
         .route(
