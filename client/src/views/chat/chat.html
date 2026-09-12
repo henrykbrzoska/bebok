@@ -39,9 +39,9 @@
         [class.warning]="contextLevel() === 'warning'"
         [class.danger]="contextLevel() === 'danger'"
         [title]="t('chat.contextTitle')"
+        [attr.aria-label]="t('chat.context') + ': ' + contextLabel()"
         data-testid="context-meter"
       >
-        <span class="tb-label">{{ t('chat.context') }}</span>
         <span class="tb-context-bar" aria-hidden="true">
           <span class="tb-context-fill" [style.width.%]="contextFill()"></span>
         </span>

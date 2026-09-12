@@ -83,13 +83,15 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
+  flex: 0 1 auto;
   min-width: 0;
   color: var(--text-muted);
 }
 
 .tb-context-bar {
-  flex: 0 0 auto;
-  width: 64px;
+  /* Shrinks before the numbers do when the toolbar gets tight. */
+  flex: 0 1 64px;
+  min-width: 28px;
   height: 6px;
   border-radius: 3px;
   background: var(--surface-3);
@@ -105,6 +107,7 @@
 }
 
 .tb-context-value {
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: var(--fs-12);
   white-space: nowrap;

@@ -448,8 +448,9 @@ pub async fn compact_session(
 
 /// The human-readable "Context compacted" note appended to a compacted fork.
 pub fn compaction_marker(before: u64, after: u64, cutoff: usize) -> String {
+    let noun = if cutoff == 1 { "message" } else { "messages" };
     format!(
-        "[Context compacted: from {before} to {after} tokens ({cutoff} earlier messages summarized)]"
+        "[Context compacted: from {before} to {after} tokens ({cutoff} earlier {noun} summarized)]"
     )
 }
 
@@ -515,6 +516,7 @@ mod tests {
         let text = compaction_marker(120_000, 30_000, 12);
         assert!(text.starts_with("[Context compacted: from 120000 to 30000 tokens"));
         assert!(text.contains("12 earlier messages"));
+        assert!(compaction_marker(1, 1, 1).contains("1 earlier message summarized"));
     }
 
     #[test]
