@@ -50,6 +50,26 @@ export class ProvidersTab {
     return provider ? this.catalog.extraFields(provider.name) : [];
   });
 
+  /**
+   * True when the selected provider has edits the engine has not seen yet.
+   * "Test connection" exercises the SAVED configuration (F3-4), so the form
+   * says so instead of silently persisting the draft.
+   */
+  readonly dirty = computed(() => {
+    const provider = this.selected();
+    if (!provider) {
+      return false;
+    }
+    if ((this.store.keyDrafts()[provider.name] ?? '').trim().length > 0) {
+      return true;
+    }
+    const saved = this.store.config()?.providers?.find((p) => p.name === provider.name);
+    if (!saved) {
+      return true;
+    }
+    return JSON.stringify({ ...saved, api_key: null }) !== JSON.stringify({ ...provider, api_key: null });
+  });
+
   /** Models discovered by the last successful "Test connection". */
   readonly discovered = computed<string[]>(() => {
     const provider = this.selected();
@@ -139,8 +159,11 @@ export class ProvidersTab {
   /**
    * Test the connection to a provider ("check available models").
    *
-   * The current form state is persisted first, because the engine resolves the
-   * API key from its saved config, not from the GUI.
+   * F3-4: this only exercises the connection. It deliberately does NOT write
+   * the form back to the config first - testing must never persist an
+   * unconfirmed draft of the other fields. The engine resolves the key from
+   * its saved config, so an edited-but-unsaved provider is flagged with a
+   * "save first" hint instead (see `dirty`).
    */
   async checkModels(provider: ProviderDraft): Promise<void> {
     const dir = this.store.directory();
@@ -151,11 +174,12 @@ export class ProvidersTab {
     this.store.error.set(null);
     this.store.providerModelsError.set(null);
     try {
-      await this.engine.putConfig(dir, { providers: this.store.providersToPersist() });
       const res = await this.engine.listModels(dir, provider.name);
       this.store.checkedModels.update((m) => ({ ...m, [provider.name]: res.models }));
       this.assignModel.set(res.models[0] ?? '');
-      await this.store.reload();
+      // Merge the discovered models into the draft instead of reloading: a
+      // reload would throw away the edits the user has not saved yet.
+      this.store.updateProvider(provider.name, { models: res.models });
     } catch (err) {
       this.store.providerModelsError.set(this.store.describe(err));
     } finally {
