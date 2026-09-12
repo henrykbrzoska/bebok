@@ -43,7 +43,13 @@
     @if (activePtyId()) {
       <app-terminal-tab [ptyId]="activePtyId()!" (status)="onStatus(activePtyId()!, $event)" />
     } @else if (!loading()) {
-      <div class="term-empty">{{ t('term.empty') }}</div>
+      <div class="term-empty">
+        <div class="prompt-line">
+          <span class="prompt">{{ promptPrefix() }}</span>
+          <span class="cursor" aria-hidden="true">▊</span>
+        </div>
+        <p class="empty-hint">{{ t('term.empty') }}</p>
+      </div>
     }
   </div>
 </section>
