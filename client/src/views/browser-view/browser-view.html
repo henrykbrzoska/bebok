@@ -1,0 +1,145 @@
+<div class="viewer" data-testid="browser-view">
+  <header class="toolbar">
+    <div class="nav">
+      <button
+        type="button"
+        data-testid="bv-back"
+        [title]="t('browserView.back')"
+        [disabled]="busy() || !open()"
+        (click)="back()"
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        data-testid="bv-forward"
+        [title]="t('browserView.forward')"
+        [disabled]="busy() || !open()"
+        (click)="forward()"
+      >
+        →
+      </button>
+      <button
+        type="button"
+        data-testid="bv-reload"
+        [title]="t('browserView.reload')"
+        [disabled]="busy() || !open()"
+        (click)="reload()"
+      >
+        ↻
+      </button>
+    </div>
+
+    <form class="url" (submit)="$event.preventDefault(); navigate()">
+      <input
+        type="text"
+        class="mono"
+        data-testid="bv-url"
+        [ngModel]="urlDraft()"
+        (ngModelChange)="onUrlInput($event)"
+        name="url"
+        [placeholder]="t('browserView.urlPlaceholder')"
+        spellcheck="false"
+        autocomplete="off"
+        [disabled]="busy() || connecting()"
+      />
+      <button type="submit" class="primary" data-testid="bv-go" [disabled]="busy() || connecting()">
+        {{ t('browserView.go') }}
+      </button>
+    </form>
+
+    @if (linkable()) {
+      <a
+        class="external"
+        data-testid="bv-open-external"
+        [href]="currentUrl()"
+        target="_blank"
+        rel="noopener noreferrer"
+        >{{ t('browser.openExternal') }} ↗</a
+      >
+    }
+  </header>
+
+  <section class="stage" [class.busy]="busy()">
+    @if (connecting()) {
+      <div class="placeholder">{{ t('browserView.connecting') }}</div>
+    } @else if (frameSrc(); as src) {
+      <img
+        #frameImg
+        data-testid="bv-frame"
+        [src]="src"
+        [alt]="t('browser.screenshotAlt')"
+        (click)="onFrameClick($event)"
+        draggable="false"
+      />
+    } @else if (open()) {
+      <div class="placeholder">{{ t('browserView.waitingFrame') }}</div>
+    } @else {
+      <div class="placeholder" data-testid="bv-empty">{{ t('browserView.noBrowser') }}</div>
+    }
+  </section>
+
+  <footer class="status">
+    <div class="line">
+      @if (headed()) {
+        <span class="badge" data-testid="bv-headed" [title]="t('browserView.headedHint')">{{
+          t('browserView.headed')
+        }}</span>
+      }
+      @if (currentTitle()) {
+        <span class="title" [title]="currentTitle()">{{ currentTitle() }}</span>
+      }
+      <span class="url mono" [title]="currentUrl()">{{ currentUrl() }}</span>
+      @if (busy()) {
+        <span class="working">{{ t('browserView.working') }}</span>
+      }
+    </div>
+
+    <form class="type" (submit)="$event.preventDefault(); typeText()">
+      <input
+        type="text"
+        data-testid="bv-type"
+        [ngModel]="typeDraft()"
+        (ngModelChange)="typeDraft.set($event)"
+        name="text"
+        [placeholder]="t('browserView.typePlaceholder')"
+        autocomplete="off"
+        [disabled]="busy() || !open()"
+      />
+      <label class="check">
+        <input
+          type="checkbox"
+          [checked]="typeSubmit()"
+          (change)="typeSubmit.set(!typeSubmit())"
+          [disabled]="busy() || !open()"
+        />
+        {{ t('browserView.pressEnter') }}
+      </label>
+      <button
+        type="submit"
+        data-testid="bv-type-send"
+        [disabled]="busy() || !open() || !typeDraft()"
+      >
+        {{ t('browserView.type') }}
+      </button>
+      <span class="spacer"></span>
+      <button
+        type="button"
+        class="danger"
+        data-testid="bv-close"
+        [disabled]="busy() || !open()"
+        (click)="closeBrowser()"
+      >
+        {{ t('browserView.closeBrowser') }}
+      </button>
+    </form>
+
+    @if (error(); as err) {
+      <div class="error" data-testid="bv-error">{{ err }}</div>
+    } @else if (notice(); as note) {
+      <div class="notice" data-testid="bv-notice">{{ note }}</div>
+    } @else {
+      <div class="hint">{{ t('browserView.clickHint') }}</div>
+    }
+  </footer>
+</div>

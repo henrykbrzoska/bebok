@@ -44,7 +44,9 @@
               </select>
             </td>
             <td class="shrink">
-              <button type="button" (click)="store.removeRule(i)">{{ t('settings.ruleRemove') }}</button>
+              <button type="button" (click)="store.removeRule(i)">
+                {{ t('settings.ruleRemove') }}
+              </button>
             </td>
           </tr>
         }
@@ -58,6 +60,24 @@
       {{ t('settings.saveRules') }}
     </button>
   </div>
+</div>
+
+<div class="card" data-testid="browser-display-card">
+  <h3>{{ t('settings.browserDisplayTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.browserDisplayHint') }}</p>
+  <label class="field">
+    <span class="micro-label">{{ t('settings.browserDisplayLabel') }}</span>
+    <select
+      data-testid="browser-display-select"
+      [ngModel]="browserDisplay()"
+      (ngModelChange)="setBrowserDisplay($event)"
+      [disabled]="store.saving()"
+    >
+      @for (mode of browserDisplays; track mode) {
+        <option [value]="mode">{{ browserDisplayLabel(mode) }}</option>
+      }
+    </select>
+  </label>
 </div>
 
 <div class="card yolo-card">

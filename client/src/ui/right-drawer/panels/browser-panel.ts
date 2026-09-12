@@ -12,10 +12,14 @@
  * Pairing rule for screenshots: the engine inserts the image part directly
  * after its `browser_screenshot` tool part (named `browser_screenshot:<call
  * id>`), so "tool part followed by an image part" is the lookup.
+ *
+ * WP-BROWSER2 (F7-6): the panel keeps the thumbnail; "Open in window" opens
+ * the live viewer window (`/browser-view?session=<id>`) for the session.
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
+import { BrowserViewerService } from '../../../core/browser-viewer.service';
 import { ImagePart, Message, Part, ToolPart } from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
@@ -124,8 +128,31 @@ export function isLinkable(url: string): boolean {
       <div class="empty">{{ t('drawer.noSession') }}</div>
     } @else if (!location() && !screenshot()) {
       <div class="empty">{{ t('browser.none') }}</div>
+      <div class="toolbar">
+        <button
+          type="button"
+          class="open-window"
+          data-testid="browser-open-window"
+          (click)="openWindow()"
+        >
+          {{ t('browser.openWindow') }}
+        </button>
+      </div>
     } @else {
       <div class="panel-body">
+        <div class="toolbar">
+          <button
+            type="button"
+            class="open-window"
+            data-testid="browser-open-window"
+            (click)="openWindow()"
+          >
+            {{ t('browser.openWindow') }}
+          </button>
+          @if (openFailed()) {
+            <span class="error">{{ t('browser.openWindowBlocked') }}</span>
+          }
+        </div>
         @if (location(); as loc) {
           <div class="location" data-testid="browser-location">
             @if (loc.error) {
@@ -159,7 +186,9 @@ export function isLinkable(url: string): boolean {
               [alt]="t('browser.screenshotAlt')"
             />
             @if (shot.url && shot.url !== location()?.url) {
-              <figcaption [title]="shot.url">{{ t('browser.screenshotOf') }} {{ shot.url }}</figcaption>
+              <figcaption [title]="shot.url">
+                {{ t('browser.screenshotOf') }} {{ shot.url }}
+              </figcaption>
             }
           </figure>
         } @else {
@@ -178,6 +207,33 @@ export function isLinkable(url: string): boolean {
 
       .empty.small {
         padding: var(--space-8) var(--space-10);
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-8);
+        padding: 0 var(--space-10) var(--space-8);
+        min-width: 0;
+      }
+
+      .panel-body .toolbar {
+        padding: 0;
+      }
+
+      .open-window {
+        font: inherit;
+        font-size: var(--fs-11-5);
+        padding: 3px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-control-sm);
+        background: var(--surface-2);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      .open-window:hover {
+        background: var(--bg-hover);
       }
 
       .panel-body {
@@ -266,9 +322,22 @@ export function isLinkable(url: string): boolean {
 })
 export class BrowserPanel {
   private readonly i18n = inject(I18nService);
+  private readonly viewer = inject(BrowserViewerService);
   readonly session = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /** Last "Open in window" attempt was blocked (popup blocker / no window). */
+  readonly openFailed = signal(false);
+
+  /** Open the live viewer window for the current session (WP-BROWSER2). */
+  async openWindow(): Promise<void> {
+    const id = this.session.meta()?.id;
+    if (!id) {
+      return;
+    }
+    this.openFailed.set(!(await this.viewer.open(id)));
+  }
 
   /** Latest screenshot in the open session's transcript. */
   readonly screenshot = computed(() => latestScreenshot(this.session.messages()));

@@ -8,11 +8,31 @@
  * visually separate, danger-tinted "YOLO mode" card.
  */
 
-import { Component, inject } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { EngineClient } from '../../core/engine-client.service';
+import { BROWSER_DISPLAYS, BrowserDisplay, isBrowserDisplay } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionRule, SettingsStore } from './settings.store';
+
+/** Default for `browser.display` when the config does not say (engine default). */
+export const DEFAULT_BROWSER_DISPLAY: BrowserDisplay = 'headed';
+
+/**
+ * Where the headed browser window should appear: directly right of the app
+ * window, on the same top edge (screen pixels). `null` when the app window's
+ * geometry is unknown (browser mode) - Chrome then picks a spot.
+ */
+export function windowPositionRightOf(
+  app: { x: number; y: number; width: number } | null,
+  gap = 8,
+): [number, number] | null {
+  if (!app) {
+    return null;
+  }
+  return [Math.round(app.x + app.width + gap), Math.round(app.y)];
+}
 
 @Component({
   selector: 'app-settings-permissions',
@@ -22,11 +42,79 @@ import { PermissionRule, SettingsStore } from './settings.store';
 })
 export class PermissionsTab {
   private readonly i18n = inject(I18nService);
+  private readonly engine = inject(EngineClient);
 
   readonly store = inject(SettingsStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly actions: Array<PermissionRule['action']> = ['allow', 'ask', 'deny'];
+
+  // --- WP-BROWSER2 (F7-6): "Browser display" ---------------------------------
+
+  readonly browserDisplays = BROWSER_DISPLAYS;
+
+  /** Effective `browser.display` of the loaded config (resolved view). */
+  readonly browserDisplay = computed<BrowserDisplay>(() => {
+    const raw = this.store.config()?.config.browser?.display;
+    return isBrowserDisplay(raw) ? raw : DEFAULT_BROWSER_DISPLAY;
+  });
+
+  browserDisplayLabel(mode: BrowserDisplay): string {
+    switch (mode) {
+      case 'viewer':
+        return this.t('settings.browserDisplayViewer');
+      case 'drawer':
+        return this.t('settings.browserDisplayDrawer');
+      default:
+        return this.t('settings.browserDisplayHeaded');
+    }
+  }
+
+  /**
+   * Persist `browser.display` to the *global* config (a user preference,
+   * shared by every project). For `headed` in the desktop shell the current
+   * app-window geometry is stored as `windowPosition` so the browser window
+   * opens right of the app.
+   */
+  async setBrowserDisplay(raw: string): Promise<void> {
+    const mode = isBrowserDisplay(raw) ? raw : DEFAULT_BROWSER_DISPLAY;
+    const dir = this.store.directory();
+    if (!dir || this.store.saving()) {
+      return;
+    }
+    this.store.saving.set(true);
+    this.store.error.set(null);
+    this.store.saved.set(null);
+    try {
+      const browser: Record<string, unknown> = { display: mode };
+      const position = mode === 'headed' ? await this.appWindowPosition() : null;
+      if (position) {
+        browser['windowPosition'] = position;
+      }
+      const cfg = await this.engine.putConfig(dir, { browser }, { scope: 'global' });
+      this.store.applyConfig(cfg);
+      this.store.saved.set(this.t('settings.browserDisplaySaved'));
+    } catch (err) {
+      this.store.error.set(this.store.describe(err));
+    } finally {
+      this.store.saving.set(false);
+    }
+  }
+
+  /** Right-of-app position (Tauri only; `null` elsewhere or on failure). */
+  private async appWindowPosition(): Promise<[number, number] | null> {
+    if (!this.engine.isTauri()) {
+      return null;
+    }
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const win = getCurrentWindow();
+      const [pos, size] = await Promise.all([win.outerPosition(), win.outerSize()]);
+      return windowPositionRightOf({ x: pos.x, y: pos.y, width: size.width });
+    } catch {
+      return null;
+    }
+  }
 
   actionLabel(action: PermissionRule['action']): string {
     switch (action) {

@@ -52,6 +52,10 @@ import {
   StatsQuery,
   StatsResponse,
   WorktreeSpec,
+  BrowserAction,
+  BrowserActionResult,
+  BrowserFrame,
+  BrowserState,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -292,6 +296,31 @@ export class EngineClient {
 
   abort(id: string): Promise<AbortResponse> {
     return this.request<AbortResponse>('POST', `/session/${id}/abort`);
+  }
+
+  // --- browser viewer (WP-BROWSER2 / F7-6) ---------------------------------
+
+  /** State of the session's agent browser (open/headed/url/display). */
+  browserState(id: string): Promise<BrowserState> {
+    return this.request<BrowserState>('GET', `/session/${id}/browser`);
+  }
+
+  /** One frame right now; rejects with a 404 error when no browser is open. */
+  browserFrame(id: string): Promise<BrowserFrame> {
+    return this.request<BrowserFrame>('GET', `/session/${id}/browser/frame`);
+  }
+
+  /** Drive the session's browser by hand (same tools + permission rules as the model). */
+  browserAction(
+    id: string,
+    action: BrowserAction,
+    body: Record<string, unknown> = {},
+  ): Promise<BrowserActionResult> {
+    return this.request<BrowserActionResult>(
+      'POST',
+      `/session/${id}/browser/${encodeURIComponent(action)}`,
+      body,
+    );
   }
 
   /** Abort a specific child task spawned by the orchestrator. */

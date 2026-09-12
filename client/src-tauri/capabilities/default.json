@@ -1,7 +1,7 @@
 {
   "identifier": "default",
-  "description": "Bebok desktop: invoke our engine command + native dialogs for the picker",
-  "windows": ["main"],
+  "description": "Bebok desktop: invoke our engine commands (engine_info, open_browser_viewer) + native dialogs for the picker; the browser viewer windows (browser-viewer-<session>) get the same set",
+  "windows": ["main", "browser-viewer-*"],
   "permissions": [
     "core:default",
     "dialog:default",
