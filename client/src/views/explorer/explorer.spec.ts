@@ -20,6 +20,7 @@ describe('ExplorerView "Open in preview" (F6-11)', () => {
   let shell: ShellStore;
 
   beforeEach(() => {
+    localStorage.clear();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [ExplorerView],
@@ -28,7 +29,15 @@ describe('ExplorerView "Open in preview" (F6-11)', () => {
         provideRouter([]),
         {
           provide: ActivatedRoute,
-          useValue: { snapshot: { queryParamMap: convertToParamMap({}) } },
+          // `data`/`paramMap` are walked by ShellStore.refresh().
+          useValue: {
+            snapshot: {
+              firstChild: null,
+              data: {},
+              paramMap: convertToParamMap({}),
+              queryParamMap: convertToParamMap({}),
+            },
+          },
         },
       ],
     });
