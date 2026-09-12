@@ -1,6 +1,6 @@
 {
   "name": "bebok",
-  "version": "0.0.0",
+  "version": "1.4.0",
   "license": "UNLICENSED",
   "scripts": {
     "ng": "ng",
