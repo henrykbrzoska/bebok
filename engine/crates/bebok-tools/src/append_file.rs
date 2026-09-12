@@ -58,13 +58,13 @@ impl Tool for AppendFile {
             Ok(full) => full,
             Err(e) => return ToolOutput::new(format!("error: {e}"), "append_file"),
         };
-        if let Some(parent) = full.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                return ToolOutput::new(
-                    format!("error: failed to create parent dir: {e}"),
-                    "append_file",
-                );
-            }
+        if let Some(parent) = full.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            return ToolOutput::new(
+                format!("error: failed to create parent dir: {e}"),
+                "append_file",
+            );
         }
 
         let mut payload = content.to_string();
