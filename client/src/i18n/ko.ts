@@ -324,4 +324,5 @@ export const ko: Record<MessageKey, string> = {
   'diff.split': '분할',
   'perm.allowAlwaysTool': '이 도구를 항상 허용',
   'perm.blocksSend': '다른 메시지를 보내기 전에 권한 요청에 응답하세요.',
+  'chat.typing': '어시스턴트가 입력 중',
 };

@@ -114,6 +114,14 @@
             </div>
           }
 
+          @if (running() && !loading()) {
+            <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
+              <span class="typing-dot" aria-hidden="true"></span>
+              <span class="typing-text">{{ t('chat.typing') }}</span>
+              <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+            </div>
+          }
+
           <app-permission-popup
             #permission
             [activeSessionID]="sessionID()"

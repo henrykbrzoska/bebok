@@ -324,4 +324,5 @@ export const hi: Record<MessageKey, string> = {
   'diff.split': 'विभाजित',
   'perm.allowAlwaysTool': 'इस टूल को हमेशा अनुमति दें',
   'perm.blocksSend': 'दूसरा संदेश भेजने से पहले अनुमति अनुरोध का उत्तर दें।',
+  'chat.typing': 'सहायक लिख रहा है',
 };

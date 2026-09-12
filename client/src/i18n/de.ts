@@ -325,4 +325,5 @@ export const de: Record<MessageKey, string> = {
   'diff.split': 'Geteilt',
   'perm.allowAlwaysTool': 'Dieses Tool immer erlauben',
   'perm.blocksSend': 'Beantworte die Berechtigungsanfrage, bevor du eine weitere Nachricht sendest.',
+  'chat.typing': 'Assistent schreibt',
 };

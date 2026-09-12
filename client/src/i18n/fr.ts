@@ -325,4 +325,5 @@ export const fr: Record<MessageKey, string> = {
   'diff.split': 'Côte à côte',
   'perm.allowAlwaysTool': 'Toujours autoriser cet outil',
   'perm.blocksSend': 'Répondez à la demande d\'autorisation avant d\'envoyer un autre message.',
+  'chat.typing': 'L\'assistant écrit',
 };

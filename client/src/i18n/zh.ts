@@ -324,4 +324,5 @@ export const zh: Record<MessageKey, string> = {
   'diff.split': '分栏',
   'perm.allowAlwaysTool': '始终允许此工具',
   'perm.blocksSend': '请先回应权限请求，然后再发送新消息。',
+  'chat.typing': '助手正在输入',
 };

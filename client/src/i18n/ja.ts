@@ -324,4 +324,5 @@ export const ja: Record<MessageKey, string> = {
   'diff.split': '分割',
   'perm.allowAlwaysTool': 'このツールを常に許可',
   'perm.blocksSend': '権限リクエストに回答してから次のメッセージを送信してください。',
+  'chat.typing': 'アシスタントが入力中',
 };

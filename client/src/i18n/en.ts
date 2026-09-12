@@ -334,6 +334,7 @@ export const en = {
   'diff.split': 'Split',
   'perm.allowAlwaysTool': 'Always allow this tool',
   'perm.blocksSend': 'Answer the permission request before sending another message.',
+  'chat.typing': 'Assistant is typing',
 };
 
 export type MessageKey = keyof typeof en;

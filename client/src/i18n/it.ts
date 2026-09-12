@@ -325,4 +325,5 @@ export const it: Record<MessageKey, string> = {
   'diff.split': 'Affiancato',
   'perm.allowAlwaysTool': 'Consenti sempre questo strumento',
   'perm.blocksSend': 'Rispondi alla richiesta di permesso prima di inviare un altro messaggio.',
+  'chat.typing': 'L\'assistente sta scrivendo',
 };

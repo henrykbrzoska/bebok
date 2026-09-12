@@ -90,8 +90,17 @@ import { I18nService } from '../../../i18n/i18n.service';
       background: var(--surface);
       overflow: hidden;
     }
+    /* F2-9: a failed tool call is a danger-bordered, red-tinted card. */
     .tool.failed {
       border-color: var(--danger);
+      background: rgba(226, 100, 95, 0.06);
+    }
+    .tool.failed .tool-name {
+      color: var(--diff-remove-text);
+    }
+    .tool.failed .tool-args {
+      color: var(--diff-remove-text);
+      opacity: 0.85;
     }
 
     .tool-head {
