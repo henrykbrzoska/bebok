@@ -50,11 +50,15 @@ pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
             continue;
         }
         let path = entry.path();
+        // Always `/`-separated: the walker appends the child with the OS
+        // separator to the `/`-separated `rel` the client sent, which on
+        // Windows produced `apps/frontend\\file.ts` (E2E R9). The client
+        // splits and joins explorer paths on `/`.
         let rel_path = path
             .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         let name = entry.file_name().to_string_lossy().to_string();
         entries.push(FsEntry {
             name,
@@ -158,5 +162,23 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(&secret).unwrap(), "secret");
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// E2E R9: nested entry paths never mix separators, whatever the OS.
+    #[test]
+    fn child_paths_are_slash_separated() {
+        let root = std::env::temp_dir().join(format!("bebok-explorer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("apps/frontend/src")).unwrap();
+        std::fs::write(root.join("apps/frontend/src/main.ts"), "x").unwrap();
+
+        let top = list_children(&root, "");
+        assert_eq!(top.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), vec!["apps"]);
+        let nested = list_children(&root, "apps/frontend");
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].path, "apps/frontend/src");
+        let files = list_children(&root, "apps/frontend/src");
+        assert_eq!(files[0].path, "apps/frontend/src/main.ts");
+        assert!(!files[0].path.contains('\\'));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

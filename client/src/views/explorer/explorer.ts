@@ -72,6 +72,9 @@ export class ExplorerView implements OnInit {
       this.lastOpenNonce = req.nonce;
       this.selection.clearOpenRequest();
       void this.openFile({ name: '', path: req.path, is_dir: false, depth: 0, expanded: false });
+      // E2E R9: also expand the tree down to the file so it is highlighted in
+      // context instead of every folder staying collapsed.
+      void this.revealPath(req.path);
     });
   }
 
@@ -200,6 +203,41 @@ export class ExplorerView implements OnInit {
       this.version.update((v) => v + 1);
     } catch (err) {
       this.error.set(this.describe(err));
+    }
+  }
+
+  /**
+   * Expand every ancestor directory of `path` (lazy-loading the ones the
+   * engine has not listed yet) so the file's row is visible in the tree.
+   */
+  async revealPath(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const segments = path.split('/').filter((s) => s.length > 0);
+    segments.pop(); // the file itself
+    let ancestor = '';
+    for (const segment of segments) {
+      ancestor = ancestor ? `${ancestor}/${segment}` : segment;
+      const state = this.dirs()[ancestor];
+      if (state?.loaded) {
+        if (!state.expanded) {
+          this.dirs.update((d) => ({ ...d, [ancestor]: { ...state, expanded: true } }));
+          this.version.update((v) => v + 1);
+        }
+        continue;
+      }
+      try {
+        const res = await this.engine.fsTree(dir, ancestor);
+        this.dirs.update((d) => ({
+          ...d,
+          [ancestor]: { entries: res.entries, loaded: true, expanded: true },
+        }));
+        this.version.update((v) => v + 1);
+      } catch {
+        return; // a missing/unlistable ancestor: leave the tree as it is
+      }
     }
   }
 
