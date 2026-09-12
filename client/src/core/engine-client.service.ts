@@ -78,10 +78,13 @@ export class EngineClient {
     return conn;
   }
 
-  /** Replace the connection (used when the remote engine URL changes). */
+  /**
+   * Replace the connection (used when the remote engine URL changes). The URL
+   * may carry the engine capability token (`?token=…` from `BEBOK_READY`);
+   * `adoptRemote` stores it and returns the connection with a clean base URL.
+   */
   reconfigure(conn: EngineConnection): void {
-    this.transport.saveRemote(conn.baseUrl);
-    this.connection.set(conn);
+    this.connection.set(this.transport.adoptRemote(conn));
   }
 
   /**

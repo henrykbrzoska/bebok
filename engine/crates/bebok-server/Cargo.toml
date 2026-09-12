@@ -24,6 +24,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+# `oneshot` in the auth middleware tests (drives the assembled Router without
+# binding a socket). Already in the lockfile via tower-http.
+tower = { version = "0.5", features = ["util"] }
+
 # portable-pty -> serial -> termios does not compile on Android; the terminal is
 # disabled there (the rest of the engine - incl. the bash tool - still works).
 [target.'cfg(not(target_os = "android"))'.dependencies]
