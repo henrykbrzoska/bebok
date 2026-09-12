@@ -209,6 +209,171 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
     ]
 }
 
+/// How a provider authenticates. Separate from [`ProviderKind`] (the wire
+/// protocol), because two providers speaking the same protocol can differ here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderAuth {
+    /// `Authorization: Bearer <key>` (OpenAI and every OpenAI-compatible host).
+    #[default]
+    Bearer,
+    /// `x-api-key: <key>` (Anthropic Messages API).
+    #[serde(rename = "x-api-key")]
+    XApiKey,
+    /// No credentials at all (local servers such as Ollama). A GUI must not
+    /// render an API-key field for these.
+    None,
+}
+
+impl ProviderAuth {
+    /// Lowercase wire name (`bearer` / `x-api-key` / `none`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderAuth::Bearer => "bearer",
+            ProviderAuth::XApiKey => "x-api-key",
+            ProviderAuth::None => "none",
+        }
+    }
+
+    /// False for keyless providers: the GUI should hide the API-key field and
+    /// the engine must not treat a missing key as a misconfiguration.
+    pub fn needs_api_key(&self) -> bool {
+        !matches!(self, ProviderAuth::None)
+    }
+}
+
+/// Input type for a [`ProviderExtraField`] (a hint for the settings form).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderFieldType {
+    Text,
+    Password,
+    Url,
+    Number,
+    Bool,
+}
+
+/// One provider-specific configuration field, declared by the engine and
+/// rendered by the GUI. Values land in [`ProviderSpec::extra`] under `key`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderExtraField {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub field_type: ProviderFieldType,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
+impl ProviderExtraField {
+    fn text(key: &str, label: &str, placeholder: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            label: label.to_string(),
+            field_type: ProviderFieldType::Text,
+            required: false,
+            placeholder: (!placeholder.is_empty()).then(|| placeholder.to_string()),
+        }
+    }
+}
+
+/// The machine-readable descriptor of a provider, for building a settings UI.
+///
+/// This is deliberately *not* [`ProviderSpec`]: the spec is runtime state
+/// (endpoint, key, model list) that the user edits and the engine persists,
+/// while this is the static shape of the form used to edit it — what the field
+/// is called, whether a key is needed at all, which environment variable is
+/// consulted, and which provider-specific extras exist. Served by
+/// `GET /providers/catalog`; keys are camelCase for the TypeScript client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUiSpec {
+    /// Provider id; matches [`ProviderSpec::name`] and the model prefix.
+    pub id: String,
+    /// Human-readable name for the settings list.
+    pub label: String,
+    /// Wire protocol (`openai` | `anthropic`).
+    pub kind: ProviderKind,
+    /// Credential style (`bearer` | `x-api-key` | `none`).
+    pub auth: ProviderAuth,
+    /// Environment variable consulted when no key is stored in the config.
+    pub env_var: String,
+    /// Default API base URL (what an empty `endpoint` falls back to).
+    pub base_url_default: String,
+    /// Provider-specific fields, stored in [`ProviderSpec::extra`].
+    pub extra_fields: Vec<ProviderExtraField>,
+}
+
+/// Extra (provider-specific) fields a given built-in exposes.
+fn builtin_extra_fields(name: &str) -> Vec<ProviderExtraField> {
+    match name {
+        "openai" => vec![
+            ProviderExtraField::text("organization", "Organization ID", "org-..."),
+            ProviderExtraField::text("project", "Project ID", "proj_..."),
+        ],
+        "openrouter" => vec![
+            ProviderExtraField::text("http_referer", "HTTP-Referer", "https://your.app"),
+            ProviderExtraField::text("x_title", "X-Title", "Bebok"),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Display name for a built-in provider id (falls back to the id itself for
+/// custom providers).
+fn provider_label(name: &str) -> String {
+    match name {
+        "zai" => "Z.ai",
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "xai" => "xAI",
+        "deepseek" => "DeepSeek",
+        "google" => "Google Gemini",
+        "mistralai" => "Mistral AI",
+        "groq" => "Groq",
+        "qwen" => "Qwen (DashScope)",
+        "openrouter" => "OpenRouter",
+        "ollama" => "Ollama",
+        other => return other.to_string(),
+    }
+    .to_string()
+}
+
+/// Credential style of a provider: keyless for local servers, otherwise the
+/// protocol's header (`x-api-key` for Anthropic, bearer for OpenAI-compatible).
+fn provider_auth(name: &str, kind: ProviderKind) -> ProviderAuth {
+    match name {
+        "ollama" => ProviderAuth::None,
+        _ => match kind {
+            ProviderKind::Anthropic => ProviderAuth::XApiKey,
+            ProviderKind::Openai => ProviderAuth::Bearer,
+        },
+    }
+}
+
+/// Describe one provider spec for the settings UI.
+pub fn provider_ui_spec(spec: &ProviderSpec) -> ProviderUiSpec {
+    ProviderUiSpec {
+        id: spec.name.clone(),
+        label: provider_label(&spec.name),
+        kind: spec.kind,
+        auth: provider_auth(&spec.name, spec.kind),
+        env_var: spec.env_var(),
+        base_url_default: default_endpoint(&spec.name, spec.kind).to_string(),
+        extra_fields: builtin_extra_fields(&spec.name),
+    }
+}
+
+/// The provider catalog: one [`ProviderUiSpec`] per built-in provider, in the
+/// order of [`builtin_provider_specs`]. Served by `GET /providers/catalog`.
+pub fn provider_catalog() -> Vec<ProviderUiSpec> {
+    builtin_provider_specs()
+        .iter()
+        .map(provider_ui_spec)
+        .collect()
+}
+
 /// Resolve the effective provider specs: config entries override built-ins by
 /// name; unknown names are appended (custom/self-hosted providers).
 pub fn resolve_provider_specs(config_specs: &[ProviderSpec]) -> Vec<ProviderSpec> {
@@ -338,4 +503,138 @@ pub fn parse_models(value: &serde_json::Value) -> Result<Vec<String>, LlmError> 
     }
 
     Ok(Vec::new())
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    /// Every built-in provider is described, in registry order.
+    #[test]
+    fn catalog_covers_every_builtin_provider() {
+        let specs = builtin_provider_specs();
+        let catalog = provider_catalog();
+        assert_eq!(catalog.len(), specs.len());
+        assert_eq!(catalog.len(), 11, "11 built-in providers today");
+        let ids: Vec<&str> = catalog.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "zai",
+                "openai",
+                "anthropic",
+                "xai",
+                "deepseek",
+                "google",
+                "mistralai",
+                "groq",
+                "qwen",
+                "openrouter",
+                "ollama",
+            ]
+        );
+    }
+
+    /// The shape the settings screen consumes: no empty label/env var, and a
+    /// default base URL that matches the spec's own endpoint default.
+    #[test]
+    fn catalog_entries_have_the_documented_shape() {
+        for entry in provider_catalog() {
+            assert!(!entry.id.is_empty());
+            assert!(!entry.label.is_empty(), "{} has no label", entry.id);
+            assert!(!entry.env_var.is_empty());
+            assert!(
+                entry.base_url_default.starts_with("http"),
+                "{}: {}",
+                entry.id,
+                entry.base_url_default
+            );
+        }
+    }
+
+    #[test]
+    fn env_var_and_base_url_match_the_runtime_spec() {
+        let specs = builtin_provider_specs();
+        for entry in provider_catalog() {
+            let spec = find_provider_spec(&specs, &entry.id).expect("built-in spec");
+            assert_eq!(entry.env_var, spec.env_var());
+            assert_eq!(entry.kind, spec.kind);
+            assert_eq!(entry.base_url_default, spec.models_url());
+        }
+    }
+
+    #[test]
+    fn auth_follows_the_protocol_for_keyed_providers() {
+        let catalog = provider_catalog();
+        let by_id = |id: &str| catalog.iter().find(|p| p.id == id).unwrap().auth;
+        assert_eq!(by_id("openai"), ProviderAuth::Bearer);
+        assert_eq!(by_id("groq"), ProviderAuth::Bearer);
+        assert_eq!(by_id("anthropic"), ProviderAuth::XApiKey);
+        assert_eq!(by_id("zai"), ProviderAuth::XApiKey);
+    }
+
+    #[test]
+    fn extra_fields_are_declared_where_the_provider_has_them() {
+        let catalog = provider_catalog();
+        let openai = catalog.iter().find(|p| p.id == "openai").unwrap();
+        let keys: Vec<&str> = openai.extra_fields.iter().map(|f| f.key.as_str()).collect();
+        assert_eq!(keys, vec!["organization", "project"]);
+        assert!(openai.extra_fields.iter().all(|f| !f.required));
+
+        let openrouter = catalog.iter().find(|p| p.id == "openrouter").unwrap();
+        let keys: Vec<&str> = openrouter
+            .extra_fields
+            .iter()
+            .map(|f| f.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["http_referer", "x_title"]);
+
+        let anthropic = catalog.iter().find(|p| p.id == "anthropic").unwrap();
+        assert!(anthropic.extra_fields.is_empty());
+    }
+
+    /// The catalog is serialised for a TypeScript client: camelCase keys, the
+    /// field type under `type`.
+    #[test]
+    fn catalog_serialises_with_camel_case_keys() {
+        let entry = provider_catalog()
+            .into_iter()
+            .find(|p| p.id == "openai")
+            .unwrap();
+        let v = serde_json::to_value(&entry).unwrap();
+        assert_eq!(v["id"], "openai");
+        assert_eq!(v["label"], "OpenAI");
+        assert_eq!(v["kind"], "openai");
+        assert_eq!(v["auth"], "bearer");
+        assert_eq!(v["envVar"], "OPENAI_API_KEY");
+        assert_eq!(v["baseUrlDefault"], "https://api.openai.com/v1");
+        assert_eq!(v["extraFields"][0]["key"], "organization");
+        assert_eq!(v["extraFields"][0]["label"], "Organization ID");
+        assert_eq!(v["extraFields"][0]["type"], "text");
+        assert_eq!(v["extraFields"][0]["required"], false);
+        assert_eq!(v["extraFields"][0]["placeholder"], "org-...");
+        // No stray snake_case keys leaked into the payload.
+        assert!(v.get("env_var").is_none());
+        assert!(v.get("base_url_default").is_none());
+        assert!(v.get("extra_fields").is_none());
+    }
+
+    /// A custom (non-built-in) provider is describable too: the id doubles as
+    /// the label and the protocol decides the auth header.
+    #[test]
+    fn custom_provider_is_described_from_its_spec() {
+        let spec = ProviderSpec {
+            name: "my-llm".into(),
+            kind: ProviderKind::Openai,
+            endpoint: Some("http://10.0.0.5:8000/v1".into()),
+            api_key: None,
+            models: vec!["local-7b".into()],
+        };
+        let ui = provider_ui_spec(&spec);
+        assert_eq!(ui.id, "my-llm");
+        assert_eq!(ui.label, "my-llm");
+        assert_eq!(ui.auth, ProviderAuth::Bearer);
+        assert_eq!(ui.env_var, "MY_LLM_API_KEY");
+        assert!(ui.extra_fields.is_empty());
+    }
 }

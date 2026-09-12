@@ -22,7 +22,8 @@ pub use provider::{
     retry_after_from_headers,
 };
 pub use spec::{
-    ProviderKind, ProviderSpec, builtin_provider_specs, find_provider_spec, list_models,
+    ProviderAuth, ProviderExtraField, ProviderFieldType, ProviderKind, ProviderSpec, ProviderUiSpec,
+    builtin_provider_specs, find_provider_spec, list_models, provider_catalog, provider_ui_spec,
     resolve_api_key, resolve_provider_specs,
 };
 pub use wire::{Protocol, map_content_part, map_image_parts, map_tool, map_tools};

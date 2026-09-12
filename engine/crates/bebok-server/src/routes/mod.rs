@@ -16,6 +16,7 @@ pub mod events;
 pub mod fs;
 pub mod mcp;
 pub mod meta;
+pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod session;
@@ -48,6 +49,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/config", get(config::get_config).put(config::put_config))
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
+        .route("/providers/catalog", get(providers::provider_catalog))
         .route("/fs/tree", get(fs::fs_tree))
         .route("/fs/file", get(fs::fs_file).put(fs::fs_file_write))
         .route("/plugins", get(meta::list_plugins))
