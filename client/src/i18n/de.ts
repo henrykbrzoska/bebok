@@ -117,6 +117,14 @@ export const de: Record<MessageKey, string> = {
   'toolGroup.expand': 'Werkzeugaufrufe ausklappen',
   'toolGroup.collapse': 'Werkzeugaufrufe einklappen',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'automatisch erlaubt · nur lesend',
+  'tool.safetyAsk': 'nachgefragt · genehmigt',
+  'tool.safetyMutating': 'verändernd oder riskant',
+  'toolGroup.safetyTitle': 'Sicherheit',
+
+
   'thinking.label': 'Denken - {text}',
 
   'dialog.pickDirectory': 'Projektverzeichnis wählen',
@@ -468,11 +476,11 @@ export const de: Record<MessageKey, string> = {
   'drawer.contextNone': 'Noch kein Durchlauf',
 
   // F6-4: compaction
-  'chat.compact': 'Verdichten',
+  'chat.compact': 'Kontext verdichten',
   'chat.compacting': 'Verdichte…',
   'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
   'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
-  'palette.compactSession': 'Kontext jetzt verdichten',
+  'palette.compactSession': 'Kontext verdichten',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Für die in dieser Sitzung verwendeten Modelle sind keine Preise bekannt',

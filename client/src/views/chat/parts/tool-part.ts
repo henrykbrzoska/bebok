@@ -4,11 +4,13 @@ import { RouterLink } from '@angular/router';
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
 import {
   Part,
+  SafetyLevel,
   TaskLink,
   ToolPart,
   ToolState,
   ToolStateCompleted,
   ToolStateError,
+  safetyLevel,
 } from '../../../core/engine.dtos';
 import { formatBytes, prettyJson, toolCallPreview } from '../../../core/format';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
@@ -45,7 +47,17 @@ import { I18nService } from '../../../i18n/i18n.service';
         [attr.aria-expanded]="detailsOpen()"
         [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
       >
-        <span class="dot state-{{ kind() }}" aria-hidden="true"></span>
+        <span
+          class="dot"
+          [class.safety-green]="safety() === 'green'"
+          [class.safety-yellow]="safety() === 'yellow'"
+          [class.safety-orange]="safety() === 'orange'"
+          [class.state-unknown]="safety() === null"
+          [class.pulse]="kind() === 'running'"
+          [class.ring-failed]="kind() === 'error'"
+          [title]="safetyLabel()"
+          aria-hidden="true"
+        ></span>
         <span class="tool-name">{{ name() }}</span>
         @if (isTask()) {
           <span class="badge delegation">{{ t('tool.delegation') }}</span>
@@ -138,6 +150,9 @@ import { I18nService } from '../../../i18n/i18n.service';
       min-height: 28px;
     }
 
+    /* F7-1: the dot's fill is the safety tier (allow/ask/mutating), not the
+       run state - the state stays visible as the uppercase text label next
+       to it. state-unknown covers parts persisted before F7-1. */
     .dot {
       width: 7px;
       height: 7px;
@@ -145,15 +160,21 @@ import { I18nService } from '../../../i18n/i18n.service';
       flex: none;
       background: var(--text-faint);
     }
-    .dot.state-completed {
+    .dot.safety-green {
       background: var(--success);
     }
-    .dot.state-running {
+    .dot.safety-yellow {
+      background: var(--warning);
+    }
+    .dot.safety-orange {
       background: var(--accent);
+    }
+    .dot.pulse {
       animation: tool-dot-pulse 1.4s ease-in-out infinite;
     }
-    .dot.state-error {
-      background: var(--danger);
+    /* F7-1: a failed call keeps a red ring regardless of its safety colour. */
+    .dot.ring-failed {
+      box-shadow: 0 0 0 2px var(--danger);
     }
     @keyframes tool-dot-pulse {
       0%, 100% { opacity: 1; }
@@ -341,6 +362,22 @@ export class ToolPartComponent {
     const input = this.state().input as Record<string, unknown> | undefined;
     const path = input?.['path'] ?? input?.['file'] ?? input?.['file_path'];
     return typeof path === 'string' ? path : '';
+  });
+
+  /** F7-1 safety tier for the header dot; `null` while unresolved or on a
+   *  part persisted before this field existed. */
+  readonly safety = computed<SafetyLevel | null>(() => safetyLevel(this.toolPart()));
+  readonly safetyLabel = computed(() => {
+    switch (this.safety()) {
+      case 'green':
+        return this.t('tool.safetyAllow');
+      case 'yellow':
+        return this.t('tool.safetyAsk');
+      case 'orange':
+        return this.t('tool.safetyMutating');
+      default:
+        return '';
+    }
   });
 
   readonly inputText = computed(() => prettyJson(this.state().input));

@@ -297,6 +297,13 @@ export const en = {
   'toolGroup.expand': 'Expand tool calls',
   'toolGroup.collapse': 'Collapse tool calls',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'auto-allowed · read-only',
+  'tool.safetyAsk': 'asked · approved',
+  'tool.safetyMutating': 'mutating or high-risk',
+  'toolGroup.safetyTitle': 'Safety',
+
   'thinking.label': 'Thinking - {text}',
 
   'dialog.pickDirectory': 'Choose a project directory',
@@ -477,11 +484,11 @@ export const en = {
   'drawer.contextNone': 'No turn yet',
 
   // F6-4: compaction
-  'chat.compact': 'Compact',
+  'chat.compact': 'Compact context',
   'chat.compacting': 'Compacting…',
   'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
   'chat.compactIdle': 'Compaction needs an idle session with a few messages',
-  'palette.compactSession': 'Compact context now',
+  'palette.compactSession': 'Compact context',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'No pricing known for the model(s) used in this session',

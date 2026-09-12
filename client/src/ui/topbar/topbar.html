@@ -11,16 +11,6 @@
   </nav>
 
   <div class="actions">
-    <button
-      type="button"
-      class="chip"
-      [class.on]="compact()"
-      (click)="toggleDensity()"
-      [title]="t('topbar.density')"
-      [attr.aria-pressed]="compact()"
-    >
-      {{ t('topbar.compact') }}
-    </button>
     @if (isChat()) {
       <button
         type="button"

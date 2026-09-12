@@ -1,8 +1,17 @@
-import { Component, inject, input, output } from '@angular/core';
+import { Component, computed, inject, input, output } from '@angular/core';
 
-import { Part, ToolStateKind } from '../../../core/engine.dtos';
+import { Part, ToolStateKind, safetyLevel } from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
 import { PartRendererComponent } from './part-renderer';
+
+/** Per-level call counts for the group header's safety cluster (F7-1). */
+export interface SafetyCounts {
+  green: number;
+  yellow: number;
+  orange: number;
+}
+
+const EMPTY_SAFETY: SafetyCounts = { green: 0, yellow: 0, orange: 0 };
 
 /** One part plus the info the renderer needs to pick its default state. */
 export interface RenderedPart {
@@ -41,9 +50,10 @@ const MAX_SUMMARY_NAMES = 4;
  */
 export function summarizeToolRun(
   rows: readonly RenderedPart[],
-): { state: ToolStateKind; names: string } {
+): { state: ToolStateKind; names: string; safety: SafetyCounts } {
   const counts = new Map<string, number>();
   let state: ToolStateKind = 'completed';
+  const safety: SafetyCounts = { green: 0, yellow: 0, orange: 0 };
   for (const row of rows) {
     if (row.part.type !== 'tool') {
       continue;
@@ -55,13 +65,17 @@ export function summarizeToolRun(
     } else if ((kind === 'running' || kind === 'pending') && state !== 'error') {
       state = 'running';
     }
+    const level = safetyLevel(row.part);
+    if (level) {
+      safety[level]++;
+    }
   }
   const labels = [...counts.entries()].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
   const names =
     labels.length > MAX_SUMMARY_NAMES
       ? `${labels.slice(0, MAX_SUMMARY_NAMES).join(', ')}, …`
       : labels.join(', ');
-  return { state, names };
+  return { state, names, safety };
 }
 
 /**
@@ -89,7 +103,27 @@ export function summarizeToolRun(
         [attr.aria-expanded]="open()"
         [title]="open() ? t('toolGroup.collapse') : t('toolGroup.expand')"
       >
-        <span class="dot state-{{ state() }}" aria-hidden="true"></span>
+        @if (hasSafety()) {
+          <span
+            class="safety-cluster"
+            [class.pulse]="state() === 'running'"
+            [class.ring-failed]="state() === 'error'"
+            [title]="safetyTitle()"
+            aria-hidden="true"
+          >
+            @if (safety().green > 0) {
+              <span class="cluster-dot safety-green">●{{ safety().green }}</span>
+            }
+            @if (safety().yellow > 0) {
+              <span class="cluster-dot safety-yellow">●{{ safety().yellow }}</span>
+            }
+            @if (safety().orange > 0) {
+              <span class="cluster-dot safety-orange">●{{ safety().orange }}</span>
+            }
+          </span>
+        } @else {
+          <span class="dot state-{{ state() }}" aria-hidden="true"></span>
+        }
         <span class="group-count">{{ t('toolGroup.summary', { n: count() }) }}</span>
         <span class="group-sep" aria-hidden="true">·</span>
         <span class="group-names">{{ names() }}</span>
@@ -156,6 +190,37 @@ export function summarizeToolRun(
     @keyframes tool-dot-pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.35; }
+    }
+
+    /* F7-1: per-level count cluster ("●3 ●1 ●2") replacing the single
+       worst-state dot once the group's calls carry a resolved safety tier. */
+    .safety-cluster {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: none;
+      border-radius: 20px;
+      padding: 1px 2px;
+    }
+    .safety-cluster.pulse {
+      animation: tool-dot-pulse 1.4s ease-in-out infinite;
+    }
+    .safety-cluster.ring-failed {
+      box-shadow: 0 0 0 2px var(--danger);
+    }
+    .cluster-dot {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      line-height: 1;
+    }
+    .cluster-dot.safety-green {
+      color: var(--success);
+    }
+    .cluster-dot.safety-yellow {
+      color: var(--warning);
+    }
+    .cluster-dot.safety-orange {
+      color: var(--accent);
     }
     .group-count {
       flex: none;
@@ -224,4 +289,29 @@ export class ToolGroupComponent {
   readonly open = input.required<boolean>();
   readonly taskLinks = input<Map<string, string>>(new Map());
   readonly toggle = output<void>();
+
+  /** F7-1 per-level counts for the header cluster; defaults to all-zero for
+   *  callers that don't pass one (kept optional so existing call sites -
+   *  and specs - don't have to change). */
+  readonly safety = input<SafetyCounts>(EMPTY_SAFETY);
+  /** False (legacy single dot) when nothing in the group has a resolved
+   *  safety tier yet - e.g. a session persisted before F7-1. */
+  readonly hasSafety = computed(() => {
+    const s = this.safety();
+    return s.green + s.yellow + s.orange > 0;
+  });
+  readonly safetyTitle = computed(() => {
+    const s = this.safety();
+    const parts: string[] = [];
+    if (s.green > 0) {
+      parts.push(`${s.green} ${this.t('tool.safetyAllow')}`);
+    }
+    if (s.yellow > 0) {
+      parts.push(`${s.yellow} ${this.t('tool.safetyAsk')}`);
+    }
+    if (s.orange > 0) {
+      parts.push(`${s.orange} ${this.t('tool.safetyMutating')}`);
+    }
+    return `${this.t('toolGroup.safetyTitle')}: ${parts.join(' · ')}`;
+  });
 }

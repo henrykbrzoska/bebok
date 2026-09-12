@@ -116,6 +116,14 @@ export const ko: Record<MessageKey, string> = {
   'toolGroup.expand': '도구 호출 펼치기',
   'toolGroup.collapse': '도구 호출 접기',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': '자동 허용 · 읽기 전용',
+  'tool.safetyAsk': '확인 후 승인됨',
+  'tool.safetyMutating': '변경 작업 또는 고위험',
+  'toolGroup.safetyTitle': '안전 등급',
+
+
   'thinking.label': '생각 중 - {text}',
 
   'dialog.pickDirectory': '프로젝트 디렉터리 선택',
@@ -467,11 +475,11 @@ export const ko: Record<MessageKey, string> = {
   'drawer.contextNone': '아직 턴이 없습니다',
 
   // F6-4: compaction
-  'chat.compact': '압축',
+  'chat.compact': '컨텍스트 압축',
   'chat.compacting': '압축 중…',
   'chat.compactTitle': '이전 메시지를 요약해 새 세션으로 만듭니다 (컨텍스트 압축)',
   'chat.compactIdle': '압축하려면 메시지가 몇 개 있는 유휴 세션이 필요합니다',
-  'palette.compactSession': '지금 컨텍스트 압축',
+  'palette.compactSession': '컨텍스트 압축',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': '이 세션에서 사용한 모델의 요금 정보가 없습니다',

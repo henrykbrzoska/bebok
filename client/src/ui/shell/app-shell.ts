@@ -31,5 +31,4 @@ export class AppShell {
 
   /** The right drawer belongs to the Chat screen only. */
   readonly showDrawer = computed(() => this.shell.isChat() && this.shell.rightDrawerOpen());
-  readonly density = this.shell.density;
 }

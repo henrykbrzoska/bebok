@@ -117,6 +117,14 @@ export const uk: Record<MessageKey, string> = {
   'toolGroup.expand': 'Розгорнути виклики інструментів',
   'toolGroup.collapse': 'Згорнути виклики інструментів',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'дозволено автоматично · лише читання',
+  'tool.safetyAsk': 'запитано · схвалено',
+  'tool.safetyMutating': 'змінює дані або є ризикованим',
+  'toolGroup.safetyTitle': 'Безпека',
+
+
   'thinking.label': 'Міркування - {text}',
 
   'dialog.pickDirectory': 'Виберіть каталог проєкту',
@@ -468,11 +476,11 @@ export const uk: Record<MessageKey, string> = {
   'drawer.contextNone': 'Ще немає ходів',
 
   // F6-4: compaction
-  'chat.compact': 'Стиснути',
+  'chat.compact': 'Стиснути контекст',
   'chat.compacting': 'Стискання…',
   'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
   'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
-  'palette.compactSession': 'Стиснути контекст зараз',
+  'palette.compactSession': 'Стиснути контекст',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Ціни для моделей, використаних у цій сесії, невідомі',

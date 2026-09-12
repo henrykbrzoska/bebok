@@ -34,7 +34,11 @@ function row(part: Part, toolIndex = 0): RenderedPart {
 
 describe('summarizeToolRun (F6-1 / F6-1c)', () => {
   it('is completed with an empty name summary for no rows', () => {
-    expect(summarizeToolRun([])).toEqual({ state: 'completed', names: '' });
+    expect(summarizeToolRun([])).toEqual({
+      state: 'completed',
+      names: '',
+      safety: { green: 0, yellow: 0, orange: 0 },
+    });
   });
 
   it('counts repeated names in first-appearance order', () => {
@@ -134,5 +138,49 @@ describe('ToolGroupComponent (F6-1 / F6-1c)', () => {
     expect(strips[0].classList.contains('first')).toBeTrue();
     expect(strips[1].classList.contains('first')).toBeFalse();
     expect(root().querySelectorAll('app-part-renderer').length).toBe(2);
+  });
+
+  it('falls back to the legacy single worst-state dot with no safety input', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], false);
+    await fixture.whenStable();
+
+    expect(root().querySelector('.safety-cluster')).toBeNull();
+    expect(root().querySelector('.group-head > .dot.state-completed')).not.toBeNull();
+  });
+
+  it('renders a per-level count cluster once safety data is present (F7-1)', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], false);
+    fixture.componentRef.setInput('safety', { green: 3, yellow: 1, orange: 2 });
+    await fixture.whenStable();
+
+    const cluster = root().querySelector('.safety-cluster');
+    expect(cluster).not.toBeNull();
+    expect(root().querySelector('.group-head > .dot')).toBeNull();
+    const dots = root().querySelectorAll('.cluster-dot');
+    expect(dots.length).toBe(3);
+    expect(dots[0].classList.contains('safety-green')).toBeTrue();
+    expect(dots[0].textContent).toContain('3');
+    expect(dots[1].classList.contains('safety-yellow')).toBeTrue();
+    expect(dots[1].textContent).toContain('1');
+    expect(dots[2].classList.contains('safety-orange')).toBeTrue();
+    expect(dots[2].textContent).toContain('2');
+  });
+
+  it('omits zero-count levels from the cluster', async () => {
+    setInputs([row(tool('read'))], false);
+    fixture.componentRef.setInput('safety', { green: 0, yellow: 0, orange: 5 });
+    await fixture.whenStable();
+
+    expect(root().querySelectorAll('.cluster-dot').length).toBe(1);
+    expect(root().querySelector('.cluster-dot')!.classList.contains('safety-orange')).toBeTrue();
+  });
+
+  it('rings the cluster when the worst state is error', async () => {
+    setInputs([row(tool('a', 'error'))], false);
+    fixture.componentRef.setInput('state', 'error');
+    fixture.componentRef.setInput('safety', { green: 0, yellow: 0, orange: 1 });
+    await fixture.whenStable();
+
+    expect(root().querySelector('.safety-cluster')!.classList.contains('ring-failed')).toBeTrue();
   });
 });

@@ -5,7 +5,7 @@ import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
 import { PartRendererComponent } from './part-renderer';
-import { RenderedPart, ToolGroupComponent, summarizeToolRun } from './tool-group';
+import { RenderedPart, SafetyCounts, ToolGroupComponent, summarizeToolRun } from './tool-group';
 
 export type { RenderedPart };
 
@@ -22,6 +22,8 @@ export interface ToolGroup {
   state: ToolStateKind;
   /** "read ×3, edit ×2" - tool names by first appearance with their counts. */
   names: string;
+  /** F7-1 per-level safety counts for the group header's dot cluster. */
+  safety: SafetyCounts;
 }
 
 export type RenderedItem = RenderedPart | ToolGroup;
@@ -66,8 +68,8 @@ export function groupParts(parts: readonly Part[]): RenderedItem[] {
 }
 
 function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
-  const { state, names } = summarizeToolRun(rows);
-  return { kind: 'group', key, rows, state, names };
+  const { state, names, safety } = summarizeToolRun(rows);
+  return { kind: 'group', key, rows, state, names, safety };
 }
 
 /**
@@ -123,6 +125,7 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
                 [state]="item.state"
                 [names]="item.names"
                 [count]="item.rows.length"
+                [safety]="item.safety"
                 [open]="groupOpen(item.key)"
                 [taskLinks]="taskLinks()"
                 (toggle)="toggleGroup(item.key)"

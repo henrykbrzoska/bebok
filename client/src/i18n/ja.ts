@@ -116,6 +116,14 @@ export const ja: Record<MessageKey, string> = {
   'toolGroup.expand': 'ツール呼び出しを展開',
   'toolGroup.collapse': 'ツール呼び出しを折りたたむ',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': '自動許可 · 読み取り専用',
+  'tool.safetyAsk': '確認済み · 承認済み',
+  'tool.safetyMutating': '変更を伴う、または高リスク',
+  'toolGroup.safetyTitle': '安全性',
+
+
   'thinking.label': '思考中 - {text}',
 
   'dialog.pickDirectory': 'プロジェクトディレクトリを選択',
@@ -467,11 +475,11 @@ export const ja: Record<MessageKey, string> = {
   'drawer.contextNone': 'まだターンがありません',
 
   // F6-4: compaction
-  'chat.compact': '圧縮',
+  'chat.compact': 'コンテキストを圧縮',
   'chat.compacting': '圧縮中…',
   'chat.compactTitle': '古いメッセージを要約して新しいセッションにまとめる（コンテキスト圧縮）',
   'chat.compactIdle': '圧縮にはメッセージが数件ある待機中のセッションが必要です',
-  'palette.compactSession': '今すぐコンテキストを圧縮',
+  'palette.compactSession': 'コンテキストを圧縮',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'このセッションで使用したモデルの料金は不明です',

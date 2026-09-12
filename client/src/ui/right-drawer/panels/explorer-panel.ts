@@ -5,6 +5,11 @@
  * gitignore-aware `GET /fs/tree` walk, rendered at drawer width. The selected
  * file is kept in `ExplorerSelectionStore` so the full-screen Explorer and this
  * mini tree stay on the same file instead of forking the state.
+ *
+ * F7-3: clicking a file row also opens the full-screen Explorer with that
+ * file selected and its content loaded (`ExplorerSelectionStore.openInExplorer`
+ * + a navigation to `/explorer`, consumed once by `ExplorerView`). The drawer
+ * itself is otherwise unchanged - it still just tracks the selection.
  */
 
 import {
@@ -15,13 +20,13 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 
+import { ExplorerSelectionStore } from '../../../core/explorer-selection.store';
 import { EngineClient } from '../../../core/engine-client.service';
 import { FsEntry } from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
-import { ExplorerSelectionStore } from './explorer-selection.store';
 
 interface FsNode {
   name: string;
@@ -201,6 +206,7 @@ export class ExplorerPanel {
   private readonly engine = inject(EngineClient);
   private readonly session = inject(ChatSessionStore);
   private readonly selection = inject(ExplorerSelectionStore);
+  private readonly router = inject(Router);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -245,14 +251,16 @@ export class ExplorerPanel {
     });
   }
 
-  /** Folders expand/collapse (lazy-loading children); files get selected. */
+  /** Folders expand/collapse (lazy-loading children); files open the
+   *  full-screen Explorer with that file selected (F7-3). */
   async activate(node: FsNode): Promise<void> {
     const dir = this.directory();
     if (!dir) {
       return;
     }
     if (!node.is_dir) {
-      this.selection.select(dir, node.path);
+      this.selection.openInExplorer(dir, node.path);
+      await this.router.navigate(['/explorer'], { queryParams: { directory: dir } });
       return;
     }
     const state = this.dirs()[node.path];

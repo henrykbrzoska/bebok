@@ -116,6 +116,14 @@ export const zh: Record<MessageKey, string> = {
   'toolGroup.expand': '展开工具调用',
   'toolGroup.collapse': '折叠工具调用',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': '自动允许 · 只读',
+  'tool.safetyAsk': '已请求 · 已批准',
+  'tool.safetyMutating': '具有修改性或高风险',
+  'toolGroup.safetyTitle': '安全性',
+
+
   'thinking.label': '思考中 - {text}',
 
   'dialog.pickDirectory': '选择项目目录',
@@ -467,11 +475,11 @@ export const zh: Record<MessageKey, string> = {
   'drawer.contextNone': '尚无回合',
 
   // F6-4: compaction
-  'chat.compact': '压缩',
+  'chat.compact': '压缩上下文',
   'chat.compacting': '压缩中…',
   'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
   'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
-  'palette.compactSession': '立即压缩上下文',
+  'palette.compactSession': '压缩上下文',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': '本会话所用模型的定价未知',

@@ -3,8 +3,9 @@
  *
  * Left: breadcrumb - "Directory" always links back to Start, followed by the
  * current context (the session id in monospace on Chat, the screen name
- * elsewhere). Right: the density toggle and, on Chat only, the right-drawer
- * toggle which highlights while the drawer is open.
+ * elsewhere). Right: on Chat only, the right-drawer toggle which highlights
+ * while the drawer is open. The density toggle that used to sit here was
+ * removed in F7-2 (compact spacing is now the app's only layout).
  */
 
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
@@ -47,12 +48,7 @@ export class Topbar {
     }
   });
 
-  readonly compact = computed(() => this.shell.density() === 'compact');
   readonly drawerOpen = this.shell.rightDrawerOpen;
-
-  toggleDensity(): void {
-    this.shell.toggleDensity();
-  }
 
   toggleDrawer(): void {
     this.shell.toggleRightDrawer();

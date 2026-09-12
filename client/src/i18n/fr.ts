@@ -117,6 +117,14 @@ export const fr: Record<MessageKey, string> = {
   'toolGroup.expand': 'Développer les appels d\'outils',
   'toolGroup.collapse': 'Réduire les appels d\'outils',
 
+  // F7-1: safety-dot legend (green = auto-allowed & read-only, yellow =
+  // asked & approved, orange = mutating/dangerous or a matched deny).
+  'tool.safetyAllow': 'autorisé automatiquement · lecture seule',
+  'tool.safetyAsk': 'demandé · approuvé',
+  'tool.safetyMutating': 'modifie ou à haut risque',
+  'toolGroup.safetyTitle': 'Sécurité',
+
+
   'thinking.label': 'Réflexion - {text}',
 
   'dialog.pickDirectory': 'Choisir un répertoire de projet',
@@ -468,11 +476,11 @@ export const fr: Record<MessageKey, string> = {
   'drawer.contextNone': 'Aucun tour pour l\'instant',
 
   // F6-4: compaction
-  'chat.compact': 'Compacter',
+  'chat.compact': 'Compacter le contexte',
   'chat.compacting': 'Compactage…',
   'chat.compactTitle': 'Résumer les anciens messages dans une nouvelle session (compactage du contexte)',
   'chat.compactIdle': 'Le compactage nécessite une session inactive avec quelques messages',
-  'palette.compactSession': 'Compacter le contexte maintenant',
+  'palette.compactSession': 'Compacter le contexte',
 
   // F6-5: unknown pricing
   'drawer.costUnknown': 'Tarif inconnu pour les modèles utilisés dans cette session',

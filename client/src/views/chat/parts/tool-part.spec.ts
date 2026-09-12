@@ -163,4 +163,38 @@ describe('ToolPartComponent default state (F6-1b)', () => {
     await fixture.whenStable();
     expect(head().querySelector('.tool-args')!.textContent).not.toContain('·');
   });
+
+  it('F7-1: colours the header dot by safety tier, independent of run state', async () => {
+    setPart({ ...READ, permission: 'allow', mutating: false });
+    await fixture.whenStable();
+    let dot = head().querySelector('.dot')!;
+    expect(dot.classList.contains('safety-green')).toBeTrue();
+    expect(dot.classList.contains('ring-failed')).toBeFalse();
+
+    setPart({ ...BASH, state: { state: 'completed', input: {}, output: 'ok', title: 'bash' }, permission: 'ask', mutating: true });
+    await fixture.whenStable();
+    dot = head().querySelector('.dot')!;
+    // Mutating wins over the "ask" verdict.
+    expect(dot.classList.contains('safety-orange')).toBeTrue();
+    expect(dot.classList.contains('safety-yellow')).toBeFalse();
+
+    setPart({ ...OTHER, permission: 'ask', mutating: false });
+    await fixture.whenStable();
+    dot = head().querySelector('.dot')!;
+    expect(dot.classList.contains('safety-yellow')).toBeTrue();
+  });
+
+  it('F7-1: falls back to state-unknown with no resolved permission (legacy part)', async () => {
+    setPart(READ);
+    await fixture.whenStable();
+    expect(head().querySelector('.dot')!.classList.contains('state-unknown')).toBeTrue();
+  });
+
+  it('F7-1: a failed call keeps a red ring regardless of its safety colour', async () => {
+    setPart({ ...FAILED, permission: 'allow', mutating: true });
+    await fixture.whenStable();
+    const dot = head().querySelector('.dot')!;
+    expect(dot.classList.contains('ring-failed')).toBeTrue();
+    expect(dot.classList.contains('safety-orange')).toBeTrue();
+  });
 });

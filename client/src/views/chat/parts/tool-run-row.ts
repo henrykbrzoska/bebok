@@ -4,7 +4,13 @@ import { Message, ToolStateKind } from '../../../core/engine.dtos';
 import { formatMs } from '../../../core/format';
 import { I18nService } from '../../../i18n/i18n.service';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
-import { GroupRow, RenderedPart, ToolGroupComponent, summarizeToolRun } from './tool-group';
+import {
+  GroupRow,
+  RenderedPart,
+  SafetyCounts,
+  ToolGroupComponent,
+  summarizeToolRun,
+} from './tool-group';
 
 /** Everything `ToolRunRowComponent` needs, pre-computed from the merged turns. */
 export interface ToolRunSummary {
@@ -14,6 +20,8 @@ export interface ToolRunSummary {
   state: ToolStateKind;
   names: string;
   count: number;
+  /** F7-1 per-level safety counts for the group header's dot cluster. */
+  safety: SafetyCounts;
   tokensIn: number;
   tokensOut: number;
   cost: number | null;
@@ -70,13 +78,14 @@ export function buildToolRun(messages: readonly Message[]): ToolRunSummary {
     tokensOut += turnOut;
   }
 
-  const { state, names } = summarizeToolRun(toolRows);
+  const { state, names, safety } = summarizeToolRun(toolRows);
   return {
     key: messages[0]?.id ?? '',
     rows,
     state,
     names,
     count: toolRows.length,
+    safety,
     tokensIn,
     tokensOut,
     cost,
@@ -118,6 +127,7 @@ export function buildToolRun(messages: readonly Message[]): ToolRunSummary {
           [state]="summary().state"
           [names]="summary().names"
           [count]="summary().count"
+          [safety]="summary().safety"
           [open]="open()"
           [taskLinks]="taskLinks()"
           (toggle)="toggle()"

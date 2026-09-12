@@ -291,11 +291,17 @@ a {
   color: var(--text-muted);
 }
 
-/* --- Density (WP-SHELL / F1-12) ---------------------------------------
- * The shell root carries `.density-compact` when the user picks Compact in
- * the topbar. Compact tightens the shared spacing scale, which every shell
+/* --- Density (WP-SHELL / F1-12, made permanent by F7-2) ----------------
+ * `.density-compact` tightens the shared spacing scale, which every shell
  * component is built on, and trims the card/list padding used by the Start
- * and Settings screens. The choice is persisted by `ui-prefs.store.ts`.
+ * and Settings screens. F7-2 removed the Comfortable/Compact toggle (it
+ * duplicated the chat toolbar's "Compact context" button in name only) and
+ * made this the app's only layout: `app-shell.html` now always applies the
+ * class instead of binding it to a preference, so this selector - and the
+ * matching `:host-context(.density-compact)` rules in `ui/sidebar/sidebar.css`
+ * - are effectively unconditional. Left as a class (rather than merged into
+ * the base selectors) to keep this change dead-simple and low-risk; a
+ * follow-up can fold them together.
  */
 
 .density-compact {
