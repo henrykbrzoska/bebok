@@ -317,4 +317,5 @@ export const ja: Record<MessageKey, string> = {
   'start.retry': '再試行',
   'sidebar.language': '言語',
   'chat.abortIdle': '実行中のターンはありません',
+  'chat.assistantLabel': 'アシスタント',
 };

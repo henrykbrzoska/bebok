@@ -318,4 +318,5 @@ export const pl: Record<MessageKey, string> = {
   'start.retry': 'Ponów',
   'sidebar.language': 'Język',
   'chat.abortIdle': 'Żadna tura nie jest uruchomiona',
+  'chat.assistantLabel': 'Asystent',
 };

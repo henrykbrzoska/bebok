@@ -190,6 +190,8 @@ export class ToolPartComponent {
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
+  /** Ordinal of this tool call within its message (see F2-6). */
+  readonly toolIndex = input(-1);
   /** Task name/ID → childSessionID map, passed down from the chat view. */
   readonly taskLinks = input<Map<string, string>>(new Map());
   readonly detailsOpen = signal(true);

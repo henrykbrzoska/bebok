@@ -15,9 +15,7 @@
 .chat-main {
   flex: 1 1 auto;
   display: flex;
-  gap: 12px;
   min-height: 0;
-  padding: 12px 16px 0;
 }
 
 .chat-col {
@@ -103,23 +101,46 @@
 .scroll {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 18px 16px 18px 16px;
-  padding-right: calc(16px + 88px);
+  padding: var(--space-20) var(--space-16);
+  padding-right: calc(var(--space-16) + 88px);
   display: flex;
   flex-direction: column;
+}
+
+/* F2-4: the transcript is one centered 880px column. */
+.thread {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-18);
+  flex: 1 1 auto;
 }
 
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-18);
   width: 100%;
 }
 
+/* F2-11: empty state. */
 .placeholder {
   margin: auto;
   text-align: center;
-  color: var(--fg-muted);
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.placeholder-title {
+  margin: 0;
+  font-size: var(--fs-14);
+  color: var(--text);
+}
+
+.placeholder p {
+  margin: 0;
 }
 
 .chat-error {
@@ -204,12 +225,14 @@
 
 .pending.user-bubble {
   align-self: flex-end;
-  margin-top: 12px;
-  max-width: 92%;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: rgba(63, 111, 224, 0.14);
-  border: 1px dashed rgba(63, 111, 224, 0.35);
+  max-width: 70%;
+  padding: var(--space-10) var(--space-14);
+  border-radius: var(--radius-bubble) var(--radius-bubble) 3px var(--radius-bubble);
+  background: rgba(232, 147, 90, 0.22);
+  border: 1px dashed rgba(232, 147, 90, 0.5);
+  color: var(--text);
+  font-size: var(--fs-13-5);
+  line-height: var(--lh-body);
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -223,7 +246,7 @@
   border-top-color: transparent;
   animation: pendspin 0.8s linear infinite;
 }
-.pending .sent { color: #4caf6b; font-size: 13px; line-height: 1; }
+.pending .sent { color: var(--success); font-size: 13px; line-height: 1; }
 @keyframes pendspin { to { transform: rotate(360deg); } }
 
 /* --- Active sub-tasks (orchestrator) --- */

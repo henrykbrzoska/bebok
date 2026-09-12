@@ -318,4 +318,5 @@ export const fr: Record<MessageKey, string> = {
   'start.retry': 'Réessayer',
   'sidebar.language': 'Langue',
   'chat.abortIdle': 'Aucun tour en cours',
+  'chat.assistantLabel': 'Assistant',
 };

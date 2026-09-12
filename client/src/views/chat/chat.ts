@@ -27,7 +27,6 @@ import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
-import { SessionSidebarComponent } from '../../ui/session-sidebar/session-sidebar';
 import { MessageRowComponent } from './parts/message-row';
 import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
@@ -102,7 +101,6 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
-    SessionSidebarComponent,
     ScrollMinimapComponent,
   ],
   templateUrl: './chat.html',

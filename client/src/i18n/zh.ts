@@ -317,4 +317,5 @@ export const zh: Record<MessageKey, string> = {
   'start.retry': '重试',
   'sidebar.language': '语言',
   'chat.abortIdle': '当前没有进行中的回合',
+  'chat.assistantLabel': '助手',
 };

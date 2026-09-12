@@ -318,4 +318,5 @@ export const uk: Record<MessageKey, string> = {
   'start.retry': 'Повторити',
   'sidebar.language': 'Мова',
   'chat.abortIdle': 'Жоден хід не виконується',
+  'chat.assistantLabel': 'Асистент',
 };

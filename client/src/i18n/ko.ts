@@ -317,4 +317,5 @@ export const ko: Record<MessageKey, string> = {
   'start.retry': '다시 시도',
   'sidebar.language': '언어',
   'chat.abortIdle': '실행 중인 턴이 없습니다',
+  'chat.assistantLabel': '어시스턴트',
 };

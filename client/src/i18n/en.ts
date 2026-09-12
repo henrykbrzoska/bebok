@@ -327,6 +327,7 @@ export const en = {
   'start.retry': 'Retry',
   'sidebar.language': 'Language',
   'chat.abortIdle': 'No turn is running',
+  'chat.assistantLabel': 'Assistant',
 };
 
 export type MessageKey = keyof typeof en;

@@ -43,23 +43,15 @@
   </header>
 
   <div class="chat-main">
-    <app-session-sidebar
-      [messages]="filteredMessages()"
-      [meta]="meta()"
-      [running]="running()"
-      [models]="modelsUsed()"
-      [filterModel]="filterModel()"
-      (filterModelChange)="filterModel.set($event)"
-    />
-
     <div class="chat-col">
       <div class="scroll-wrap">
         <div #scroll class="scroll" (scroll)="onScroll()">
+          <div class="thread">
           @if (loading()) {
             <div class="placeholder">{{ t('chat.loading') }}</div>
           } @else if (filteredMessages().length === 0 && pending().length === 0) {
             <div class="placeholder">
-              <p>{{ t('chat.noMessages') }}</p>
+              <p class="placeholder-title">{{ t('chat.noMessages') }}</p>
               <p class="muted">{{ t('chat.sendFirst') }}</p>
             </div>
           } @else {
@@ -121,6 +113,7 @@
               }
             </div>
           }
+          </div>
         </div>
 
         @if (scrollArea()) {

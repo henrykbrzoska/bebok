@@ -318,4 +318,5 @@ export const es: Record<MessageKey, string> = {
   'start.retry': 'Reintentar',
   'sidebar.language': 'Idioma',
   'chat.abortIdle': 'Ningún turno en curso',
+  'chat.assistantLabel': 'Asistente',
 };

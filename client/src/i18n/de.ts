@@ -318,4 +318,5 @@ export const de: Record<MessageKey, string> = {
   'start.retry': 'Erneut versuchen',
   'sidebar.language': 'Sprache',
   'chat.abortIdle': 'Kein Durchlauf aktiv',
+  'chat.assistantLabel': 'Assistent',
 };

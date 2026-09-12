@@ -317,4 +317,5 @@ export const hi: Record<MessageKey, string> = {
   'start.retry': 'पुनः प्रयास',
   'sidebar.language': 'भाषा',
   'chat.abortIdle': 'कोई टर्न नहीं चल रहा',
+  'chat.assistantLabel': 'सहायक',
 };
