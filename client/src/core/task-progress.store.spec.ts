@@ -112,13 +112,15 @@ describe('TaskProgressStore (WP-DELEGATION)', () => {
 
   it('matches a task call by its normalised name or by the prompt prefix', () => {
     listener!(started('n', { name: 'api-tests', description: descriptionOf('Add unit tests for the api app controller') }));
-    listener!(started('m', { name: 'code-2', description: descriptionOf('Update README.md with a features section and nothing else, keep the style') }));
+    // 81 chars: the engine keeps only the first 80 as the task description, so
+    // the tool call's full prompt must match on that prefix.
+    const long = 'Update README.md with a features section and nothing else, keep the style, thanks';
+    expect(long.length).toBeGreaterThan(80);
+    listener!(started('m', { name: 'code-2', description: descriptionOf(long) }));
 
     expect(store.matchTaskCall({ name: 'API Tests', prompt: 'whatever' }, 'parent-1')?.taskID).toBe('n');
     expect(store.matchTaskCall({ prompt: '  Add unit tests for the api app controller  ' })?.taskID).toBe('n');
-    expect(
-      store.matchTaskCall({ prompt: 'Update README.md with a features section and nothing else, keep the style, thanks' })?.taskID,
-    ).toBe('m');
+    expect(store.matchTaskCall({ prompt: long })?.taskID).toBe('m');
     expect(store.matchTaskCall({ prompt: 'unrelated' })).toBeNull();
     expect(store.matchTaskCall({ name: 'api-tests' }, 'other-session')).toBeNull();
     expect(store.matchTaskCall(undefined)).toBeNull();
