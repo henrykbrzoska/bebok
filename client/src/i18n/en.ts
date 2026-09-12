@@ -357,6 +357,9 @@ export const en = {
   'drawer.openExplorer': 'Open the full Explorer',
   'drawer.loadingTree': 'Loading tree…',
   'drawer.emptyTree': 'Empty directory',
+  'drawer.terminalSession': 'Terminal session',
+  'drawer.newTerminal': 'New terminal',
+  'drawer.noTerminal': 'No terminal running. Press + to start one.',
 };
 
 export type MessageKey = keyof typeof en;

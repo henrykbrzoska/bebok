@@ -347,4 +347,7 @@ export const ja: Record<MessageKey, string> = {
   'drawer.openExplorer': 'フルエクスプローラーを開く',
   'drawer.loadingTree': 'ツリーを読み込み中…',
   'drawer.emptyTree': '空のディレクトリ',
+  'drawer.terminalSession': 'ターミナルセッション',
+  'drawer.newTerminal': '新しいターミナル',
+  'drawer.noTerminal': '実行中のターミナルはありません。+ で起動します。',
 };

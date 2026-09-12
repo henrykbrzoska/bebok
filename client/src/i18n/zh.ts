@@ -347,4 +347,7 @@ export const zh: Record<MessageKey, string> = {
   'drawer.openExplorer': '打开完整资源管理器',
   'drawer.loadingTree': '正在加载目录树…',
   'drawer.emptyTree': '空目录',
+  'drawer.terminalSession': '终端会话',
+  'drawer.newTerminal': '新建终端',
+  'drawer.noTerminal': '没有正在运行的终端。按 + 启动一个。',
 };

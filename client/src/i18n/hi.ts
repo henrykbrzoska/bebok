@@ -347,4 +347,7 @@ export const hi: Record<MessageKey, string> = {
   'drawer.openExplorer': 'पूरा एक्सप्लोरर खोलें',
   'drawer.loadingTree': 'ट्री लोड हो रहा है…',
   'drawer.emptyTree': 'खाली निर्देशिका',
+  'drawer.terminalSession': 'टर्मिनल सत्र',
+  'drawer.newTerminal': 'नया टर्मिनल',
+  'drawer.noTerminal': 'कोई टर्मिनल नहीं चल रहा। शुरू करने के लिए + दबाएँ।',
 };

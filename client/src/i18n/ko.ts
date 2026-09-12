@@ -347,4 +347,7 @@ export const ko: Record<MessageKey, string> = {
   'drawer.openExplorer': '전체 탐색기 열기',
   'drawer.loadingTree': '트리 불러오는 중…',
   'drawer.emptyTree': '빈 디렉터리',
+  'drawer.terminalSession': '터미널 세션',
+  'drawer.newTerminal': '새 터미널',
+  'drawer.noTerminal': '실행 중인 터미널이 없습니다. +를 눌러 시작하세요.',
 };

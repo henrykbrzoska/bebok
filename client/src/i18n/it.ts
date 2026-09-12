@@ -348,4 +348,7 @@ export const it: Record<MessageKey, string> = {
   'drawer.openExplorer': 'Apri l\'Explorer completo',
   'drawer.loadingTree': 'Caricamento albero…',
   'drawer.emptyTree': 'Cartella vuota',
+  'drawer.terminalSession': 'Sessione terminale',
+  'drawer.newTerminal': 'Nuovo terminale',
+  'drawer.noTerminal': 'Nessun terminale attivo. Premi + per avviarne uno.',
 };

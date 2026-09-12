@@ -348,4 +348,7 @@ export const uk: Record<MessageKey, string> = {
   'drawer.openExplorer': 'Відкрити повний Провідник',
   'drawer.loadingTree': 'Завантаження дерева…',
   'drawer.emptyTree': 'Порожній каталог',
+  'drawer.terminalSession': 'Сесія термінала',
+  'drawer.newTerminal': 'Новий термінал',
+  'drawer.noTerminal': 'Немає активного термінала. Натисніть +, щоб запустити.',
 };

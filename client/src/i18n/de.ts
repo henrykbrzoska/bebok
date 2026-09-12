@@ -348,4 +348,7 @@ export const de: Record<MessageKey, string> = {
   'drawer.openExplorer': 'Vollen Explorer öffnen',
   'drawer.loadingTree': 'Baum wird geladen…',
   'drawer.emptyTree': 'Leeres Verzeichnis',
+  'drawer.terminalSession': 'Terminal-Sitzung',
+  'drawer.newTerminal': 'Neues Terminal',
+  'drawer.noTerminal': 'Kein Terminal aktiv. Mit + eines starten.',
 };
