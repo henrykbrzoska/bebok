@@ -190,6 +190,30 @@ impl InstanceStore {
         self.spawn_session(&instance, session).await
     }
 
+    /// Create a session bound to a fresh git worktree of `root` (WP-GIT /
+    /// F6-15): runs `git worktree add <root>/.bebok/worktrees/<branch>
+    /// [<base>]`, then creates the session with the worktree path as its
+    /// directory like any other session. Returns the session and the
+    /// worktree path (unnormalised; `session.directory()` is the normalised
+    /// form). Session-creation internals are untouched - only the directory
+    /// string differs.
+    pub async fn create_worktree_session(
+        &self,
+        root: &str,
+        branch: &str,
+        base: Option<&str>,
+        agent: &str,
+        model: Option<&str>,
+    ) -> Result<(Arc<SessionState>, PathBuf)> {
+        let root_path = PathBuf::from(normalize_path(Path::new(root)));
+        let path = crate::git::add_worktree(&root_path, branch, base)
+            .await
+            .map_err(CoreError::from)?;
+        let directory = path.to_string_lossy().to_string();
+        let session = self.create_session(&directory, agent, model).await?;
+        Ok((session, path))
+    }
+
     /// Resolve the most recent session for a directory (for `continueLast`).
     pub async fn continue_last_session(
         &self,
@@ -268,14 +292,21 @@ impl InstanceStore {
 
     /// List session metadata for a directory. The startup scan supplies closed
     /// sessions; open sessions contribute their current title, usage and time.
+    ///
+    /// Sessions running in one of the directory's git worktrees
+    /// (`<directory>/.bebok/worktrees/<branch>`, WP-GIT) are listed with the
+    /// project they belong to, so they show up in its sidebar and Start list.
     pub async fn list_sessions(&self, directory: &str) -> Vec<Session> {
         let normalized = normalize_path(Path::new(directory));
+        let root = Path::new(&normalized);
         let mut sessions: Vec<Session> = self
             .meta
             .read()
             .await
             .values()
-            .filter(|s| s.directory == normalized)
+            .filter(|s| {
+                s.directory == normalized || crate::git::is_worktree_of(Path::new(&s.directory), root)
+            })
             .cloned()
             .collect();
         // The startup/creation index is not rewritten after every turn. Take
@@ -369,6 +400,70 @@ mod tests {
             assert_eq!(listed[0].usage.output_tokens, 3);
         }
 
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// WP-GIT / F6-15: a worktree session is a real `git worktree` on disk,
+    /// its directory is the worktree path, and it is listed under the project
+    /// root it belongs to. Deleting the session leaves the worktree alone.
+    #[tokio::test]
+    async fn worktree_session_creates_a_git_worktree_and_lists_under_the_root() {
+        if !crate::git::git_available().await {
+            eprintln!("skipping: git not on PATH");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("bebok-wt-session-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        for args in [
+            vec!["init", "-q"],
+            vec!["symbolic-ref", "HEAD", "refs/heads/main"],
+            vec!["config", "user.email", "bebok@example.com"],
+            vec!["config", "user.name", "Bebok Test"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["commit", "-q", "--allow-empty", "-m", "init"],
+        ] {
+            let out = crate::git::run(&project, &args).await.expect("git spawns");
+            assert!(out.success, "git {args:?}: {}", out.stderr);
+        }
+
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let (session, path) = store
+            .create_worktree_session(project.to_str().unwrap(), "bebok/session-abc", None, "code", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            path,
+            crate::git::worktrees_dir(&project).join("bebok").join("session-abc")
+        );
+        assert!(path.join(".git").exists(), "a real worktree has a .git link file");
+        assert_eq!(session.directory(), crate::util::normalize_path(&path));
+        let info = crate::git::worktree_info(std::path::Path::new(session.directory())).unwrap();
+        assert_eq!(info.branch, "bebok/session-abc");
+
+        // Listed under the project root (and under its own directory).
+        let listed = store.list_sessions(project.to_str().unwrap()).await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, session.id());
+        assert_eq!(store.list_sessions(session.directory()).await.len(), 1);
+
+        // A second, plain session in the root is listed too; the worktree
+        // session is not listed under an unrelated directory.
+        store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        assert_eq!(store.list_sessions(project.to_str().unwrap()).await.len(), 2);
+        let other = base.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(store.list_sessions(other.to_str().unwrap()).await.is_empty());
+
+        // Deleting the session never removes the worktree by itself.
+        let meta = store.delete_session(session.id()).await.unwrap();
+        assert_eq!(meta.directory, session.directory());
+        assert!(path.join(".git").exists(), "worktree survives session deletion");
+
+        let _ = crate::git::remove_worktree(&project, &path).await;
         let _ = std::fs::remove_dir_all(base);
     }
 
