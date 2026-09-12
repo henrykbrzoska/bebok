@@ -125,7 +125,9 @@ pub fn validate_url(raw: &str) -> Result<String, String> {
         return Err(format!("'{url}' is malformed: expected {scheme}://host"));
     }
     if matches!(scheme_lc.as_str(), "http" | "https") {
-        let host = rest.trim_start_matches('/');
+        // Strip exactly the `//` authority marker: `https:///path` must be
+        // seen as an empty host, not as host `path`.
+        let host = rest.strip_prefix("//").unwrap_or(rest);
         let host = host.split(['/', '?', '#']).next().unwrap_or("");
         if host.is_empty() {
             return Err(format!("'{url}' has no host"));
