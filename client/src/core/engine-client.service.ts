@@ -22,6 +22,7 @@ import {
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
+  FsBrowseResponse,
   FsFileResponse,
   FsTreeResponse,
   McpListResponse,
@@ -30,6 +31,9 @@ import {
   MessageListResponse,
   ModelsResponse,
   PermissionResponse,
+  ProjectEntry,
+  ProjectPatch,
+  ProjectsListResponse,
   PromptBody,
   PtyInfo,
   PtyListResponse,
@@ -350,6 +354,50 @@ export class EngineClient {
       'GET',
       `/models?directory=${encodeURIComponent(directory)}&provider=${encodeURIComponent(provider)}`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // F5: projects registry (/projects) + directory picker (/fs/browse)
+  // ---------------------------------------------------------------------------
+
+  /** Registered projects, already in display order (pinned, recent, name). */
+  listProjects(): Promise<ProjectEntry[]> {
+    return this.request<ProjectsListResponse>('GET', '/projects').then((d) => d.projects);
+  }
+
+  /** Register a directory. Re-adding a known path returns the existing entry. */
+  addProject(path: string, name?: string): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('POST', '/projects', {
+      path,
+      ...(name ? { name } : {}),
+    });
+  }
+
+  updateProject(id: string, patch: ProjectPatch): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('PATCH', `/projects/${encodeURIComponent(id)}`, patch);
+  }
+
+  /** Forget a project. The directory itself is never touched. */
+  removeProject(id: string): Promise<{ removed: boolean; id: string }> {
+    return this.request<{ removed: boolean; id: string }>(
+      'DELETE',
+      `/projects/${encodeURIComponent(id)}`,
+    );
+  }
+
+  /** Stamp `last_opened_at` and get back the normalised path to switch to. */
+  openProject(id: string): Promise<ProjectEntry> {
+    return this.request<ProjectEntry>('POST', `/projects/${encodeURIComponent(id)}/open`);
+  }
+
+  /**
+   * List the subdirectories of `path`, or the host's roots when `path` is
+   * omitted. Directory names only - this endpoint never returns file contents.
+   */
+  browseDirectory(path?: string | null, showHidden = false): Promise<FsBrowseResponse> {
+    const query =
+      (path ? `path=${encodeURIComponent(path)}&` : '') + `show_hidden=${showHidden ? 'true' : 'false'}`;
+    return this.request<FsBrowseResponse>('GET', `/fs/browse?${query}`);
   }
 
   // ---------------------------------------------------------------------------

@@ -465,3 +465,42 @@ export interface PtyTicketResponse {
   ptyId: string;
   ticket: string;
 }
+
+// ---------------------------------------------------------------------------
+// F5: projects registry (`/projects`) + directory picker (`/fs/browse`)
+// ---------------------------------------------------------------------------
+
+/** One registered project directory (mirrors `bebok_core::config::projects::ProjectEntry`). */
+export interface ProjectEntry {
+  id: string;
+  name: string;
+  /** Absolute, engine-normalised path - never split it client-side. */
+  path: string;
+  added_at: number;
+  last_opened_at: number | null;
+  pinned: boolean;
+}
+
+export interface ProjectsListResponse {
+  projects: ProjectEntry[];
+}
+
+/** `PATCH /projects/{id}` body. */
+export interface ProjectPatch {
+  name?: string;
+  pinned?: boolean;
+}
+
+/** One row of the directory picker: always a directory, never a file. */
+export interface FsBrowseEntry {
+  name: string;
+  path: string;
+  hidden: boolean;
+  readable: boolean;
+}
+
+export interface FsBrowseResponse {
+  /** The listed directory, or null when the response carries the host roots. */
+  path: string | null;
+  entries: FsBrowseEntry[];
+}
