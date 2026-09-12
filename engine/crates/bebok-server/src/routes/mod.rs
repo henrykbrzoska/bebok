@@ -9,6 +9,7 @@ use axum::routing::{get, patch, post};
 
 use crate::state::AppState;
 
+pub mod agents;
 pub mod common;
 pub mod config;
 pub mod debug;
@@ -44,6 +45,7 @@ pub fn build_api_router() -> Router<AppState> {
             "/session/{id}/task/{taskID}/abort",
             post(session::abort_task),
         )
+        .route("/session/{id}/agents", get(agents::list_agents))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/truncate", post(session::truncate_session))

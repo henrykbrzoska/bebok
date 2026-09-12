@@ -1217,6 +1217,8 @@ if __name__ == "__main__":
             child_session_id: "uuid-child".to_string(),
             name: "fix-ci".to_string(),
             agent: "code".to_string(),
+            model: None,
+            started_at: 0,
         };
         let json = serde_json::to_value(&task).unwrap();
         assert!(json.get("taskID").is_some(), "expected camelCase taskID");

@@ -393,6 +393,15 @@ pub struct Session {
     pub context_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share: Option<Value>,
+    /// F6-12: outcome of the delegated sub-turn for sessions spawned by the
+    /// `task`/`fleet` tools (`completed` | `aborted` | `error`), persisted
+    /// when `task.ended` fires. `None` for top-level sessions and for
+    /// children still running (or interrupted by an engine restart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<String>,
+    /// F6-12: error text that accompanied `task_status` (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_error: Option<String>,
 }
 
 impl Session {
@@ -412,6 +421,8 @@ impl Session {
             context_used: None,
             context_model: None,
             share: None,
+            task_status: None,
+            task_error: None,
         }
     }
 
