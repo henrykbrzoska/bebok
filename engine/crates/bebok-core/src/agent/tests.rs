@@ -941,7 +941,15 @@ if __name__ == "__main__":
     // Plugin hooks (event-observer extension points)
     // ------------------------------------------------------------------
 
-    /// A plugin that vetoes every `bash` call at the `before.tool` hook.
+    /// Marker that makes the veto plugin's match unique to its own test.
+    ///
+    /// The plugin host is global, so a fixture that vetoed *every* `bash` call
+    /// would also veto bash calls made by other tests running concurrently
+    /// (e.g. `unknown_bash_asks_then_executes_when_allowed`). Matching on this
+    /// marker keeps the veto scoped to the command this test issues.
+    const VETO_BASH_MARKER: &str = "must-survive.txt";
+
+    /// A plugin that vetoes only its own `bash` call at the `before.tool` hook.
     struct VetoBash;
 
     #[async_trait::async_trait]
@@ -955,15 +963,23 @@ if __name__ == "__main__":
             payload: &mut serde_json::Value,
         ) -> crate::plugin::HookResult {
             use crate::plugin::HookResult;
-            if hook == crate::plugin::Hook::BEFORE_TOOL
-                && payload.get("tool").and_then(|v| v.as_str()) == Some("bash")
+            if hook != crate::plugin::Hook::BEFORE_TOOL
+                || payload.get("tool").and_then(|v| v.as_str()) != Some("bash")
             {
-                if let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed") {
-                    *allowed = false;
-                }
-                return HookResult::Changed;
+                return HookResult::Continue;
             }
-            HookResult::Continue
+            let mine = payload
+                .get("input")
+                .and_then(|v| v.get("command"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|cmd| cmd.contains(VETO_BASH_MARKER));
+            if !mine {
+                return HookResult::Continue;
+            }
+            if let Some(serde_json::Value::Bool(allowed)) = payload.get_mut("allowed") {
+                *allowed = false;
+            }
+            HookResult::Changed
         }
     }
 
