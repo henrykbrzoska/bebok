@@ -25,6 +25,7 @@ pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod session;
+pub mod stats;
 
 /// Build all API routes (same paths/methods as before; only module paths
 /// changed). The caller adds middleware/CORS/state (see `server.rs`).
@@ -83,6 +84,7 @@ pub fn build_api_router() -> Router<AppState> {
             post(git::remove_worktree),
         )
         .route("/plugins", get(meta::list_plugins))
+        .route("/stats", get(stats::get_stats))
         .route("/event", get(events::event_stream))
         .route(
             "/debug/log",

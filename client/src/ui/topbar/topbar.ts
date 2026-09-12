@@ -38,6 +38,8 @@ export class Topbar {
         return this.t('nav.terminal');
       case 'debug':
         return this.t('nav.debugLog');
+      case 'stats':
+        return this.t('nav.stats');
       case 'settings':
         return this.t('nav.settings');
       default:
