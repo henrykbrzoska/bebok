@@ -316,4 +316,5 @@ export const hi: Record<MessageKey, string> = {
   'start.connectingTo': '{url} से कनेक्ट हो रहा है…',
   'start.retry': 'पुनः प्रयास',
   'sidebar.language': 'भाषा',
+  'chat.abortIdle': 'कोई टर्न नहीं चल रहा',
 };

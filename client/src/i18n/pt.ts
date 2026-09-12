@@ -317,4 +317,5 @@ export const pt: Record<MessageKey, string> = {
   'start.connectingTo': 'A ligar a {url}…',
   'start.retry': 'Tentar novamente',
   'sidebar.language': 'Idioma',
+  'chat.abortIdle': 'Nenhum turno em execução',
 };

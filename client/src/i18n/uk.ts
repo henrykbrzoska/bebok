@@ -317,4 +317,5 @@ export const uk: Record<MessageKey, string> = {
   'start.connectingTo': 'З\'єднання з {url}…',
   'start.retry': 'Повторити',
   'sidebar.language': 'Мова',
+  'chat.abortIdle': 'Жоден хід не виконується',
 };

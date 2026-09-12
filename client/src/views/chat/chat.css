@@ -36,82 +36,68 @@
   display: flex;
 }
 
-.chat-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
+/* --- F2-3: slim session toolbar (44px) --- */
+
+.session-toolbar {
   flex: 0 0 auto;
-}
-
-.chat-title {
+  height: 44px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-width: 0;
+  gap: var(--space-16);
+  padding: 0 var(--space-16);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
-.back {
-  color: var(--fg-muted);
-  text-decoration: none;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.back:hover {
-  color: var(--accent);
-}
-
-.titles {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.session-title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-sub {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.running-chip {
-  font-size: 12px;
-  color: var(--warn);
-}
-
-.agent-switch {
+.tb-field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+  gap: var(--space-6);
+  min-width: 0;
 }
 
-.agent-switch select {
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--fg);
-  background: var(--bg-raised);
+.tb-label {
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.tb-select {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
+  border-radius: var(--radius-control-sm);
+  padding: 3px 6px;
+  max-width: 200px;
   outline: none;
+}
+
+.tb-select:focus {
+  border-color: var(--accent);
+}
+
+.tb-abort {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  padding: 4px 14px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+  color: var(--danger);
+}
+
+.tb-abort:hover:not(:disabled) {
+  background: rgba(226, 100, 95, 0.12);
+}
+
+.tb-abort:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .scroll {

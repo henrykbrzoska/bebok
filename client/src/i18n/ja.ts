@@ -316,4 +316,5 @@ export const ja: Record<MessageKey, string> = {
   'start.connectingTo': '{url} に接続中…',
   'start.retry': '再試行',
   'sidebar.language': '言語',
+  'chat.abortIdle': '実行中のターンはありません',
 };

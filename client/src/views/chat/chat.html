@@ -1,60 +1,45 @@
 <div class="chat">
-  <header class="chat-head">
-    <div class="chat-title">
-      <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-      <div class="titles">
-        @if (meta()?.alias) {
-          <span class="session-title">{{ meta()!.alias }}</span>
-        } @else {
-          <span class="session-title">{{ meta()?.title || t('chat.session') }}</span>
-        }
-        <span class="muted session-sub">
-          {{ meta()?.agent }} · {{ meta()?.directory }}
-          @if (meta()?.model) {
-            · {{ meta()?.model }}
+  <header class="session-toolbar">
+    @if (agents().length > 0) {
+      <label class="tb-field">
+        <span class="tb-label">{{ t('chat.agent') }}</span>
+        <select class="tb-select" [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
+          @for (agent of agents(); track agent.name) {
+            <option [value]="agent.name">{{ agent.name }}</option>
           }
-        </span>
-      </div>
-    </div>
-
-    <div class="chat-actions">
-      @if (agents().length > 0) {
-        <label class="agent-switch">
-          <span class="muted">{{ t('chat.agent') }}</span>
-          <select [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
-            @for (agent of agents(); track agent.name) {
-              <option [value]="agent.name">{{ agent.name }}</option>
-            }
-          </select>
-        </label>
-        <label class="agent-switch">
-          <span class="muted">{{ t('chat.model') }}</span>
-          <select [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
-            <option value="">{{ t('settings.defaultOption') }}</option>
-            @if (selectedModel() && !availableModels().includes(selectedModel())) {
-              <option [value]="selectedModel()">{{ selectedModel() }}</option>
-            }
-            @for (model of availableModels(); track model) {
-              <option [value]="model">{{ model }}</option>
-            }
-          </select>
-        </label>
-      }
-      <label class="agent-switch thinking">
-        <span class="muted">{{ t('settings.thinking') }}</span>
-        <select [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
-          <option value="off">{{ t('settings.thinkingOff') }}</option>
-          <option value="low">{{ t('settings.thinkingLow') }}</option>
-          <option value="medium">{{ t('settings.thinkingMedium') }}</option>
-          <option value="high">{{ t('settings.thinkingHigh') }}</option>
-          <option value="max">{{ t('settings.thinkingMax') }}</option>
         </select>
       </label>
-      <button class="danger" (click)="abortTurn()" [disabled]="!running()">{{ t('chat.abort') }}</button>
-      @if (running()) {
-        <span class="running-chip">{{ t('chat.running') }}</span>
-      }
-    </div>
+      <label class="tb-field">
+        <span class="tb-label">{{ t('chat.model') }}</span>
+        <select class="tb-select" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
+          <option value="">{{ t('settings.defaultOption') }}</option>
+          @if (selectedModel() && !availableModels().includes(selectedModel())) {
+            <option [value]="selectedModel()">{{ selectedModel() }}</option>
+          }
+          @for (model of availableModels(); track model) {
+            <option [value]="model">{{ model }}</option>
+          }
+        </select>
+      </label>
+    }
+    <label class="tb-field">
+      <span class="tb-label">{{ t('settings.thinking') }}</span>
+      <select class="tb-select" [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
+        <option value="off">{{ t('settings.thinkingOff') }}</option>
+        <option value="low">{{ t('settings.thinkingLow') }}</option>
+        <option value="medium">{{ t('settings.thinkingMedium') }}</option>
+        <option value="high">{{ t('settings.thinkingHigh') }}</option>
+        <option value="max">{{ t('settings.thinkingMax') }}</option>
+      </select>
+    </label>
+
+    <button
+      class="tb-abort"
+      type="button"
+      (click)="abortTurn()"
+      [disabled]="!running()"
+      [title]="running() ? t('chat.abort') : t('chat.abortIdle')"
+    >{{ t('chat.abort') }}</button>
   </header>
 
   <div class="chat-main">

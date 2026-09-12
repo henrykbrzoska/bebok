@@ -326,6 +326,7 @@ export const en = {
   'start.connectingTo': 'Connecting to {url}…',
   'start.retry': 'Retry',
   'sidebar.language': 'Language',
+  'chat.abortIdle': 'No turn is running',
 };
 
 export type MessageKey = keyof typeof en;
