@@ -15,6 +15,7 @@ use crate::provider::{
     ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, ToolCall, Usage,
     retry_after_from_headers,
 };
+use crate::spec::model_name;
 use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Native Anthropic Messages endpoint.
@@ -52,12 +53,7 @@ impl Provider for AnthropicProvider {
         &self,
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
-        let model = req
-            .model
-            .rsplit('/')
-            .next()
-            .unwrap_or(&req.model)
-            .to_string();
+        let model = model_name(&req.model).to_string();
         let body = anthropic_body(&req, &model);
 
         let resp = self

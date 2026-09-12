@@ -83,11 +83,20 @@ impl Tool for Bash {
 ///
 /// On Unix the shell is resolved from `BEBOK_SHELL` (explicit override, used
 /// by the Android/iOS embedding to point at a bundled shell binary), then
-/// `$SHELL`, then `sh`. On Windows it is always `cmd /C`.
+/// `$SHELL`, then `sh`. On Windows `BEBOK_SHELL` overrides the default
+/// `cmd` shell.
 fn shell_command() -> (String, &'static str) {
     #[cfg(windows)]
     {
-        ("cmd".to_string(), "/C")
+        let shell = std::env::var("BEBOK_SHELL").unwrap_or_else(|_| "cmd".to_string());
+        let flag = if shell.rsplit(['\\', '/']).next().is_some_and(|name| {
+            name.eq_ignore_ascii_case("cmd") || name.eq_ignore_ascii_case("cmd.exe")
+        }) {
+            "/C"
+        } else {
+            "-Command"
+        };
+        (shell, flag)
     }
 
     #[cfg(not(windows))]
@@ -96,5 +105,25 @@ fn shell_command() -> (String, &'static str) {
             .or_else(|_| std::env::var("SHELL"))
             .unwrap_or_else(|_| "sh".to_string());
         (shell, "-c")
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::shell_command;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn windows_shell_override_selects_pwsh() {
+        let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let prior = std::env::var_os("BEBOK_SHELL");
+        unsafe { std::env::set_var("BEBOK_SHELL", "pwsh") };
+        assert_eq!(shell_command(), ("pwsh".to_string(), "-Command"));
+        match prior {
+            Some(value) => unsafe { std::env::set_var("BEBOK_SHELL", value) },
+            None => unsafe { std::env::remove_var("BEBOK_SHELL") },
+        }
     }
 }
