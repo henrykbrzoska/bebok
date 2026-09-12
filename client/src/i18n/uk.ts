@@ -332,6 +332,7 @@ export const uk: Record<MessageKey, string> = {
   'chat.goToLastUser': 'Перейти до останнього запитання ↑',
   'chat.loadEarlier': 'Завантажити попередні повідомлення',
   'chat.earlierHidden': 'Приховано попередніх повідомлень: {n}',
+  'chat.mergedTurns': 'Об’єднано {n} ходів лише з інструментами',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

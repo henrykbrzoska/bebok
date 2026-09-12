@@ -331,6 +331,7 @@ export const hi: Record<MessageKey, string> = {
   'chat.goToLastUser': 'अंतिम प्रश्न पर जाएं ↑',
   'chat.loadEarlier': 'पिछले संदेश लोड करें',
   'chat.earlierHidden': '{n} पिछले संदेश नहीं दिखाए गए',
+  'chat.mergedTurns': '{n} केवल-टूल टर्न मिला दिए गए',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

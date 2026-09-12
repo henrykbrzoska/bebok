@@ -331,6 +331,7 @@ export const ja: Record<MessageKey, string> = {
   'chat.goToLastUser': '最後の質問へ ↑',
   'chat.loadEarlier': '以前のメッセージを読み込む',
   'chat.earlierHidden': '以前のメッセージ {n} 件は非表示',
+  'chat.mergedTurns': 'ツールのみのターン {n} 件を統合',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',

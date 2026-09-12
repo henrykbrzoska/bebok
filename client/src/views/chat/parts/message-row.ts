@@ -5,14 +5,9 @@ import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
 import { PartRendererComponent } from './part-renderer';
+import { RenderedPart, ToolGroupComponent, summarizeToolRun } from './tool-group';
 
-/** One part plus the info the renderer needs to pick its default state. */
-export interface RenderedPart {
-  kind: 'part';
-  part: Part;
-  /** 0-based index of this part among the tool parts of the same message. */
-  toolIndex: number;
-}
+export type { RenderedPart };
 
 /**
  * A run of >= 2 consecutive tool calls folded into one collapsible summary
@@ -30,9 +25,6 @@ export interface ToolGroup {
 }
 
 export type RenderedItem = RenderedPart | ToolGroup;
-
-/** Names beyond this many are folded into a trailing ellipsis. */
-const MAX_SUMMARY_NAMES = 4;
 
 /**
  * Grouping pass (F6-1): walks one message's parts, numbering tool calls with
@@ -74,25 +66,7 @@ export function groupParts(parts: readonly Part[]): RenderedItem[] {
 }
 
 function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
-  const counts = new Map<string, number>();
-  let state: ToolStateKind = 'completed';
-  for (const row of rows) {
-    if (row.part.type !== 'tool') {
-      continue;
-    }
-    counts.set(row.part.name, (counts.get(row.part.name) ?? 0) + 1);
-    const kind = row.part.state.state;
-    if (kind === 'error') {
-      state = 'error';
-    } else if ((kind === 'running' || kind === 'pending') && state !== 'error') {
-      state = 'running';
-    }
-  }
-  const labels = [...counts.entries()].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
-  const names =
-    labels.length > MAX_SUMMARY_NAMES
-      ? `${labels.slice(0, MAX_SUMMARY_NAMES).join(', ')}, …`
-      : labels.join(', ');
+  const { state, names } = summarizeToolRun(rows);
   return { kind: 'group', key, rows, state, names };
 }
 
@@ -104,7 +78,7 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
  */
 @Component({
   selector: 'app-message-row',
-  imports: [PartRendererComponent],
+  imports: [PartRendererComponent, ToolGroupComponent],
   host: { '[id]': 'rowId()', '[class.user]': 'isUser()' },
   template: `
     @if (isUser()) {
@@ -144,32 +118,15 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
         <div class="body">
           @for (item of items(); track $index) {
             @if (item.kind === 'group') {
-              <div class="tool-group" [class.open]="groupOpen(item.key)">
-                <button
-                  type="button"
-                  class="group-head"
-                  (click)="toggleGroup(item.key)"
-                  [attr.aria-expanded]="groupOpen(item.key)"
-                  [title]="groupOpen(item.key) ? t('toolGroup.collapse') : t('toolGroup.expand')"
-                >
-                  <span class="dot state-{{ item.state }}" aria-hidden="true"></span>
-                  <span class="group-count">{{ t('toolGroup.summary', { n: item.rows.length }) }}</span>
-                  <span class="group-sep" aria-hidden="true">·</span>
-                  <span class="group-names">{{ item.names }}</span>
-                  <span class="chevron" aria-hidden="true">{{ groupOpen(item.key) ? '▾' : '▸' }}</span>
-                </button>
-                @if (groupOpen(item.key)) {
-                  <div class="group-body">
-                    @for (row of item.rows; track $index) {
-                      <app-part-renderer
-                        [part]="row.part"
-                        [toolIndex]="row.toolIndex"
-                        [taskLinks]="taskLinks()"
-                      />
-                    }
-                  </div>
-                }
-              </div>
+              <app-tool-group
+                [rows]="item.rows"
+                [state]="item.state"
+                [names]="item.names"
+                [count]="item.rows.length"
+                [open]="groupOpen(item.key)"
+                [taskLinks]="taskLinks()"
+                (toggle)="toggleGroup(item.key)"
+              />
             } @else {
               <app-part-renderer
                 [part]="item.part"
@@ -261,85 +218,9 @@ function makeGroup(key: number, rows: RenderedPart[]): ToolGroup {
       overflow-wrap: anywhere;
     }
 
-    /* --- F6-1: grouped run of tool calls --- */
-    .tool-group {
-      border: 1px solid var(--border);
-      border-radius: var(--radius-panel);
-      background: var(--surface);
-      overflow: hidden;
-    }
-    .group-head {
-      display: flex;
-      align-items: center;
-      gap: var(--space-8);
-      width: 100%;
-      min-height: 28px;
-      background: none;
-      border: none;
-      border-radius: 0;
-      padding: 5px var(--space-12);
-      cursor: pointer;
-      text-align: left;
-      min-width: 0;
-    }
-    .group-head:hover {
-      background: var(--surface-2);
-    }
-    .group-head .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      flex: none;
-      background: var(--text-faint);
-    }
-    .group-head .dot.state-completed {
-      background: var(--success);
-    }
-    .group-head .dot.state-running {
-      background: var(--accent);
-      animation: tool-dot-pulse 1.4s ease-in-out infinite;
-    }
-    .group-head .dot.state-error {
-      background: var(--danger);
-    }
-    @keyframes tool-dot-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
-    }
-    .group-count {
-      flex: none;
-      font-family: var(--font-mono);
-      font-size: var(--fs-12-5);
-      font-weight: 600;
-      color: var(--text);
-    }
-    .group-sep {
-      flex: none;
-      color: var(--text-faint);
-      font-size: var(--fs-11-5);
-    }
-    .group-names {
-      flex: 1 1 auto;
-      min-width: 0;
-      font-family: var(--font-mono);
-      font-size: var(--fs-11-5);
-      color: var(--text-muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .group-head .chevron {
-      flex: none;
-      font-size: 10px;
-      color: var(--text-faint);
-    }
-    .group-body {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-4);
-      padding: var(--space-8);
-      border-top: 1px solid var(--border);
-    }
+    /* F6-1: the grouped-run summary row itself is app-tool-group now
+       (./tool-group.ts), reused as-is by the cross-message merge (F6-1c,
+       tool-run-row.ts); its styles live there. */
 
     @media (max-width: 700px) {
       .bubble {

@@ -331,6 +331,7 @@ export const zh: Record<MessageKey, string> = {
   'chat.goToLastUser': '跳转到最后一个问题 ↑',
   'chat.loadEarlier': '加载更早的消息',
   'chat.earlierHidden': '{n} 条更早的消息未显示',
+  'chat.mergedTurns': '已合并 {n} 个仅工具轮次',
   'chrome.subagents': 'Sub-agents',
   'chrome.noSubagents': 'No sub-agents',
   'tool.delegation': 'delegation',
