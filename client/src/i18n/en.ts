@@ -405,6 +405,7 @@ export const en = {
   'chat.abortIdle': 'No turn is running',
   'chat.assistantLabel': 'Assistant',
   'thinking.head': 'Thinking',
+  'thinking.charCount': '{n} chars',
   'diff.mode': 'Diff layout',
   'diff.unified': 'Unified',
   'diff.split': 'Split',

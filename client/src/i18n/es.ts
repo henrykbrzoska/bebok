@@ -396,6 +396,7 @@ export const es: Record<MessageKey, string> = {
   'chat.abortIdle': 'Ningún turno en curso',
   'chat.assistantLabel': 'Asistente',
   'thinking.head': 'Pensando',
+  'thinking.charCount': '{n} caracteres',
   'diff.mode': 'Vista de diferencias',
   'diff.unified': 'Unificado',
   'diff.split': 'Dividido',

@@ -1,10 +1,11 @@
 /**
- * F6-1: grouping of consecutive tool calls in one message.
+ * F6-1 / F6-1b: grouping of consecutive tool calls in one message, and the
+ * three-level collapse (group -> per-call row -> arguments/output).
  *
  * `groupParts` is the pure grouping pass; the component specs cover the
  * rendered group row (a real `<button>` with `aria-expanded`, so native
- * Enter/Space activation applies) and the "Expand tool calls by default"
- * preference.
+ * Enter/Space activation applies), the "Expand tool calls by default"
+ * preference, and that no level auto-expands a level below it.
  */
 
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -152,31 +153,45 @@ describe('MessageRowComponent tool groups (F6-1)', () => {
     expect(root().querySelectorAll('app-tool-part').length).toBe(0);
   });
 
-  it('expands on activation to reveal the individual tool rows, first one open', async () => {
+  it('expands on activation to reveal the individual tool rows - all still collapsed (three-level expand, F6-1b)', async () => {
     fixture.componentRef.setInput('message', message([tool('read'), tool('edit')]));
     await fixture.whenStable();
 
-    // A real <button> receives native Enter/Space activation as a click.
+    // Level 1 -> 2: A real <button> receives native Enter/Space activation as a click.
     groupButton()!.click();
     await fixture.whenStable();
 
     expect(groupButton()!.getAttribute('aria-expanded')).toBe('true');
     const heads = toolHeads();
     expect(heads.length).toBe(2);
-    expect(heads[0].getAttribute('aria-expanded')).toBe('true');
+    // Opening the group must not auto-expand any child row (no "first call" exception).
+    expect(heads[0].getAttribute('aria-expanded')).toBe('false');
     expect(heads[1].getAttribute('aria-expanded')).toBe('false');
+    expect(root().querySelectorAll('.tool-details').length).toBe(0);
+
+    // Level 2 -> 3: each row expands independently of its sibling.
+    heads[0].click();
+    await fixture.whenStable();
+    expect(toolHeads()[0].getAttribute('aria-expanded')).toBe('true');
+    expect(toolHeads()[1].getAttribute('aria-expanded')).toBe('false');
+    expect(root().querySelectorAll('.tool-details').length).toBe(1);
 
     groupButton()!.click();
     await fixture.whenStable();
     expect(groupButton()!.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('does not group a lone tool call', async () => {
+  it('does not group a lone tool call, and it starts collapsed like any other call (F6-1b)', async () => {
     fixture.componentRef.setInput('message', message([text('a'), tool('read'), text('b')]));
     await fixture.whenStable();
 
     expect(groupButton()).toBeNull();
-    expect(root().querySelectorAll('app-tool-part').length).toBe(1);
+    const parts = root().querySelectorAll('app-tool-part');
+    expect(parts.length).toBe(1);
+    const head = toolHeads()[0];
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.classList.contains('collapsed')).toBeTrue();
+    expect(root().querySelector('.tool-details')).toBeNull();
   });
 
   it('starts groups and every tool call expanded when the preference is on', async () => {
@@ -188,6 +203,8 @@ describe('MessageRowComponent tool groups (F6-1)', () => {
     const heads = toolHeads();
     expect(heads.length).toBe(3);
     heads.forEach((head) => expect(head.getAttribute('aria-expanded')).toBe('true'));
+    // The lone call outside the group is expanded too - the pref applies everywhere.
+    expect(root().querySelectorAll('.tool-details').length).toBe(3);
   });
 
   it('applies a preference change to already rendered groups', async () => {
@@ -198,5 +215,12 @@ describe('MessageRowComponent tool groups (F6-1)', () => {
     prefs.setExpandToolCallsByDefault(true);
     await fixture.whenStable();
     expect(groupButton()!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('separates the group count and the tool-name summary with a "·"', async () => {
+    fixture.componentRef.setInput('message', message([tool('read'), tool('edit')]));
+    await fixture.whenStable();
+
+    expect(groupButton()!.querySelector('.group-sep')!.textContent!.trim()).toBe('·');
   });
 });
