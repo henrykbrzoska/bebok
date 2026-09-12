@@ -25,6 +25,8 @@ export type StatusTone = 'success' | 'warning' | 'danger' | 'muted' | 'accent' |
       :host {
         display: inline-flex;
         min-width: 0;
+        /* Callers may recolor the whole chip (e.g. the Start status row). */
+        color: var(--text-muted);
       }
 
       .status {
@@ -33,7 +35,7 @@ export type StatusTone = 'success' | 'warning' | 'danger' | 'muted' | 'accent' |
         gap: 6px;
         min-width: 0;
         font-size: var(--fs-11-5);
-        color: var(--text-muted);
+        color: inherit;
       }
 
       .dot {

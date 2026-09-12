@@ -1,16 +1,17 @@
 <section class="start">
-  @if (!isTauri()) {
-    <div class="card connect-card">
-      <h2>{{ t('start.connectTitle') }}</h2>
-      <p class="muted">
-        {{ t('start.connectHint') }}
-        <code>http://127.0.0.1:8787</code>).
-      </p>
+  <div class="card connect-card" [class.error]="phase() === 'error'">
+    <h2>{{ t('start.connectTitle') }}</h2>
+    <p class="card-hint">
+      {{ t('start.connectHint') }}
+      <code>http://127.0.0.1:8787</code>).
+    </p>
 
-      <label>
-        <span>{{ t('start.engineAddress') }}</span>
+    @if (showAddressForm() && !isTauri()) {
+      <label class="field">
+        <span class="field-label">{{ t('start.engineAddress') }}</span>
         <input
           type="text"
+          class="mono-input"
           [ngModel]="remoteBaseUrl()"
           (ngModelChange)="remoteBaseUrl.set($event)"
           placeholder="http://127.0.0.1:8787"
@@ -19,30 +20,36 @@
       </label>
 
       <div class="actions">
-        <button class="primary" (click)="connectRemote()" [disabled]="connecting()">
+        <button class="primary" (click)="retry()" [disabled]="connecting()">
           {{ connecting() ? t('start.connecting') : t('start.connectContinue') }}
         </button>
       </div>
-    </div>
-  } @else {
-    <div class="card connect-card">
-      <h2>{{ t('start.localEngine') }}</h2>
-      <p class="muted">{{ t('start.localHint') }}</p>
+    } @else if (phase() === 'error') {
       <div class="actions">
-        <button class="primary" (click)="connect()" [disabled]="connecting()">
-          {{ connecting() ? t('start.connecting') : t('start.connect') }}
+        <button class="primary" (click)="retry()" [disabled]="connecting()">
+          {{ t('start.retry') }}
         </button>
       </div>
-    </div>
-  }
+    }
 
-  @if (connected() || (isTauri() && eventsState() !== 'idle')) {
+    <div class="status-row" [attr.data-phase]="phase()">
+      <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      @if (phase() === 'live' && !isTauri() && !showAddressForm()) {
+        <button type="button" class="link-btn" (click)="toggleAddressForm()">
+          {{ t('start.engineAddress') }}
+        </button>
+      }
+    </div>
+  </div>
+
+  @if (connected()) {
     <div class="card directory-card">
       <h2>{{ t('start.projectDir') }}</h2>
 
       <div class="row">
         <input
           type="text"
+          class="mono-input"
           [ngModel]="directory() ?? ''"
           (ngModelChange)="directory.set($event || null)"
           [placeholder]="t('start.dirPlaceholder')"
@@ -59,14 +66,14 @@
       @if (directory()) {
         <div class="sessions-block">
           <div class="sessions-head">
-            <h3>{{ t('start.sessionsInDir') }}</h3>
+            <h3 class="micro-label">{{ t('start.sessionsInDir') }}</h3>
             @if (loadingSessions()) {
               <span class="muted">{{ t('start.loading') }}</span>
             }
           </div>
 
           @if (sessions().length === 0 && !loadingSessions()) {
-            <p class="muted empty">{{ t('start.noSessions') }}</p>
+            <p class="empty">{{ t('start.noSessions') }}</p>
           }
 
           <ul class="session-list">
@@ -79,60 +86,59 @@
                   (click)="openSession(session)"
                   (keydown.enter)="openSession(session)"
                 >
-                  <span class="session-row">
-                    <span class="session-text">
-                      <span class="session-title">{{ session.title || t('start.untitled') }}</span>
-                      <span class="session-meta muted">
-                        {{ session.agent }} · {{ session.usage.input_tokens + session.usage.output_tokens }} tok ·
-                        {{ formatDate(session.created_at) }}
-                      </span>
-                    </span>
-                    @if (confirmDeleteId() === session.id) {
-                      <span class="delete-confirm">
-                        <button
-                          class="delete-btn confirm"
-                          (click)="confirmDeleteSession(session, $event)"
-                          [disabled]="deletingId() !== null"
-                        >
-                          {{ deletingId() === session.id ? t('start.deleting') : t('start.deleteConfirm') }}
-                        </button>
-                        <button class="delete-btn cancel" (click)="$event.stopPropagation(); cancelDelete()">
-                          {{ t('start.deleteCancel') }}
-                        </button>
-                      </span>
-                    } @else {
-                      <button
-                        class="delete-btn"
-                        type="button"
-                        (click)="requestDeleteSession(session, $event)"
-                        [title]="t('start.deleteSession')"
-                      >
-                        ✕
-                      </button>
-                    }
+                  <span class="session-text">
+                    <span class="session-title">{{ session.title || t('start.untitled') }}</span>
+                    <span class="session-meta">{{ sessionMeta(session) }}</span>
                   </span>
+                  @if (confirmDeleteId() === session.id) {
+                    <span class="delete-confirm">
+                      <button
+                        class="delete-btn confirm"
+                        (click)="confirmDeleteSession(session, $event)"
+                        [disabled]="deletingId() !== null"
+                      >
+                        {{ deletingId() === session.id ? t('start.deleting') : t('start.deleteConfirm') }}
+                      </button>
+                      <button class="delete-btn cancel" (click)="$event.stopPropagation(); cancelDelete()">
+                        {{ t('start.deleteCancel') }}
+                      </button>
+                    </span>
+                  } @else {
+                    <button
+                      class="delete-btn"
+                      type="button"
+                      (click)="requestDeleteSession(session, $event)"
+                      [title]="t('start.deleteSession')"
+                    >
+                      ✕
+                    </button>
+                  }
                 </div>
               </li>
             }
           </ul>
 
-          <div class="actions">
-            <label class="agent-pick">
-              <span>{{ t('start.agent') }}</span>
-              <select [ngModel]="selectedAgent()" (ngModelChange)="selectedAgent.set($event)">
-                @for (agent of agents(); track agent.name) {
-                  <option [value]="agent.name">
-                    {{ agent.name }}{{ agent.model ? ' · ' + agent.model : '' }}
-                  </option>
-                }
-              </select>
-            </label>
+          <div class="new-row">
+            <select
+              class="agent-select"
+              [ngModel]="selectedAgent()"
+              (ngModelChange)="selectedAgent.set($event)"
+              [attr.aria-label]="t('start.agent')"
+            >
+              @for (agent of agents(); track agent.name) {
+                <option [value]="agent.name">{{ agentLabel(agent) }}</option>
+              }
+              @if (agents().length === 0) {
+                <option value="code">code</option>
+              }
+            </select>
             <button class="primary" (click)="startSession()" [disabled]="creating() || !directory()">
               {{ creating() ? t('start.creating') : t('start.newSession') }}
             </button>
           </div>
-          <div class="actions">
-            <a class="ghost-link" routerLink="/settings" [queryParams]="{ directory: directory() }">
+
+          <div class="settings-link">
+            <a routerLink="/settings" [queryParams]="{ directory: directory() }">
               {{ t('start.settingsLink') }}
             </a>
           </div>
