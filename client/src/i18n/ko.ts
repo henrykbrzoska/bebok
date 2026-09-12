@@ -683,4 +683,11 @@ export const ko: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': '위험(주황색)',
   'settings.toolSafetyGroupUncategorized': '미분류(회색)',
   'settings.toolSafetyBadge': '미분류 도구 {n}개',
+
+  // F8-4: "베복이란?" 페이지
+  'topbar.about': '베복이란?',
+  'palette.openAbout': '베복이란?',
+  'about.back': '← 디렉터리',
+  'about.loading': '불러오는 중…',
+  'about.error': '이 페이지를 불러올 수 없습니다.',
 };

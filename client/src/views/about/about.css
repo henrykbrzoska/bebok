@@ -1,0 +1,38 @@
+:host {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.about {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-24) var(--space-16);
+}
+
+.about-col {
+  width: 100%;
+  max-width: 760px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-16);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-12-5);
+}
+
+.back:hover {
+  color: var(--text);
+}
+
+.status {
+  color: var(--text-muted);
+  font-size: var(--fs-12-5);
+}
+
+.status.error {
+  color: var(--danger);
+}

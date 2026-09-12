@@ -683,4 +683,11 @@ export const hi: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': 'खतरनाक (नारंगी)',
   'settings.toolSafetyGroupUncategorized': 'अवर्गीकृत (धूसर)',
   'settings.toolSafetyBadge': '{n} अवर्गीकृत टूल',
+
+  // F8-4: "बेबोक क्या है?" पेज
+  'topbar.about': 'बेबोक क्या है?',
+  'palette.openAbout': 'बेबोक क्या है?',
+  'about.back': '← निर्देशिका',
+  'about.loading': 'लोड हो रहा है…',
+  'about.error': 'यह पेज लोड नहीं हो सका।',
 };

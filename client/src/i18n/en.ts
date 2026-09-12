@@ -692,6 +692,13 @@ export const en = {
   'settings.toolSafetyGroupDangerous': 'Dangerous (orange)',
   'settings.toolSafetyGroupUncategorized': 'Uncategorized (gray)',
   'settings.toolSafetyBadge': '{n} uncategorized tools',
+
+  // F8-4: "What is Bebok?" page
+  'topbar.about': 'What is Bebok?',
+  'palette.openAbout': 'What is Bebok?',
+  'about.back': '← Directory',
+  'about.loading': 'Loading…',
+  'about.error': 'Could not load this page.',
 };
 
 export type MessageKey = keyof typeof en;

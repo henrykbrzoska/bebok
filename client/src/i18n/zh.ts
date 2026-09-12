@@ -683,4 +683,11 @@ export const zh: Record<MessageKey, string> = {
   'settings.toolSafetyGroupDangerous': '危险（橙色）',
   'settings.toolSafetyGroupUncategorized': '未分类（灰色）',
   'settings.toolSafetyBadge': '{n} 个未分类工具',
+
+  // F8-4:"什么是 Bebok?"页面
+  'topbar.about': '什么是 Bebok?',
+  'palette.openAbout': '什么是 Bebok?',
+  'about.back': '← 目录',
+  'about.loading': '加载中…',
+  'about.error': '无法加载此页面。',
 };

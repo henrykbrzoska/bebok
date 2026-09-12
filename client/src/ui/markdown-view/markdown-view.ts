@@ -72,6 +72,14 @@ import { resolveRelativePath } from './relative-path';
       padding: 1px 4px;
       font-size: 0.92em;
     }
+    app-markdown-view img {
+      max-width: 100%;
+      height: auto;
+      border-radius: var(--radius-panel);
+      border: 1px solid var(--border);
+      margin: 8px 0;
+      display: block;
+    }
     app-markdown-view pre code {
       background: none;
       padding: 0;
