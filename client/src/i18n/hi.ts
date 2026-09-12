@@ -318,4 +318,5 @@ export const hi: Record<MessageKey, string> = {
   'sidebar.language': 'भाषा',
   'chat.abortIdle': 'कोई टर्न नहीं चल रहा',
   'chat.assistantLabel': 'सहायक',
+  'thinking.head': 'सोच रहा है',
 };

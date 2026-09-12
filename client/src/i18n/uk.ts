@@ -319,4 +319,5 @@ export const uk: Record<MessageKey, string> = {
   'sidebar.language': 'Мова',
   'chat.abortIdle': 'Жоден хід не виконується',
   'chat.assistantLabel': 'Асистент',
+  'thinking.head': 'Міркування',
 };

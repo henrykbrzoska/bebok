@@ -318,4 +318,5 @@ export const ko: Record<MessageKey, string> = {
   'sidebar.language': '언어',
   'chat.abortIdle': '실행 중인 턴이 없습니다',
   'chat.assistantLabel': '어시스턴트',
+  'thinking.head': '생각 중',
 };

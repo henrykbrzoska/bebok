@@ -318,4 +318,5 @@ export const ja: Record<MessageKey, string> = {
   'sidebar.language': '言語',
   'chat.abortIdle': '実行中のターンはありません',
   'chat.assistantLabel': 'アシスタント',
+  'thinking.head': '思考中',
 };

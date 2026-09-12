@@ -328,6 +328,7 @@ export const en = {
   'sidebar.language': 'Language',
   'chat.abortIdle': 'No turn is running',
   'chat.assistantLabel': 'Assistant',
+  'thinking.head': 'Thinking',
 };
 
 export type MessageKey = keyof typeof en;

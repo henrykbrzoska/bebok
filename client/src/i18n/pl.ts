@@ -319,4 +319,5 @@ export const pl: Record<MessageKey, string> = {
   'sidebar.language': 'Język',
   'chat.abortIdle': 'Żadna tura nie jest uruchomiona',
   'chat.assistantLabel': 'Asystent',
+  'thinking.head': 'Myślenie',
 };

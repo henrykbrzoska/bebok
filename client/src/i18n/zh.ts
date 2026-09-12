@@ -318,4 +318,5 @@ export const zh: Record<MessageKey, string> = {
   'sidebar.language': '语言',
   'chat.abortIdle': '当前没有进行中的回合',
   'chat.assistantLabel': '助手',
+  'thinking.head': '思考中',
 };
