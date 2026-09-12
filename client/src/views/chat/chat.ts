@@ -8,6 +8,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { CdkScrollable } from '@angular/cdk/scrolling';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { ElementRef } from '@angular/core';
@@ -30,9 +31,15 @@ import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
-import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
 const REFRESH_DEBOUNCE_MS = 300;
+/**
+ * F6-2: how many of the newest messages the transcript renders initially, and
+ * how many more each "Load earlier messages" click reveals. `messages` always
+ * holds the full history (index-based SSE patches depend on it); only the
+ * rendered slice is windowed.
+ */
+export const MESSAGE_WINDOW = 60;
 const DRAFT_KEY = 'bebok.sessionDrafts';
 const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -158,11 +165,11 @@ function persistDrafts(drafts: Record<string, string>): void {
 @Component({
   selector: 'app-chat',
   imports: [
+    CdkScrollable,
     FormsModule,
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
-    ScrollMinimapComponent,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -246,6 +253,22 @@ export class ChatView implements OnInit, OnDestroy {
     return this.messages().filter((m) => m.meta?.model === filter);
   });
 
+  /**
+   * F6-2: number of newest (filtered) messages actually rendered. Starts at
+   * `MESSAGE_WINDOW`, grows by `loadEarlier()`, resets on session switch.
+   */
+  readonly visibleCount = signal(MESSAGE_WINDOW);
+
+  /** The rendered slice: the last `visibleCount()` of `filteredMessages()`. */
+  readonly windowedMessages = computed<Message[]>(() =>
+    windowMessages(this.filteredMessages(), this.visibleCount()),
+  );
+
+  /** Older messages kept out of the DOM (drives the "Load earlier" control). */
+  readonly hiddenCount = computed(() =>
+    Math.max(0, this.filteredMessages().length - this.visibleCount()),
+  );
+
   /** Show the "jump to last user message" button when user has scrolled up
    *  and there is at least one user message in the conversation. */
   readonly showJump = computed<boolean>(() => {
@@ -256,7 +279,8 @@ export class ChatView implements OnInit, OnDestroy {
   });
 
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
-  readonly minimap = viewChild(ScrollMinimapComponent);
+  /** CDK handle on the same element (`cdkScrollable`) for offset measuring. */
+  private readonly scrollable = viewChild(CdkScrollable);
   /** Inline permission prompt (F2-8) - blocks sending while unresolved. */
   readonly permission = viewChild(PermissionPopup);
 
@@ -300,10 +324,15 @@ export class ChatView implements OnInit, OnDestroy {
       }
     });
 
-    // Follow the stream unless the user scrolled up.
+    // Follow the stream unless the user scrolled up. `loading` and the
+    // rendered window are read too: the rows only enter the DOM once the
+    // loading placeholder goes away, and the initial scroll-to-bottom must
+    // happen after that, not while the placeholder is still showing (F6-2).
     effect(() => {
       this.messages();
+      this.windowedMessages();
       this.running();
+      this.loading();
       const el = this.scrollArea();
       if (!el || !this.follow()) {
         return;
@@ -431,8 +460,7 @@ export class ChatView implements OnInit, OnDestroy {
     this.sending.set(false);
     this.filterModel.set(null);
     this.follow.set(true);
-    // Reset minimap geometry for the new session.
-    this.minimap()?.refresh();
+    this.visibleCount.set(MESSAGE_WINDOW);
     await this.loadAll(nextID, seq);
     // Stale navigation already moved on: leave the new tab alone.
     if (seq !== this.loadSeq || nextID !== this.sessionID()) {
@@ -502,8 +530,6 @@ export class ChatView implements OnInit, OnDestroy {
       } catch {
         /* switcher lists are non-critical */
       }
-      // Recompute minimap after messages load + render.
-      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
         return;
@@ -577,8 +603,6 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.messages.set(messages);
       this.reconcilePending();
-      // Refresh minimap after transcript sync.
-      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (sessionID !== this.sessionID()) {
         return;
@@ -702,13 +726,36 @@ export class ChatView implements OnInit, OnDestroy {
     if (!el) {
       return;
     }
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const distance =
+      this.scrollable()?.measureScrollOffset('bottom') ??
+      el.scrollHeight - el.scrollTop - el.clientHeight;
     this.follow.set(distance < 90);
   }
 
-  /** Scroll to the last user message in the current (filtered) transcript. */
+  /**
+   * F6-2: reveal the next `MESSAGE_WINDOW` older messages. The viewport is
+   * kept anchored on the row the user was looking at: the newly rendered rows
+   * grow the content above it, so `scrollTop` is advanced by that growth.
+   */
+  loadEarlier(): void {
+    if (this.hiddenCount() === 0) {
+      return;
+    }
+    const el = this.scrollArea()?.nativeElement;
+    const heightBefore = el?.scrollHeight ?? 0;
+    const topBefore = el?.scrollTop ?? 0;
+    this.visibleCount.update((count) => count + MESSAGE_WINDOW);
+    if (!el) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
+    });
+  }
+
+  /** Scroll to the last user message among the rendered (windowed) rows. */
   scrollToLastUser(): void {
-    const msgs = this.filteredMessages();
+    const msgs = this.windowedMessages();
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {
         const el = this.scrollArea()?.nativeElement;
@@ -1157,6 +1204,14 @@ export class ChatView implements OnInit, OnDestroy {
   removeAttachment(id: string): void {
     this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
+}
+
+/** F6-2: the newest `count` entries of `messages` (the whole list if shorter). */
+export function windowMessages<T>(messages: readonly T[], count: number): T[] {
+  if (count <= 0) {
+    return [];
+  }
+  return messages.length > count ? messages.slice(-count) : [...messages];
 }
 
 /** Recover a user prompt into the composer when opening its retry branch. */

@@ -1,8 +1,9 @@
 /**
  * Appearance tab (WP-SETTINGS / F2-28): runtime-path inputs in a 2-column
  * grid, a Comfortable/Compact density segmented control wired to WP-SHELL's
- * `ui-prefs.store.ts` density signal (read, never redefined), plus the custom
- * CSS editor and the Docker probe that already lived under "Others".
+ * `ui-prefs.store.ts` density signal (read, never redefined), the F6-1
+ * "Expand tool calls by default" toggle (same store), plus the custom CSS
+ * editor and the Docker probe that already lived under "Others".
  */
 
 import { Component, inject } from '@angular/core';
@@ -29,11 +30,17 @@ export class AppearanceTab {
 
   readonly density = this.prefs.density;
   readonly densities: Density[] = ['comfortable', 'compact'];
+  /** F6-1: tool calls in the transcript start expanded. */
+  readonly expandToolCalls = this.prefs.expandToolCallsByDefault;
 
   readonly runtimes: RuntimeField[] = ['python', 'python3', 'node', 'php', 'docker', 'git'];
 
   setDensity(density: Density): void {
     this.prefs.setDensity(density);
+  }
+
+  setExpandToolCalls(expand: boolean): void {
+    this.prefs.setExpandToolCallsByDefault(expand);
   }
 
   densityLabel(density: Density): string {

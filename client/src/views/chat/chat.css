@@ -103,7 +103,6 @@
   overflow-y: auto;
   /* Keep the transcript dense enough for code-review conversations. */
   padding: var(--space-12) var(--space-16);
-  padding-right: calc(var(--space-16) + 88px);
   display: flex;
   flex-direction: column;
 }
@@ -124,6 +123,34 @@
   flex-direction: column;
   gap: var(--space-10);
   width: 100%;
+}
+
+/* F6-2: "Load earlier messages" control above the windowed transcript. */
+.load-earlier {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: var(--space-4) 0;
+}
+
+.load-earlier-btn {
+  font-size: var(--fs-12);
+  padding: 4px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+}
+
+.load-earlier-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.load-earlier-hint {
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
 }
 
 /* F2-11: empty state - centred "No messages. / Send the first prompt below." */
@@ -518,7 +545,6 @@ button.small {
 @media (max-width: 700px) {
   .scroll {
     padding: var(--space-10) var(--space-10);
-    padding-right: var(--space-10);
   }
 
   .thread {

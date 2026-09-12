@@ -45,7 +45,7 @@
   <div class="chat-main">
     <div class="chat-col">
       <div class="scroll-wrap">
-        <div #scroll class="scroll" (scroll)="onScroll()">
+        <div #scroll cdkScrollable class="scroll" (scroll)="onScroll()">
           <div class="thread">
           @if (loading()) {
             <div class="placeholder">{{ t('chat.loading') }}</div>
@@ -56,8 +56,16 @@
               <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
             </div>
           } @else {
+            @if (hiddenCount() > 0) {
+              <div class="load-earlier">
+                <button type="button" class="load-earlier-btn" (click)="loadEarlier()">
+                  {{ t('chat.loadEarlier') }}
+                </button>
+                <span class="load-earlier-hint">{{ t('chat.earlierHidden', { n: hiddenCount() }) }}</span>
+              </div>
+            }
             <div class="messages">
-              @for (message of filteredMessages(); track message.id) {
+              @for (message of windowedMessages(); track message.id) {
                 <app-message-row
                   [rowId]="'msg-'+message.id"
                   [message]="message"
@@ -130,13 +138,6 @@
           />
           </div>
         </div>
-
-        @if (scrollArea()) {
-          <app-scroll-minimap
-            [messages]="filteredMessages()"
-            [scrollTarget]="scrollArea()!"
-          />
-        }
       </div>
 
       @if (showJump()) {

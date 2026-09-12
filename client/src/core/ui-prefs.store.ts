@@ -9,6 +9,9 @@
  * - `sidebarExpanded`, `rightDrawerOpen`, `rightDrawerPanels`,
  *   `rightDrawerWidth` and `density` are the WP-SHELL redesign state
  *   (F1-3 / F1-12). `density` replaces the old `topbarCompact` flag.
+ * - `expandToolCallsByDefault` is the chat transcript preference (F6-1):
+ *   when on, every tool call (and every grouped run of tool calls) starts
+ *   expanded; when off, only the first tool call of a turn does.
  */
 
 import { Injectable, signal } from '@angular/core';
@@ -20,6 +23,7 @@ const KEY_RIGHT_DRAWER_OPEN = 'bebok.ui.shell.rightDrawerOpen';
 const KEY_RIGHT_DRAWER_PANELS = 'bebok.ui.shell.rightDrawerPanels';
 const KEY_RIGHT_DRAWER_WIDTH = 'bebok.ui.shell.rightDrawerWidth';
 const KEY_DENSITY = 'bebok.ui.shell.density';
+const KEY_EXPAND_TOOL_CALLS = 'bebok.ui.chat.expandToolCalls';
 
 export const DEFAULT_SIDEBAR_WIDTH = 230;
 export const MIN_SIDEBAR_WIDTH = 150;
@@ -127,6 +131,8 @@ export class UiPrefsStore {
   );
   /** Shell: spacing density for lists/settings. */
   readonly density = signal<Density>(readDensity());
+  /** Chat: tool calls (and tool-call groups) start expanded (F6-1). */
+  readonly expandToolCallsByDefault = signal(readBool(KEY_EXPAND_TOOL_CALLS, false));
 
   toggleSidebar(): void {
     this.setSidebarVisible(!this.sidebarVisible());
@@ -181,5 +187,14 @@ export class UiPrefsStore {
   setDensity(density: Density): void {
     this.density.set(density);
     writeString(KEY_DENSITY, density);
+  }
+
+  toggleExpandToolCallsByDefault(): void {
+    this.setExpandToolCallsByDefault(!this.expandToolCallsByDefault());
+  }
+
+  setExpandToolCallsByDefault(expand: boolean): void {
+    this.expandToolCallsByDefault.set(expand);
+    writeString(KEY_EXPAND_TOOL_CALLS, String(expand));
   }
 }
