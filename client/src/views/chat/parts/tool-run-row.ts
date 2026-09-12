@@ -206,7 +206,10 @@ export class ToolRunRowComponent {
       id: this.messages()[0]?.id ?? '',
       expand: this.prefs.expandToolCallsByDefault(),
     }),
-    computation: () => null,
+    // The computation re-runs on every `messages()` change; keep the user's
+    // choice unless the run identity or the pref actually changed.
+    computation: (src, prev) =>
+      prev && prev.source.id === src.id && prev.source.expand === src.expand ? prev.value : null,
   });
 
   readonly open = computed(() => this.openOverride() ?? this.prefs.expandToolCallsByDefault());
