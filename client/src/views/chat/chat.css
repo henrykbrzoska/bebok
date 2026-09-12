@@ -38,11 +38,14 @@
 
 .session-toolbar {
   flex: 0 0 auto;
-  height: 44px;
+  min-height: 44px;
   display: flex;
+  /* E2E R5: when the column is narrow (drawer open at ~1400px) the fields
+     first shrink their selects, then wrap onto a second row - never overlap. */
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-16);
-  padding: 0 var(--space-16);
+  gap: 4px var(--space-16);
+  padding: 4px var(--space-16);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
@@ -51,6 +54,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -70,7 +74,12 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-control-sm);
   padding: 3px 6px;
+  /* Shrinkable: a long model id truncates inside the select instead of
+     pushing the control over the next label. */
+  flex: 1 1 auto;
+  min-width: 72px;
   max-width: 200px;
+  text-overflow: ellipsis;
   outline: none;
 }
 
