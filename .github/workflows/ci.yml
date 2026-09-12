@@ -16,6 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        working-directory: engine
+        run: cargo fmt --check
+      - name: Lint
+        working-directory: engine
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build
         working-directory: engine
         run: cargo build --workspace
