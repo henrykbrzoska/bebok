@@ -12,6 +12,7 @@ import { ActivatedRoute } from '@angular/router';
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
 import { ExplorerSelectionStore } from '../../ui/right-drawer/panels/explorer-selection.store';
 import { ShellStore } from '../../ui/shell/shell.store';
@@ -44,6 +45,7 @@ export class ExplorerView implements OnInit {
   private readonly i18n = inject(I18nService);
   private readonly selection = inject(ExplorerSelectionStore);
   private readonly shell = inject(ShellStore);
+  private readonly codeHighlight = inject(CodeHighlightService);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -92,6 +94,19 @@ export class ExplorerView implements OnInit {
 
   readonly markdownRows = computed<MarkdownRow[]>(() =>
     this.isMarkdownSelection() ? toMarkdownRows(this.fileContent()) : [],
+  );
+
+  /**
+   * F7-4: syntax-highlighted HTML for the plain-text content view (raw
+   * files - markdown/html get their own dedicated views above). Language is
+   * resolved from the selected file's extension; `CodeHighlightService`
+   * already escapes and skips highlighting for files over its size guard, so
+   * `html` is always safe to bind with `[innerHTML]` (no wrapping
+   * `<pre>`/`<code>` - the template keeps its own for the existing
+   * `.file-body.file-content` layout).
+   */
+  readonly highlightedFileContent = computed(() =>
+    this.codeHighlight.highlight(this.fileContent(), { filename: this.selectedPath() }),
   );
 
   async ngOnInit(): Promise<void> {

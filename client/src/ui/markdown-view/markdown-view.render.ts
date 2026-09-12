@@ -17,6 +17,7 @@
  * document's own path instead of letting the browser navigate away.
  */
 
+import { highlightBlockHtml } from '../code-highlight/code-highlight';
 import { hasUriScheme } from './relative-path';
 
 type Block =
@@ -234,10 +235,10 @@ export function renderMarkdownView(source: string): string {
       switch (block.kind) {
         case 'heading':
           return `<h${block.level}>${renderInline(escapeHtml(block.text))}</h${block.level}>`;
-        case 'code': {
-          const lang = block.lang ? ` data-lang="${escapeHtml(block.lang)}"` : '';
-          return `<pre><code${lang}>${escapeHtml(block.code)}</code></pre>`;
-        }
+        case 'code':
+          // F7-4: syntax highlighting via `ui/code-highlight` (safe on its
+          // own terms - see that module's header).
+          return highlightBlockHtml(block.code, { language: block.lang || null });
         case 'quote':
           return `<blockquote>${block.lines.map((l) => `<p>${renderInline(escapeHtml(l))}</p>`).join('')}</blockquote>`;
         case 'list': {

@@ -1,6 +1,7 @@
 import { Component, computed, inject, input } from '@angular/core';
 
 import { I18nService } from '../../i18n/i18n.service';
+import { CodeHighlightService } from '../code-highlight/code-highlight.service';
 import { DiffViewStore } from './diff-view.store';
 
 type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
@@ -8,6 +9,23 @@ type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
 interface DiffLine {
   cls: LineKind;
   text: string;
+  /**
+   * F7-4: safe-to-bind HTML for this line. For `add`/`del`/`ctx` this is the
+   * leading `+`/`-`/` ` marker plus syntax-highlighted code (tokens colored,
+   * the add/remove *background* stays on `.line.add`/`.line.del` from `cls`
+   * so highlighting never fights the diff coloring). `hunk`/`meta` lines are
+   * just escaped, unhighlighted text.
+   */
+  html: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** One row of the split view: left = old side, right = new side. */
@@ -59,14 +77,14 @@ interface SplitRow {
           <div class="diff split">
             @for (row of splitRows(); track $index) {
               @if (row.full) {
-                <div class="line full {{ row.full.cls }}"><code>{{ row.full.text }}</code></div>
+                <div class="line full {{ row.full.cls }}"><code [innerHTML]="row.full.html"></code></div>
               } @else {
                 <div class="pair">
                   <div class="line side {{ row.left ? row.left.cls : 'empty' }}">
-                    <code>{{ row.left ? row.left.text : '' }}</code>
+                    <code [innerHTML]="row.left ? row.left.html : ''"></code>
                   </div>
                   <div class="line side {{ row.right ? row.right.cls : 'empty' }}">
-                    <code>{{ row.right ? row.right.text : '' }}</code>
+                    <code [innerHTML]="row.right ? row.right.html : ''"></code>
                   </div>
                 </div>
               }
@@ -75,13 +93,13 @@ interface SplitRow {
         } @else {
           <div class="diff">
             @for (line of lines; track $index) {
-              <div class="line {{ line.cls }}"><code>{{ line.text }}</code></div>
+              <div class="line {{ line.cls }}"><code [innerHTML]="line.html"></code></div>
             }
           </div>
         }
       </div>
     } @else {
-      <pre class="plain"><code>{{ text() }}</code></pre>
+      <pre class="plain"><code class="hljs" [innerHTML]="plainHtml()"></code></pre>
     }
   `,
   styles: `
@@ -201,6 +219,7 @@ interface SplitRow {
 })
 export class DiffViewComponent {
   private readonly i18n = inject(I18nService);
+  private readonly codeHighlight = inject(CodeHighlightService);
   readonly store = inject(DiffViewStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -210,7 +229,8 @@ export class DiffViewComponent {
 
   readonly mode = this.store.mode;
 
-  readonly segments = computed<DiffLine[] | null>(() => {
+  /** Line classification only (no highlighting yet - see `segments`). */
+  private readonly rawLines = computed<Pick<DiffLine, 'cls' | 'text'>[] | null>(() => {
     const text = this.text();
     const lines = text.split('\n');
     const looksLikeDiff = lines.some(
@@ -219,7 +239,7 @@ export class DiffViewComponent {
     if (!looksLikeDiff) {
       return null;
     }
-    return lines.map((line): DiffLine => {
+    return lines.map((line): Pick<DiffLine, 'cls' | 'text'> => {
       if (line.startsWith('+') && !line.startsWith('+++')) {
         return { cls: 'add', text: line };
       }
@@ -236,11 +256,80 @@ export class DiffViewComponent {
     });
   });
 
+  /**
+   * F7-4: one language for the whole block, so every line tokenizes
+   * consistently. Preference: the `[fileLabel]` input (set by the caller when
+   * it knows the real path - `tool-part.ts`, `diff-overlay.ts`), falling back
+   * to the path named on the diff's own `+++ b/…`/`diff --git a/… b/…` line.
+   */
+  private readonly language = computed<string | null>(() => {
+    const label = this.fileLabel();
+    if (label) {
+      const lang = this.codeHighlight.resolveLanguage(null, label);
+      if (lang) {
+        return lang;
+      }
+    }
+    const lines = this.rawLines();
+    if (!lines) {
+      return null;
+    }
+    for (const line of lines) {
+      if (line.cls !== 'meta') {
+        continue;
+      }
+      const match = /^\+\+\+ b\/(.+)$/.exec(line.text) ?? /^diff --git a\/\S+ b\/(.+)$/.exec(line.text);
+      if (match) {
+        const lang = this.codeHighlight.resolveLanguage(null, match[1]);
+        if (lang) {
+          return lang;
+        }
+      }
+    }
+    return null;
+  });
+
+  /**
+   * Diff lines to render. `add`/`del`/`ctx` keep their leading `+`/`-`/` `
+   * marker and get the rest of the line syntax-highlighted; `hunk`/`meta`
+   * lines are just escaped (they are diff punctuation, not code).
+   */
+  readonly segments = computed<DiffLine[] | null>(() => {
+    const lines = this.rawLines();
+    if (!lines) {
+      return null;
+    }
+    const language = this.language();
+    return lines.map((line) => ({ ...line, html: this.renderLineHtml(line, language) }));
+  });
+
+  private renderLineHtml(line: Pick<DiffLine, 'cls' | 'text'>, language: string | null): string {
+    if (line.cls === 'hunk' || line.cls === 'meta') {
+      return escapeHtml(line.text);
+    }
+    let marker = '';
+    let code = line.text;
+    if (line.cls === 'add' || line.cls === 'del') {
+      marker = line.text.slice(0, 1);
+      code = line.text.slice(1);
+    } else if (line.text.startsWith(' ')) {
+      marker = ' ';
+      code = line.text.slice(1);
+    }
+    const { html } = this.codeHighlight.highlight(code, { language });
+    return `${escapeHtml(marker)}${html}`;
+  }
+
   readonly added = computed(
     () => this.segments()?.filter((l) => l.cls === 'add').length ?? 0,
   );
   readonly removed = computed(
     () => this.segments()?.filter((l) => l.cls === 'del').length ?? 0,
+  );
+
+  /** Same highlighting for the non-diff plain-text fallback below. */
+  readonly plainHtml = computed(
+    () => this.codeHighlight.highlight(this.text(), { filename: this.fileLabel() || null }).html,
   );
 
   /**
