@@ -39,7 +39,7 @@ describe('MarkdownViewComponent', () => {
 
   it('emits the resolved path when a relative link is clicked', () => {
     const anchor = fixture.nativeElement.querySelector(
-      'a[data-relative]',
+      'a.relative-link',
     ) as HTMLAnchorElement;
     expect(anchor).toBeTruthy();
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
@@ -54,7 +54,7 @@ describe('MarkdownViewComponent', () => {
       (a) => a.getAttribute('href') === 'https://example.com',
     );
     expect(external).toBeTruthy();
-    expect(external?.hasAttribute('data-relative')).toBeFalse();
+    expect(external?.classList.contains('relative-link')).toBeFalse();
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     external?.dispatchEvent(event);
     expect(fixture.componentInstance.lastClick).toBeNull();

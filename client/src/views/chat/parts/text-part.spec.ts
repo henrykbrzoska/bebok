@@ -38,6 +38,7 @@ describe('TextPartComponent link detection (F6-11)', () => {
   let shell: ShellStore;
 
   beforeEach(() => {
+    localStorage.clear();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [HostComponent],
@@ -57,7 +58,7 @@ describe('TextPartComponent link detection (F6-11)', () => {
 
   it('opens Preview for a relative markdown link', () => {
     const el = render('See [the plan](./analysis/plan.md) for details.');
-    const anchor = el.querySelector('a[data-preview-href]') as HTMLAnchorElement;
+    const anchor = el.querySelector('a.preview-link') as HTMLAnchorElement;
     expect(anchor).toBeTruthy();
 
     anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -69,7 +70,7 @@ describe('TextPartComponent link detection (F6-11)', () => {
 
   it('opens Preview for a bare relative .md mention', () => {
     const el = render('Check docs/readme.md before shipping.');
-    const anchor = el.querySelector('a[data-preview-href]') as HTMLAnchorElement;
+    const anchor = el.querySelector('a.preview-link') as HTMLAnchorElement;
     expect(anchor?.textContent).toBe('docs/readme.md');
 
     anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -80,7 +81,7 @@ describe('TextPartComponent link detection (F6-11)', () => {
     const el = render('Full docs at [here](https://example.com/readme).');
     const anchor = el.querySelector('a') as HTMLAnchorElement;
     expect(anchor.getAttribute('target')).toBe('_blank');
-    expect(anchor.hasAttribute('data-preview-href')).toBeFalse();
+    expect(anchor.classList.contains('preview-link')).toBeFalse();
 
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     anchor.dispatchEvent(event);
