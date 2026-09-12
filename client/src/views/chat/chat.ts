@@ -27,7 +27,7 @@ import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
-import { SessionSidebarComponent } from '../../ui/session-sidebar/session-sidebar';
+import { ChatSessionStore } from './chat-session.store';
 import { MessageRowComponent } from './parts/message-row';
 import { ScrollMinimapComponent } from './parts/scroll-minimap';
 
@@ -47,8 +47,37 @@ const IMAGE_MAX_EDGE = 2048;
 const IMAGE_DOWNSCALE_THRESHOLD = 1 * 1024 * 1024;
 /** Decoded-byte target after downscaling (~2 MiB); the engine's 5 MiB is the hard cap. */
 const IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
+/** Tallest the auto-growing composer gets before it scrolls (F2-10). */
+const COMPOSER_MAX_HEIGHT = 200;
 let pendingSeq = 0;
 let attachmentSeq = 0;
+
+/** Minimal shape of the (non-standard) Web Speech API we rely on. */
+interface SpeechRecognitionResultLike {
+  readonly length: number;
+  [index: number]: { transcript: string };
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [index: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+/** `SpeechRecognition` / `webkitSpeechRecognition`, when the host has it. */
+function speechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  const ctor = scope['SpeechRecognition'] ?? scope['webkitSpeechRecognition'];
+  return typeof ctor === 'function' ? (ctor as new () => SpeechRecognitionLike) : null;
+}
 
 /** A user prompt echoed locally while waiting for the engine to reflect it. */
 interface PendingPrompt {
@@ -102,7 +131,6 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
-    SessionSidebarComponent,
     ScrollMinimapComponent,
   ],
   templateUrl: './chat.html',
@@ -116,6 +144,7 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
+  private readonly sessionStore = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -146,8 +175,8 @@ export class ChatView implements OnInit, OnDestroy {
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
 
-  /** M6: filter the transcript by model (driven from the sidebar). */
-  readonly filterModel = signal<string | null>(null);
+  /** M6: filter the transcript by model (driven from the drawer's Session panel). */
+  readonly filterModel = this.sessionStore.filterModel;
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
@@ -178,17 +207,6 @@ export class ChatView implements OnInit, OnDestroy {
     return this.taskLinks().get(nameOrId) ?? null;
   }
 
-  readonly modelsUsed = computed<string[]>(() => {
-    const set = new Set<string>();
-    for (const m of this.messages()) {
-      const model = m.meta?.model;
-      if (model) {
-        set.add(model);
-      }
-    }
-    return [...set];
-  });
-
   readonly filteredMessages = computed<Message[]>(() => {
     const filter = this.filterModel();
     if (!filter) {
@@ -208,6 +226,13 @@ export class ChatView implements OnInit, OnDestroy {
 
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
   readonly minimap = viewChild(ScrollMinimapComponent);
+  /** Inline permission prompt (F2-8) - blocks sending while unresolved. */
+  readonly permission = viewChild(PermissionPopup);
+
+  /** True while a permission decision is outstanding (F2-8, bug B15). */
+  readonly permissionBlocked = computed(
+    () => (this.permission()?.asks().length ?? 0) > 0,
+  );
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
@@ -225,6 +250,12 @@ export class ChatView implements OnInit, OnDestroy {
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => this.handleEvent(ev));
+
+    // Publish the visible session to the shared store so the right drawer's
+    // Session panel derives tokens/cost/files from the same data (F2-12).
+    effect(() => this.sessionStore.meta.set(this.meta()));
+    effect(() => this.sessionStore.messages.set(this.messages()));
+    effect(() => this.sessionStore.running.set(this.running()));
 
     // Full transcript sync whenever the SSE stream (re)connects: events that
     // fell into the reconnect gap are recovered from the engine, not guessed.
@@ -312,6 +343,7 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.sessionStore.clear();
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();
     this.routeSub = null;
@@ -664,6 +696,10 @@ export class ChatView implements OnInit, OnDestroy {
     if ((!text && staged.length === 0) || this.loading()) {
       return;
     }
+    // A pending permission prompt blocks turn progress (F2-8).
+    if (this.permissionBlocked()) {
+      return;
+    }
     this.draft.set('');
     this.saveDraft('');
     const images: PromptImage[] = staged.map((a) => ({
@@ -885,6 +921,60 @@ export class ChatView implements OnInit, OnDestroy {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void this.sendPrompt();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Composer (F2-10): auto-grow textarea + optional dictation.
+  // ---------------------------------------------------------------------------
+
+  /** Grow the textarea with its content, up to `COMPOSER_MAX_HEIGHT`. */
+  autoGrow(el: HTMLTextAreaElement): void {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }
+
+  /** Speech recognition is a browser extra: absent in most webviews. */
+  readonly micSupported = signal(speechRecognitionCtor() !== null);
+  readonly dictating = signal(false);
+  private recognition: SpeechRecognitionLike | null = null;
+
+  /** Toggle dictation; recognized text is appended to the current draft. */
+  toggleDictation(): void {
+    if (this.dictating()) {
+      this.recognition?.stop();
+      this.dictating.set(false);
+      return;
+    }
+    const Ctor = speechRecognitionCtor();
+    if (!Ctor) {
+      return;
+    }
+    try {
+      const recognition = new Ctor();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
+        let text = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          text += event.results[i][0]?.transcript ?? '';
+        }
+        if (!text) {
+          return;
+        }
+        const next = this.draft() ? `${this.draft()} ${text.trim()}` : text.trim();
+        this.draft.set(next);
+        this.saveDraft(next);
+      };
+      recognition.onend = () => this.dictating.set(false);
+      recognition.onerror = () => this.dictating.set(false);
+      recognition.start();
+      this.recognition = recognition;
+      this.dictating.set(true);
+    } catch {
+      this.micSupported.set(false);
+      this.dictating.set(false);
     }
   }
 

@@ -1,81 +1,58 @@
 <div class="chat">
-  <header class="chat-head">
-    <div class="chat-title">
-      <a class="back" routerLink="/">{{ t('chat.back') }}</a>
-      <div class="titles">
-        @if (meta()?.alias) {
-          <span class="session-title">{{ meta()!.alias }}</span>
-        } @else {
-          <span class="session-title">{{ meta()?.title || t('chat.session') }}</span>
-        }
-        <span class="muted session-sub">
-          {{ meta()?.agent }} · {{ meta()?.directory }}
-          @if (meta()?.model) {
-            · {{ meta()?.model }}
+  <header class="session-toolbar">
+    @if (agents().length > 0) {
+      <label class="tb-field">
+        <span class="tb-label">{{ t('chat.agent') }}</span>
+        <select class="tb-select" [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
+          @for (agent of agents(); track agent.name) {
+            <option [value]="agent.name">{{ agent.name }}</option>
           }
-        </span>
-      </div>
-    </div>
-
-    <div class="chat-actions">
-      @if (agents().length > 0) {
-        <label class="agent-switch">
-          <span class="muted">{{ t('chat.agent') }}</span>
-          <select [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
-            @for (agent of agents(); track agent.name) {
-              <option [value]="agent.name">{{ agent.name }}</option>
-            }
-          </select>
-        </label>
-        <label class="agent-switch">
-          <span class="muted">{{ t('chat.model') }}</span>
-          <select [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
-            <option value="">{{ t('settings.defaultOption') }}</option>
-            @if (selectedModel() && !availableModels().includes(selectedModel())) {
-              <option [value]="selectedModel()">{{ selectedModel() }}</option>
-            }
-            @for (model of availableModels(); track model) {
-              <option [value]="model">{{ model }}</option>
-            }
-          </select>
-        </label>
-      }
-      <label class="agent-switch thinking">
-        <span class="muted">{{ t('settings.thinking') }}</span>
-        <select [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
-          <option value="off">{{ t('settings.thinkingOff') }}</option>
-          <option value="low">{{ t('settings.thinkingLow') }}</option>
-          <option value="medium">{{ t('settings.thinkingMedium') }}</option>
-          <option value="high">{{ t('settings.thinkingHigh') }}</option>
-          <option value="max">{{ t('settings.thinkingMax') }}</option>
         </select>
       </label>
-      <button class="danger" (click)="abortTurn()" [disabled]="!running()">{{ t('chat.abort') }}</button>
-      @if (running()) {
-        <span class="running-chip">{{ t('chat.running') }}</span>
-      }
-    </div>
+      <label class="tb-field">
+        <span class="tb-label">{{ t('chat.model') }}</span>
+        <select class="tb-select" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
+          <option value="">{{ t('settings.defaultOption') }}</option>
+          @if (selectedModel() && !availableModels().includes(selectedModel())) {
+            <option [value]="selectedModel()">{{ selectedModel() }}</option>
+          }
+          @for (model of availableModels(); track model) {
+            <option [value]="model">{{ model }}</option>
+          }
+        </select>
+      </label>
+    }
+    <label class="tb-field">
+      <span class="tb-label">{{ t('settings.thinking') }}</span>
+      <select class="tb-select" [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
+        <option value="off">{{ t('settings.thinkingOff') }}</option>
+        <option value="low">{{ t('settings.thinkingLow') }}</option>
+        <option value="medium">{{ t('settings.thinkingMedium') }}</option>
+        <option value="high">{{ t('settings.thinkingHigh') }}</option>
+        <option value="max">{{ t('settings.thinkingMax') }}</option>
+      </select>
+    </label>
+
+    <button
+      class="tb-abort"
+      type="button"
+      (click)="abortTurn()"
+      [disabled]="!running()"
+      [title]="running() ? t('chat.abort') : t('chat.abortIdle')"
+    >{{ t('chat.abort') }}</button>
   </header>
 
   <div class="chat-main">
-    <app-session-sidebar
-      [messages]="filteredMessages()"
-      [meta]="meta()"
-      [running]="running()"
-      [models]="modelsUsed()"
-      [filterModel]="filterModel()"
-      (filterModelChange)="filterModel.set($event)"
-    />
-
     <div class="chat-col">
       <div class="scroll-wrap">
         <div #scroll class="scroll" (scroll)="onScroll()">
+          <div class="thread">
           @if (loading()) {
             <div class="placeholder">{{ t('chat.loading') }}</div>
           } @else if (filteredMessages().length === 0 && pending().length === 0) {
-            <div class="placeholder">
-              <p>{{ t('chat.noMessages') }}</p>
-              <p class="muted">{{ t('chat.sendFirst') }}</p>
+            <div class="placeholder empty-state">
+              <p class="placeholder-title">{{ t('chat.noMessages') }}</p>
+              <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
             </div>
           } @else {
             <div class="messages">
@@ -136,6 +113,21 @@
               }
             </div>
           }
+
+          @if (running() && !loading()) {
+            <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
+              <span class="typing-dot" aria-hidden="true"></span>
+              <span class="typing-text">{{ t('chat.typing') }}</span>
+              <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+            </div>
+          }
+
+          <app-permission-popup
+            #permission
+            [activeSessionID]="sessionID()"
+            [directory]="meta()?.directory"
+          />
+          </div>
         </div>
 
         @if (scrollArea()) {
@@ -190,11 +182,17 @@
         @if (attachError()) {
           <div class="attach-error">{{ attachError() }}</div>
         }
+        @if (permissionBlocked()) {
+          <div class="perm-blocked" role="status">{{ t('perm.blocksSend') }}</div>
+        }
         <textarea
-          rows="3"
+          #composerInput
+          rows="1"
+          class="composer-input"
           [placeholder]="t('chat.composerPlaceholder')"
+          [attr.aria-label]="t('chat.composerPlaceholder')"
           [ngModel]="draft()"
-          (ngModelChange)="draft.set($event); saveDraft($event)"
+          (ngModelChange)="draft.set($event); saveDraft($event); autoGrow(composerInput)"
           (keydown)="onComposerKeydown($event)"
           [disabled]="loading()"
         ></textarea>
@@ -229,23 +227,36 @@
         }
 
         <div class="composer-actions">
-          <button
-            class="attach-btn"
-            (click)="filePicker.click()"
-            [title]="t('chat.attachImage')"
-            [disabled]="loading() || attachments().length >= 5"
-          >📎</button>
           <label class="follow-toggle">
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
             {{ t('chat.follow') }}
           </label>
+          <button
+            class="icon-action"
+            type="button"
+            (click)="filePicker.click()"
+            [title]="t('chat.attachImage')"
+            [attr.aria-label]="t('chat.attachImage')"
+            [disabled]="loading() || attachments().length >= 5"
+          >📎</button>
+          <button
+            class="icon-action mic"
+            type="button"
+            [class.on]="dictating()"
+            (click)="toggleDictation()"
+            [title]="micSupported() ? t('chat.mic') : t('chat.micUnsupported')"
+            [attr.aria-label]="t('chat.mic')"
+            [attr.aria-pressed]="dictating()"
+            [disabled]="!micSupported() || loading()"
+          >🎙</button>
           @if (queue().length > 0) {
             <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
           }
           <button
             class="primary send"
             (click)="sendPrompt()"
-            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading()"
+            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading() || permissionBlocked()"
+            [title]="permissionBlocked() ? t('perm.blocksSend') : t('chat.send')"
           >
             {{ sending() ? t('chat.sending') : t('chat.send') }}
           </button>
@@ -253,6 +264,4 @@
       </footer>
     </div>
   </div>
-
-  <app-permission-popup [activeSessionID]="sessionID()" [directory]="meta()?.directory" />
 </div>

@@ -51,6 +51,8 @@ function extractHtmlBlocks(source: string): string[] {
   styles: `
     .md {
       word-wrap: break-word;
+      font-size: var(--fs-13-5);
+      line-height: var(--lh-body);
     }
     .md p {
       margin: 0 0 8px;
@@ -59,14 +61,15 @@ function extractHtmlBlocks(source: string): string[] {
       margin-bottom: 0;
     }
     .md pre {
-      background: var(--bg-raised);
+      background: var(--terminal-bg);
       border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      border-radius: var(--radius-panel);
       padding: 10px 12px;
       overflow-x: auto;
       margin: 8px 0;
-      font-size: 12.5px;
+      font-size: var(--fs-12-5);
       line-height: 1.5;
+      color: var(--code-text-strong);
     }
     .md code {
       background: rgba(255, 255, 255, 0.07);
@@ -96,6 +99,26 @@ function extractHtmlBlocks(source: string): string[] {
       margin-top: 10px;
       border-top: 1px dashed var(--border);
       padding-top: 10px;
+    }
+
+    /* Inside the user bubble the ground is --accent, so every inner colour
+       has to fall back to the bubble's dark text (F2-4). */
+    :host-context(.bubble) .md a {
+      color: inherit;
+      text-decoration: underline;
+    }
+    :host-context(.bubble) .md code {
+      background: rgba(0, 0, 0, 0.14);
+      color: inherit;
+    }
+    :host-context(.bubble) .md pre {
+      background: rgba(0, 0, 0, 0.2);
+      border-color: rgba(0, 0, 0, 0.18);
+      color: inherit;
+    }
+    :host-context(.bubble) .md blockquote {
+      border-left-color: rgba(0, 0, 0, 0.25);
+      color: inherit;
     }
   `,
 })
