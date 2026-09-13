@@ -112,6 +112,8 @@ cd ../client && npm run sidecar:copy && npm run tauri:build
 
 `sidecar:copy` copies the release engine binary to `src-tauri/binaries/bebok-server-[.exe]` using the target triple from `rustc -vV`. `tauri:build` compiles the frontend, bundles the sidecar and produces the platform binary and installers. For development, use `npm run tauri:dev`.
 
+Official builds for Windows, Linux and macOS (Apple silicon + Intel) are produced by GitHub Actions when a `X.Y.Z` tag is pushed - see [scripts/release.md](scripts/release.md) for the version bump (`npm run version:bump -- X.Y.Z`), tagging, optional signing secrets and how to test-run the pipeline without tagging.
+
 The engine prints `BEBOK_READY http://host:port` on stdout so the shell can discover a sidecar started with `--port 0`; logs go to stderr.
 
 ### 4. Mobile (Capacitor)

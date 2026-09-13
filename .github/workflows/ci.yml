@@ -1,9 +1,17 @@
 name: CI
 
+# PR gate. Release builds live in release.yml and reuse the Rust/npm caches
+# populated here (same Swatinem/rust-cache `shared-key` and setup-node cache).
+
 on:
   push:
     branches: [main, master]
   pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NODE_VERSION: 22
 
 jobs:
   engine:
@@ -11,11 +19,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Must match release.yml so tag builds restore this cache.
+          shared-key: ${{ matrix.os }}-${{ matrix.target }}
+          workspaces: |
+            engine -> target
+            client/src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
       - name: Format
         working-directory: engine
         run: cargo fmt --check
@@ -34,13 +57,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: client/package-lock.json
       - name: Install
