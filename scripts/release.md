@@ -47,6 +47,61 @@ CI). Consequences for users, also printed in the release notes:
 - **Linux**: no warnings; `.deb` and AppImage work unsigned. The AppImage and
   portable build need WebKitGTK 4.1 on the host.
 
+## Android (WP-M3)
+
+`.github/workflows/android.yml` builds the APK on every PR/push touching
+`client/**` or `engine/**` (arm64-v8a + x86_64, the latter only so the CI
+emulator can run it); `.github/workflows/release.yml`'s `android` job runs on
+a tag (arm64-v8a only - see PLAN-1.6-MOBILE.md #9 on APK size) and attaches
+`bebok-X.Y.Z-android-arm64.apk` to the release, with its checksum folded
+into `SHA256SUMS.txt`.
+
+`versionName`/`versionCode` are **not** set in `client/android/app/build.gradle`
+directly - the file reads `client/package.json`'s `version` at Gradle
+configuration time (`versionCode = major*10000 + minor*100 + patch`), so
+`npm run version:bump` is the only place a release version is written, same
+as every other platform. `preflight` has a lightweight guard against that
+derivation being replaced with a hard-coded string later.
+
+### Signing
+
+| Secrets | Effect when present |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Decodes the keystore to `$RUNNER_TEMP` and passes it to `gradlew assembleRelease` via `-Pbebok.keystore=… -Pbebok.keystorePassword=… -Pbebok.keyAlias=… -Pbebok.keyPassword=…` (read by `signingConfigs.release` in `app/build.gradle`). Create the secret with `base64 -w0 release.keystore` (or the PowerShell `[Convert]::ToBase64String(...)` equivalent used for the Windows cert). |
+
+Without all four secrets, `assembleRelease` still succeeds: the `release`
+build type falls back to the auto-generated **debug** signing config and the
+output filename gets a `-debugkey` suffix (`android.yml`'s PR artifact) or a
+log notice (the release job keeps the published asset name
+`bebok-X.Y.Z-android-arm64.apk` either way, with a note in the release
+description instead - a debug-signed APK cannot be upgraded in place by a
+later release-keystore-signed build, so uninstall it first if you installed
+one from a PR run).
+
+### Local equivalent
+
+```bash
+cd client
+BEBOK_ANDROID_ABIS="arm64-v8a x86_64" npm run android:bundle   # Git Bash/WSL; needs
+                                                                 # ANDROID_NDK_HOME (r27)
+                                                                 # + rustup targets
+                                                                 # aarch64-linux-android,
+                                                                 # x86_64-linux-android
+npx ng build
+npx cap sync android
+cd android && ./gradlew assembleRelease testDebugUnitTest
+```
+
+`bundle-android.sh` detects the NDK host tag (`linux-x86_64` /
+`darwin-x86_64` / `windows-x86_64`) itself; on Windows it must run under Git
+Bash or WSL (it is a bash script), and it resolves the NDK's Windows
+toolchain wrapper (`.cmd`) explicitly - the extension-less
+`<target><api>-clang` NDK ships on Windows is a POSIX shell script that a
+natively-spawned `rustc`/`cc` cannot exec directly.
+
+Maestro flows live in `client/maestro/**` (`npm run android:maestro` against
+whatever `adb` currently targets) - see `client/maestro/README.md`.
+
 ## Cutting a release
 
 1. Make sure `main` is green in CI.

@@ -10,6 +10,7 @@
     "doctor": "node scripts/bebok.mjs doctor",
     "full-build-dev": "node scripts/bebok.mjs full-build-dev",
     "full-build-app": "node scripts/bebok.mjs full-build-app",
+    "full-build-apk": "node scripts/bebok.mjs full-build-apk",
     "engine": "node scripts/bebok.mjs engine",
     "client": "node scripts/bebok.mjs client"
   }

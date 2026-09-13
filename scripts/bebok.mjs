@@ -4,6 +4,7 @@
 //   npm run doctor                       toolchain + platform dependency check
 //   npm run full-build-dev [-- flags]    engine (dev) + `ng serve`, token wired automatically
 //   npm run full-build-app [-- flags]    engine (release) + sidecar + Tauri bundles for this OS
+//   npm run full-build-apk [-- flags]    engine (per-ABI) + ng build + cap sync + Android APK
 //   npm run engine         [-- flags]    build + run the engine only
 //   npm run client         [-- flags]    `ng serve` only
 //
@@ -66,6 +67,7 @@ const TAGS = {
   bebok: c.green('[bebok] '),
   cargo: c.cyan('[cargo] '),
   npm: c.magenta('[npm]   '),
+  android: c.cyan('[apk]   '),
 };
 
 function log(msg) {
@@ -97,6 +99,9 @@ function npmCli() {
 const NG_JS = path.join(CLIENT_DIR, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
 const TAURI_JS = path.join(CLIENT_DIR, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 const COPY_SIDECAR_JS = path.join(CLIENT_DIR, 'scripts', 'copy-sidecar.mjs');
+const CAP_JS = path.join(CLIENT_DIR, 'node_modules', '@capacitor', 'cli', 'bin', 'capacitor');
+const ANDROID_DIR = path.join(CLIENT_DIR, 'android');
+const BUNDLE_ANDROID_SH = path.join(CLIENT_DIR, 'scripts', 'bundle-android.sh');
 
 /** `cargo` / `rustc` are real executables; `where`/`which` them via PATH. */
 function findOnPath(name) {
@@ -109,6 +114,26 @@ function findOnPath(name) {
       const P = path.join(dir, name + ext);
       if (existsSync(P)) return P;
     }
+  }
+  return null;
+}
+
+/**
+ * `bundle-android.sh` is a bash script (POSIX sh, runs on Ubuntu CI and on
+ * Windows via Git Bash/WSL - see the script header). Resolve a real `bash`
+ * rather than relying on a shell to interpret the `.sh` extension.
+ */
+function bashBin() {
+  const onPath = findOnPath('bash');
+  if (onPath) return onPath;
+  if (isWin) {
+    // Git for Windows' default install locations (Git Bash), tried when
+    // `bash` is not already on PATH.
+    const candidates = [
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    ];
+    return candidates.find((p) => existsSync(p)) ?? null;
   }
   return null;
 }
@@ -554,6 +579,59 @@ async function cmdFullBuildApp(flags) {
   }
 }
 
+/**
+ * WP-M3 (F10-11): Android APK, mirroring the android.yml/release.yml CI
+ * pipeline for a local run - bundle the engine (per-ABI), `ng build`,
+ * `cap sync android`, `gradlew assembleRelease`.
+ */
+async function cmdFullBuildApk(flags) {
+  if (!existsSync(ANDROID_DIR)) {
+    fail(`${path.relative(ROOT, ANDROID_DIR)} not found - this checkout has no Android project`);
+  }
+  const bash = bashBin();
+  if (!bash) {
+    fail(
+      'no bash found - bundle-android.sh is a POSIX shell script; install Git for Windows ' +
+        '(Git Bash) or run this from WSL/Linux/macOS',
+    );
+  }
+  await ensureClientDeps();
+
+  const abis = flags.abis || 'arm64-v8a';
+  log(`bundling engine for ABIs: ${abis}`);
+  await runStep(TAGS.android, bash, [BUNDLE_ANDROID_SH], {
+    cwd: CLIENT_DIR,
+    env: { BEBOK_ANDROID_ABIS: abis },
+  });
+
+  await runStep(TAGS.client, process.execPath, [NG_JS, 'build'], {
+    cwd: CLIENT_DIR,
+    env: { NG_CLI_ANALYTICS: 'false' },
+  });
+
+  await runStep(TAGS.android, process.execPath, [CAP_JS, 'sync', 'android'], { cwd: CLIENT_DIR });
+
+  const gradlew = path.join(ANDROID_DIR, isWin ? 'gradlew.bat' : 'gradlew');
+  if (!existsSync(gradlew)) fail(`gradle wrapper not found: ${gradlew}`);
+  const gradleArgs = ['assembleRelease'];
+  if (flags.test) gradleArgs.push('testDebugUnitTest');
+  await runStep(TAGS.android, gradlew, gradleArgs, { cwd: ANDROID_DIR });
+
+  // ---- report ---------------------------------------------------------------
+  const apkDir = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'release');
+  const apks = existsSync(apkDir) ? listFiles(apkDir, 1).filter((p) => p.endsWith('.apk')) : [];
+  if (!apks.length) fail(`no APK found under ${path.relative(ROOT, apkDir)}`);
+
+  log('');
+  log(`${c.green('build complete')} (ABIs: ${abis})`);
+  for (const p of apks) {
+    const st = statSync(p);
+    const mb = (st.size / 1024 / 1024).toFixed(1);
+    log(`  ${path.relative(ROOT, p)}  ${c.dim(`${mb} MB`)}`);
+    log(`    sha256 ${await sha256(p)}`);
+  }
+}
+
 async function cmdDoctor() {
   const rows = [];
   const add = (name, ok, detail, required = true) => rows.push({ name, ok, detail, required });
@@ -631,6 +709,7 @@ commands
   doctor           check rustc/cargo, node/npm, tauri cli and OS-level Tauri deps
   full-build-dev   build engine (dev) + start it + ng serve; opens with the token wired
   full-build-app   engine release + sidecar + Tauri bundles for this OS (+ SHA256 report)
+  full-build-apk   engine (per-ABI, Android) + ng build + cap sync + Android APK
   engine           build + run the engine only (prints the bootstrap URL)
   client           ng serve only
 
@@ -648,6 +727,12 @@ flags (full-build-app)
   --bundles <list>    tauri bundle list      (default: windows nsis,msi / linux deb,appimage / macos dmg)
   --skip-engine       reuse engine/target/<triple>/release/bebok-server
   --skip-tauri        stop after the engine release build + \`ng build\`
+
+flags (full-build-apk)
+  --abis <list>       space-separated Android ABIs -> BEBOK_ANDROID_ABIS (default: arm64-v8a)
+  --test              also run \`gradlew testDebugUnitTest\`
+  requires: bash (Git Bash/WSL on Windows), ANDROID_NDK_HOME (NDK r27), rustup
+  targets aarch64-linux-android/x86_64-linux-android, Android SDK (ANDROID_HOME)
 `;
 
 async function main() {
@@ -669,6 +754,8 @@ async function main() {
         bundles: { type: 'string' },
         'skip-engine': { type: 'boolean', default: false },
         'skip-tauri': { type: 'boolean', default: false },
+        abis: { type: 'string' },
+        test: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -698,6 +785,9 @@ async function main() {
     case 'full-build-app':
     case 'app':
       return cmdFullBuildApp(flags);
+    case 'full-build-apk':
+    case 'apk':
+      return cmdFullBuildApk(flags);
     case 'engine':
       return cmdEngine(flags);
     case 'client':
