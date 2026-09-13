@@ -7,9 +7,11 @@
 
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
 
 import { EngineClient } from '../../../core/engine-client.service';
-import { PreviewPanel } from './preview-panel';
+import { UiPrefsStore } from '../../../core/ui-prefs.store';
+import { PreviewPanel, isPreviewablePath } from './preview-panel';
 import { ExplorerSelectionStore } from './explorer-selection.store';
 
 describe('PreviewPanel (F6-10)', () => {
@@ -17,12 +19,14 @@ describe('PreviewPanel (F6-10)', () => {
   let panel: PreviewPanel;
   let selection: ExplorerSelectionStore;
   let fsFile: jasmine.Spy;
+  let fsTree: jasmine.Spy;
 
   beforeEach(() => {
+    localStorage.clear();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [PreviewPanel],
-      providers: [provideZonelessChangeDetection()],
+      providers: [provideZonelessChangeDetection(), provideRouter([])],
     });
     fixture = TestBed.createComponent(PreviewPanel);
     panel = fixture.componentInstance;
@@ -31,8 +35,30 @@ describe('PreviewPanel (F6-10)', () => {
     fsFile = spyOn(engine, 'fsFile').and.callFake((_directory: string, path: string) =>
       Promise.resolve({ path, content: `content of ${path}` }),
     );
+    fsTree = spyOn(engine, 'fsTree').and.callFake((_directory: string, path?: string) => {
+      const tree: Record<string, { name: string; path: string; is_dir: boolean }[]> = {
+        '': [
+          { name: 'README.md', path: 'README.md', is_dir: false },
+          { name: 'main.ts', path: 'main.ts', is_dir: false },
+          { name: 'docs', path: 'docs', is_dir: true },
+          { name: 'node_modules', path: 'node_modules', is_dir: true },
+        ],
+        docs: [
+          { name: 'orders.md', path: 'docs/orders.md', is_dir: false },
+          { name: 'config.yaml', path: 'docs/config.yaml', is_dir: false },
+        ],
+        node_modules: [{ name: 'x.md', path: 'node_modules/x.md', is_dir: false }],
+      };
+      return Promise.resolve({ path: path ?? '', entries: tree[path ?? ''] ?? [] });
+    });
     fixture.detectChanges();
   });
+
+  async function settle(): Promise<void> {
+    await fixture.whenStable();
+    fixture.detectChanges();
+    await fixture.whenStable();
+  }
 
   it('shows the empty state before anything has been opened', () => {
     expect(panel.currentPath()).toBeNull();
@@ -93,5 +119,127 @@ describe('PreviewPanel (F6-10)', () => {
     expect(panel.currentPath()).toBe('docs/a.md');
     expect(panel.canBack()).toBeFalse();
     expect(panel.canForward()).toBeFalse();
+  });
+
+  // -- F9-3 / F9-15 -----------------------------------------------------------
+
+  it('F9-3: opening a file also reveals the Preview drawer section', () => {
+    const prefs = TestBed.inject(UiPrefsStore);
+    prefs.setRightDrawerOpen(false);
+    prefs.setRightDrawerPanel('preview', false);
+    prefs.setRightDrawerPanelCollapsed('preview', true);
+    selection.openInPreview('/proj', 'docs/a.md');
+    expect(prefs.rightDrawerOpen()).toBeTrue();
+    expect(prefs.rightDrawerPanels().preview).toBeTrue();
+    expect(prefs.rightDrawerCollapsed().preview).toBeFalse();
+    expect(prefs.rightDrawerReveal()?.panel).toBe('preview');
+  });
+
+  it('F9-15: shows the file name (mono) with the full path as tooltip', async () => {
+    selection.openInPreview('/proj', 'docs/nested/orders.md');
+    await settle();
+    expect(panel.currentName()).toBe('orders.md');
+    const el = fixture.nativeElement.querySelector('[data-testid="preview-file-name"]');
+    expect(el.getAttribute('title')).toBe('docs/nested/orders.md');
+    expect(el.textContent).toContain('orders.md');
+    expect(el.textContent).not.toContain('nested');
+  });
+
+  it('F9-15: empty state explains how to fill the panel and offers Open file', () => {
+    const empty = fixture.nativeElement.querySelector('[data-testid="preview-empty"]');
+    expect(empty).toBeTruthy();
+    expect(empty.textContent).toContain('Open file');
+    expect(empty.querySelector('button')).toBeTruthy();
+  });
+
+  it('F9-15: Pin keeps the file - a replacing request is parked with "Open anyway"', async () => {
+    selection.openInPreview('/proj', 'docs/a.md');
+    await settle();
+    panel.togglePin();
+    await settle();
+    expect(panel.pinned()).toBeTrue();
+
+    selection.openInPreview('/proj', 'docs/b.md');
+    await settle();
+    expect(panel.currentPath()).toBe('docs/a.md');
+    expect(panel.blockedRequest()?.path).toBe('docs/b.md');
+    expect(fixture.nativeElement.querySelector('[data-testid="preview-blocked"]')).toBeTruthy();
+
+    // A relative link inside the document is parked the same way.
+    await panel.navigate('docs/c.md');
+    expect(panel.currentPath()).toBe('docs/a.md');
+    expect(panel.blockedRequest()?.path).toBe('docs/c.md');
+
+    panel.openBlocked();
+    await settle();
+    expect(panel.pinned()).toBeFalse();
+    expect(panel.currentPath()).toBe('docs/c.md');
+    expect(panel.blockedRequest()).toBeNull();
+  });
+
+  it('F9-15: Refresh re-reads the file and Open in Explorer hands over the selection', async () => {
+    selection.openInPreview('/proj', 'docs/a.md');
+    await settle();
+    expect(fsFile).toHaveBeenCalledTimes(1);
+    await panel.refresh();
+    expect(fsFile).toHaveBeenCalledTimes(2);
+
+    const router = TestBed.inject(Router);
+    const navigate = spyOn(router, 'navigate').and.resolveTo(true);
+    await panel.openInExplorer();
+    expect(selection.openRequest()?.path).toBe('docs/a.md');
+    expect(navigate).toHaveBeenCalledWith(['/explorer'], { queryParams: { directory: '/proj' } });
+  });
+
+  it('F9-15: flags a file that changed on disk and clears the flag on Reload', async () => {
+    selection.openInPreview('/proj', 'docs/a.md');
+    await settle();
+    expect(panel.modified()).toBeFalse();
+    await panel.checkModified(true);
+    expect(panel.modified()).toBeFalse(); // unchanged content -> no badge
+
+    fsFile.and.callFake((_d: string, path: string) =>
+      Promise.resolve({ path, content: `NEW content of ${path}` }),
+    );
+    await panel.checkModified(true);
+    await settle();
+    expect(panel.modified()).toBeTrue();
+    expect(fixture.nativeElement.querySelector('[data-testid="preview-modified"]')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('[data-testid="preview-reload"]')).toBeTruthy();
+
+    await panel.refresh();
+    await settle();
+    expect(panel.modified()).toBeFalse();
+    expect(panel.content()).toBe('NEW content of docs/a.md');
+  });
+
+  it('F9-15: the picker walks the tree (skipping node_modules), filters and opens a file', async () => {
+    selection.select('/proj', null);
+    panel.openPicker();
+    await settle();
+    await panel.loadPickerFiles('/proj');
+    await settle();
+    expect(fsTree).toHaveBeenCalledWith('/proj', undefined);
+    expect(fsTree).toHaveBeenCalledWith('/proj', 'docs');
+    expect(fsTree).not.toHaveBeenCalledWith('/proj', 'node_modules');
+    expect(panel.pickerResults()).toEqual(['README.md', 'docs/config.yaml', 'docs/orders.md']);
+
+    panel.onPickerQuery('ord');
+    expect(panel.pickerResults()).toEqual(['docs/orders.md']);
+
+    panel.onPickerKey(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle();
+    expect(panel.pickerOpen()).toBeFalse();
+    expect(panel.currentPath()).toBe('docs/orders.md');
+    expect(panel.content()).toBe('content of docs/orders.md');
+  });
+
+  it('F9-15: only previewable text types are offered', () => {
+    expect(isPreviewablePath('a/b.md')).toBeTrue();
+    expect(isPreviewablePath('x.YAML')).toBeTrue();
+    expect(isPreviewablePath('index.html')).toBeTrue();
+    expect(isPreviewablePath('main.ts')).toBeFalse();
+    expect(isPreviewablePath('logo.png')).toBeFalse();
+    expect(isPreviewablePath('Makefile')).toBeFalse();
   });
 });
