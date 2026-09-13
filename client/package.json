@@ -12,6 +12,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "sidecar:copy": "node scripts/copy-sidecar.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "tauri:diag": "node scripts/diag-tauri-build.mjs",
     "tauri:clean": "node scripts/clean-tauri-target.mjs",
     "tauri:rebuild": "node scripts/rebuild-tauri.mjs",

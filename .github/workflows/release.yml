@@ -1,0 +1,496 @@
+name: Release
+
+# Tag-triggered multi-OS release builds.
+#
+#   git tag 1.5.0 && git push origin 1.5.0      -> builds + publishes release "1.5.0"
+#   workflow_dispatch (Actions tab)             -> same pipeline, draft release by default
+#
+# Full runbook: scripts/release.md
+#
+# Signing is OPTIONAL and gated on repository secrets (see scripts/release.md):
+#   WINDOWS_CERT_PFX_BASE64 + WINDOWS_CERT_PASSWORD  -> Authenticode-sign .exe/.msi
+#   GPG_PRIVATE_KEY + GPG_PASSPHRASE                  -> .asc detached signatures (Linux + SHA256SUMS)
+#   TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD)           -> Tauri updater .sig artifacts
+# macOS builds are never signed/notarized: Gatekeeper will warn on first launch.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag or ref to build (empty = the branch selected above, release tag = version in package.json)'
+        required: false
+        default: ''
+        type: string
+      draft:
+        description: 'Create the GitHub Release as a draft'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NODE_VERSION: 22
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Resolve ref/tag/version and make sure every manifest agrees with the tag.
+  # --------------------------------------------------------------------------
+  preflight:
+    name: preflight (version consistency)
+    runs-on: ubuntu-22.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      draft: ${{ steps.resolve.outputs.draft }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag and version
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_DRAFT: ${{ github.event.inputs.draft }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pkg_version=$(node -p "require('./client/package.json').version")
+          tauri_version=$(node -p "require('./client/src-tauri/tauri.conf.json').version")
+          cargo_version=$(awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' engine/Cargo.toml)
+          shell_version=$(awk '/^\[package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' client/src-tauri/Cargo.toml)
+
+          echo "client/package.json           : $pkg_version"
+          echo "client/src-tauri/tauri.conf.json: $tauri_version"
+          echo "engine/Cargo.toml (workspace) : $cargo_version"
+          echo "client/src-tauri/Cargo.toml   : $shell_version"
+
+          if [ "$pkg_version" != "$tauri_version" ] || [ "$pkg_version" != "$cargo_version" ] || [ "$pkg_version" != "$shell_version" ]; then
+            echo "::error::Version mismatch between manifests. Run: cd client && npm run version:bump -- <x.y.z>"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            tag="$REF_NAME"
+            draft=false
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+            draft="$INPUT_DRAFT"
+          else
+            # Dispatched from a branch without a tag: release tag = manifest version.
+            tag="$pkg_version"
+            draft="$INPUT_DRAFT"
+          fi
+
+          version="${tag#v}"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::'$tag' is not a release tag (expected X.Y.Z or vX.Y.Z, optional -prerelease suffix)"
+            exit 1
+          fi
+          if [ "$version" != "$pkg_version" ]; then
+            echo "::error::Tag '$tag' (version $version) does not match manifest version $pkg_version. Run: cd client && npm run version:bump -- $version"
+            exit 1
+          fi
+
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "draft=$draft"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release $tag (version $version, draft=$draft, prerelease=$prerelease) from $(git rev-parse --short HEAD)"
+
+  # --------------------------------------------------------------------------
+  # Build engine + Tauri bundles per OS/arch.
+  # --------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.platform }})
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64
+            bundles: deb,appimage
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x64
+            bundles: msi,nsis
+          # macos-13 (Intel) was retired by GitHub; macos-15-intel is the
+          # current free x86_64 label. macos-15 is Apple silicon.
+          - os: macos-15
+            target: aarch64-apple-darwin
+            platform: macos-arm64
+            bundles: app,dmg
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos-x64
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
+      # Secrets mapped to env so steps can test for presence with `env.*`.
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Same shared-key scheme as ci.yml so release builds restore CI caches.
+          shared-key: ${{ matrix.os }}-${{ matrix.target }}
+          workspaces: |
+            engine -> target
+            client/src-tauri -> target
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Linux system dependencies (Tauri 2)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev \
+            libfuse2 \
+            patchelf \
+            build-essential \
+            file \
+            curl \
+            wget
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      # ---- optional: Windows code signing certificate -----------------------
+      - name: Import Windows signing certificate (optional)
+        id: wincert
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $pwd = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
+          Remove-Item $pfx -Force
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "signtool.exe not found in the Windows SDK" }
+          "thumbprint=$($cert.Thumbprint)" >> $env:GITHUB_OUTPUT
+          "signtool=$signtool" >> $env:GITHUB_OUTPUT
+          "WIN_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          "WIN_SIGNTOOL=$signtool" >> $env:GITHUB_ENV
+          Write-Host "Imported code-signing certificate $($cert.Subject) ($($cert.Thumbprint))"
+
+      - name: Windows code signing skipped
+        if: runner.os == 'Windows' && (env.WINDOWS_CERT_PFX_BASE64 == '' || env.WINDOWS_CERT_PASSWORD == '')
+        shell: bash
+        run: echo "::notice title=Windows signing skipped::WINDOWS_CERT_PFX_BASE64 / WINDOWS_CERT_PASSWORD not set - .exe/.msi will be unsigned (SmartScreen will warn)."
+
+      # ---- optional: GPG key for Linux artifact signatures ------------------
+      - name: Import GPG key (optional)
+        if: runner.os == 'Linux' && env.GPG_PRIVATE_KEY != '' && env.GPG_PASSPHRASE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --yes --import
+          fpr=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="fpr"{print $10; exit}')
+          if [ -z "$fpr" ]; then echo "::error::GPG_PRIVATE_KEY did not import a secret key"; exit 1; fi
+          {
+            echo "GPG_FINGERPRINT=$fpr"
+            # Tauri's AppImage bundler honours these to embed a GPG signature.
+            echo "SIGN=1"
+            echo "SIGN_KEY=$fpr"
+            echo "APPIMAGETOOL_SIGN_PASSPHRASE=$GPG_PASSPHRASE"
+            echo "APPIMAGETOOL_FORCE_SIGN=1"
+          } >> "$GITHUB_ENV"
+          echo "Imported GPG key $fpr"
+
+      - name: GPG signing skipped
+        if: runner.os == 'Linux' && (env.GPG_PRIVATE_KEY == '' || env.GPG_PASSPHRASE == '')
+        shell: bash
+        run: echo "::notice title=GPG signing skipped::GPG_PRIVATE_KEY / GPG_PASSPHRASE not set - no .asc signatures for Linux artifacts."
+
+      - name: Tauri updater signing skipped
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: bash
+        run: echo "::notice title=Updater signing skipped::TAURI_SIGNING_PRIVATE_KEY not set - no .sig updater artifacts."
+
+      # ---- engine -----------------------------------------------------------
+      - name: Build engine (release, ${{ matrix.target }})
+        working-directory: engine
+        run: cargo build --release --locked -p bebok-server --target ${{ matrix.target }}
+
+      - name: Sign engine binary (Windows, optional)
+        if: runner.os == 'Windows' && env.WIN_SIGN_THUMBPRINT != ''
+        shell: pwsh
+        run: |
+          & $env:WIN_SIGNTOOL sign /sha1 $env:WIN_SIGN_THUMBPRINT /fd sha256 /td sha256 /tr http://timestamp.digicert.com /d "Bebok engine" "engine\target\$env:TARGET\release\bebok-server.exe"
+          & $env:WIN_SIGNTOOL verify /pa /v "engine\target\$env:TARGET\release\bebok-server.exe"
+
+      - name: Copy sidecar (bebok-server-${{ matrix.target }})
+        working-directory: client
+        run: npm run sidecar:copy -- --target ${{ matrix.target }}
+
+      # ---- Tauri bundles ----------------------------------------------------
+      - name: Compose Tauri config overrides
+        id: tauricfg
+        shell: bash
+        run: |
+          set -euo pipefail
+          cfg='{}'
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            cfg=$(node -e 'const c=JSON.parse(process.argv[1]); c.bundle=Object.assign(c.bundle||{},{createUpdaterArtifacts:true}); console.log(JSON.stringify(c))' "$cfg")
+          fi
+          if [ -n "${WIN_SIGN_THUMBPRINT:-}" ]; then
+            cfg=$(node -e 'const c=JSON.parse(process.argv[1]); c.bundle=c.bundle||{}; c.bundle.windows={certificateThumbprint:process.argv[2],digestAlgorithm:"sha256",timestampUrl:"http://timestamp.digicert.com"}; console.log(JSON.stringify(c))' "$cfg" "$WIN_SIGN_THUMBPRINT")
+          fi
+          echo "config=$cfg" >> "$GITHUB_OUTPUT"
+          echo "tauri config override: $cfg"
+
+      - name: Tauri build (${{ matrix.bundles }})
+        working-directory: client
+        shell: bash
+        env:
+          TAURI_CONFIG_OVERRIDE: ${{ steps.tauricfg.outputs.config }}
+        run: |
+          set -euo pipefail
+          args=(build --ci --target "$TARGET" --bundles "${{ matrix.bundles }}")
+          if [ "$TAURI_CONFIG_OVERRIDE" != "{}" ]; then
+            args+=(--config "$TAURI_CONFIG_OVERRIDE")
+          fi
+          npx tauri "${args[@]}"
+
+      # ---- collect ----------------------------------------------------------
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="release-out"
+          bundle="client/src-tauri/target/$TARGET/release/bundle"
+          bin="client/src-tauri/target/$TARGET/release"
+          stage="stage/bebok-$VERSION"
+          rm -rf "$out" stage && mkdir -p "$out" "$stage"
+          exe=""; [ "$RUNNER_OS" = "Windows" ] && exe=".exe"
+          # Tauri 2 keeps the Cargo binary name (bebok-desktop); fall back to productName.
+          app="$bin/bebok-desktop$exe"; [ -f "$app" ] || app="$bin/bebok$exe"
+          [ -f "$app" ] || { echo "::error::desktop binary not found in $bin"; ls -la "$bin"; exit 1; }
+          # Standalone headless engine (browser mode / remote engine for mobile).
+          cp "engine/target/$TARGET/release/bebok-server$exe" "$out/bebok-server-$VERSION-$PLATFORM$exe"
+          case "$PLATFORM" in
+            linux-x64)
+              cp "$bundle"/deb/*.deb "$out"/
+              cp "$bundle"/appimage/*.AppImage "$out"/
+              cp "$bundle"/appimage/*.AppImage.sig "$out"/ 2>/dev/null || true
+              cp "$bundle"/deb/*.deb.sig "$out"/ 2>/dev/null || true
+              cp "$app" "$bin/bebok-server" LICENSE README.md "$stage"/
+              tar -czf "$out/bebok-$VERSION-$PLATFORM-portable.tar.gz" -C stage "bebok-$VERSION"
+              ;;
+            windows-x64)
+              cp "$bundle"/msi/*.msi "$out"/
+              cp "$bundle"/nsis/*-setup.exe "$out"/
+              cp "$bundle"/msi/*.msi.sig "$out"/ 2>/dev/null || true
+              cp "$bundle"/nsis/*-setup.exe.sig "$out"/ 2>/dev/null || true
+              cp "$app" "$bin/bebok-server.exe" LICENSE README.md "$stage"/
+              (cd stage && 7z a -tzip "../$out/bebok-$VERSION-$PLATFORM-portable.zip" "bebok-$VERSION" > /dev/null)
+              ;;
+            macos-*)
+              arch=$(basename "$bundle"/dmg/*.dmg .dmg | sed -E "s/^bebok_${VERSION}_//")
+              cp "$bundle"/dmg/*.dmg "$out"/
+              if ls "$bundle"/macos/*.app.tar.gz > /dev/null 2>&1; then
+                # Produced by Tauri when updater artifacts are enabled (with .sig).
+                cp "$bundle"/macos/*.app.tar.gz "$out"/
+                cp "$bundle"/macos/*.app.tar.gz.sig "$out"/ 2>/dev/null || true
+              else
+                tar -czf "$out/bebok_${VERSION}_${arch}.app.tar.gz" -C "$bundle/macos" bebok.app
+              fi
+              ;;
+          esac
+          echo "Collected for $PLATFORM:"
+          ls -la "$out"
+
+      - name: Sign Linux artifacts with GPG (optional)
+        if: runner.os == 'Linux' && env.GPG_FINGERPRINT != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-out
+          for f in *.deb *.AppImage *.tar.gz; do
+            [ -f "$f" ] || continue
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --local-user "$GPG_FINGERPRINT" --armor --detach-sign --output "$f.asc" "$f"
+            gpg --batch --verify "$f.asc" "$f"
+          done
+          ls -la
+
+      - name: Verify Windows signatures (optional)
+        if: runner.os == 'Windows' && env.WIN_SIGN_THUMBPRINT != ''
+        shell: pwsh
+        run: |
+          Get-ChildItem release-out -Include *.exe,*.msi -Recurse | ForEach-Object {
+            & $env:WIN_SIGNTOOL verify /pa /v $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signature verification failed for $($_.Name)" }
+          }
+
+      - name: SHA256SUMS (${{ matrix.platform }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-out
+          if command -v sha256sum > /dev/null 2>&1; then
+            sha256sum -- * > "SHA256SUMS-$PLATFORM.txt"
+          else
+            shasum -a 256 -- * > "SHA256SUMS-$PLATFORM.txt"
+          fi
+          cat "SHA256SUMS-$PLATFORM.txt"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bebok-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}
+          path: release-out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove Windows signing certificate
+        if: always() && runner.os == 'Windows' && steps.wincert.outputs.thumbprint != ''
+        shell: pwsh
+        run: |
+          $tp = '${{ steps.wincert.outputs.thumbprint }}'
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $tp } | Remove-Item -Force
+
+  # --------------------------------------------------------------------------
+  # Merge checksums and create/update the GitHub Release.
+  # --------------------------------------------------------------------------
+  release:
+    name: release (${{ needs.preflight.outputs.tag }})
+    needs: [preflight, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Merge SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat SHA256SUMS-*.txt | sort -k2 > SHA256SUMS.txt
+          rm -f SHA256SUMS-*.txt
+          echo "== SHA256SUMS.txt =="; cat SHA256SUMS.txt
+          echo "== assets =="; ls -la
+
+      - name: Sign SHA256SUMS.txt with GPG (optional)
+        if: env.GPG_PRIVATE_KEY != '' && env.GPG_PASSPHRASE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --yes --import
+          fpr=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1=="fpr"{print $10; exit}')
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$fpr" --armor --detach-sign --output artifacts/SHA256SUMS.txt.asc artifacts/SHA256SUMS.txt
+          gpg --batch --verify artifacts/SHA256SUMS.txt.asc artifacts/SHA256SUMS.txt
+          gpg --batch --armor --export "$fpr" > artifacts/bebok-release-signing-key.asc
+
+      - name: Release notes footer
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Downloads"
+            echo
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| Windows x64 installer | \`bebok_${VERSION}_x64-setup.exe\` (NSIS) / \`bebok_${VERSION}_x64_en-US.msi\` |"
+            echo "| Windows x64 portable | \`bebok-${VERSION}-windows-x64-portable.zip\` |"
+            echo "| Linux x64 | \`bebok_${VERSION}_amd64.deb\` / \`bebok_${VERSION}_amd64.AppImage\` / \`bebok-${VERSION}-linux-x64-portable.tar.gz\` |"
+            echo "| macOS Apple silicon | \`bebok_${VERSION}_aarch64.dmg\` / \`bebok_${VERSION}_aarch64.app.tar.gz\` |"
+            echo "| macOS Intel | \`bebok_${VERSION}_x64.dmg\` / \`bebok_${VERSION}_x64.app.tar.gz\` |"
+            echo "| Headless engine (browser mode) | \`bebok-server-${VERSION}-<platform>[.exe]\` |"
+            echo
+            echo "Verify downloads against \`SHA256SUMS.txt\`."
+            if [ -f artifacts/SHA256SUMS.txt.asc ]; then
+              echo "\`SHA256SUMS.txt.asc\` and \`*.asc\` are GPG detached signatures (public key: \`bebok-release-signing-key.asc\`)."
+            fi
+            if [ "$WINDOWS_SIGNED" != "true" ]; then
+              echo
+              echo "> Windows binaries are not code-signed: SmartScreen will show \"Windows protected your PC\" - choose *More info -> Run anyway*."
+            fi
+            echo
+            echo "> macOS builds are not signed or notarized: Gatekeeper will block the first launch - right-click the app -> *Open*, or run \`xattr -dr com.apple.quarantine /Applications/bebok.app\`."
+          } > release-footer.md
+          cat release-footer.md
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.sha }}
+          draft: ${{ needs.preflight.outputs.draft == 'true' }}
+          prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          append_body: true
+          body_path: release-footer.md
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*
