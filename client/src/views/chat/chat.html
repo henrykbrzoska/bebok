@@ -291,16 +291,26 @@
             [attr.aria-label]="t('chat.attachImage')"
             [disabled]="loading() || attachments().length >= 5"
           >📎</button>
-          <button
-            class="icon-action mic"
-            type="button"
-            [class.on]="dictating()"
-            (click)="toggleDictation()"
-            [title]="micSupported() ? t('chat.mic') : t('chat.micUnsupported')"
-            [attr.aria-label]="t('chat.mic')"
-            [attr.aria-pressed]="dictating()"
-            [disabled]="!micSupported() || loading()"
-          >🎙</button>
+          @if (isCapacitor) {
+            <app-composer-capture
+              [model]="effectiveModel().id"
+              [disabled]="loading()"
+              [attachDisabled]="attachments().length >= 5"
+              (files)="addFiles($event)"
+              (transcript)="appendToDraft($event)"
+            />
+          } @else {
+            <button
+              class="icon-action mic"
+              type="button"
+              [class.on]="dictating()"
+              (click)="toggleDictation()"
+              [title]="micSupported() ? t('chat.mic') : t('chat.micUnsupported')"
+              [attr.aria-label]="t('chat.mic')"
+              [attr.aria-pressed]="dictating()"
+              [disabled]="!micSupported() || loading()"
+            >🎙</button>
+          }
           @if (queue().length > 0) {
             <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
           }

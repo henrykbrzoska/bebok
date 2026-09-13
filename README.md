@@ -148,6 +148,16 @@ The mobile client connects to a remote engine over LAN (see the connect
 screen). The PTY surface (/pty*) is compiled out of Android engine builds,
 so the mobile client has no terminal.
 
+**Secrets on Android (1.6.0 limitation).** Device tokens for paired
+desktops live in the Android Keystore (`SecureStore` plugin, AES-256/GCM,
+never plaintext in `shared_prefs`). Provider API keys entered on the phone
+are written by the embedded engine to its own config file inside the app
+sandbox (`filesDir/.config/bebok/config.json`) **in plaintext** - the
+`BEBOK_CONFIG_KEY` at-rest encryption of the `providers` section is not
+implemented in 1.6.0 (`allowBackup=false` keeps that file out of cloud
+backups; a rooted device or `adb backup`-style extraction can still read
+it). Prefer keys with a small scope / spend cap on the phone.
+
 ## Projects
 
 A project is a registered directory with a friendly name. Bebok stores the registry in

@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { EngineWorkTracker } from '../../core/engine-launcher';
 import {
   ActiveTask,
   AgentInfo,
@@ -35,6 +36,7 @@ import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line
 import { ToastHost } from '../../ui/toast/toast-host';
 import { ChatSessionStore } from './chat-session.store';
 import { resolveEffectiveModel } from './effective-model';
+import { ComposerCapture } from './parts/composer-capture';
 import { MessageRowComponent } from './parts/message-row';
 import { ToolRunRowComponent } from './parts/tool-run-row';
 
@@ -179,6 +181,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     ToolRunRowComponent,
     TaskProgressLine,
     ToastHost,
+    ComposerCapture,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -195,8 +198,13 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
   private readonly sessionStore = inject(ChatSessionStore);
+  /** WP-M5 (F10-21): foreground-service bookkeeping on the phone (no-op elsewhere). */
+  private readonly work = inject(EngineWorkTracker);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /** WP-M5 (F10-17): the Capacitor shell gets native capture controls. */
+  readonly isCapacitor = this.engine.isCapacitor;
 
   /**
    * Active session id, driven by the route (`/chat/:sessionID`). A signal (not
@@ -946,6 +954,9 @@ export class ChatView implements OnInit, OnDestroy {
     const head = this.queue()[0];
     this.sending.set(true);
     this.error.set(null);
+    // F10-21: raise the foreground service for the turn; released when the
+    // engine reports the session idle (or right below on a failed POST).
+    this.work.begin(sessionID);
     try {
       await this.engine.prompt(
         sessionID,
@@ -969,6 +980,7 @@ export class ChatView implements OnInit, OnDestroy {
       } else {
         this.error.set(message);
         this.queue.update((q) => q.slice(1));
+        this.work.end(sessionID);
       }
     } finally {
       if (sessionID === this.sessionID()) {
@@ -992,6 +1004,7 @@ export class ChatView implements OnInit, OnDestroy {
       return;
     }
     this.running.set(false);
+    this.work.end(sessionID);
     await this.drainQueue();
   }
 
@@ -1138,6 +1151,7 @@ export class ChatView implements OnInit, OnDestroy {
     const sessionID = this.sessionID();
     this.running.set(false);
     this.error.set(null);
+    this.work.end(sessionID);
     try {
       await this.engine.abort(sessionID);
     } catch (err) {
@@ -1215,6 +1229,17 @@ export class ChatView implements OnInit, OnDestroy {
       this.micSupported.set(false);
       this.dictating.set(false);
     }
+  }
+
+  /** WP-M5 (F10-17): native dictation result - appended, never sent. */
+  appendToDraft(text: string): void {
+    const clean = text.trim();
+    if (!clean) {
+      return;
+    }
+    const next = this.draft() ? `${this.draft()} ${clean}` : clean;
+    this.draft.set(next);
+    this.saveDraft(next);
   }
 
   describe(err: unknown): string {

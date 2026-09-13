@@ -2,8 +2,10 @@ package dev.bebok.mobile;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.res.AssetManager;
 import android.os.Build;
+import android.util.Log;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -15,7 +17,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,12 +41,25 @@ import java.util.concurrent.TimeUnit;
  * turn ({@link #beginWork}/{@link #endWork}) and an idle auto-stop timer that
  * kills the engine after {@link IdleAutoStopPolicy#DEFAULT_IDLE_THRESHOLD_MILLIS}
  * of inactivity while the app is backgrounded.
+ *
+ * WP-M5 (F10-21, device testing): {@code start({ env: { BEBOK_PROVIDER_MOCK: "1" } })}
+ * forwards WP-M1's deterministic mock-provider switch to the engine. The hook
+ * is limited to {@link #DEBUG_ENV_ALLOWLIST} and is ignored entirely unless
+ * the installed APK is debuggable ({@link ApplicationInfo#FLAG_DEBUGGABLE}),
+ * so a release build can never be talked into the mock provider. In a
+ * debuggable build the system property {@code debug.bebok.provider_mock}
+ * ({@code adb shell setprop debug.bebok.provider_mock 1}) has the same effect
+ * without touching the UI.
  */
 @CapacitorPlugin(name = "EngineLauncher")
 public class EngineLauncherPlugin extends Plugin {
 
+    private static final String TAG = "BebokEngine";
     private static final String READY_PREFIX = "BEBOK_READY ";
     private static final long IDLE_CHECK_PERIOD_SECONDS = 60;
+    /** Env vars JS may set on the engine - debuggable builds only. */
+    static final Set<String> DEBUG_ENV_ALLOWLIST = Set.of("BEBOK_PROVIDER_MOCK");
+    static final String MOCK_SYSPROP = "debug.bebok.provider_mock";
 
     private Process process;
     private volatile String baseUrl;
@@ -65,8 +83,13 @@ public class EngineLauncherPlugin extends Plugin {
     @PluginMethod
     public void start(PluginCall call) {
         try {
-            if (baseUrl == null) {
-                baseUrl = launch();
+            // Serialised: the JS side may call start() from two places at once
+            // (EventsStore's reconnect loop + an explicit reconnect) and must
+            // never end up with two engine processes.
+            synchronized (this) {
+                if (baseUrl == null) {
+                    baseUrl = launch(debugEnv(call.getObject("env")));
+                }
             }
             recordActivity();
             JSObject ret = new JSObject();
@@ -154,7 +177,63 @@ public class EngineLauncherPlugin extends Plugin {
         recordActivity();
     }
 
-    private String launch() throws Exception {
+    /** True for a debuggable APK (assembleDebug, or a release build with `debuggable true`). */
+    static boolean isDebuggable(Context ctx) {
+        return (ctx.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    /**
+     * Filter the JS-supplied env through {@link #DEBUG_ENV_ALLOWLIST}; empty
+     * (and logged) in a non-debuggable build. Also honours the
+     * {@link #MOCK_SYSPROP} system property in debuggable builds.
+     */
+    private Map<String, String> debugEnv(JSObject requested) {
+        Map<String, String> env = new HashMap<>();
+        boolean debuggable = isDebuggable(getContext());
+        if (requested != null) {
+            Iterator<String> keys = requested.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                if (!DEBUG_ENV_ALLOWLIST.contains(key)) {
+                    Log.w(TAG, "ignoring engine env " + key + " (not allow-listed)");
+                    continue;
+                }
+                if (!debuggable) {
+                    Log.w(TAG, "ignoring engine env " + key + " (release build)");
+                    continue;
+                }
+                String value = requested.getString(key);
+                if (value != null && !value.isEmpty()) {
+                    env.put(key, value);
+                }
+            }
+        }
+        if (debuggable && !env.containsKey("BEBOK_PROVIDER_MOCK")) {
+            String prop = readSystemProperty(MOCK_SYSPROP);
+            if ("1".equals(prop) || "true".equalsIgnoreCase(prop)) {
+                env.put("BEBOK_PROVIDER_MOCK", "1");
+            }
+        }
+        if (!env.isEmpty()) {
+            Log.w(TAG, "debug engine env: " + env.keySet());
+        }
+        return env;
+    }
+
+    /** `getprop <name>` (empty string when unset or unavailable). */
+    private static String readSystemProperty(String name) {
+        try {
+            Process p = new ProcessBuilder("getprop", name).redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line = r.readLine();
+                return line == null ? "" : line.trim();
+            }
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String launch(Map<String, String> extraEnv) throws Exception {
         Context ctx = getContext();
         File binDir = new File(ctx.getFilesDir(), "bin");
         if (!binDir.exists() && !binDir.mkdirs()) {
@@ -180,6 +259,7 @@ public class EngineLauncherPlugin extends Plugin {
         }
         pb.environment().put("HOME", ctx.getFilesDir().getAbsolutePath());
         pb.environment().put("TERM", "xterm-256color");
+        pb.environment().putAll(extraEnv);
         pb.redirectErrorStream(false);
 
         process = pb.start();
