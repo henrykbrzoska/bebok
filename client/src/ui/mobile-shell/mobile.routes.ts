@@ -8,15 +8,16 @@
  * `ShellStore.activeScreen` / `currentSessionId` keep working for the stores
  * the existing views rely on (the chat drawer logic, session tabs, ...).
  *
- * Tab contents are placeholders here: WP-M5 fills `chat-tab` and `more-tab`,
- * WP-M6 fills `remote-tab`, `agents-tab` and `changes-tab` - one file each so
- * the two packages never touch the same component.
+ * Tab contents: WP-M5 fills `chat-tab` (onboarding / chat home / ChatView)
+ * and Settings-lite under More; WP-M6 fills `remote-tab`, `agents-tab` and
+ * `changes-tab` - one file each so the two packages never touch the same
+ * component.
  */
 
 import { Routes } from '@angular/router';
 
 import { AboutView } from '../../views/about/about';
-import { SettingsView } from '../../views/settings/settings';
+import { SettingsLiteView } from '../../views/mobile/settings-lite/settings-lite';
 import { StatsView } from '../../views/stats/stats';
 import { AgentsTab } from './tabs/agents-tab';
 import { ChangesTab } from './tabs/changes-tab';
@@ -34,7 +35,13 @@ export const MOBILE_ROUTES: Routes = [
   { path: 'changes', component: ChangesTab, data: { screen: 'start', tab: 'changes' } },
   { path: 'more', component: MoreTab, data: { screen: 'start', tab: 'more' } },
   { path: 'more/stats', component: StatsView, data: { screen: 'stats', tab: 'more' } },
-  { path: 'more/settings', component: SettingsView, data: { screen: 'settings', tab: 'more' } },
+  // WP-M5 (F10-19): Settings-lite (list -> section) instead of the desktop SettingsView.
+  { path: 'more/settings', component: SettingsLiteView, data: { screen: 'settings', tab: 'more' } },
+  {
+    path: 'more/settings/:section',
+    component: SettingsLiteView,
+    data: { screen: 'settings', tab: 'more' },
+  },
   { path: 'more/about', component: AboutView, data: { screen: 'about', tab: 'more' } },
   { path: '**', redirectTo: 'chat' },
 ];
