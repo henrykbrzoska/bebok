@@ -343,7 +343,11 @@ jobs:
               cp "$bundle"/msi/*.msi.sig "$out"/ 2>/dev/null || true
               cp "$bundle"/nsis/*-setup.exe.sig "$out"/ 2>/dev/null || true
               cp "$app" "$bin/bebok-server.exe" LICENSE README.md "$stage"/
-              (cd stage && 7z a -tzip "../$out/bebok-$VERSION-$PLATFORM-portable.zip" "bebok-$VERSION" > /dev/null)
+              if command -v 7z > /dev/null 2>&1; then
+                (cd stage && 7z a -tzip "../$out/bebok-$VERSION-$PLATFORM-portable.zip" "bebok-$VERSION" > /dev/null)
+              else
+                powershell -NoProfile -Command "Compress-Archive -Path 'stage/bebok-$VERSION' -DestinationPath '$out/bebok-$VERSION-$PLATFORM-portable.zip' -CompressionLevel Optimal"
+              fi
               ;;
             macos-*)
               arch=$(basename "$bundle"/dmg/*.dmg .dmg | sed -E "s/^bebok_${VERSION}_//")
