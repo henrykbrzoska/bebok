@@ -27,6 +27,14 @@ export type StatusTone = 'success' | 'warning' | 'danger' | 'muted' | 'accent' |
         min-width: 0;
         /* Callers may recolor the whole chip (e.g. the Start status row). */
         color: var(--text-muted);
+        /* F9-1: the visually-hidden label below is position: absolute.
+         * Without a positioned ancestor its containing block is the *document*,
+         * so every hidden label of a row scrolled out of the sidebar session
+         * list (or any other clipped container) still extends the document's
+         * scrollable overflow - the page grew a second scrollbar and the whole
+         * shell (topbar included) could be scrolled away. Anchoring the label
+         * to the host keeps it inside the row's own clip. */
+        position: relative;
       }
 
       .status {
