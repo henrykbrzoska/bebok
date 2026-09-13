@@ -102,10 +102,16 @@ gh release delete 1.5.0-rc.1 --yes   # remove the test draft
 ```
 
 `preflight` still requires the manifests to agree with the tag / with each
-other. If a release for that tag already exists, the run **updates it in
-place** (assets overwritten, `draft` input applied - `draft=true` turns a
-published release back into a draft), so bump the version on the branch
-before experimenting against a version that is already out.
+other. A manual run **refuses to touch a release that is already published**
+for that tag (the `release` job fails with a clear error, the build artifacts
+stay attached to the workflow run), because `softprops/action-gh-release`
+would otherwise overwrite its assets and re-apply the `draft` flag. So to test
+the whole pipeline end to end, bump the version on the branch first (e.g.
+`npm run version:bump -- 1.5.0-rc.1`, commit) and dispatch from that branch;
+an existing *draft* release for the tag is updated in place.
+
+`gh workflow run release.yml` needs the workflow to exist on the ref you pass
+(`--ref`), i.e. after this file has landed on `main`.
 
 ## Local equivalent of one matrix leg
 

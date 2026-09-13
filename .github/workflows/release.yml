@@ -452,6 +452,25 @@ jobs:
           gpg --batch --verify artifacts/SHA256SUMS.txt.asc artifacts/SHA256SUMS.txt
           gpg --batch --armor --export "$fpr" > artifacts/bebok-release-signing-key.asc
 
+      - name: Refuse to modify a published release from a manual run
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if state=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$state" != "true" ]; then
+              echo "::error::Release '$TAG' is already published. A manual run would overwrite its assets and apply draft=${{ needs.preflight.outputs.draft }}. Bump the version (npm run version:bump) or delete the release first. Build artifacts are attached to this workflow run."
+              exit 1
+            fi
+            echo "Existing draft release '$TAG' will be updated."
+          else
+            echo "No release '$TAG' yet - it will be created."
+          fi
+
       - name: Release notes footer
         shell: bash
         env:
