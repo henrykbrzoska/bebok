@@ -366,7 +366,7 @@ jobs:
         run: |
           set -euo pipefail
           cd release-out
-          for f in *.deb *.AppImage *.tar.gz; do
+          for f in *.deb *.AppImage *.tar.gz bebok-server-*; do
             [ -f "$f" ] || continue
             gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
               --local-user "$GPG_FINGERPRINT" --armor --detach-sign --output "$f.asc" "$f"
