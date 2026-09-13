@@ -22,8 +22,14 @@ impl Tool for Bash {
     fn description(&self) -> &str {
         "Run a shell command in the project root and return its combined stdout and stderr. \
          Set background:true for long-running processes (dev servers, watchers): the command is \
-         started detached and the call returns at once with its id/pid/log path; stop it later \
-         with bash_kill."
+         started detached and the call returns with its id/pid/log path; stop it later with \
+         bash_kill. With background:true you can also wait for readiness in the same call: \
+         ready_port (a TCP port that must start answering) and/or ready_text (a line the log \
+         must print), up to ready_timeout ms (default 120000, max 300000) - the call then returns \
+         'ready' with the log tail, or the failure reason (process exited, timeout) with the log \
+         tail so you can fix it. Prefer this over polling the log yourself. When the command \
+         goes through npm (`npm exec`/`npm run`), put server flags after `--` \
+         (`npm exec nx serve app -- --port 4317`), otherwise npm swallows them."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -42,8 +48,24 @@ impl Tool for Bash {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "true: start a long-running process (dev server, watcher) detached and return immediately with its id/pid/log path; stop it later with bash_kill.",
+                    "description": "true: start a long-running process (dev server, watcher) detached and return with its id/pid/log path; stop it later with bash_kill.",
                     "default": false
+                },
+                "ready_port": {
+                    "type": "integer",
+                    "description": "background only: wait until this local TCP port accepts connections (e.g. the dev server's port) before returning.",
+                    "minimum": 1,
+                    "maximum": 65535
+                },
+                "ready_text": {
+                    "type": "string",
+                    "description": "background only: wait until the process log contains this text (case-insensitive, e.g. 'Application is running' or 'Local:') before returning."
+                },
+                "ready_timeout": {
+                    "type": "integer",
+                    "description": "background only: how long to wait for ready_port/ready_text in milliseconds (default 120000, max 300000). A first nx/webpack/vite build can take 60-120 s.",
+                    "minimum": 1000,
+                    "maximum": 300000
                 }
             },
             "required": ["command"]
@@ -59,7 +81,26 @@ impl Tool for Bash {
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            return spawn_background(&ctx, command).await;
+            let ready = ReadySpec {
+                port: args
+                    .get("ready_port")
+                    .and_then(Value::as_u64)
+                    .filter(|p| (1..=65535).contains(p))
+                    .map(|p| p as u16),
+                text: args
+                    .get("ready_text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string),
+                timeout: Duration::from_millis(
+                    args.get("ready_timeout")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(120_000)
+                        .clamp(1_000, 300_000),
+                ),
+            };
+            return spawn_background(&ctx, command, ready).await;
         }
         let timeout_ms = args
             .get("timeout")
@@ -128,31 +169,178 @@ impl Tool for Bash {
     }
 }
 
-/// `background: true`: hand the command to the [`ProcessRegistry`] and report
-/// how to follow / stop it.
-async fn spawn_background(ctx: &ToolCtx, command: &str) -> ToolOutput {
-    match ProcessRegistry::global()
+/// Readiness conditions for a background command (F9-8): the call blocks
+/// until the port answers and/or the log prints the text, the process
+/// exits, or the timeout elapses.
+#[derive(Debug, Clone, Default)]
+pub struct ReadySpec {
+    pub port: Option<u16>,
+    pub text: Option<String>,
+    pub timeout: Duration,
+}
+
+impl ReadySpec {
+    fn is_set(&self) -> bool {
+        self.port.is_some() || self.text.is_some()
+    }
+}
+
+/// Outcome of waiting for [`ReadySpec`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadyOutcome {
+    /// Every requested condition holds.
+    Ready,
+    /// The process ended before becoming ready (exit code, if known).
+    Exited(Option<i32>),
+    /// The timeout elapsed; says which condition is still unmet.
+    TimedOut(String),
+    /// The turn was aborted while waiting (the process keeps running).
+    Aborted,
+}
+
+/// Poll the registry until `spec` is satisfied (see [`ReadyOutcome`]).
+pub async fn wait_ready(
+    id: &str,
+    spec: &ReadySpec,
+    abort: &tokio_util::sync::CancellationToken,
+) -> ReadyOutcome {
+    let registry = ProcessRegistry::global();
+    let deadline = tokio::time::Instant::now() + spec.timeout;
+    let needle = spec.text.as_ref().map(|t| t.to_ascii_lowercase());
+    loop {
+        let port_ok = match spec.port {
+            Some(port) => tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .is_ok(),
+            None => true,
+        };
+        let text_ok = match &needle {
+            Some(needle) => registry
+                .read_log(id, Some(256 * 1024))
+                .map(|log| log.to_ascii_lowercase().contains(needle.as_str()))
+                .unwrap_or(false),
+            None => true,
+        };
+        if port_ok && text_ok {
+            return ReadyOutcome::Ready;
+        }
+        if let Some(info) = registry.get(id)
+            && !info.is_running()
+        {
+            return ReadyOutcome::Exited(info.exit_code);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let mut unmet = Vec::new();
+            if !port_ok {
+                unmet.push(format!("port {} is not answering", spec.port.unwrap_or(0)));
+            }
+            if !text_ok {
+                unmet.push(format!(
+                    "log does not contain {:?}",
+                    spec.text.clone().unwrap_or_default()
+                ));
+            }
+            return ReadyOutcome::TimedOut(unmet.join("; "));
+        }
+        tokio::select! {
+            _ = abort.cancelled() => return ReadyOutcome::Aborted,
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
+    }
+}
+
+/// Last `max` bytes of a process log, for the tool text.
+fn log_tail(id: &str, max: usize) -> String {
+    ProcessRegistry::global()
+        .read_log(id, Some(max))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// `background: true`: hand the command to the [`ProcessRegistry`], wait for
+/// readiness when asked, and report how to follow / stop it.
+async fn spawn_background(ctx: &ToolCtx, command: &str, ready: ReadySpec) -> ToolOutput {
+    let info = match ProcessRegistry::global()
         .spawn_background(&ctx.session_id, &ctx.root, command)
         .await
     {
-        Ok(info) => {
-            let log = relative_log_path(&info.id);
-            let text = format!(
-                "started in background: id={} pid={} log={log}\nUse `bash_kill` with the id to stop it; read the log with read_file/tail.",
-                info.id, info.pid
+        Ok(info) => info,
+        Err(e) => {
+            return ToolOutput::new(
+                format!("error: failed to start background command: {e}"),
+                "bash",
             );
-            ToolOutput::new(text, format!("bash (background) {command}")).with_structured(json!({
-                "id": info.id,
-                "pid": info.pid,
-                "log": log,
-                "command": command,
-            }))
         }
-        Err(e) => ToolOutput::new(
-            format!("error: failed to start background command: {e}"),
-            "bash",
-        ),
+    };
+    let log = relative_log_path(&info.id);
+    let mut structured = json!({
+        "id": info.id,
+        "pid": info.pid,
+        "log": log,
+        "command": command,
+    });
+    let title = format!("bash (background) {command}");
+    if !ready.is_set() {
+        let text = format!(
+            "started in background: id={} pid={} log={log}\nUse `bash_kill` with the id to stop it; read the log with read_file/tail (or pass ready_port/ready_text to wait for readiness).",
+            info.id, info.pid
+        );
+        return ToolOutput::new(text, title).with_structured(structured);
     }
+    let outcome = wait_ready(&info.id, &ready, &ctx.abort).await;
+    let tail = log_tail(&info.id, 4 * 1024);
+    let (status, headline) = match &outcome {
+        ReadyOutcome::Ready => (
+            "ready",
+            format!(
+                "ready: id={} pid={} log={log}{}{}",
+                info.id,
+                info.pid,
+                ready
+                    .port
+                    .map(|p| format!(" · port {p} answering"))
+                    .unwrap_or_default(),
+                ready
+                    .text
+                    .as_ref()
+                    .map(|t| format!(" · log contains {t:?}"))
+                    .unwrap_or_default(),
+            ),
+        ),
+        ReadyOutcome::Exited(code) => (
+            "exited",
+            format!(
+                "FAILED: the process exited before becoming ready (exit code {}). Read the log below, fix the cause (port in use? missing dependency? build error?) and start it again. id={} log={log}",
+                code.map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".into()),
+                info.id
+            ),
+        ),
+        ReadyOutcome::TimedOut(unmet) => (
+            "timeout",
+            format!(
+                "NOT READY after {} s: {unmet}. The process is still running (id={} pid={} log={log}); read the log, and either wait longer with another bash call (ready_port/ready_text) or fix the cause.",
+                ready.timeout.as_secs(),
+                info.id,
+                info.pid
+            ),
+        ),
+        ReadyOutcome::Aborted => (
+            "aborted",
+            format!(
+                "aborted while waiting; process still running (id={} log={log})",
+                info.id
+            ),
+        ),
+    };
+    structured["ready"] = json!(status);
+    let text = if tail.is_empty() {
+        format!("{headline}\n(log is still empty)")
+    } else {
+        format!("{headline}\n--- log tail ---\n{tail}")
+    };
+    ToolOutput::new(text, title).with_structured(structured)
 }
 
 /// The shell + flag used to run a single command on this platform.
@@ -190,6 +378,63 @@ mod background_tests {
     use crate::processes::ProcessRegistry;
     use crate::tool::{Tool, tool_ctx};
     use tokio_util::sync::CancellationToken;
+
+    /// F9-8: `ready_text` blocks until the log prints the text; a process
+    /// that exits before a `ready_port` answers is reported as FAILED with
+    /// the log tail instead of a bare "started".
+    #[tokio::test]
+    async fn background_ready_text_and_early_exit() {
+        let root = std::env::temp_dir().join(format!("bebok-bash-ready-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = Bash
+            .execute(
+                tool_ctx(
+                    root.clone(),
+                    "ready-session".into(),
+                    CancellationToken::new(),
+                ),
+                serde_json::json!({
+                    "command": "echo server READY on 4317",
+                    "background": true,
+                    "ready_text": "ready on",
+                    "ready_timeout": 20000,
+                }),
+            )
+            .await;
+        assert!(output.text.starts_with("ready: id="), "{}", output.text);
+        assert!(
+            output.text.contains("log contains \"ready on\""),
+            "{}",
+            output.text
+        );
+        assert!(output.text.contains("READY on 4317"), "{}", output.text);
+        assert_eq!(output.structured.as_ref().unwrap()["ready"], "ready");
+
+        // A command that ends without ever opening the port -> FAILED + tail.
+        let output = Bash
+            .execute(
+                tool_ctx(
+                    root.clone(),
+                    "ready-session".into(),
+                    CancellationToken::new(),
+                ),
+                serde_json::json!({
+                    "command": "echo boom-no-server",
+                    "background": true,
+                    "ready_port": 1,
+                    "ready_timeout": 20000,
+                }),
+            )
+            .await;
+        assert!(
+            output.text.starts_with("FAILED: the process exited"),
+            "{}",
+            output.text
+        );
+        assert!(output.text.contains("boom-no-server"), "{}", output.text);
+        assert_eq!(output.structured.as_ref().unwrap()["ready"], "exited");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[tokio::test]
     async fn background_returns_id_pid_log_and_creates_the_log_file() {

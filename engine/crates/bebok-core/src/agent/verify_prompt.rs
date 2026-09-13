@@ -68,10 +68,15 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
         );
     }
     s.push_str(
-        "- Dev servers: start them with `bash` and `background: true` — the call returns at once \
-         with an `id`, the `pid` and a log path under `.bebok/run/`; read the log with `tail` / \
-         `read_file` (or `fetch` the URL) until the server prints its ready line, and stop it \
-         later with `bash_kill` (id). Never run a server in the foreground and never use \
+        "- Dev servers: start them with `bash` and `background: true` plus `ready_port` (the \
+         port the server will listen on) and/or `ready_text` (its ready line) with \
+         `ready_timeout` 120000-180000: the call blocks until the server answers and returns \
+         `ready` with the log tail, or tells you the process exited / timed out (with the \
+         log) so you can fix it — no polling, no guessing. You get an `id`, the `pid` and a \
+         log path under `.bebok/run/` (read it with `tail`); stop the process later with \
+         `bash_kill` (id). With `npm exec` / `npm run`, put server flags after `--` (`npm \
+         exec nx serve app -- --port 4317`) or use `npx` directly; npm swallows a bare \
+         `--port`. Never run a server in the foreground and never use \
          `start /B`, `nohup` or `&` tricks: a foreground `bash` call blocks until its timeout. \
          Before starting one, check whether the project's port already answers (`fetch` \
          http://localhost:<port>/) and that the response really is this project; reuse it only \
@@ -115,10 +120,11 @@ project's default port (4200/5173/3000...) unless the log of a server YOU starte
 says it listens there — a port that already answers belongs to another app (a different \
 `<title>` in the `fetch` response is proof) and testing against it is a FAIL. API/backend: \
 it must run on the port the frontend proxy targets; if that port is held by a foreign process, \
-report that as a FAIL instead of testing a stranger's server. Readiness: read the server's own \
-log (`tail`) every 5-10 s for up to 3 minutes — a first `nx serve`/webpack/vite build can take \
-60-120 s — until it prints its ready line / URL; do not kill and restart a server that is still \
-compiling. If the log shows the port is in use or a crash, fix that (other port, missing \
+report that as a FAIL instead of testing a stranger's server. Readiness: use `ready_port` / \
+`ready_text` with a `ready_timeout` of 120-180 s — a first `nx serve`/webpack/vite build can \
+take 60-120 s; if it reports NOT READY, read the log and wait once more before touching \
+anything; do not kill and restart a server that is still compiling. If the log shows the port \
+is in use or a crash, fix that (other port, missing \
 dependency, build error) and start it again.\n\
 2. Verify the API on its own: `fetch` (or `bash` curl) the endpoint(s) the feature uses and check \
 the JSON (status 200, expected fields, expected number of rows). If the API is wrong, fix it \
@@ -216,6 +222,7 @@ mod tests {
             "`bash_kill`",
             "non-default port",
             "do not kill and restart",
+            "`ready_port`",
             "ANY of the following is `Status: FAIL`",
             "Verify the API on its own",
             "`browser_wait` for the DATA",
