@@ -1,6 +1,7 @@
 import {
   Component,
   ElementRef,
+  Injector,
   OnDestroy,
   computed,
   effect,
@@ -14,6 +15,7 @@ import { EngineClient } from '../../core/engine-client.service';
 import { EngineEvent, PermissionAsked } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { prettyJson } from '../../core/format';
+import { OfflineQueue, isNetworkError } from '../../core/remote/offline-cache';
 import { I18nService } from '../../i18n/i18n.service';
 import { ToastStore } from '../toast/toast.store';
 
@@ -82,15 +84,23 @@ let dialogSeq = 0;
   selector: 'app-permission-popup',
   template: `
     @if (asks().length > 0) {
+      @if (mode() === 'sheet') {
+        <div class="sheet-backdrop" aria-hidden="true" data-testid="perm-sheet-backdrop"></div>
+      }
       <div
         class="perm"
+        [class.perm-sheet]="mode() === 'sheet'"
         role="dialog"
         aria-modal="true"
         [attr.aria-labelledby]="titleId"
         [attr.aria-describedby]="bodyId"
+        [attr.data-mode]="mode()"
         (keydown)="onKeydown($event)"
         #dialog
       >
+        @if (mode() === 'sheet') {
+          <div class="sheet-handle" aria-hidden="true"><span class="grip"></span></div>
+        }
         <div class="perm-head">
           <span class="dot" aria-hidden="true"></span>
           <h3 class="perm-title" [id]="titleId">{{ t('perm.title') }}</h3>
@@ -283,6 +293,84 @@ let dialogSeq = 0;
     .deny:hover:not(:disabled) {
       background: rgba(226, 100, 95, 0.12);
     }
+
+    /* WP-M6 (F10-25): bottom-sheet variant for the phone. Same look as
+       ui/mobile-shell/sheet.ts (backdrop, grip, rounded top) without
+       depending on it - the prompt stays a self-contained dialog. */
+    .sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 60;
+    }
+
+    .perm.perm-sheet {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 61;
+      max-height: min(85dvh, 85vh);
+      overflow-y: auto;
+      border: 0;
+      border-top: 1px solid var(--border-strong);
+      border-radius: 12px 12px 0 0;
+      padding: 0 var(--space-16) calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.45);
+      animation: perm-sheet-in 180ms ease-out;
+    }
+
+    @keyframes perm-sheet-in {
+      from {
+        transform: translateY(100%);
+      }
+      to {
+        transform: translateY(0);
+      }
+    }
+
+    .sheet-handle {
+      display: flex;
+      justify-content: center;
+      padding: 10px 0 6px;
+    }
+
+    .grip {
+      width: 36px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border-strong);
+    }
+
+    .perm-sheet .perm-title {
+      font-size: var(--fs-14);
+    }
+
+    .perm-sheet .perm-body {
+      font-size: var(--fs-13-5);
+    }
+
+    .perm-sheet .perm-actions {
+      flex-wrap: wrap;
+      margin-top: var(--space-4);
+    }
+
+    .perm-sheet .perm-actions button {
+      flex: 1 1 45%;
+      min-height: 44px;
+      font-size: var(--fs-13-5);
+    }
+
+    .perm-sheet .deny {
+      flex-basis: 100%;
+      margin-left: 0;
+    }
+
+    .perm-sheet .queued-note {
+      font-size: var(--fs-12);
+      color: var(--warning);
+      margin: 0;
+    }
   `,
 })
 export class PermissionPopup implements OnDestroy {
@@ -290,10 +378,21 @@ export class PermissionPopup implements OnDestroy {
   private readonly events = inject(EventsStore);
   private readonly i18n = inject(I18nService);
   private readonly toasts = inject(ToastStore);
+  /**
+   * WP-M6: the offline queue is resolved lazily (sheet mode, on a network
+   * failure only) so the desktop path never instantiates it.
+   */
+  private readonly injector = inject(Injector);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly activeSessionID = input<string>();
+  /**
+   * WP-M6 (F10-25): `inline` (default, in the transcript) or `sheet` - a
+   * fixed bottom sheet over the page for the phone. Same data, same
+   * decisions, same events; only the chrome differs.
+   */
+  readonly mode = input<'inline' | 'sheet'>('inline');
   /**
    * Working directory of the open chat. Asks raised by a delegated sub-agent
    * carry the *child* session id, so the prompt also matches by directory -
@@ -473,7 +572,18 @@ export class PermissionPopup implements OnDestroy {
         this.toasts.show(this.t('perm.allowedToast', { tool: item.toolName }), { kind: 'success' });
       }
     } catch (err) {
-      console.error('permission decision failed', err);
+      if (this.mode() === 'sheet' && isNetworkError(err)) {
+        // WP-M6 (F10-27): the desktop is unreachable right now - queue the
+        // decision (10 min TTL) instead of losing it.
+        this.injector.get(OfflineQueue).enqueue('permission', sessionID, {
+          requestID: item.requestID,
+          decision,
+          always,
+        });
+        this.toasts.show(this.t('mobile.remote.queuedDecision'), { kind: 'info' });
+      } else {
+        console.error('permission decision failed', err);
+      }
     } finally {
       this.resolvedIds.add(item.requestID);
       this.asks.update((list) => list.filter((a) => a.requestID !== item.requestID));
