@@ -41,7 +41,13 @@ pub struct FleetMemberInfo {
     pub model: String,
 }
 
-/// The fleet as it exists *right now* for the agent the prompt is built for.
+/// The fleet as it exists *right now* for the agent the prompt is built for,
+/// plus whether THIS prompt asked for it.
+///
+/// Fleet-first: the orchestrator prefers `fleet` over solo whenever the fleet
+/// is usable (tool + config + members). [`requested`] keeps the legacy
+/// per-prompt flag for message wording/back-compat only — it never gates
+/// fan-out. [`is_active`] == [`is_usable`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FleetContext {
     /// This agent actually has the `fleet` tool ([`FLEET_AGENT`] only).
@@ -50,11 +56,15 @@ pub struct FleetContext {
     pub enabled: bool,
     /// Configured members, in config order.
     pub members: Vec<FleetMemberInfo>,
+    /// Per-prompt "Run as fleet" flag (`fleet: true` on the prompt body).
+    /// Back-compat only: usable fleets are preferred regardless of this flag.
+    pub requested: bool,
 }
 
 impl FleetContext {
-    /// Snapshot of the resolved config, seen from `agent_name`.
-    pub fn from_config(cfg: &ResolvedConfig, agent_name: &str) -> Self {
+    /// Snapshot of the resolved config, seen from `agent_name`, for a prompt
+    /// whose "Run as fleet" switch is `fleet_requested`.
+    pub fn from_config(cfg: &ResolvedConfig, agent_name: &str, fleet_requested: bool) -> Self {
         Self {
             tool_available: agent_name == FLEET_AGENT,
             enabled: cfg.is_fleet_enabled(),
@@ -67,6 +77,7 @@ impl FleetContext {
                     model: m.model.clone(),
                 })
                 .collect(),
+            requested: fleet_requested,
         }
     }
 
@@ -75,24 +86,36 @@ impl FleetContext {
         self.tool_available && self.enabled && !self.members.is_empty()
     }
 
+    /// Fan-out is wanted for this prompt: the fleet is usable (tool +
+    /// config + members). Fleet-first: the legacy per-prompt flag is not
+    /// required.
+    pub fn is_active(&self) -> bool {
+        self.is_usable()
+    }
+
     /// The `Fleet:` paragraph, or an empty string when this agent has no
     /// `fleet` tool at all (naming a tool that is not in its list only invites
     /// a hallucinated call).
+    ///
+    /// Fleet-first: when usable the paragraph advertises the roster and
+    /// prefers `fleet`, regardless of the legacy per-prompt flag. When
+    /// unusable it names the reason and falls back to `task`.
     fn note(&self) -> String {
         if !self.tool_available {
             return String::new();
         }
         if !self.is_usable() {
-            let why = if !self.enabled {
+            let why = if !self.tool_available {
+                "this agent does not carry the `fleet` tool"
+            } else if !self.enabled {
                 "`fleet.enabled` is false"
             } else {
                 "`fleet.members` is empty"
             };
             return format!(
-                "Fleet: NOT available in this project ({why}), so a `fleet` call would only \
-                 return an error (`fleet: fleet is not enabled ...` / `no members are \
-                 configured`). Delegate with parallel `task` calls instead - never skip the \
-                 work because the fleet is missing.\n"
+                "Fleet: NOT available in this project ({why}), so a `fleet` call \
+                 would only return an error. Fall back to sequential or parallel `task` calls \
+                 with `background: true` - never skip the work because the fleet is missing.\n"
             );
         }
         let mut note = format!(
@@ -125,6 +148,13 @@ impl FleetContext {
              heterogeneous `tasks` runs different prompts concurrently - each in its own \
              isolated session. With both filters omitted EVERY one of the members above runs.\n",
         );
+        note.push_str(
+            "The fleet is available for this project, so prefer `fleet` for independent \
+             parallel subtasks and use heterogeneous `tasks` when the \
+             subtasks differ. Only fall back to `task` calls when the subtasks are sequential \
+             (B needs A's output), when the selection would exceed the requested count, or when \
+             no configured member fits the work.\n",
+        );
         note
     }
 }
@@ -148,9 +178,10 @@ pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> O
         ),
         None => String::new(),
     };
-    // Only offer the fleet as a spawn route when it can actually run.
-    let fleet_alt = if fleet.is_usable() {
-        " (or one `fleet` call with `tasks` - see the `Fleet:` line below)"
+    // Offer the fleet as a spawn route whenever it can actually run.
+    // Fleet-first: usable fleets are preferred, no per-prompt opt-in needed.
+    let fleet_alt = if fleet.is_active() {
+        " (prefer one `fleet` call with `tasks` - see the `Fleet:` line below)"
     } else {
         ""
     };
@@ -259,7 +290,15 @@ mod tests {
     }
 
     /// Fleet as this project actually configures it: orchestrator + members.
+    /// Fleet-first: tests pass the per-prompt flag explicitly, but the flag
+    /// no longer gates anything.
     fn fleet(members: &[(&str, &str, &str)]) -> FleetContext {
+        fleet_requested(members, true)
+    }
+
+    /// Same as [`fleet`] but with an explicit legacy per-prompt "Run as fleet"
+    /// flag (back-compat only; it no longer gates fan-out).
+    fn fleet_requested(members: &[(&str, &str, &str)], requested: bool) -> FleetContext {
         FleetContext {
             tool_available: true,
             enabled: true,
@@ -271,6 +310,7 @@ mod tests {
                     model: (*model).to_string(),
                 })
                 .collect(),
+            requested,
         }
     }
 
@@ -335,8 +375,9 @@ mod tests {
         assert!(note.contains("- `code-deepseek-v4-flash`"), "{note}");
         assert!(note.contains("unknown member(s)"), "{note}");
         assert!(note.contains("EVERY one of the members above runs"), "{note}");
-        // The spawn bullet only offers `fleet` when it can actually run.
-        assert!(note.contains("see the `Fleet:` line below"), "{note}");
+        // Requested + usable: the roster prefers `fleet` for this prompt.
+        assert!(note.contains("prefer one `fleet` call"), "{note}");
+        assert!(note.contains("heterogeneous `tasks`"), "{note}");
     }
 
     #[test]
@@ -355,6 +396,7 @@ mod tests {
                     model: model.clone(),
                 })
                 .collect(),
+            requested: true,
         };
         let note = note_with(&cfg(DelegationMode::Auto), &ctx);
         assert!(note.contains("member(s)"), "{note}");
@@ -363,25 +405,67 @@ mod tests {
     }
 
     #[test]
-    fn disabled_or_empty_fleet_is_announced_instead_of_advertised() {
+    fn usable_fleet_prefers_fleet_even_when_not_requested() {
+        // Fleet-first: usability alone decides. Usable + requested still
+        // prefers `fleet` ...
+        let active = note_with(
+            &cfg(DelegationMode::Auto),
+            &fleet(&[("ask-a", "ask", "p/m")]),
+        );
+        assert!(active.contains("prefer one `fleet` call"), "{active}");
+        assert!(active.contains("enabled here with 1 configured member(s)"), "{active}");
+        // ... and usable + NOT requested prefers `fleet` too.
+        let unrequested = note_with(
+            &cfg(DelegationMode::Auto),
+            &fleet_requested(&[("ask-a", "ask", "p/m")], false),
+        );
+        assert!(unrequested.contains("enabled here with 1 configured member(s)"), "{unrequested}");
+        assert!(unrequested.contains("prefer one `fleet` call"), "{unrequested}");
+        assert!(unrequested.contains("prefer `fleet` for independent"), "{unrequested}");
+        assert!(!unrequested.contains("do NOT call `fleet`"), "{unrequested}");
+    }
+
+    #[test]
+    fn requested_but_unusable_fleet_falls_back_to_task() {
         let disabled = FleetContext {
             tool_available: true,
             enabled: false,
             members: vec![],
+            requested: true,
         };
         let note = note_with(&cfg(DelegationMode::Auto), &disabled);
         assert!(note.contains("Fleet: NOT available"), "{note}");
         assert!(note.contains("`fleet.enabled` is false"), "{note}");
-        assert!(note.contains("Use parallel `task` calls instead") || note.contains("Delegate with parallel `task` calls instead"), "{note}");
+        assert!(note.contains("Fall back to sequential or parallel `task` calls"), "{note}");
+        assert!(!note.contains("see the `Fleet:` line below"), "{note}");
+        assert!(!note.contains("prefer one `fleet` call"), "{note}");
+    }
+
+    #[test]
+    fn disabled_or_empty_fleet_is_announced_instead_of_advertised() {
+        // Unusable regardless of the legacy request flag: announced with a
+        // reason, never advertised, and never offered as a spawn route.
+        let disabled = FleetContext {
+            tool_available: true,
+            enabled: false,
+            members: vec![],
+            requested: false,
+        };
+        let note = note_with(&cfg(DelegationMode::Auto), &disabled);
+        assert!(note.contains("Fleet: NOT available"), "{note}");
+        assert!(note.contains("`fleet.enabled` is false"), "{note}");
         assert!(!note.contains("see the `Fleet:` line below"), "{note}");
 
         let empty = FleetContext {
             tool_available: true,
             enabled: true,
             members: vec![],
+            requested: false,
         };
         let note = note_with(&cfg(DelegationMode::Auto), &empty);
+        assert!(note.contains("Fleet: NOT available"), "{note}");
         assert!(note.contains("`fleet.members` is empty"), "{note}");
+        assert!(!note.contains("see the `Fleet:` line below"), "{note}");
     }
 
     /// `fleet` is orchestrator-only (`request.rs` filters the tool out
@@ -396,6 +480,7 @@ mod tests {
                 agent: "ask".into(),
                 model: "p/m".into(),
             }],
+            requested: true,
         };
         let note = note_with(&cfg(DelegationMode::Auto), &ctx);
         assert!(!note.contains("fleet"), "no fleet mention expected:\n{note}");
@@ -413,23 +498,36 @@ mod tests {
             model: "openai/gpt-4.1-nano".into(),
         });
 
-        let orchestrator = FleetContext::from_config(&conf, "orchestrator");
+        // Fleet-first: usability alone decides. The legacy flag changes
+        // nothing: usable means active, with or without it.
+        let solo = FleetContext::from_config(&conf, "orchestrator", false);
+        assert!(solo.tool_available);
+        assert!(solo.is_usable());
+        assert!(solo.is_active());
+        assert!(
+            note_with(&cfg(DelegationMode::Auto), &solo).contains("prefer one `fleet` call")
+        );
+
+        let orchestrator = FleetContext::from_config(&conf, "orchestrator", true);
         assert!(orchestrator.tool_available);
         assert!(orchestrator.is_usable());
+        assert!(orchestrator.is_active());
         assert_eq!(orchestrator.members.len(), 1);
         assert_eq!(orchestrator.members[0].name, "ask-openai-gpt-4.1-nano");
 
         // Same project, another main-thread agent: no `fleet` tool, no mention.
-        let code = FleetContext::from_config(&conf, "code");
+        let code = FleetContext::from_config(&conf, "code", true);
         assert!(!code.tool_available);
         assert!(!code.is_usable());
+        assert!(!code.is_active());
         assert!(!note_with(&cfg(DelegationMode::Auto), &code).contains("fleet"));
 
-        // Enabled but empty -> announced as unavailable.
+        // Empty -> announced as unavailable, with fallback.
         let mut empty = ResolvedConfig::default();
         empty.fleet.enabled = true;
-        let ctx = FleetContext::from_config(&empty, "orchestrator");
+        let ctx = FleetContext::from_config(&empty, "orchestrator", true);
         assert!(!ctx.is_usable());
+        assert!(!ctx.is_active());
         assert!(note_with(&cfg(DelegationMode::Auto), &ctx).contains("NOT available"));
     }
 

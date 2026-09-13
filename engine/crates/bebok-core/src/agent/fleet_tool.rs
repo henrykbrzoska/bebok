@@ -318,7 +318,10 @@ impl Tool for FleetTool {
     fn description(&self) -> &str {
         "Run one prompt across the configured parallel-fleet members concurrently; each member \
          works in an isolated context and returns only its final answer, combined into per-member \
-         sections. Members are fixed and user-named — this tool cannot create members or target \
+         sections. Prefer `fleet` over solo `task` calls when the fleet is available (enabled \
+         with configured members, as shown in the delegation policy's `Fleet:` line); when the \
+         policy says the fleet is NOT available, delegate with `task` calls instead. Members are fixed and \
+         user-named — this tool cannot create members or target \
          arbitrary presets or counts. The members configured in this project are listed in the \
          `Fleet:` line of your delegation policy: copy labels from there for `names`, or filter \
          by `agents`. Optional `names` selects by exact member name; optional `agents` selects by \
@@ -332,10 +335,9 @@ impl Tool for FleetTool {
          prompts for independent tasks, e.g. {\"tasks\": [{\"prompt\": \"research auth\", \
          \"agent\": \"ask\"}, {\"prompt\": \"research db\", \"agent\": \"ask\"}]} — each entry \
          is {prompt (required), agent?, name?, member?, images?} and runs concurrently in its own \
-         isolated session; `task.member` must match a configured member name. Use fleet when \
-         the user explicitly requests parallel execution or when running many independent tasks \
-         concurrently is clearly beneficial and the fleet is configured as described above. For \
-         most delegation, prefer `task` calls. Returns member names; report which ran."
+         isolated session; `task.member` must match a configured member name. Use fleet whenever \
+         the fleet is configured as \
+         described above; otherwise prefer `task` calls. Returns member names; report which ran."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -524,6 +526,11 @@ impl Tool for FleetTool {
                 return ToolOutput::new("fleet: parent session not found", "fleet");
             }
         };
+
+        // Fleet-first: fan-out needs only a usable fleet (enabled + members,
+        // checked above). The legacy per-prompt `fleet: true` flag
+        // (`SessionState::fleet_requested`) is recorded for back-compat but no
+        // longer gates execution.
 
         let bus = store.bus();
         bus.publish(
@@ -863,6 +870,18 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(args.agents.unwrap(), vec!["ask"]);
+    }
+
+    #[test]
+    fn description_prefers_fleet_when_available_without_a_request_gate() {
+        let tool = FleetTool {
+            store: Weak::new(),
+            max_depth: 3,
+        };
+        let desc = Tool::description(&tool);
+        assert!(desc.contains("Prefer `fleet`"), "{desc}");
+        assert!(!desc.contains("Requires Run as fleet"), "{desc}");
+        assert!(!desc.contains("NOT requested"), "{desc}");
     }
 
     #[test]

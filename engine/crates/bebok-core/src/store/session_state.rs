@@ -92,6 +92,10 @@ pub struct SessionState {
     pub turn: Mutex<()>,
     running: AtomicBool,
     abort: Mutex<Option<CancellationToken>>,
+    /// Per-prompt "Run as fleet" flag (`PromptBody::fleet`, default false),
+    /// set by `prompt_turn` before the turn starts. Kept for back-compat;
+    /// the `fleet` tool no longer refuses a fan-out when it is false.
+    fleet_requested: AtomicBool,
     /// Pending `ask` permission requests awaiting a client decision (M2).
     pending_asks: Mutex<HashMap<String, PendingPermissionRequest>>,
     /// Session-scoped decision cache: identical `(tool, pattern)` is not asked
@@ -132,6 +136,7 @@ impl SessionState {
             turn: Mutex::new(()),
             running: AtomicBool::new(false),
             abort: Mutex::new(None),
+            fleet_requested: AtomicBool::new(false),
             pending_asks: Mutex::new(HashMap::new()),
             decision_cache: Mutex::new(HashMap::new()),
             child_tasks: Mutex::new(HashMap::new()),
@@ -430,6 +435,20 @@ impl SessionState {
     /// True while a turn is running on this session.
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
+    }
+
+    /// Record the per-prompt "Run as fleet" flag for the turn being started.
+    /// Called by `prompt_turn` after claiming the slot, before spawning the
+    /// turn; the `fleet` tool reads it back via [`fleet_requested`].
+    pub fn set_fleet_requested(&self, requested: bool) {
+        self.fleet_requested.store(requested, Ordering::Release);
+    }
+
+    /// Whether the running turn asked for the fleet (`fleet: true` on the
+    /// prompt body). Back-compat only: a usable fleet is preferred even when
+    /// this is false.
+    pub fn fleet_requested(&self) -> bool {
+        self.fleet_requested.load(Ordering::Acquire)
     }
 
     // -- child task tracking --------------------------------------------------

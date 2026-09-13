@@ -165,7 +165,12 @@ pub async fn prompt_turn(
     // Extension point (Tasks 2/5/6): prompt assembly is isolated here so
     // config/plugin editable prompts (and future sidebar/topbar or custom-CSS
     // context) can override the system text without touching the handler.
-    assemble_prompt(&instance, &mut agent, &cfg);
+    // `fleet` is the legacy per-prompt "Run as fleet" switch, kept for
+    // back-compat: the flag is recorded on the session but no longer gates
+    // fan-out — fleet-first usability (tool + config + members) decides.
+    let fleet_requested = body.fleet;
+    session.set_fleet_requested(fleet_requested);
+    assemble_prompt(&instance, &mut agent, &cfg, fleet_requested);
 
     // Pre-flight vision capability check: a model known to reject image input
     // fails fast with a 400 *before* the user message is appended, so the
@@ -277,10 +282,16 @@ pub async fn prompt_turn(
 
 /// Assemble AGENTS.md + enabled skills + mid-chat environment notes into the
 /// agent's system prompt (verbatim move of the previous inline block).
+///
+/// `fleet_requested` is the legacy per-prompt "Run as fleet" switch
+/// (`PromptBody::fleet`, default false), kept for back-compat. It is recorded
+/// on the session but no longer gates anything: the orchestrator prefers the
+/// fleet whenever it is usable (tool + `fleet.enabled` + members).
 fn assemble_prompt(
     instance: &bebok_core::Instance,
     agent: &mut bebok_core::agent::Agent,
     cfg: &bebok_core::config::ResolvedConfig,
+    fleet_requested: bool,
 ) {
     // Assemble AGENTS.md + enabled skills into the system prompt.
     let mut discovered = bebok_core::skills::discover(&instance.root);
@@ -321,7 +332,8 @@ fn assemble_prompt(
     // rendered from the *resolved config* so the model sees the members this
     // project actually has (or that the fleet is off) rather than a generic
     // description it would have to guess names from.
-    let fleet = bebok_core::agent::FleetContext::from_config(cfg, &agent.name);
+    let fleet =
+        bebok_core::agent::FleetContext::from_config(cfg, &agent.name, fleet_requested);
     if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation, &fleet) {
         agent.prompt = format!("{}\n\n{policy}", agent.prompt);
     }
@@ -428,6 +440,8 @@ mod tests {
     /// config*, not from the static preset text (which cannot know the member
     /// labels), and an agent that does not carry the `fleet` tool never sees
     /// the section at all. This is the `assemble_prompt` wiring guard.
+    /// Fleet-first: the same config yields the roster + prefer-fleet spawn
+    /// route whether or not the prompt carried the legacy `fleet: true` flag.
     #[tokio::test]
     async fn assembled_prompt_carries_the_configured_fleet_roster() {
         let base = std::env::temp_dir().join(format!("bebok-fleet-{}", uuid::Uuid::new_v4()));
@@ -449,8 +463,9 @@ mod tests {
         let instance = store.get_or_create_instance(&dir).await.unwrap();
         let cfg = instance.config_snapshot();
 
+        // Run as fleet: roster + prefer-fleet spawn route.
         let mut orchestrator = bebok_core::agent::Agent::orchestrator();
-        assemble_prompt(&instance, &mut orchestrator, &cfg);
+        assemble_prompt(&instance, &mut orchestrator, &cfg, true);
         let prompt = orchestrator.prompt.clone();
         assert!(prompt.contains("## Delegation policy (mode: auto)"), "{prompt}");
         assert!(prompt.contains("Fleet: enabled here with"), "{prompt}");
@@ -459,14 +474,33 @@ mod tests {
             "{prompt}"
         );
         assert!(prompt.contains("- `code-zai-glm-5.3-flash`"), "{prompt}");
-        // The spawn bullet only offers the fleet route when it can run.
-        assert!(prompt.contains("see the `Fleet:` line below"), "{prompt}");
+        // The spawn bullet only offers the fleet route when it was requested
+        // for this prompt and can run.
+        assert!(prompt.contains("prefer one `fleet` call"), "{prompt}");
+
+        // Same project, legacy flag off: the roster + prefer-fleet route are
+        // still shown (fleet-first: usability alone decides).
+        let mut solo = bebok_core::agent::Agent::orchestrator();
+        assemble_prompt(&instance, &mut solo, &cfg, false);
+        assert!(solo.prompt.contains("Fleet: enabled here with"), "{}", solo.prompt);
+        assert!(solo.prompt.contains("prefer one `fleet` call"), "{}", solo.prompt);
 
         // `code` is a main-thread agent as well, but it has no `fleet` tool.
         let mut code = bebok_core::agent::Agent::code();
-        assemble_prompt(&instance, &mut code, &cfg);
+        assemble_prompt(&instance, &mut code, &cfg, true);
         assert!(!code.prompt.contains("fleet"), "{}", code.prompt);
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `PromptBody::fleet` is optional and defaults to solo (`false`).
+    #[test]
+    fn prompt_body_fleet_flag_defaults_to_false() {
+        let plain: crate::routes::session::PromptBody =
+            serde_json::from_str(r#"{"message":"hi"}"#).unwrap();
+        assert!(!plain.fleet);
+        let on: crate::routes::session::PromptBody =
+            serde_json::from_str(r#"{"message":"hi","fleet":true}"#).unwrap();
+        assert!(on.fleet);
     }
 }

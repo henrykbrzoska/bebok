@@ -56,43 +56,36 @@ import { safetyLegend } from './safety-legend';
         [class.collapsed]="!detailsOpen()"
         (click)="detailsOpen.set(!detailsOpen())"
       >
-        @if (childLink()) {
+        @if (isTask()) {
           <a
             class="dot safety-{{ safety() }} label-link"
             [class.pulse]="kind() === 'running'"
             [class.ring-failed]="kind() === 'error'"
             [title]="safetyTitle()"
             [attr.data-safety]="safety()"
-            [routerLink]="['/chat', childLink()!]"
+            [routerLink]="childLink() ? ['/chat', childLink()] : null"
+            [class.muted]="!childLink()"
             (click)="$event.stopPropagation()"
             tabindex="-1"
             aria-hidden="true"
           ></a>
           <a
             class="tool-name label-link text-link"
-            [routerLink]="['/chat', childLink()!]"
-            [title]="t('tool.openSubagent')"
+            [routerLink]="childLink() ? ['/chat', childLink()] : null"
+            [class.muted]="!childLink()"
+            [title]="childLink() ? t('tool.openSubagent') : null"
             (click)="$event.stopPropagation()"
           >{{ name() }}</a>
-          @if (isTask()) {
-            <a
-              class="badge delegation label-link"
-              [routerLink]="['/chat', childLink()!]"
-              [title]="t('tool.openSubagent')"
-              (click)="$event.stopPropagation()"
-            >{{ t('tool.delegation') }}</a>
-          }
+          <span class="badge delegation label-link">{{ t('tool.delegation') }}</span>
           <a
             class="target-name label-link text-link"
-            [routerLink]="['/chat', childLink()!]"
-            [title]="t('tool.openSubagent')"
+            [routerLink]="childLink() ? ['/chat', childLink()] : null"
+            [class.muted]="!childLink()"
+            [title]="childLink() ? t('tool.openSubagent') : null"
             (click)="$event.stopPropagation()"
           >{{ taskName() }}</a>
         } @else {
           <ng-container *ngTemplateOutlet="labelCluster"></ng-container>
-          @if (isTask()) {
-            <span class="target-name muted">{{ taskName() }}</span>
-          }
         }
         <button
           type="button"
@@ -223,7 +216,8 @@ import { safetyLegend } from './safety-legend';
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .target-name.muted {
+    .target-name.muted,
+    .tool-name.muted {
       color: var(--text-muted);
       font-weight: 400;
     }

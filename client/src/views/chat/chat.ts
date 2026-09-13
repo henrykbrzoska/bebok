@@ -111,6 +111,8 @@ export interface QueuedPrompt {
   agent: string;
   /** Explicit model selected when this message was queued, if any. */
   model?: string;
+  /** Per-prompt fleet fan-out requested when this message was queued. */
+  fleet?: boolean;
 }
 
 /** Freeze the composer settings together with the message that will use them. */
@@ -119,6 +121,7 @@ export function queuePrompt(
   images: PromptImage[],
   agent: string,
   selectedModel: string,
+  fleet = false,
 ): QueuedPrompt {
   const model = selectedModel.trim();
   return {
@@ -126,6 +129,7 @@ export function queuePrompt(
     images,
     agent,
     ...(model ? { model } : {}),
+    ...(fleet ? { fleet: true } : {}),
   };
 }
 
@@ -136,6 +140,7 @@ export function queuedPromptBody(prompt: QueuedPrompt): PromptBody {
     agent: prompt.agent,
     ...(prompt.model ? { model: prompt.model } : {}),
     ...(prompt.images.length ? { images: prompt.images } : {}),
+    ...(prompt.fleet ? { fleet: true } : {}),
   };
 }
 
@@ -239,6 +244,11 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
+
+  /** "Run as fleet" per-prompt toggle (fleet-first when available; sticky). */
+  readonly runAsFleet = signal(false);
+  /** True when the directory config enables the fleet with at least one member. */
+  readonly fleetAvailable = signal(false);
 
   /** M6: filter the transcript by model (driven from the drawer's Session panel). */
   readonly filterModel = this.sessionStore.filterModel;
@@ -577,6 +587,16 @@ export class ChatView implements OnInit, OnDestroy {
         }
         this.agents.set(agents);
         this.thinking.set(cfg.config.thinking ?? 'off');
+        const fleet = cfg.config.fleet;
+        const available = !!fleet?.enabled && (fleet?.members?.length ?? 0) > 0;
+        const wasAvailable = this.fleetAvailable();
+        this.fleetAvailable.set(available);
+        if (!available) {
+          this.runAsFleet.set(false);
+        } else if (!wasAvailable) {
+          // Fleet just became available: prefer fleet over solo.
+          this.runAsFleet.set(true);
+        }
         const defaultModel = (cfg.config.model ?? '').trim();
         this.configDefaultModel.set(
           !defaultModel
@@ -879,6 +899,9 @@ export class ChatView implements OnInit, OnDestroy {
     }));
     this.attachments.set([]);
     this.attachError.set(null);
+    // Per-prompt fleet fan-out: frozen with the message. The toggle stays
+    // sticky (fleet-first when available); only force solo when unavailable.
+    const fleet = this.fleetAvailable() && this.runAsFleet();
     // Always enqueue; sends immediately when idle, otherwise waits for the turn.
     // Preserve the dispatch settings with the message. A queued prompt may
     // wait for a running turn, and reading these controls in `drainQueue()`
@@ -886,7 +909,7 @@ export class ChatView implements OnInit, OnDestroy {
     // later rather than the model the user chose before pressing Send.
     this.queue.update((q) => [
       ...q,
-      queuePrompt(text, images, this.selectedAgent(), this.selectedModel()),
+      queuePrompt(text, images, this.selectedAgent(), this.selectedModel(), fleet),
     ]);
     this.pending.update((p) => [
       ...p,

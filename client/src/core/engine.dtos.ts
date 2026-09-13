@@ -252,6 +252,8 @@ export interface PromptBody {
   agent?: string;
   model?: string;
   images?: PromptImage[];
+  /** Per-prompt fan-out to the parallel fleet (solo turn when absent/false). */
+  fleet?: boolean;
 }
 
 export interface AbortResponse {

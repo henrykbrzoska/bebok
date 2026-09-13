@@ -351,8 +351,11 @@ impl ResolvedConfig {
             .unwrap_or_else(|| self.model.clone())
     }
 
-    /// Whether the parallel-agents fleet is enabled. Capability gate only:
-    /// fan-out still requires explicit `fleet: true` on the prompt.
+    /// Whether the parallel-agents fleet is enabled. Capability gate: the
+    /// orchestrator prefers fan-out whenever this is on and members are
+    /// configured (`FleetContext::is_usable`). The legacy per-prompt
+    /// `fleet: true` flag (`FleetContext::requested`) is recorded for
+    /// back-compat but no longer gates anything.
     pub fn is_fleet_enabled(&self) -> bool {
         self.fleet.enabled
     }

@@ -328,19 +328,21 @@ export class EngineClient {
     );
   }
 
-  prompt(id: string, body: PromptBody | string, agent?: string, model?: string): Promise<unknown> {
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string, fleet?: boolean): Promise<unknown> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
             message: body,
             ...(agent ? { agent } : {}),
             ...(model ? { model } : {}),
+            ...(fleet ? { fleet: true } : {}),
           }
         : {
             message: body.message,
             ...((body.agent ?? agent) ? { agent: (body.agent ?? agent) as string } : {}),
             ...((body.model ?? model) ? { model: (body.model ?? model) as string } : {}),
             ...(body.images?.length ? { images: body.images } : {}),
+            ...((body.fleet ?? fleet) ? { fleet: true } : {}),
           };
     return this.request('POST', `/session/${id}/prompt`, payload);
   }
