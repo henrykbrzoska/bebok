@@ -172,6 +172,23 @@ export interface SessionMeta {
   worktree_branch?: string | null;
 }
 
+/**
+ * F9-12: is this session a sub-agent child (spawned by the `task` / `fleet`
+ * tools)? The engine sets `parent` for three kinds of derived session - a
+ * fork, a compaction and a delegated child - but only the child gets an
+ * `alias` (the orchestrator-assigned name, allocated at spawn time). A fork
+ * or compaction copies neither, so "has a parent AND an alias" is the
+ * client-side definition; no extra engine field is needed.
+ */
+export function isSubAgentSession(session: Pick<SessionMeta, 'parent' | 'alias'>): boolean {
+  return !!session.parent && !!session.alias?.trim();
+}
+
+/** Parent session id of a derived session, or null. */
+export function parentSessionId(session: Pick<SessionMeta, 'parent'>): string | null {
+  return session.parent?.[0] ?? null;
+}
+
 export interface PendingPermissionSnapshot extends PermissionAsked {
   sessionID: string;
   directory: string;

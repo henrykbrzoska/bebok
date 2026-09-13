@@ -80,27 +80,34 @@
     <div class="session-list" role="list">
       @for (group of groups(); track group.key) {
         <div class="group-label">{{ t(group.labelKey) }}</div>
-        @for (session of group.sessions; track session.id) {
+        @for (row of group.rows; track row.session.id) {
           <button
             type="button"
             role="listitem"
             class="session-row"
-            [class.active]="isCurrentSession(session)"
-            (click)="openSession(session)"
-            [title]="sessionTitle(session)"
+            [class.active]="isCurrentSession(row.session)"
+            [class.subagent]="row.subAgent"
+            [style.padding-left.px]="rowIndent(row)"
+            [attr.data-depth]="row.depth"
+            [attr.data-subagent]="row.subAgent ? 'true' : null"
+            (click)="openSession(row.session)"
+            [title]="rowTooltip(row)"
           >
             <span class="session-head">
+              @if (row.subAgent) {
+                <app-nav-icon class="subagent-glyph" name="subagent" [size]="12" />
+              }
               <app-status-dot
                 class="session-dot"
-                [label]="sessionStatusLabel(session)"
-                [tone]="sessionTone(session)"
+                [label]="sessionStatusLabel(row.session)"
+                [tone]="sessionTone(row.session)"
                 [labelHidden]="true"
               />
-              <span class="session-title">{{ sessionTitle(session) }}</span>
+              <span class="session-title">{{ sessionTitle(row.session) }}</span>
             </span>
             <span class="session-meta">
-              {{ sessionMeta(session) }}
-              @if (worktreeBranch(session); as branch) {
+              {{ sessionMeta(row.session) }}
+              @if (worktreeBranch(row.session); as branch) {
                 <app-branch-badge [branch]="branch" />
               }
             </span>
@@ -114,17 +121,28 @@
       }
     </div>
 
-    <nav class="nav-rail">
+    <!-- F9-13: icon rail (horizontal in the expanded sidebar). Tooltip: a
+         small CSS tooltip after ~300ms (`data-tip`) + aria-label. -->
+    <nav class="nav-rail" [attr.aria-label]="t('sidebar.navLabel')">
       @for (item of navItems; track item.screen) {
         <button
           type="button"
-          class="nav-row"
+          class="nav-btn"
           [class.active]="isActive(item.screen)"
           (click)="go(item.path)"
+          [attr.data-tip]="t(item.labelKey)"
+          [attr.aria-label]="t(item.labelKey)"
           [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+          [attr.data-testid]="'nav-' + item.screen"
         >
-          <span class="nav-dot" aria-hidden="true"></span>
-          <span class="nav-label">{{ t(item.labelKey) }}</span>
+          <app-nav-icon [name]="item.icon" />
+          @if (item.screen === 'settings' && uncategorizedCount() > 0) {
+            <span
+              class="nav-badge"
+              [attr.aria-label]="t('sidebar.uncategorizedBadge', { n: uncategorizedCount() })"
+              [title]="t('sidebar.uncategorizedBadge', { n: uncategorizedCount() })"
+            ></span>
+          }
         </button>
       }
     </nav>
@@ -145,7 +163,7 @@
   }
 
   @if (!expanded()) {
-    <nav class="rail">
+    <nav class="rail" [attr.aria-label]="t('sidebar.navLabel')">
       @for (item of navItems; track item.screen) {
         <button
           type="button"
@@ -155,8 +173,12 @@
           [title]="t(item.labelKey)"
           [attr.aria-label]="t(item.labelKey)"
           [attr.aria-current]="isActive(item.screen) ? 'page' : null"
+          [attr.data-testid]="'rail-' + item.screen"
         >
-          {{ t(item.railKey) }}
+          <app-nav-icon [name]="item.icon" />
+          @if (item.screen === 'settings' && uncategorizedCount() > 0) {
+            <span class="nav-badge" aria-hidden="true"></span>
+          }
         </button>
       }
       <div class="rail-status">

@@ -113,6 +113,7 @@
   justify-content: center;
   background: transparent;
   border: none;
+  position: relative;
   color: var(--text-muted);
   font-size: var(--fs-11);
   font-weight: 600;
@@ -128,7 +129,12 @@
 
 .rail-btn.active {
   background: var(--surface-3);
-  color: var(--text);
+  color: var(--accent);
+}
+
+.rail-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .rail-status {
@@ -317,6 +323,32 @@
   font-weight: 600;
 }
 
+/* --- F9-12: nested sub-agent rows ------------------------------------- */
+
+.session-row.subagent .session-title {
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+}
+
+.session-row.subagent.active .session-title {
+  color: var(--text);
+}
+
+.session-row.subagent .session-meta {
+  color: var(--text-faint);
+}
+
+.subagent-glyph {
+  flex: none;
+  color: var(--text-faint);
+  margin-right: -2px;
+}
+
+.session-row.subagent:hover .subagent-glyph,
+.session-row.subagent.active .subagent-glyph {
+  color: var(--accent);
+}
+
 .session-meta {
   display: block;
   font-size: var(--fs-11);
@@ -336,53 +368,109 @@
 
 /* --- Bottom nav rail + footer ------------------------------------------ */
 
+/* --- F9-13: icon rail (expanded sidebar: one horizontal row) ---------- */
+
 .nav-rail {
   border-top: 1px solid var(--border);
-  padding: var(--space-6);
+  padding: var(--space-6) var(--space-8);
   flex: none;
-}
-
-.nav-row {
   display: flex;
   align-items: center;
-  gap: var(--space-9);
-  width: 100%;
-  padding: var(--space-8);
+  justify-content: space-between;
+  gap: 2px;
+}
+
+.nav-btn {
+  position: relative;
+  width: 36px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border-radius: var(--radius-control);
   cursor: pointer;
   background: transparent;
-  border: none;
-  text-align: left;
-}
-
-.nav-row:hover {
-  background: var(--surface-2);
-}
-
-.nav-row.active {
-  background: var(--surface-3);
-}
-
-.nav-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex: none;
-}
-
-.nav-row.active .nav-dot {
-  background: var(--accent);
-}
-
-.nav-label {
-  font-size: var(--fs-12-5);
+  border: 1px solid transparent;
   color: var(--text-muted);
-  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.nav-row.active .nav-label {
+.nav-btn:hover:not(:disabled) {
+  background: var(--surface-2);
   color: var(--text);
+}
+
+.nav-btn.active {
+  background: var(--surface-3);
+  color: var(--accent);
+}
+
+.nav-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Small custom tooltip above the icon, ~300ms after hover/focus; the
+   collapsed rail (60px, overflow hidden) uses the native `title` instead. */
+.nav-btn[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%) translateY(2px);
+  padding: 3px 8px;
+  border-radius: var(--radius-control-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease 300ms, transform 120ms ease 300ms;
+  z-index: 5;
+}
+
+.nav-btn:hover::after,
+.nav-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* First/last tooltips would overflow the 252px sidebar - pin them inward. */
+.nav-btn:first-child[data-tip]::after {
+  left: 0;
+  transform: translateX(0) translateY(2px);
+}
+
+.nav-btn:first-child:hover::after,
+.nav-btn:first-child:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+
+.nav-btn:last-child[data-tip]::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(2px);
+}
+
+.nav-btn:last-child:hover::after,
+.nav-btn:last-child:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+
+/* Badge dot (Settings while tools remain uncategorized). */
+.nav-badge {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 .footer {
@@ -417,8 +505,8 @@
   margin-top: 1px;
 }
 
-:host-context(.density-compact) .nav-row {
-  padding: 5px var(--space-8);
+:host-context(.density-compact) .nav-rail {
+  padding: 4px var(--space-8);
 }
 
 :host-context(.density-compact) .group-label {
