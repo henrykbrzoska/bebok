@@ -16,8 +16,11 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { Router } from '@angular/router';
 
 import { EngineClient } from '../../../core/engine-client.service';
+import { ProcessInfo } from '../../../core/engine.dtos';
+import { ProcessesStore, processTone } from '../../../core/processes.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 import { TerminalTab, type TerminalTabStatus } from '../../../views/terminal/terminal-tab';
@@ -34,6 +37,29 @@ interface PtyOption {
   imports: [TerminalTab],
   template: `
     <div class="panel-body">
+      <!-- F9-14: background processes of the active session (command · status · port). -->
+      @if (procs.processes().length > 0) {
+        <ul class="procs" role="list" [attr.aria-label]="t('processes.title')" data-testid="drawer-processes">
+          @for (p of procs.processes(); track p.id) {
+            <li>
+              <button
+                type="button"
+                class="proc"
+                (click)="openProcess(p)"
+                [title]="p.command + ' — ' + procStatus(p)"
+                [attr.data-testid]="'drawer-process-' + p.id"
+              >
+                <span class="dot" [class]="'dot proc-' + procTone(p)" aria-hidden="true"></span>
+                <span class="proc-cmd">{{ p.command }}</span>
+                <span class="proc-status">{{ procStatus(p) }}</span>
+                @if (p.port) {
+                  <span class="proc-port">:{{ p.port }}</span>
+                }
+              </button>
+            </li>
+          }
+        </ul>
+      }
       <div class="head">
         @if (ptys().length > 1) {
           <select
@@ -79,6 +105,59 @@ interface PtyOption {
       .panel-body {
         display: flex;
         flex-direction: column;
+      }
+
+      /* F9-14 compact process list */
+      .procs {
+        margin: 0;
+        padding: var(--space-6) var(--space-6) var(--space-4);
+        list-style: none;
+        border-bottom: 1px solid var(--border);
+        max-height: 160px;
+        overflow-y: auto;
+      }
+      .proc {
+        display: flex;
+        align-items: center;
+        gap: var(--space-6);
+        width: 100%;
+        padding: 3px var(--space-6);
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-control-sm);
+        color: var(--text-muted);
+        font-size: var(--fs-11);
+        text-align: left;
+      }
+      .proc:hover {
+        background: var(--surface);
+        color: var(--text);
+      }
+      .proc .dot.proc-running {
+        background: var(--success);
+      }
+      .proc .dot.proc-failed {
+        background: var(--danger);
+      }
+      .proc-cmd {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-family: var(--font-mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .proc-status,
+      .proc-port {
+        flex: none;
+        font-size: 10px;
+        color: var(--text-faint);
+      }
+      .proc-port {
+        font-family: var(--font-mono);
+        padding: 0 4px;
+        border-radius: var(--radius-control-sm);
+        background: var(--surface-2);
       }
 
       .head {
@@ -177,6 +256,8 @@ export class TerminalPanel {
   private readonly i18n = inject(I18nService);
   private readonly engine = inject(EngineClient);
   private readonly session = inject(ChatSessionStore);
+  private readonly router = inject(Router);
+  readonly procs = inject(ProcessesStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -201,6 +282,33 @@ export class TerminalPanel {
       this.directory();
       void this.refresh();
     });
+    // F9-14: list the active session's background processes.
+    effect(() => {
+      const id = this.session.meta()?.id;
+      if (id && this.procs.sessionId() !== id) {
+        void this.procs.load(id);
+      }
+    });
+  }
+
+  procTone(p: ProcessInfo): string {
+    return processTone(p);
+  }
+
+  procStatus(p: ProcessInfo): string {
+    if (p.status === 'running') {
+      return this.i18n.t('processes.running');
+    }
+    return p.exit_code !== null && p.exit_code !== undefined
+      ? this.i18n.t('processes.exitCode', { code: p.exit_code })
+      : this.i18n.t('processes.exited');
+  }
+
+  /** Select the process' log tab and go to the Terminal screen. */
+  async openProcess(p: ProcessInfo): Promise<void> {
+    this.procs.select(p.id);
+    const dir = this.directory();
+    await this.router.navigate(['/terminal'], { queryParams: dir ? { directory: dir } : {} });
   }
 
   select(ptyId: string): void {

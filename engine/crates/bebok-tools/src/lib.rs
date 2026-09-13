@@ -8,6 +8,7 @@ pub mod append_file;
 pub mod base64;
 pub mod basename;
 pub mod bash;
+pub mod bash_kill;
 pub mod browser;
 pub mod chmod;
 pub mod cp;
@@ -28,6 +29,7 @@ pub mod ln;
 pub mod mkdir;
 pub mod mv;
 mod pathguard;
+pub mod processes;
 pub mod pwd;
 pub mod read_file;
 pub mod realpath;
@@ -50,6 +52,7 @@ pub mod write_file;
 pub use docker::{DockerStatus, check_docker};
 pub use explorer::FsEntry;
 pub use pathguard::resolve_in_root;
+pub use processes::{ProcessEvent, ProcessExited, ProcessInfo, ProcessOutput, ProcessRegistry};
 pub use registry::{ToolRegistry, ToolSource};
 pub use runtimes::Runtimes;
 pub use tool::{Tool, ToolCtx, ToolImage, ToolOutput};
@@ -68,6 +71,8 @@ use std::sync::Arc;
 ///   `base64` (read-only unless `out` is given);
 /// * mutating — `mkdir`, `touch`, `cp`, `mv`, `rm`, `append_file`, `chmod`,
 ///   `ln`, `sed`, `gzip`;
+/// * background processes (F9-14) — `bash { background: true }` starts a
+///   detached process tracked by [`ProcessRegistry`]; `bash_kill` stops it;
 /// * browser automation — the `browser_*` family (WP-BROWSER), one headless
 ///   Chromium page per session, every call `Ask` by default.
 pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
@@ -110,6 +115,7 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(gzip::Gzip),
         // Escape hatch.
         Arc::new(bash::Bash),
+        Arc::new(bash_kill::BashKill),
     ];
     tools.extend(browser::tools());
     tools

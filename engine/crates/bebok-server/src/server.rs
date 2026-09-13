@@ -60,6 +60,10 @@ pub fn build_app() -> (Router, AppState) {
         });
     }
 
+    // F9-14: republish background-process output/exit on the event bus as
+    // `process.output` / `process.exited` (throttled per process).
+    crate::routes::processes::spawn_bridge(store.clone());
+
     // LLM trace: last 2 request/response payloads (memory-only, global).
     // The LazyLock global is the single source of truth; turn.rs pushes there,
     // and both AppState and the debug route read from the same Arc.
@@ -133,5 +137,16 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
+
+    // F9-14: no background process (dev server, watcher) outlives the engine.
+    let killed = bebok_tools::processes::ProcessRegistry::global()
+        .kill_all()
+        .await;
+    if !killed.is_empty() {
+        tracing::info!(
+            "stopped {} background process(es) on shutdown",
+            killed.len()
+        );
+    }
     Ok(())
 }

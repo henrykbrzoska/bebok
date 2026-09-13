@@ -146,6 +146,10 @@ impl InstanceStore {
         let meta = self.meta.write().await.remove(&id).unwrap_or(snapshot);
         // WP-BROWSER: a deleted session's headless browser (if any) goes too.
         bebok_tools::browser::close_session(&id.to_string()).await;
+        // F9-14: background processes started by this session go too.
+        bebok_tools::processes::ProcessRegistry::global()
+            .kill_session(&id.to_string())
+            .await;
 
         // Drop the on-disk session directory (session.json + msg-*.json).
         let disk_dir = state.disk_dir().to_path_buf();

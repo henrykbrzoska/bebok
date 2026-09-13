@@ -3,9 +3,14 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
+use crate::processes::{ProcessRegistry, relative_log_path};
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Run a shell command and capture its stdout/stderr.
+///
+/// With `background: true` (F9-14) the command is instead handed to the
+/// [`ProcessRegistry`]: spawned detached with its output appended to
+/// `.bebok/run/<id>.log`, and the call returns immediately.
 pub struct Bash;
 
 #[async_trait]
@@ -15,7 +20,10 @@ impl Tool for Bash {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command in the project root and return its combined stdout and stderr."
+        "Run a shell command in the project root and return its combined stdout and stderr. \
+         Set background:true for long-running processes (dev servers, watchers): the command is \
+         started detached and the call returns at once with its id/pid/log path; stop it later \
+         with bash_kill."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -31,6 +39,11 @@ impl Tool for Bash {
                     "description": "Maximum execution time in milliseconds (default 120000, maximum 600000).",
                     "minimum": 1000,
                     "maximum": 600000
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "true: start a long-running process (dev server, watcher) detached and return immediately with its id/pid/log path; stop it later with bash_kill.",
+                    "default": false
                 }
             },
             "required": ["command"]
@@ -41,6 +54,13 @@ impl Tool for Bash {
         let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
             return ToolOutput::new("error: missing required parameter 'command'", "bash");
         };
+        if args
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return spawn_background(&ctx, command).await;
+        }
         let timeout_ms = args
             .get("timeout")
             .and_then(Value::as_u64)
@@ -108,13 +128,40 @@ impl Tool for Bash {
     }
 }
 
+/// `background: true`: hand the command to the [`ProcessRegistry`] and report
+/// how to follow / stop it.
+async fn spawn_background(ctx: &ToolCtx, command: &str) -> ToolOutput {
+    match ProcessRegistry::global()
+        .spawn_background(&ctx.session_id, &ctx.root, command)
+        .await
+    {
+        Ok(info) => {
+            let log = relative_log_path(&info.id);
+            let text = format!(
+                "started in background: id={} pid={} log={log}\nUse `bash_kill` with the id to stop it; read the log with read_file/tail.",
+                info.id, info.pid
+            );
+            ToolOutput::new(text, format!("bash (background) {command}")).with_structured(json!({
+                "id": info.id,
+                "pid": info.pid,
+                "log": log,
+                "command": command,
+            }))
+        }
+        Err(e) => ToolOutput::new(
+            format!("error: failed to start background command: {e}"),
+            "bash",
+        ),
+    }
+}
+
 /// The shell + flag used to run a single command on this platform.
 ///
 /// On Unix the shell is resolved from `BEBOK_SHELL` (explicit override, used
 /// by the Android/iOS embedding to point at a bundled shell binary), then
 /// `$SHELL`, then `sh`. On Windows `BEBOK_SHELL` overrides the default
 /// `cmd` shell.
-fn shell_command() -> (String, &'static str) {
+pub(crate) fn shell_command() -> (String, &'static str) {
     #[cfg(windows)]
     {
         let shell = std::env::var("BEBOK_SHELL").unwrap_or_else(|_| "cmd".to_string());
@@ -134,6 +181,74 @@ fn shell_command() -> (String, &'static str) {
             .or_else(|_| std::env::var("SHELL"))
             .unwrap_or_else(|_| "sh".to_string());
         (shell, "-c")
+    }
+}
+
+#[cfg(test)]
+mod background_tests {
+    use super::Bash;
+    use crate::processes::ProcessRegistry;
+    use crate::tool::{Tool, tool_ctx};
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn background_returns_id_pid_log_and_creates_the_log_file() {
+        let root = std::env::temp_dir().join(format!("bebok-bash-bg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let output = Bash
+            .execute(
+                tool_ctx(root.clone(), "bg-session".into(), CancellationToken::new()),
+                serde_json::json!({"command": "echo background-hi", "background": true}),
+            )
+            .await;
+        assert!(
+            output.text.starts_with("started in background: id="),
+            "{}",
+            output.text
+        );
+        assert!(output.text.contains("bash_kill"), "{}", output.text);
+        let structured = output.structured.expect("structured payload");
+        let id = structured["id"].as_str().unwrap().to_string();
+        assert!(structured["pid"].as_u64().unwrap() > 0);
+        assert_eq!(structured["command"], "echo background-hi");
+        let log = structured["log"].as_str().unwrap();
+        assert_eq!(log, format!(".bebok/run/{id}.log"));
+        assert!(
+            output.text.contains(&format!("log={log}")),
+            "{}",
+            output.text
+        );
+        assert!(root.join(log).exists(), "log file must exist right away");
+        assert!(root.join(".bebok/run/.gitignore").exists());
+
+        let registry = ProcessRegistry::global();
+        let info = registry.get(&id).expect("registered");
+        assert_eq!(info.session_id, "bg-session");
+        // Let it finish, then clean up.
+        for _ in 0..100 {
+            if !registry.get(&id).unwrap().is_running() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(!registry.get(&id).unwrap().is_running());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn background_false_keeps_the_foreground_path() {
+        let output = Bash
+            .execute(
+                tool_ctx(
+                    std::env::temp_dir(),
+                    "fg-session".into(),
+                    CancellationToken::new(),
+                ),
+                serde_json::json!({"command": "echo fg-hi", "background": false}),
+            )
+            .await;
+        assert!(output.text.contains("fg-hi"), "{}", output.text);
+        assert!(output.structured.is_none());
     }
 }
 

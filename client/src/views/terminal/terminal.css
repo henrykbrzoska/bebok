@@ -20,6 +20,170 @@
   background: var(--terminal-bg);
 }
 
+/* --- Processes (F9-14) -------------------------------------------------- */
+
+.processes {
+  flex: none;
+  max-height: 38vh;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.proc-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: 32px;
+  padding: 0 var(--space-14);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.proc-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--success);
+  color: var(--bg);
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+
+.proc-refresh {
+  margin-left: auto;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-12-5);
+  line-height: 1.4;
+}
+
+.proc-refresh:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+.proc-empty,
+.proc-error {
+  padding: 0 var(--space-14) var(--space-10);
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
+}
+
+.proc-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.proc-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 var(--space-8) var(--space-6);
+  list-style: none;
+}
+
+.proc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 5px var(--space-8);
+  border-radius: var(--radius-control-sm);
+  font-size: var(--fs-12);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.proc-row:hover,
+.proc-row:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.proc-row.selected {
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.proc-row.exited {
+  color: var(--text-muted);
+}
+
+.proc-row .dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.proc-row .dot.tone-running {
+  background: var(--success);
+}
+
+.proc-row .dot.tone-failed {
+  background: var(--danger);
+}
+
+.proc-row .dot.tone-exited {
+  background: var(--text-faint);
+}
+
+.proc-cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proc-agent {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--fs-11);
+  color: var(--accent);
+}
+
+.proc-port {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-control-sm);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+}
+
+.proc-uptime {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.proc-status {
+  flex: none;
+  min-width: 64px;
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
 /* --- Tab strip (F2-18) -------------------------------------------------- */
 
 .tab-strip {
@@ -133,6 +297,23 @@
   background: rgba(226, 100, 95, 0.12);
   border: 1px solid var(--danger);
   border-radius: var(--radius-control-sm);
+}
+
+/* Log tabs (F9-14) share the PTY tab look; the kind prefix tells them apart. */
+.tab.log-tab .tab-kind {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.tab .dot.tone-running {
+  background: var(--success);
+}
+
+.tab .dot.tone-failed {
+  background: var(--danger);
 }
 
 /* --- Body (F2-19) ------------------------------------------------------- */

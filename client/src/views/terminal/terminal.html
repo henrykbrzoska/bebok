@@ -1,5 +1,57 @@
 <section class="terminal">
-  <!-- F2-18: 40px tab strip, one tab per engine PTY. -->
+  <!-- F9-14: background processes of the current session (registry). -->
+  <section class="processes" [attr.aria-label]="t('processes.title')" data-testid="processes">
+    <div class="proc-head">
+      <span class="proc-title">{{ t('processes.title') }}</span>
+      @if (procs.running().length > 0) {
+        <span class="proc-count">{{ procs.running().length }}</span>
+      }
+      <button
+        class="proc-refresh"
+        type="button"
+        (click)="refreshProcesses()"
+        [disabled]="procs.loading()"
+        [title]="t('processes.refresh')"
+        [attr.aria-label]="t('processes.refresh')"
+      >
+        ↻
+      </button>
+    </div>
+    @if (procs.error()) {
+      <div class="proc-error">{{ procs.error() }}</div>
+    }
+    @if (processes().length === 0) {
+      <div class="proc-empty">{{ t('processes.empty') }}</div>
+    } @else {
+      <ul class="proc-list" role="list">
+        @for (p of processes(); track p.id) {
+          <li
+            class="proc-row"
+            role="button"
+            tabindex="0"
+            [class.selected]="activeLogId() === p.id"
+            [class.exited]="p.status !== 'running'"
+            (click)="openLog(p.id)"
+            (keydown.enter)="openLog(p.id)"
+            (keydown.space)="$event.preventDefault(); openLog(p.id)"
+            [title]="p.command + ' — ' + processStatusLabel(p)"
+            [attr.data-testid]="'process-' + p.id"
+          >
+            <span class="dot" [class]="'dot tone-' + tone(p)" aria-hidden="true"></span>
+            <span class="proc-cmd">{{ p.command }}</span>
+            <span class="proc-agent" [title]="t('processes.agent')">{{ p.agent }}</span>
+            @if (portBadge(p); as badge) {
+              <span class="proc-port" [title]="p.url ?? ''">{{ badge }}</span>
+            }
+            <span class="proc-uptime" [title]="t('processes.uptime')">{{ uptime(p) }}</span>
+            <span class="proc-status">{{ processStatusLabel(p) }}</span>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
+  <!-- F2-18: 40px tab strip, one tab per engine PTY (+ F9-14 log tabs). -->
   <div class="tab-strip" role="tablist" [attr.aria-label]="t('term.title')">
     @for (tab of tabs(); track tab.ptyId) {
       <div
@@ -24,6 +76,34 @@
         </button>
       </div>
     }
+    @for (id of logTabs(); track id) {
+      <div
+        class="tab log-tab"
+        role="tab"
+        [class.active]="activeLogId() === id"
+        [attr.aria-selected]="activeLogId() === id"
+        (click)="openLog(id)"
+        [title]="t('processes.log') + ': ' + logTabTitle(id)"
+        [attr.data-testid]="'log-tab-' + id"
+      >
+        @if (procs.byId(id); as p) {
+          <span class="dot" [class]="'dot tone-' + tone(p)" aria-hidden="true"></span>
+        } @else {
+          <span class="dot" aria-hidden="true"></span>
+        }
+        <span class="tab-kind">{{ t('processes.log') }}</span>
+        <span class="tab-title">{{ logTabTitle(id) }}</span>
+        <button
+          class="tab-close"
+          type="button"
+          [attr.aria-label]="t('term.closeTab')"
+          [title]="t('term.closeTab')"
+          (click)="$event.stopPropagation(); closeLog(id)"
+        >
+          ✕
+        </button>
+      </div>
+    }
     <button
       class="new-term"
       type="button"
@@ -40,7 +120,9 @@
 
   <!-- F2-19: terminal body. -->
   <div class="term-body">
-    @if (activePtyId()) {
+    @if (activeLogId(); as logId) {
+      <app-process-log-tab [processId]="logId" [now]="now()" />
+    } @else if (activePtyId()) {
       <app-terminal-tab [ptyId]="activePtyId()!" (status)="onStatus(activePtyId()!, $event)" />
     } @else if (!loading()) {
       <div class="term-empty">
