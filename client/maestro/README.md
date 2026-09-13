@@ -13,8 +13,14 @@ renders the whole UI as DOM content, which does not expose Android view ids.
   `client/src/i18n/en.ts`), and takes a screenshot. This is the baseline
   "the app boots and the engine comes up" check.
 
-Later packages add more flows next to this one (`chat-local.yaml`,
-`remote-mirror.yaml`, etc. - see `analysis/PLAN-1.6-MOBILE.md` section 8).
+- `chat-local.yaml` (WP-M5) - fresh state -> onboarding -> "Chat locally" ->
+  quick session -> `[write]` prompt -> permission prompt answered -> mock
+  reply streamed -> relaunch -> history still listed. Needs a *debuggable*
+  build with the mock provider on (Settings -> This device -> "Mock
+  provider", or `adb shell setprop debug.bebok.provider_mock 1`).
+
+Later packages add more flows next to these (`remote-mirror.yaml`, etc. -
+see `analysis/PLAN-1.6-MOBILE.md` section 8).
 
 ## Running locally
 

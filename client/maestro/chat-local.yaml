@@ -1,0 +1,53 @@
+# WP-M5: "chat local" flow (PLAN-1.6-MOBILE.md section 8, scenario 4) -
+# fresh install -> onboarding -> Chat locally -> quick session -> a
+# `[write]`-prefixed prompt against the embedded engine running WP-M1's
+# deterministic mock provider -> permission prompt answered -> streamed
+# reply -> relaunch -> the session is still listed.
+#
+# The mock provider must be on: install a *debuggable* build and either
+# toggle More -> Settings -> This device -> "Mock provider", or
+# `adb shell setprop debug.bebok.provider_mock 1` before launching (both are
+# ignored by release builds - EngineLauncherPlugin only honours them when
+# ApplicationInfo.FLAG_DEBUGGABLE is set).
+#
+# Text selectors only (see README.md): strings come from client/src/i18n/en.ts.
+appId: dev.bebok.mobile
+---
+- clearState
+- launchApp
+- waitForAnimationToEnd
+- assertVisible:
+    text: "engine live"
+    timeout: 40000
+- assertVisible: "Welcome to Bebok"
+- tapOn: "Chat locally"
+- assertVisible:
+    text: "Quick session"
+    timeout: 10000
+- takeScreenshot: WP-M5-chat-home
+- tapOn: "Quick session"
+- assertVisible:
+    text: "Describe the task.*"
+    timeout: 15000
+- tapOn: "Describe the task.*"
+- inputText: "[write] hello from maestro"
+- tapOn: "Send"
+- assertVisible:
+    text: "Permission required"
+    timeout: 20000
+- takeScreenshot: WP-M5-permission
+- tapOn: "Allow"
+- assertVisible:
+    text: "Mock reply to.*"
+    timeout: 20000
+- takeScreenshot: WP-M5-reply
+- stopApp
+- launchApp
+- waitForAnimationToEnd
+- assertVisible:
+    text: "engine live"
+    timeout: 40000
+- assertVisible:
+    text: "hello from maestro"
+    timeout: 15000
+- takeScreenshot: WP-M5-history
