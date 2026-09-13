@@ -1524,4 +1524,88 @@ wrote orders.ts",
         assert!(!dumped.contains("api-orders started"), "{dumped}");
         let _ = std::fs::remove_dir_all(&base);
     }
+    // ------------------------------------------------------------------
+    // WP-M1 (F10-5): the runtime mock provider through the real turn runner
+    // ------------------------------------------------------------------
+
+    /// `[write]` -> `write_file` tool call -> `permission.asked` (default
+    /// rules ask for a mutating tool) -> allowed -> `mock-1.txt` exists ->
+    /// the deterministic reply lands in the transcript.
+    #[tokio::test]
+    async fn mock_provider_writes_a_file_after_a_permission_ask() {
+        let base = std::env::temp_dir().join(format!("bebok-mock-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let data = base.join("data");
+
+        let store = InstanceStore::with_data_dir(data.clone());
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session
+            .append_user_message("[write] create a note")
+            .await
+            .unwrap();
+
+        let tools = Arc::new(ToolRegistry::new(builtin_tools()));
+        let provider: Arc<dyn Provider> = Arc::new(bebok_llm::MockProvider::new());
+        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let bus = store.bus();
+        let mut events = bus.subscribe();
+        let resolver = tokio::spawn(resolve_first_ask(
+            session.clone(),
+            bus.subscribe(),
+            PermissionAnswer {
+                allow: true,
+                always: false,
+            },
+        ));
+
+        let abort = CancellationToken::new();
+        session.try_begin_turn();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            run_turn(
+                session.clone(),
+                Agent::code(),
+                tools,
+                provider,
+                permission,
+                bus,
+                abort,
+                crate::config::DEFAULT_MODEL,
+            ),
+        )
+        .await
+        .expect("turn must finish after the ask is resolved")
+        .unwrap();
+        session.end_turn();
+        resolver.await.unwrap();
+
+        let content = tokio::fs::read_to_string(project.join("mock-1.txt"))
+            .await
+            .expect("mock-1.txt written by the mock's write_file call");
+        assert_eq!(content, "mock write #1\n");
+
+        let messages = session.messages_snapshot().await;
+        let completed = messages[1].parts.iter().any(|p| {
+            matches!(p, Part::Tool { name, state: ToolState::Completed { .. }, .. }
+                if name == "write_file")
+        });
+        assert!(completed, "write_file must complete once allowed");
+        assert_eq!(
+            messages.last().unwrap().text_content(),
+            "Mock reply to: [write] create a note"
+        );
+
+        let evs = drain_events(&mut events, 300).await;
+        let asked = evs
+            .iter()
+            .find(|e| e.kind == "permission.asked")
+            .expect("permission.asked for the mock write");
+        assert_eq!(asked.properties["toolName"], "write_file");
+        assert!(evs.iter().any(|e| e.kind == "permission.resolved"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

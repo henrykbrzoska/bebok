@@ -37,6 +37,11 @@ pub fn build_provider(
     spec: &crate::ProviderSpec,
     fallback_api_key: Option<String>,
 ) -> Result<Arc<dyn Provider>, String> {
+    // WP-M1 (F10-5): `BEBOK_PROVIDER_MOCK=1` short-circuits every provider to
+    // the deterministic mock (e2e without API keys).
+    if crate::providers::mock::enabled() {
+        return Ok(Arc::new(crate::providers::mock::MockProvider::new()));
+    }
     let api_key = crate::resolve_api_key(spec).or(fallback_api_key);
     let config = crate::adapter_config(spec, api_key);
     let adapter = adapter_for(spec.kind);
