@@ -1,0 +1,80 @@
+<div class="m-shell density-compact" data-testid="mobile-shell">
+  <header class="m-topbar">
+    <h1 class="m-title" data-testid="mobile-title">{{ title() }}</h1>
+
+    <button
+      type="button"
+      class="m-status"
+      (click)="openEngineSheet()"
+      [attr.title]="targets.active()?.label ?? statusLabel()"
+      data-testid="mobile-status"
+    >
+      <app-status-dot [tone]="statusTone()" [label]="statusLabel()" />
+    </button>
+
+    <button
+      type="button"
+      class="m-overflow"
+      (click)="openEngineSheet()"
+      [attr.aria-label]="t('mobile.overflow')"
+      [attr.title]="t('mobile.overflow')"
+      data-testid="mobile-overflow"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="12" cy="5" r="1.8" />
+        <circle cx="12" cy="12" r="1.8" />
+        <circle cx="12" cy="19" r="1.8" />
+      </svg>
+    </button>
+  </header>
+
+  @if (connectError(); as error) {
+    <div class="m-banner" role="status" data-testid="mobile-connect-error">{{ error }}</div>
+  }
+  @if (targets.platformError(); as error) {
+    <div class="m-banner" role="status" data-testid="mobile-platform-error">
+      {{ t('mobile.engine.embeddedFailed', { error }) }}
+    </div>
+  }
+
+  <main class="m-content">
+    <router-outlet />
+  </main>
+
+  <app-bottom-tabs />
+
+  <app-sheet [open]="engineSheetOpen()" [title]="t('mobile.engine.title')" (close)="closeEngineSheet()">
+    <ul class="m-targets" data-testid="mobile-targets">
+      @for (target of targets.targets(); track target.id) {
+        <li>
+          <button
+            type="button"
+            class="m-target"
+            [class.active]="target.id === targets.activeId()"
+            [disabled]="switching() !== null"
+            (click)="switchTo(target)"
+            [attr.data-testid]="'target-' + target.id"
+          >
+            <span class="m-target-main">
+              <span class="m-target-label">{{ target.label }}</span>
+              @if (target.baseUrl !== target.label) {
+                <span class="m-target-url">{{ target.baseUrl }}</span>
+              }
+            </span>
+            <span class="m-target-kind">
+              {{
+                target.id === targets.activeId()
+                  ? t('mobile.engine.active')
+                  : targetKindLabel(target)
+              }}
+            </span>
+          </button>
+        </li>
+      } @empty {
+        <li class="m-targets-empty">{{ t('mobile.engine.none') }}</li>
+      }
+    </ul>
+  </app-sheet>
+
+  <app-reconnect-banner />
+</div>

@@ -9,24 +9,37 @@ import { DebugView } from '../views/debug/debug';
 import { StatsView } from '../views/stats/stats';
 import { BrowserView } from '../views/browser-view/browser-view';
 import { AboutView } from '../views/about/about';
+import { redirectToDesktop, redirectToMobile } from '../ui/mobile-shell/mobile.guards';
 
 /**
  * Flat routes rendered inside `AppShell` (WP-SHELL / F1-11). Each route
  * carries `data.screen`, which `ShellStore.activeScreen` derives from - the
  * sidebar/topbar highlight follows the router instead of a parallel signal.
+ *
+ * WP-M2 (F10-8): the phone shell lives under the lazy `/m/**` group. Every
+ * desktop route carries `redirectToMobile` (phone -> `/m` twin) and the `m`
+ * group `redirectToDesktop` (desktop -> flat twin), see `mobile.guards.ts`.
  */
+const mobile = [redirectToMobile];
+
 export const routes: Routes = [
-  { path: '', component: StartView, data: { screen: 'start' } },
+  { path: '', component: StartView, canActivate: mobile, data: { screen: 'start' } },
   // `/connect` merged into Start (F2-1); kept as an alias for old deep links.
   { path: 'connect', redirectTo: '', pathMatch: 'full' },
-  { path: 'chat/:sessionID', component: ChatView, data: { screen: 'chat' } },
-  { path: 'settings', component: SettingsView, data: { screen: 'settings' } },
-  { path: 'terminal', component: TerminalView, data: { screen: 'terminal' } },
-  { path: 'explorer', component: ExplorerView, data: { screen: 'explorer' } },
-  { path: 'debug', component: DebugView, data: { screen: 'debug' } },
-  { path: 'stats', component: StatsView, data: { screen: 'stats' } },
+  { path: 'chat/:sessionID', component: ChatView, canActivate: mobile, data: { screen: 'chat' } },
+  { path: 'settings', component: SettingsView, canActivate: mobile, data: { screen: 'settings' } },
+  { path: 'terminal', component: TerminalView, canActivate: mobile, data: { screen: 'terminal' } },
+  { path: 'explorer', component: ExplorerView, canActivate: mobile, data: { screen: 'explorer' } },
+  { path: 'debug', component: DebugView, canActivate: mobile, data: { screen: 'debug' } },
+  { path: 'stats', component: StatsView, canActivate: mobile, data: { screen: 'stats' } },
   // F8-4: static, localized "What is Bebok?" explainer page.
-  { path: 'about', component: AboutView, data: { screen: 'about' } },
+  { path: 'about', component: AboutView, canActivate: mobile, data: { screen: 'about' } },
+  // WP-M2 (F10-8): the mobile shell + its five tabs, one lazy chunk.
+  {
+    path: 'm',
+    canMatch: [redirectToDesktop],
+    loadChildren: () => import('../ui/mobile-shell/mobile.routes').then((m) => m.MOBILE_ROUTES),
+  },
   // WP-BROWSER2 (F7-6): the browser viewer window. `bare: true` makes `App`
   // render it without the shell (own window, no sidebar/topbar/drawer).
   {

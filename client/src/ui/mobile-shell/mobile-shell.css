@@ -1,0 +1,166 @@
+/* Mobile shell (WP-M2 / F10-8): top bar 48px, content, bottom tabs 56px.
+ * `100dvh` (not `100vh`) so the browser/WebView chrome never hides the tab
+ * bar; safe-area insets keep the bars clear of notches and gesture areas. */
+
+:host {
+  display: block;
+  height: 100dvh;
+}
+
+.m-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.m-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: calc(48px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) var(--space-8) 0 var(--space-16);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.m-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-status,
+.m-overflow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 var(--space-8);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.m-status:active,
+.m-overflow:active {
+  background: var(--surface-2);
+}
+
+.m-overflow {
+  width: 40px;
+  padding: 0;
+}
+
+.m-overflow svg {
+  width: 20px;
+  height: 20px;
+}
+
+.m-banner {
+  flex: none;
+  padding: var(--space-6) var(--space-16);
+  font-size: var(--fs-12);
+  color: var(--danger);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.m-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* --- engine sheet -------------------------------------------------------- */
+
+.m-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.m-target {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 52px;
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.m-target.active {
+  border-color: var(--accent);
+}
+
+.m-target:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.m-target-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-target-label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-target-url {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-target-kind {
+  flex: none;
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+}
+
+.m-target.active .m-target-kind {
+  color: var(--accent);
+}
+
+.m-targets-empty {
+  padding: var(--space-12);
+  color: var(--text-muted);
+  font-size: var(--fs-12-5);
+}
