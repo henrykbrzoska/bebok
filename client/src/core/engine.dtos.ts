@@ -1180,3 +1180,23 @@ export class RemoteApiError extends Error {
     this.name = 'RemoteApiError';
   }
 }
+
+// ---------------------------------------------------------------------------
+// WP-M6 (F10-23): phone-side pairing with a desktop engine (`POST /remote/pair`)
+// ---------------------------------------------------------------------------
+
+/** `POST /remote/pair` request body (unauthenticated, remote listener only). */
+export interface PairWithDesktopBody {
+  code: string;
+  deviceName?: string;
+  model?: string;
+  platform?: string;
+}
+
+/** `POST /remote/pair` -> 200: the per-device token to store for this desktop. */
+export interface PairWithDesktopResponse {
+  deviceId: string;
+  token: string;
+  engineName: string;
+  fingerprint: string;
+}

@@ -24,7 +24,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- WP-M6 (F10-22): `bebok://pair?v=1&ep=...&code=...&fp=...` deep
+                 link - the scan-free way into pairing (tap on the desktop's
+                 pairing card, WP-M8's e2e hook via `am start -d`). Delivered
+                 to the JS side by Capacitor's App plugin (`appUrlOpen`, or
+                 `getLaunchUrl()` on a cold start); `launchMode="singleTask"`
+                 above keeps one activity, so a link while running arrives via
+                 onNewIntent. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bebok" android:host="pair" />
+            </intent-filter>
+
         </activity>
+
+        <!-- WP-M6 (F10-22): ML Kit downloads the barcode model on install
+             instead of on first scan (`@capacitor-mlkit/barcode-scanning`). -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
 
         <!-- F10-10: raised for the duration of a turn by
              EngineLauncherPlugin.beginWork()/endWork(). -->
@@ -43,6 +63,13 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
     </application>
+
+    <!-- WP-M6 (F10-27): package visibility for "Open Tailscale" (the
+         AppLauncher plugin resolves the launch intent by package name, which
+         Android 11+ hides without an explicit <queries> entry). -->
+    <queries>
+        <package android:name="com.tailscale.ipn" />
+    </queries>
 
     <!-- Permissions -->
 
