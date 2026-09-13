@@ -1,6 +1,7 @@
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
+import { escapeAndLinkify } from '../../../core/linkify';
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
 import {
   Part,
@@ -114,7 +115,7 @@ import { safetyLegend } from './safety-legend';
             @case ('error') {
               @if (errorText()) {
                 <div class="section-label danger">{{ t('tool.error') }}</div>
-                <pre class="panel error"><code>{{ errorText() }}</code></pre>
+                <pre class="panel error"><code [innerHTML]="errorHtml()"></code></pre>
               }
             }
             @case ('running') {
@@ -327,6 +328,11 @@ import { safetyLegend } from './safety-legend';
       color: var(--diff-remove-text);
       border-color: var(--danger);
     }
+    /* F9-11: a linkified bare URL in a plain-text error panel. */
+    .panel a {
+      color: inherit;
+      text-decoration: underline;
+    }
 
     .running-note {
       font-size: var(--fs-12);
@@ -470,4 +476,7 @@ export class ToolPartComponent {
 
   readonly outputText = computed(() => this.completed()?.output ?? '');
   readonly errorText = computed(() => this.failed()?.error ?? '');
+  /** F9-11: `errorText`, escaped and with any bare http(s) URL linkified -
+   *  plain text, no markdown (it is a raw tool/engine error message). */
+  readonly errorHtml = computed(() => escapeAndLinkify(this.errorText()));
 }

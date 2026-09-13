@@ -89,4 +89,26 @@ describe('DiffViewComponent syntax highlighting (F7-4)', () => {
     expect(code.innerHTML).toContain('hljs-keyword');
     expect(code.textContent).toBe('const value: number = 2;\n');
   });
+
+  it('F9-11: linkifies a bare URL in the non-diff plain-text tool output', () => {
+    const el = render('fetched https://example.com/data.json ok');
+    const code = el.querySelector('pre.plain code') as HTMLElement;
+    const link = code.querySelector('a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://example.com/data.json');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(code.textContent).toBe('fetched https://example.com/data.json ok');
+  });
+
+  it('F9-11: keeps a URL in a `// comment` intact under TS highlighting (the // line-comment rule would otherwise split it)', () => {
+    const el = render('// see https://example.com/docs for the API', 'src/a.ts');
+    const code = el.querySelector('pre.plain code') as HTMLElement;
+    // Still recognized/highlighted as a TS comment...
+    expect(code.innerHTML).toContain('hljs-comment');
+    // ...but the URL survived as one link rather than being split at `//`.
+    const link = code.querySelector('a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://example.com/docs');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(code.textContent).toBe('// see https://example.com/docs for the API');
+  });
 });

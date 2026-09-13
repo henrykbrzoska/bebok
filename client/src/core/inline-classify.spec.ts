@@ -181,7 +181,7 @@ describe('renderClassifiedInlineCode', () => {
 
   it('opens an http(s) URL as a real external link', () => {
     const html = renderClassifiedInlineCode('http://127.0.0.1:8787');
-    expect(html).toBe('<a href="http://127.0.0.1:8787" target="_blank" rel="noreferrer" class="ic ic-url">http://127.0.0.1:8787</a>');
+    expect(html).toBe('<a href="http://127.0.0.1:8787" target="_blank" rel="noopener noreferrer" class="ic ic-url">http://127.0.0.1:8787</a>');
   });
 
   it('renders a bare route as plain colored text, not a link', () => {

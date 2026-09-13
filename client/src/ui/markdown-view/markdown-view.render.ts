@@ -19,9 +19,15 @@
  * Also supported: a standalone image line `![alt](src)` (F8-4, for the "What
  * is Bebok?" page's illustrations) - rendered as its own `<img>` block, never
  * intercepted as a relative link (images are static assets, not documents).
+ *
+ * F9-11: a bare `http(s)://` URL mentioned in plain prose (not already part
+ * of `[label](url)` syntax or a backtick span) is linkified too, via the
+ * shared `core/linkify.ts` (also used by the chat markdown renderer,
+ * `core/markdown.ts`, and the tool-output rendering helper, `diff-view.ts`).
  */
 
 import { highlightBlockHtml } from '../code-highlight/code-highlight';
+import { linkifyOutsideTags, renderSchemeLink } from '../../core/linkify';
 import { hasUriScheme } from './relative-path';
 
 type Block =
@@ -226,13 +232,13 @@ function renderInline(escaped: string): string {
   let html = escaped.replace(/`([^`\n]+)`/g, (_, code: string) => `<code>${code}</code>`);
   html = html.replace(/\*\*([^*\n]+)\*\*/g, (_, s: string) => `<strong>${s}</strong>`);
   html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, (_, pre: string, s: string) => `${pre}<em>${s}</em>`);
-  html = html.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) => {
-    if (hasUriScheme(href)) {
-      return `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
-    }
-    return `<a href="${href}" class="relative-link">${label}</a>`;
-  });
-  return html;
+  html = html.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
+    renderSchemeLink(label, href, 'relative-link', hasUriScheme(href)),
+  );
+  // F9-11: a bare http(s) URL mentioned in prose becomes a clickable link
+  // too - skipping `<a>`/`<code>` spans, so it never touches a URL already
+  // linked above or a still-plain-code backtick span.
+  return linkifyOutsideTags(html);
 }
 
 function renderParagraphText(text: string): string {

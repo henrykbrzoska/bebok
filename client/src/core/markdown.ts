@@ -16,10 +16,17 @@
  * etc. each get a distinct chip instead of one generic gray one. That
  * module only ever wraps the already-escaped span text, so it introduces
  * no new way for raw model text to reach the DOM.
+ *
+ * F9-11: a bare `http(s)://` URL mentioned in plain prose (not already part
+ * of `[label](url)` syntax or a backtick span) is linkified too, via
+ * `core/linkify.ts` - shared with the Preview panel renderer
+ * (`markdown-view.render.ts`) and the tool-output rendering helper
+ * (`diff-view.ts`).
  */
 
 import { renderClassifiedInlineCode } from './inline-classify';
 import { highlightBlockHtml } from '../ui/code-highlight/code-highlight';
+import { linkifyOutsideTags, renderSchemeLink } from './linkify';
 
 interface Block {
   kind: 'code' | 'md';
@@ -120,12 +127,15 @@ function renderInline(value: string): string {
     .replace(/`([^`\n]+)`/g, (_, code: string) => renderClassifiedInlineCode(code, { pathLinkClass: 'preview-link' }))
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
-      hasUriScheme(href)
-        ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`
-        : `<a href="${href}" class="preview-link">${label}</a>`,
+      renderSchemeLink(label, href, 'preview-link', hasUriScheme(href)),
     );
   // F6-11: a plain-looking relative `.md` path gets the same treatment.
   html = linkifyBarePaths(html);
+  // F9-11: a bare http(s) URL mentioned in prose becomes a clickable link
+  // too - run last, and skipping `<a>`/`<code>` spans, so it never touches a
+  // URL already linked above (markdown syntax, the `.md`-path pass) or a
+  // still-plain-code backtick span.
+  html = linkifyOutsideTags(html);
   // <br> inside block paragraphs from escaped newlines.
   html = html.replace(/\n/g, '<br>');
   return html;

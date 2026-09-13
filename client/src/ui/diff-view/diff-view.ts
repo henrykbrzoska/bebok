@@ -1,6 +1,7 @@
 import { Component, computed, inject, input } from '@angular/core';
 
 import { I18nService } from '../../i18n/i18n.service';
+import { protectUrls } from '../../core/linkify';
 import { CodeHighlightService } from '../code-highlight/code-highlight.service';
 import { DiffViewStore } from './diff-view.store';
 
@@ -43,6 +44,15 @@ interface SplitRow {
  * add/remove tokens, behind a unified/split toggle. Any other text is shown
  * verbatim in a monospace block. Diff detection stays conservative: only
  * output containing `@@` hunks or `diff --git` headers is interpreted.
+ *
+ * F9-11: the non-diff, "plain" fallback block (`plainHtml` below) also
+ * linkifies any bare `http(s)://` URL the tool output mentions (a web-search
+ * result, a listing, a log line, ...) - linkify only, no markdown, via the
+ * shared `core/linkify.ts`. The URL is protected (swapped for an inert
+ * placeholder - see `protectUrls`) *before* syntax highlighting runs, not
+ * linkified after, so a C-style grammar's `//`-comment rule can never split
+ * a URL's scheme from its `//` across a span boundary. The actual diff lines
+ * are left untouched: they are tokenized as code, not read as prose.
  */
 @Component({
   selector: 'app-diff-view',
@@ -211,6 +221,11 @@ interface SplitRow {
       line-height: 1.5;
       color: var(--code-text-strong);
     }
+    /* F9-11: a linkified bare URL in the plain-text tool-output fallback. */
+    .plain a {
+      color: inherit;
+      text-decoration: underline;
+    }
 
     code {
       font-family: var(--font-mono);
@@ -327,10 +342,15 @@ export class DiffViewComponent {
     () => this.segments()?.filter((l) => l.cls === 'del').length ?? 0,
   );
 
-  /** Same highlighting for the non-diff plain-text fallback below. */
-  readonly plainHtml = computed(
-    () => this.codeHighlight.highlight(this.text(), { filename: this.fileLabel() || null }).html,
-  );
+  /** Same highlighting for the non-diff plain-text fallback below, plus
+   *  F9-11 bare-URL linkification. URLs are protected before highlighting
+   *  and restored as real links after (see `protectUrls`'s header comment
+   *  for why - highlighting is what could otherwise split a URL apart). */
+  readonly plainHtml = computed(() => {
+    const guarded = protectUrls(this.text());
+    const { html } = this.codeHighlight.highlight(guarded.text, { filename: this.fileLabel() || null });
+    return guarded.restore(html);
+  });
 
   /**
    * Side-by-side rows: each run of deletions is zipped with the run of
