@@ -1,7 +1,7 @@
 /**
  * WP-M5 / F10-21: `EngineWorkTracker` keeps `beginWork`/`endWork` balanced
  * across a successful turn, an aborted turn and a failed prompt, releases
- * on the SSE `session.updated { running: false }` signal, and is a no-op
+ * on the SSE `session.updated` (without `running: true`) signal, and is a no-op
  * outside Capacitor. Also: the debug launch options for the mock provider.
  */
 
@@ -28,9 +28,15 @@ describe('EngineWorkTracker (F10-21)', () => {
   let bridge: EngineWorkBridge;
   let tracker: EngineWorkTracker;
 
+  // The real engine sends `properties: { running: true }` while a turn runs
+  // and a bare `session.updated` (no `properties`) when it ends.
   function emit(sessionID: string, running: boolean): void {
     for (const l of listeners) {
-      l({ type: 'session.updated', directory: '/p', sessionID, properties: { running } });
+      l(
+        running
+          ? { type: 'session.updated', directory: '/p', sessionID, properties: { running: true } }
+          : { type: 'session.updated', directory: '/p', sessionID },
+      );
     }
   }
 
