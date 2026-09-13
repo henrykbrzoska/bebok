@@ -7,8 +7,11 @@
  * finished child sessions; the panel refetches it on every `task.started` /
  * `task.ended` / `task.aborted` SSE event for the current session (plus when
  * the parent turn settles), so it never polls and never shows a stale
- * "running" row. Clicking a row opens the read-only transcript overlay
- * (`ui/agent-transcript`).
+ * "running" row. Clicking a row (anywhere on the card, Enter/Space from the
+ * keyboard) opens the read-only transcript overlay (`ui/agent-transcript`);
+ * a small secondary "Open session" action on the card navigates to the
+ * child's own chat instead (F9-4) - the same target as the underlined task
+ * link in the chat transcript.
  *
  * WP-DELEGATION (F8-2): `task.progress` events (<= 1/s per child) patch the
  * matching row in place - last tool, one-line summary, tokens - without a
@@ -25,6 +28,8 @@ import {
   inject,
   signal,
 } from '@angular/core';
+
+import { Router } from '@angular/router';
 
 import { EngineClient } from '../../../core/engine-client.service';
 import {
@@ -75,7 +80,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
     } @else {
       <ul class="agents" data-testid="agents-list">
         @for (agent of agents(); track agent.childSessionID) {
-          <li>
+          <li class="card-wrap">
             <button
               type="button"
               class="agent"
@@ -84,13 +89,22 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
               [class.failed]="agent.status === 'failed'"
               [class.aborted]="agent.status === 'aborted'"
               [attr.data-status]="agent.status"
+              [attr.data-testid]="'agent-card'"
               [title]="agent.description || t('agents.openTranscript')"
+              [attr.aria-label]="
+                (agent.name || shortId(agent.childSessionID)) +
+                ' · ' +
+                statusLabel(agent.status) +
+                ' · ' +
+                t('agents.openTranscript')
+              "
               (click)="open(agent)"
             >
               <span class="row">
                 <span class="status-dot" aria-hidden="true"></span>
                 <span class="name">{{ agent.name || shortId(agent.childSessionID) }}</span>
                 <span class="status">{{ statusLabel(agent.status) }}</span>
+                <span class="view-hint" aria-hidden="true">{{ t('agents.viewHint') }}</span>
               </span>
               <span class="row meta">
                 <span class="agent-preset">{{ agent.agent }}</span>
@@ -118,6 +132,33 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
               @if (agent.error) {
                 <span class="error" [title]="agent.error">{{ agent.error }}</span>
               }
+            </button>
+            <button
+              type="button"
+              class="open-session"
+              data-testid="agent-open-session"
+              (click)="openSession(agent, $event)"
+              [title]="t('agents.openSessionHint')"
+              [attr.aria-label]="
+                t('agents.openSession') + ': ' + (agent.name || shortId(agent.childSessionID))
+              "
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="12"
+                height="12"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              {{ t('agents.openSession') }}
             </button>
           </li>
         }
@@ -154,12 +195,18 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         gap: 4px;
       }
 
+      .card-wrap {
+        position: relative;
+        min-width: 0;
+      }
+
       .agent {
         display: flex;
         flex-direction: column;
         gap: 2px;
         width: 100%;
-        padding: var(--space-6) var(--space-8);
+        /* Room for the "Open session" action pinned bottom-right (F9-4). */
+        padding: var(--space-6) var(--space-8) 26px;
         border-radius: var(--radius-control-sm);
         border: 1px solid var(--border);
         background: var(--surface-2);
@@ -167,11 +214,61 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         text-align: left;
         cursor: pointer;
         min-width: 0;
+        transition:
+          border-color 120ms ease,
+          background 120ms ease,
+          box-shadow 120ms ease;
       }
 
-      .agent:hover {
+      .agent:hover,
+      .agent:focus-visible {
         border-color: var(--border-strong);
         background: var(--surface-3);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+
+      .agent:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
+      }
+
+      /* "View transcript" hint - appears on hover/focus so the card reads
+         as clickable (F9-4 hover affordance). */
+      .view-hint {
+        flex: none;
+        font-size: 10px;
+        color: var(--accent);
+        opacity: 0;
+        transition: opacity 120ms ease;
+      }
+
+      .agent:hover .view-hint,
+      .agent:focus-visible .view-hint {
+        opacity: 1;
+      }
+
+      .open-session {
+        position: absolute;
+        right: var(--space-8);
+        bottom: 5px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 7px;
+        font-size: 10.5px;
+        line-height: 1.5;
+        color: var(--text-muted);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-bubble);
+        cursor: pointer;
+      }
+
+      .open-session:hover:not(:disabled),
+      .open-session:focus-visible {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: var(--surface);
       }
 
       .row {
@@ -296,6 +393,7 @@ export class AgentsPanel {
   private readonly engine = inject(EngineClient);
   private readonly events = inject(EventsStore);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
   readonly session = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -350,6 +448,13 @@ export class AgentsPanel {
 
   open(agent: AgentEntry): void {
     this.selected.set(agent);
+  }
+
+  /** F9-4: secondary action - go to the child's own chat (what the
+   *  underlined task link in the transcript does). Never opens the overlay. */
+  openSession(agent: AgentEntry, event: Event): void {
+    event.stopPropagation();
+    void this.router.navigate(['/chat', agent.childSessionID]);
   }
 
   close(): void {
