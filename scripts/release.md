@@ -56,6 +56,20 @@ a tag (arm64-v8a only - see PLAN-1.6-MOBILE.md #9 on APK size) and attaches
 `bebok-X.Y.Z-android-arm64.apk` to the release, with its checksum folded
 into `SHA256SUMS.txt`.
 
+The embedded engine is packaged as a *native library* (F10-29):
+`client/scripts/bundle-android.sh` writes the stripped, per-ABI
+`bebok-server` to `client/android/app/src/main/jniLibs/<abi>/libbebok_server.so`
+(plus `libmksh.so` when mksh could be cross-compiled), `app/build.gradle`
+packages `jniLibs` with `useLegacyPackaging` (= `extractNativeLibs="true"`)
+and limits the APK's ABIs to the ones that actually carry an engine, and
+`EngineLauncherPlugin` execs it from `ApplicationInfo.nativeLibraryDir`. This
+is the only exec-allowed location for an untrusted app on Android 10+; the
+earlier "copy the asset into `files/bin`" approach dies with
+`error=13, Permission denied` (W^X) on Android 16. A `unzip -l app.apk | grep
+lib/` should therefore list `lib/arm64-v8a/libbebok_server.so` (and
+`lib/x86_64/...` for the PR build); an APK built without running the bundle
+script has no engine and only works in Remote mode.
+
 `versionName`/`versionCode` are **not** set in `client/android/app/build.gradle`
 directly - the file reads `client/package.json`'s `version` at Gradle
 configuration time (`versionCode = major*10000 + minor*100 + patch`), so

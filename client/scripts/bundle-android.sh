@@ -7,8 +7,19 @@
 #
 # Requires: Rust with the matching `*-linux-android` targets installed
 # (`rustup target add aarch64-linux-android x86_64-linux-android`) + Android
-# NDK r27 at $ANDROID_NDK_HOME (or the default path below). Output lands in
-# android/app/src/main/assets/bin/<abi>/ and is picked up by `npx cap sync`.
+# NDK r27 at $ANDROID_NDK_HOME (or the default path below).
+#
+# F10-29: the binaries are packaged as *native libraries* -
+# android/app/src/main/jniLibs/<abi>/libbebok_server.so (+ libmksh.so) -
+# not as assets. Android 10+ (targetSdk >= 29) refuses to exec anything the
+# app itself wrote into its data dir (W^X for untrusted_app: "error=13,
+# Permission denied" on the S25 Ultra / Android 16), while files the
+# *installer* placed in ApplicationInfo.nativeLibraryDir (lib/<abi>/lib*.so,
+# extracted because build.gradle sets jniLibs.useLegacyPackaging) may be
+# exec'd. They are ordinary PIE executables that merely carry a lib*.so
+# name; EngineLauncherPlugin runs them straight from nativeLibraryDir. The
+# ABI choice is the installer's (build.gradle limits the APK to the ABIs
+# present here via abiFilters), so no per-ABI asset lookup exists any more.
 #
 # BEBOK_ANDROID_ABIS: space-separated list of Android ABI names to build for.
 # Default: "arm64-v8a" (real devices). CI additionally builds "x86_64" for the
@@ -21,7 +32,10 @@ set -euo pipefail
 
 CLIENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE_DIR="$CLIENT_DIR/../engine"
-ASSET_BIN="$CLIENT_DIR/android/app/src/main/assets/bin"
+JNI_LIBS="$CLIENT_DIR/android/app/src/main/jniLibs"
+LEGACY_ASSET_BIN="$CLIENT_DIR/android/app/src/main/assets/bin"
+SERVER_LIB="libbebok_server.so"
+SHELL_LIB="libmksh.so"
 
 ABIS="${BEBOK_ANDROID_ABIS:-arm64-v8a}"
 
@@ -56,7 +70,13 @@ HOST_TAG="$(ndk_host_tag)"
 NDK_BIN="$NDK_DIR/toolchains/llvm/prebuilt/$HOST_TAG/bin"
 NDK_API=23
 
-mkdir -p "$ASSET_BIN"
+mkdir -p "$JNI_LIBS"
+# Pre-F10-29 layout: a stale assets/bin/ would still be packaged (never used)
+# and double the APK size - drop it.
+if [ -d "$LEGACY_ASSET_BIN" ]; then
+  echo ">> removing legacy $LEGACY_ASSET_BIN (the engine now ships in jniLibs/)"
+  rm -rf "$LEGACY_ASSET_BIN"
+fi
 
 echo ">> ABIs: $ABIS (NDK host tag: $HOST_TAG)"
 
@@ -104,8 +124,8 @@ for ABI in $ABIS; do
   fi
   TARGET_UPPER="$(echo "$TARGET" | tr '[:lower:]-' '[:upper:]_')"
 
-  ABI_ASSET_DIR="$ASSET_BIN/$ABI"
-  mkdir -p "$ABI_ASSET_DIR"
+  ABI_LIB_DIR="$JNI_LIBS/$ABI"
+  mkdir -p "$ABI_LIB_DIR"
 
   echo ">> building engine for $ABI ($TARGET)"
   export CC_"${TARGET//-/_}"="$CLANG"
@@ -114,17 +134,17 @@ for ABI in $ABIS; do
   export "CARGO_TARGET_${TARGET_UPPER}_LINKER"="$CLANG"
   ( cd "$ENGINE_DIR" && cargo build --release --target "$TARGET" -p bebok-server )
 
-  "$STRIP" -o "$ABI_ASSET_DIR/bebok-server" \
+  "$STRIP" -o "$ABI_LIB_DIR/$SERVER_LIB" \
     "$ENGINE_DIR/target/$TARGET/release/bebok-server"
-  SIZE=$(wc -c < "$ABI_ASSET_DIR/bebok-server" | tr -d ' ')
-  SIZE_HUMAN=$(du -h "$ABI_ASSET_DIR/bebok-server" | awk '{print $1}')
-  echo "   -> $ABI_ASSET_DIR/bebok-server ($SIZE_HUMAN, $SIZE bytes)"
+  SIZE=$(wc -c < "$ABI_LIB_DIR/$SERVER_LIB" | tr -d ' ')
+  SIZE_HUMAN=$(du -h "$ABI_LIB_DIR/$SERVER_LIB" | awk '{print $1}')
+  echo "   -> $ABI_LIB_DIR/$SERVER_LIB ($SIZE_HUMAN, $SIZE bytes)"
   SIZE_REPORT="$SIZE_REPORT
-$ABI/bebok-server: $SIZE_HUMAN ($SIZE bytes)"
+$ABI/$SERVER_LIB: $SIZE_HUMAN ($SIZE bytes)"
 
   # mksh (bash tool / terminal) for this ABI - best-effort, same semantics as
   # before: if it fails, the app still works minus the bash tool.
-  if [ -x "$ABI_ASSET_DIR/mksh" ]; then
+  if [ -s "$ABI_LIB_DIR/$SHELL_LIB" ]; then
     echo ">> mksh already bundled for $ABI, skipping"
   else
     echo ">> building mksh for $ABI ($TARGET)"
@@ -149,18 +169,18 @@ $ABI/bebok-server: $SIZE_HUMAN ($SIZE bytes)"
         rm -f mksh mksh.exe *.o 2>/dev/null || true
         PATH="$LINK_BIN:$PATH" CC=clang TARGET_OS=Android LDSTATIC=1 \
           sh Build.sh -r 2>&1 | tail -5
-        cp mksh "$ABI_ASSET_DIR/mksh"
+        cp mksh "$ABI_LIB_DIR/$SHELL_LIB"
       ) || echo "   (mksh build failed for $ABI; skipping shell - bash tool disabled)"
-      if [ -f "$ABI_ASSET_DIR/mksh" ]; then
-        echo "   -> $ABI_ASSET_DIR/mksh"
+      if [ -f "$ABI_LIB_DIR/$SHELL_LIB" ]; then
+        echo "   -> $ABI_LIB_DIR/$SHELL_LIB"
       fi
     fi
   fi
 done
 
 echo
-echo "done. assets:"
-find "$ASSET_BIN" -type f -exec ls -lh {} \;
+echo "done. native libs (jniLibs/<abi>/):"
+find "$JNI_LIBS" -type f -exec ls -lh {} \;
 echo
 echo "== stripped engine size per ABI =="
 echo "$SIZE_REPORT"
