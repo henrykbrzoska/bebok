@@ -10,6 +10,7 @@
  */
 
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { ENGINE_API } from '../../../core/engine-api';
 import { RemoteApiError, RemoteDevice, RemotePairStart } from '../../../core/engine.dtos';
@@ -28,6 +29,7 @@ export class RemoteTab implements OnInit, OnDestroy {
   private readonly engine = inject(ENGINE_API);
   private readonly i18n = inject(I18nService);
   private readonly toast = inject(ToastStore);
+  private readonly sanitizer = inject(DomSanitizer);
 
   readonly store = inject(RemoteDesktopStore);
   readonly t = this.i18n.t.bind(this.i18n);
@@ -59,13 +61,19 @@ export class RemoteTab implements OnInit, OnDestroy {
     return pending !== null && pending !== (this.store.status()?.allowLan ?? false);
   });
 
-  readonly qrSvg = computed<string | null>(() => {
+  /**
+   * `[innerHTML]` runs Angular's HTML sanitizer, which strips `<svg>`
+   * wholesale (it is not on the default safe-HTML element list) - the QR
+   * markup is entirely our own generated output (never user input), so it is
+   * marked trusted explicitly rather than losing the picture silently.
+   */
+  readonly qrSvg = computed<SafeHtml | null>(() => {
     const start = this.pairStart();
     if (!start) {
       return null;
     }
     const matrix = encodeQr(this.pairingUri(start));
-    return matrix ? qrToSvg(matrix, 4) : null;
+    return matrix ? this.sanitizer.bypassSecurityTrustHtml(qrToSvg(matrix, 4)) : null;
   });
 
   readonly secondsLeft = computed(() => {
