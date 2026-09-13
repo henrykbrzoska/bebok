@@ -119,6 +119,12 @@ public class EngineLauncherPlugin extends Plugin {
             // (EventsStore's reconnect loop + an explicit reconnect) and must
             // never end up with two engine processes.
             synchronized (this) {
+                if (baseUrl != null && (process == null || !process.isAlive())) {
+                    // Killed from outside (OS memory pressure, `kill`): the
+                    // remembered URL points at a dead port - relaunch.
+                    Log.w(TAG, "engine process is gone; relaunching");
+                    killProcess();
+                }
                 if (baseUrl == null) {
                     baseUrl = launch(debugEnv(call.getObject("env")));
                 }
