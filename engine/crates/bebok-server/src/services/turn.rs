@@ -142,18 +142,25 @@ pub async fn prompt_turn(
     // Resolve the agent preset and the effective model (agent override ->
     // session override -> per-agent-type config -> resolved config).
     let mut agent = instance.resolve_agent(effective_agent);
-    let model = body
+    let prompt_model = body
         .model
         .as_deref()
-        .filter(|m| !m.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            agent
-                .model
-                .clone()
-                .or_else(|| meta.model.clone())
-                .unwrap_or_else(|| cfg.model_for(&agent.name))
-        });
+        .map(str::trim)
+        .filter(|m| !m.is_empty());
+    // F9-9: a toolbar pick is persisted on the session so `effective_model`
+    // and later turns agree with what the user sees.
+    if let Some(m) = prompt_model
+        && meta.model.as_deref() != Some(m)
+    {
+        session.set_model(Some(m)).await;
+    }
+    let model = prompt_model.map(str::to_string).unwrap_or_else(|| {
+        agent
+            .model
+            .clone()
+            .or_else(|| meta.model.clone())
+            .unwrap_or_else(|| cfg.model_for(&agent.name))
+    });
 
     // Extension point (Tasks 2/5/6): prompt assembly is isolated here so
     // config/plugin editable prompts (and future sidebar/topbar or custom-CSS

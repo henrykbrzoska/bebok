@@ -90,6 +90,16 @@ describe('AgentTranscript (F6-13)', () => {
     expect(fixture.nativeElement.textContent).toContain('running');
   });
 
+  it('F9-9: shows the child model as a small header badge when known', async () => {
+    await settle();
+    expect(fixture.nativeElement.querySelector('[data-testid="transcript-model"]')).toBeNull();
+    fixture.componentRef.setInput('model', 'openai/gpt-5.6-mini');
+    await settle();
+    const badge = fixture.nativeElement.querySelector('[data-testid="transcript-model"]') as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent!.trim()).toBe('openai/gpt-5.6-mini');
+  });
+
   it('appends a streamed assistant message from a message.part.updated event', async () => {
     await settle();
     expect(listener).toBeTruthy();

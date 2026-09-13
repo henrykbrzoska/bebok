@@ -49,6 +49,44 @@ export type GroupRow = RenderedPart | TurnStrip;
 /** Names beyond this many are folded into a trailing ellipsis. */
 const MAX_SUMMARY_NAMES = 4;
 
+/** Tools whose completed structured output carries the child's `model` (F9-9). */
+const CHILD_TOOLS: ReadonlySet<string> = new Set(['task', 'fleet']);
+
+/** `openai/gpt-5.6-mini` -> `gpt-5.6-mini` (the badge drops the provider for brevity). */
+export function shortModel(model: string): string {
+  const slash = model.indexOf('/');
+  return slash >= 0 ? model.slice(slash + 1) : model;
+}
+
+/**
+ * F9-9: models of the delegated children in a run (`task` / `fleet` rows
+ * whose completed `structured.model` is set) that differ from the session's
+ * effective model. Deduplicated, first-appearance order, full ids (the
+ * header shortens them for display).
+ */
+export function childModelsOf(rows: readonly GroupRow[], sessionModel = ''): string[] {
+  const out: string[] = [];
+  for (const row of rows) {
+    if (row.kind !== 'part' || row.part.type !== 'tool' || !CHILD_TOOLS.has(row.part.name)) {
+      continue;
+    }
+    const state = row.part.state;
+    if (state.state !== 'completed') {
+      continue;
+    }
+    const model = (state.structured as { model?: unknown } | undefined)?.model;
+    if (typeof model !== 'string' || !model || out.includes(model)) {
+      continue;
+    }
+    // Same model spelled with or without the provider prefix is not a difference.
+    if (model === sessionModel || (sessionModel && shortModel(model) === shortModel(sessionModel))) {
+      continue;
+    }
+    out.push(model);
+  }
+  return out;
+}
+
 /**
  * Summarize a run of tool-call rows for a group header: the worst state
  * across the run (error > running/pending > completed), a "read ×2, edit"
@@ -62,7 +100,8 @@ const MAX_SUMMARY_NAMES = 4;
 export function summarizeToolRun(
   rows: readonly RenderedPart[],
   resolve?: SafetyResolver,
-): { state: ToolStateKind; names: string; safety: SafetyCounts } {
+  sessionModel = '',
+): { state: ToolStateKind; names: string; safety: SafetyCounts; childModels: string[] } {
   const counts = new Map<string, number>();
   let state: ToolStateKind = 'completed';
   const safety: SafetyCounts = { ...EMPTY_SAFETY };
@@ -84,7 +123,7 @@ export function summarizeToolRun(
     labels.length > MAX_SUMMARY_NAMES
       ? `${labels.slice(0, MAX_SUMMARY_NAMES).join(', ')}, …`
       : labels.join(', ');
-  return { state, names, safety };
+  return { state, names, safety, childModels: childModelsOf(rows, sessionModel) };
 }
 
 /**
@@ -134,6 +173,10 @@ export function summarizeToolRun(
         <span class="group-count">{{ t('toolGroup.summary', { n: count() }) }}</span>
         <span class="group-sep" aria-hidden="true">·</span>
         <span class="group-names">{{ names() }}</span>
+        @if (childModelLabel(); as label) {
+          <span class="group-sep" aria-hidden="true">·</span>
+          <span class="group-model" data-testid="group-child-model" [title]="models().join(', ')">{{ label }}</span>
+        }
         <span class="chevron" aria-hidden="true">{{ open() ? '▾' : '▸' }}</span>
       </button>
       @if (open()) {
@@ -254,6 +297,21 @@ export function summarizeToolRun(
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    /* F9-9: child model badge ("gpt-5.6-mini") when a task/fleet row ran on a
+       model other than the session's. */
+    .group-model {
+      flex: 0 1 auto;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--text-faint);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .group-head .chevron {
       flex: none;
       font-size: 10px;
@@ -305,6 +363,19 @@ export class ToolGroupComponent {
    *  and specs - don't have to change). */
   readonly safety = input<SafetyCounts>(EMPTY_SAFETY);
   readonly categories = SAFETY_CATEGORIES;
+
+  /** F9-9: the session's effective model (chat passes `meta.effective_model`). */
+  readonly sessionModel = input<string>('');
+  /** F9-9: precomputed child models; `null` derives them from `rows` (merged runs). */
+  readonly childModels = input<string[] | null>(null);
+  readonly models = computed(
+    () => this.childModels() ?? childModelsOf(this.rows(), this.sessionModel()),
+  );
+  /** "gpt-5.6-mini" / "gpt-5.6-mini, o5-nano" - deduped, provider prefix stripped. */
+  readonly childModelLabel = computed(() => {
+    const short = [...new Set(this.models().map(shortModel))];
+    return short.join(', ');
+  });
   /** False (legacy single worst-state dot) only when no counts were passed. */
   readonly hasSafety = computed(() => {
     const s = this.safety();

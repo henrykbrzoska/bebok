@@ -15,8 +15,25 @@ import {
   GroupRow,
   RenderedPart,
   ToolGroupComponent,
+  childModelsOf,
+  shortModel,
   summarizeToolRun,
 } from './tool-group';
+
+function task(model: string | undefined, name = 'task'): Part {
+  return {
+    type: 'tool',
+    id: `${name}-${Math.random()}`,
+    name,
+    state: {
+      state: 'completed',
+      input: {},
+      output: 'ok',
+      title: name,
+      structured: { taskID: 't', name: 'n', agent: 'code', childSessionID: 'c', ...(model ? { model } : {}) },
+    },
+  };
+}
 
 function tool(
   name: string,
@@ -50,6 +67,7 @@ describe('summarizeToolRun (F6-1 / F6-1c)', () => {
       state: 'completed',
       names: '',
       safety: { ...EMPTY_SAFETY },
+      childModels: [],
     });
   });
 
@@ -86,6 +104,23 @@ describe('summarizeToolRun (F6-1 / F6-1c)', () => {
     expect(
       summarizeToolRun([row(tool('a', 'running')), row(tool('b', 'error')), row(tool('c'))]).state,
     ).toBe('error');
+  });
+
+  it('F9-9: lists task/fleet child models that differ from the session model, deduped', () => {
+    const rows = [
+      row(task('openai/gpt-5.6-mini')),
+      row(task('openai/gpt-5.6-luna')),
+      row(task('openai/gpt-5.6-mini', 'fleet')),
+      row(task(undefined)),
+      row(task('zai/glm-4.5', 'task_wait')),
+      row(tool('read')),
+    ];
+    expect(summarizeToolRun(rows, undefined, 'openai/gpt-5.6-luna').childModels).toEqual(['openai/gpt-5.6-mini']);
+    expect(childModelsOf(rows, '')).toEqual(['openai/gpt-5.6-mini', 'openai/gpt-5.6-luna']);
+    // Provider-less session model still matches its prefixed twin.
+    expect(childModelsOf(rows, 'gpt-5.6-luna')).toEqual(['openai/gpt-5.6-mini']);
+    expect(shortModel('openai/gpt-5.6-mini')).toBe('gpt-5.6-mini');
+    expect(shortModel('gpt-5')).toBe('gpt-5');
   });
 
   it('truncates the name list beyond 4 entries with an ellipsis', () => {
@@ -214,6 +249,27 @@ describe('ToolGroupComponent (F6-1 / F6-1c)', () => {
 
     expect(root().querySelectorAll('.cluster-dot').length).toBe(1);
     expect(root().querySelector('.cluster-dot')!.classList.contains('safety-dangerous')).toBeTrue();
+  });
+
+  it('F9-9: renders " · <model>" after the names for a differing child model, deriving it from rows', async () => {
+    setInputs([row(task('openai/gpt-5.6-mini')), row(tool('task_wait'))], false);
+    fixture.componentRef.setInput('sessionModel', 'openai/gpt-5.6-luna');
+    await fixture.whenStable();
+
+    const badge = root().querySelector('[data-testid="group-child-model"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent!.trim()).toBe('gpt-5.6-mini');
+    expect(root().querySelectorAll('.group-sep').length).toBe(2);
+
+    // Same model as the session: nothing to show.
+    fixture.componentRef.setInput('sessionModel', 'openai/gpt-5.6-mini');
+    await fixture.whenStable();
+    expect(root().querySelector('[data-testid="group-child-model"]')).toBeNull();
+
+    // A precomputed list wins over the derivation.
+    fixture.componentRef.setInput('childModels', ['anthropic/claude-z', 'zai/claude-z']);
+    await fixture.whenStable();
+    expect(root().querySelector('[data-testid="group-child-model"]')!.textContent!.trim()).toBe('claude-z');
   });
 
   it('rings the cluster when the worst state is error', async () => {

@@ -102,6 +102,10 @@ describe('AgentsPanel (F6-13)', () => {
     expect(row.textContent).toContain('fix-ci');
     expect(row.textContent).toContain('code');
     expect(row.textContent).toContain('test-model');
+    // F9-9: the model is a small badge with its own test id.
+    const badge = row.querySelector('[data-testid="agent-model"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent!.trim()).toBe('test-model');
     expect(row.textContent).toContain('running');
   });
 
