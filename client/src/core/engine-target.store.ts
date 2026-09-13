@@ -16,9 +16,9 @@
  *
  * Persistence: `bebok.targets` holds the persisted targets *without* their
  * tokens; `bebok.targets.active` the active id. Tokens are read/written via
- * the `TargetSecrets` interface, defaulting to `localStorage` - WP-M5 swaps in
- * an Android Keystore implementation by providing `TARGET_SECRETS`, nothing
- * else changes.
+ * the `TargetSecrets` interface, defaulting to `localStorage`; on Capacitor
+ * the token's factory picks WP-M5's Android Keystore implementation
+ * (`secure-store.ts`), nothing else changes.
  *
  * The store is pure state: `EngineClient.switchTarget(id)` is what actually
  * re-points requests, and `EventsStore` restarts its stream when `activeId`
@@ -26,6 +26,8 @@
  */
 
 import { Injectable, InjectionToken, computed, inject, signal } from '@angular/core';
+
+import { SecureStoreTargetSecrets, isCapacitorRuntime } from './secure-store';
 
 export type EngineTargetKind = 'sidecar' | 'embedded' | 'remote-url' | 'desktop';
 
@@ -95,7 +97,10 @@ export class LocalStorageTargetSecrets implements TargetSecrets {
 
 export const TARGET_SECRETS = new InjectionToken<TargetSecrets>('TARGET_SECRETS', {
   providedIn: 'root',
-  factory: () => new LocalStorageTargetSecrets(),
+  // WP-M5 (F10-20): the Capacitor shell gets the Android Keystore-backed
+  // store; browser dev and the desktop shell keep `localStorage`.
+  factory: () =>
+    isCapacitorRuntime() ? new SecureStoreTargetSecrets() : new LocalStorageTargetSecrets(),
 });
 
 /** Kinds that survive a reload (the others are re-resolved by the platform). */
