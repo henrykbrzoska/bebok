@@ -54,6 +54,13 @@ export class RemoteDesktopStore {
   async refresh(): Promise<void> {
     this.loading.set(true);
     try {
+      if (!this.engine.connected()) {
+        // Topbar mounts (and calls `ensure()`) before the app's own
+        // `connect()` necessarily resolves; without this, a `refresh()` that
+        // races the initial handshake would fail once with "not connected"
+        // and - since `ensure()` only fetches once - never self-heal.
+        await this.engine.connect();
+      }
       const [status, devices] = await Promise.all([
         this.engine.getRemoteStatus(),
         this.engine.listDevices(),

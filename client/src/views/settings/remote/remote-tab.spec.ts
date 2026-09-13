@@ -64,6 +64,8 @@ describe('RemoteTab (F10-13)', () => {
   let fixture: ComponentFixture<RemoteTab>;
   let component: RemoteTab;
   let engine: {
+    connected: () => boolean;
+    connect: jasmine.Spy;
     getRemoteStatus: jasmine.Spy;
     enableRemote: jasmine.Spy;
     disableRemote: jasmine.Spy;
@@ -81,6 +83,8 @@ describe('RemoteTab (F10-13)', () => {
     TestBed.resetTestingModule();
     listener = null;
     engine = {
+      connected: () => true,
+      connect: jasmine.createSpy('connect'),
       getRemoteStatus: jasmine.createSpy('getRemoteStatus').and.resolveTo(initialStatus),
       enableRemote: jasmine.createSpy('enableRemote').and.resolveTo(status({ enabled: true })),
       disableRemote: jasmine.createSpy('disableRemote').and.resolveTo(status({ enabled: false, listening: false })),

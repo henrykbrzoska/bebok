@@ -58,7 +58,7 @@ describe('RemoteDesktopStore (F10-15)', () => {
     listDevices = jasmine.createSpy('listDevices').and.resolveTo([]);
     eventsStart = jasmine.createSpy('start');
 
-    const engine = { getRemoteStatus, listDevices };
+    const engine = { getRemoteStatus, listDevices, connected: () => true, connect: jasmine.createSpy('connect') };
     const events = {
       start: eventsStart,
       onEvent: jasmine.createSpy('onEvent').and.callFake((fn: (event: EngineEvent) => void) => {
@@ -140,5 +140,43 @@ describe('RemoteDesktopStore (F10-15)', () => {
     getRemoteStatus.and.rejectWith(new Error('engine unreachable'));
     await store.ensure();
     expect(store.error()).toContain('engine unreachable');
+  });
+});
+
+/**
+ * Topbar (F10-14) calls `ensure()` as soon as it mounts, which can race the
+ * app's own initial `connect()`. Since `ensure()` only fetches once, a bare
+ * "not connected" failure at that moment would never self-heal.
+ */
+describe('RemoteDesktopStore connect-race (F10-15)', () => {
+  it('connects the engine itself before the first fetch when not yet connected', async () => {
+    let connected = false;
+    const connect = jasmine.createSpy('connect').and.callFake(async () => {
+      connected = true;
+      return {} as never;
+    });
+    const engine = {
+      connected: () => connected,
+      connect,
+      getRemoteStatus: jasmine.createSpy('getRemoteStatus').and.resolveTo(makeStatus()),
+      listDevices: jasmine.createSpy('listDevices').and.resolveTo([]),
+    };
+    const events = { start: () => undefined, onEvent: () => () => undefined };
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: ENGINE_API, useValue: engine },
+        { provide: EventsStore, useValue: events },
+      ],
+    });
+    const store = TestBed.inject(RemoteDesktopStore);
+
+    await store.ensure();
+
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(engine.getRemoteStatus).toHaveBeenCalledTimes(1);
+    expect(store.error()).toBeNull();
+    expect(store.enabled()).toBeTrue();
   });
 });
