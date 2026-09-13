@@ -179,6 +179,22 @@ export class EventsStore {
     return this.lastEventId;
   }
 
+  /**
+   * The embedded engine (Capacitor) is gone - idle auto-stop, the
+   * notification's Stop, an OS kill: the saved connection points at a dead
+   * port and every retry against it fails (seen on the S25 Ultra as a
+   * permanent "engine reconnecting…"). Drop it so the next attempt goes
+   * through `EngineClient.connect()` -> `EngineLauncher.start()`, which
+   * relaunches the engine (idempotent while it is running) and adopts the
+   * new URL and token. Other target kinds keep retrying the same address.
+   */
+  private forgetDeadEmbeddedEngine(): void {
+    const target = this.streamTarget ? this.targets.byId(this.streamTarget) : null;
+    if (target?.kind === 'embedded') {
+      this.engine.connection.set(null);
+    }
+  }
+
   private async run(): Promise<void> {
     const gen = ++this.generation;
     while (!this.stopped && gen === this.generation) {
@@ -248,6 +264,7 @@ export class EventsStore {
           break;
         }
         this.state.set(this.everLive ? 'reconnecting' : 'error');
+        this.forgetDeadEmbeddedEngine();
       } finally {
         if (this.controller === controller) {
           this.controller = null;

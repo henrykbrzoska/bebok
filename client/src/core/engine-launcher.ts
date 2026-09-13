@@ -88,9 +88,20 @@ let bridgePromise: Promise<EngineLauncherPlugin> | null = null;
  * `EngineWorkTracker`) adds nothing to the browser/desktop bundle.
  */
 function bridge(): Promise<EngineLauncherPlugin> {
-  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) =>
-    registerPlugin<EngineLauncherPlugin>('EngineLauncher'),
-  );
+  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) => {
+    const plugin = registerPlugin<EngineLauncherPlugin>('EngineLauncher');
+    // Never resolve a promise with the Capacitor proxy itself: it answers
+    // every property, `then` included, so the promise would adopt it as a
+    // thenable, call the (non-existent) native `then` method and never
+    // settle - "Chat locally" then hangs on "Starting the engine…" without
+    // a single native call (seen on the S25 Ultra). Hand back plain bindings.
+    return {
+      start: (options) => plugin.start(options),
+      stop: () => plugin.stop(),
+      beginWork: (options) => plugin.beginWork(options),
+      endWork: () => plugin.endWork(),
+    };
+  });
   return bridgePromise;
 }
 
@@ -118,8 +129,8 @@ export type EngineWorkBridge = Pick<EngineLauncherPlugin, 'beginWork' | 'endWork
  *   or a retry never double-counts.
  * - `end(sessionID)` releases it: the composer calls it on abort and on a
  *   failed prompt, and the tracker itself listens to the SSE stream for
- *   `session.updated { running: false }` (turn end, abort and stream errors
- *   all surface that way), so a turn finishing while the chat view is closed
+ *   a `session.updated` without `running: true` (turn end, abort and stream
+ *   errors all surface that way), so a turn finishing while the chat view is closed
  *   still drops the service.
  *
  * Calls are serialised per tracker so `beginWork`/`endWork` reach the plugin
@@ -183,7 +194,13 @@ export class EngineWorkTracker {
     }
     this.listening = true;
     this.events.onEvent((event) => {
-      if (event.type === 'session.updated' && event.properties?.['running'] === false) {
+      // The engine announces a running turn with `properties.running === true`
+      // and the end of it with a `session.updated` that carries no `running`
+      // at all (`emit_session` in turn.rs; `ChatView` reads it the same way).
+      // Checking for `running === false` never matched on the device: the
+      // foreground service stayed up after every turn and the idle auto-stop
+      // never fired.
+      if (event.type === 'session.updated' && event.properties?.['running'] !== true) {
         this.end(event.sessionID);
       }
     });

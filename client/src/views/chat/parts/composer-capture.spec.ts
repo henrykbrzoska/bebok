@@ -161,7 +161,7 @@ describe('ComposerCapture (F10-17)', () => {
     await tracker.settled();
     expect(bridgeCalls).toEqual(['begin']);
     for (const l of events.listeners) {
-      l({ type: 'session.updated', directory: '/p', sessionID: 's1', properties: { running: false } });
+      l({ type: 'session.updated', directory: '/p', sessionID: 's1' }); // turn end: no `running`
     }
     await tracker.settled();
     expect(bridgeCalls).toEqual(['begin', 'end']);

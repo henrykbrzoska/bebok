@@ -179,6 +179,37 @@ describe('EventsStore (WP-M2)', () => {
     expect(targets.byId('b')?.lastOk).toBeDefined();
   });
 
+  it('relaunches a dead embedded engine instead of retrying its old port (idle auto-stop)', async () => {
+    store.reconnectDelayMs = 5;
+    store.start();
+    await flush();
+    expect(engine.connect).toHaveBeenCalledTimes(1);
+    // The platform target is the embedded engine (Capacitor).
+    targets.upsert({ ...targets.byId('a')!, kind: 'embedded' });
+    // The native side killed it: the stream drops and the port is dead.
+    fetchSpy.and.callFake(() => Promise.reject(new TypeError('Failed to fetch')));
+    streams[0].close();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flush();
+    // The connection was forgotten, so the loop went through connect()
+    // again (= EngineLauncher.start() on the phone) instead of hammering
+    // the old URL forever.
+    expect(engine.connect).toHaveBeenCalledTimes(2);
+    expect(store.state()).not.toBe('live');
+  });
+
+  it('keeps retrying the same address for a non-embedded target', async () => {
+    store.reconnectDelayMs = 5;
+    store.start();
+    await flush();
+    fetchSpy.and.callFake(() => Promise.reject(new TypeError('Failed to fetch')));
+    streams[0].close();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flush();
+    expect(engine.connect).toHaveBeenCalledTimes(1);
+    expect(engine.connection()).not.toBeNull();
+  });
+
   it('does not restart when the target changes before the stream was started', async () => {
     targets.upsert({ id: 'x', kind: 'desktop', label: 'X', baseUrl: 'http://x:1', token: null });
     targets.setActive('x');

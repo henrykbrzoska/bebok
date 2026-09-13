@@ -1,7 +1,7 @@
 /**
  * WP-M5 / F10-21: `EngineWorkTracker` keeps `beginWork`/`endWork` balanced
  * across a successful turn, an aborted turn and a failed prompt, releases
- * on the SSE `session.updated { running: false }` signal, and is a no-op
+ * on the SSE `session.updated` (without `running: true`) signal, and is a no-op
  * outside Capacitor. Also: the debug launch options for the mock provider.
  */
 
@@ -9,6 +9,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 
 import {
+  EngineLauncher,
   EngineWorkBridge,
   EngineWorkTracker,
   MOCK_PROVIDER_KEY,
@@ -27,9 +28,15 @@ describe('EngineWorkTracker (F10-21)', () => {
   let bridge: EngineWorkBridge;
   let tracker: EngineWorkTracker;
 
+  // The real engine sends `properties: { running: true }` while a turn runs
+  // and a bare `session.updated` (no `properties`) when it ends.
   function emit(sessionID: string, running: boolean): void {
     for (const l of listeners) {
-      l({ type: 'session.updated', directory: '/p', sessionID, properties: { running } });
+      l(
+        running
+          ? { type: 'session.updated', directory: '/p', sessionID, properties: { running: true } }
+          : { type: 'session.updated', directory: '/p', sessionID },
+      );
     }
   }
 
@@ -139,5 +146,33 @@ describe('embedded launch options (mock provider toggle)', () => {
     writeMockProviderFlag(true);
     expect(readMockProviderFlag()).toBeTrue();
     expect(embeddedLaunchOptions()).toEqual({ env: { BEBOK_PROVIDER_MOCK: '1' } });
+  });
+});
+
+describe('EngineLauncher bridge (Capacitor proxy is a thenable)', () => {
+  // Importing `@capacitor/core` installs `window.Capacitor`, which would flip
+  // `isCapacitorRuntime()` for every later spec - restore the browser state.
+  const hadCapacitor = 'Capacitor' in window;
+  afterAll(() => {
+    if (!hadCapacitor) {
+      delete (window as unknown as Record<string, unknown>)['Capacitor'];
+    }
+  });
+
+  // Regression (S25 Ultra): resolving the bridge promise with the Capacitor
+  // plugin proxy made the promise adopt it as a thenable and never settle -
+  // "Chat locally" hung on "Starting the engine…" without one native call.
+  // Outside Capacitor the web platform rejects with "not implemented on
+  // web"; a hang shows up as the timeout below.
+  it('settles (rejects on the web platform) instead of hanging', async () => {
+    const outcome = await Promise.race([
+      EngineLauncher.endWork().then(
+        () => 'resolved',
+        (err: unknown) => `rejected: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    expect(outcome).not.toBe('hung');
+    expect(outcome).toContain('not implemented');
   });
 });
