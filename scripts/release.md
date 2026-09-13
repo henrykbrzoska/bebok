@@ -116,12 +116,24 @@ an existing *draft* release for the tag is updated in place.
 ## Local equivalent of one matrix leg
 
 ```bash
+# repo root - host target triple, default bundles per OS (nsis,msi / deb,appimage / dmg),
+# prints every artifact path with its SHA256; see `node scripts/bebok.mjs --help`
+npm run full-build-app                       # or: -- --bundles nsis  /  -- --skip-tauri
+```
+
+which runs the same steps as the workflow (unsigned):
+
+```bash
 cd engine && cargo build --release --locked -p bebok-server --target x86_64-pc-windows-msvc
 cd ../client && npm ci
 npm run sidecar:copy -- --target x86_64-pc-windows-msvc
 npx tauri build --ci --target x86_64-pc-windows-msvc --bundles msi,nsis
 # bundles: client/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/{msi,nsis}
 ```
+
+`npm run doctor` (root) checks the toolchain and the OS-level Tauri
+dependencies before you try; `npm run full-build-dev` is the matching
+development loop (engine + `ng serve` with the token wired in).
 
 Lint the workflows before pushing changes to them:
 

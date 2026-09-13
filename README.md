@@ -66,6 +66,9 @@ Project Explorer showing code from the current project.
 │ ├── scripts/copy-sidecar.mjs # release binary -> src-tauri/binaries/bebok-server-[.exe]
 │ ├── capacitor.config.ts # mobile shell (webDir -> dist/bebok/browser)
 │ └── src-tauri/ # Tauri 2 shell (spawns engine sidecar, native dialogs)
+├── scripts/bebok.mjs # root orchestration: doctor / full-build-dev / full-build-app (npm run … from ./)
+├── scripts/release.md # tag-triggered release pipeline, signing secrets, local build leg
+├── dev.cmd, dev.sh # shortcuts for `npm run full-build-dev`
 ├── AGENTS.md # contributor/agent orientation guide
 └── LICENSE
 ```
@@ -82,6 +85,24 @@ The engine and client build on **Linux and Windows**. CI
 engine (`cargo build` / `cargo test --workspace` from `engine/`) plus the client
 (`npm ci` + `npm run build` from `client/`) on both `ubuntu-latest` and
 `windows-latest`.
+
+## Quick start
+
+```bash
+npm run doctor           # checks rustc/cargo, node, tauri cli and the OS-level Tauri deps
+npm run full-build-dev   # builds + starts the engine and `ng serve`, opens with the token wired in (--open)
+npm run full-build-app   # engine release + sidecar + Tauri bundles for this OS, prints paths + SHA256
+```
+
+Run these from the repo root (`dev.cmd` / `./dev.sh` are shortcuts for
+`full-build-dev`; `dev.cmd tauri` / `./dev.sh --tauri` run the desktop shell
+via `tauri dev` instead). `full-build-dev` prints
+`http://localhost:4200/?engine=<url-encoded BEBOK_READY url>` - the browser
+client adopts that engine address + token once and strips it from the address
+bar, so nothing has to be pasted. Flags: `--port`, `--client-port`, `--no-auth`,
+`--diagnostic`, `--open`, `--tauri`; `full-build-app` takes `--bundles`,
+`--skip-engine`, `--skip-tauri`. See `node scripts/bebok.mjs --help`. The
+manual steps below still work.
 
 ## Running
 
@@ -101,7 +122,7 @@ cd client
 npm install
 npm start            # http://localhost:4200
 ```
-Enter the engine address (http://127.0.0.1:8787) and pick a project directory.
+Enter the engine address (the `BEBOK_READY http://127.0.0.1:8787/?token=…` line the engine printed) and pick a project directory - or open `http://localhost:4200/?engine=<url-encoded BEBOK_READY url>` and the client adopts it by itself (this is what `npm run full-build-dev` does).
 
 ### 3. Desktop (Tauri)
 
@@ -110,7 +131,7 @@ cd engine && cargo build --release
 cd ../client && npm run sidecar:copy && npm run tauri:build
 ```
 
-`sidecar:copy` copies the release engine binary to `src-tauri/binaries/bebok-server-[.exe]` using the target triple from `rustc -vV`. `tauri:build` compiles the frontend, bundles the sidecar and produces the platform binary and installers. For development, use `npm run tauri:dev`.
+`sidecar:copy` copies the release engine binary to `src-tauri/binaries/bebok-server-[.exe]` using the target triple from `rustc -vV`. `tauri:build` compiles the frontend, bundles the sidecar and produces the platform binary and installers. For development, use `npm run tauri:dev`. `npm run full-build-app` (repo root) chains all of this for the host OS (`--bundles nsis,msi` / `deb,appimage` / `dmg`, unsigned) and prints the artifact paths with SHA256 sums.
 
 Official builds for Windows, Linux and macOS (Apple silicon + Intel) are produced by GitHub Actions when a `X.Y.Z` tag is pushed - see [scripts/release.md](scripts/release.md) for the version bump (`npm run version:bump -- X.Y.Z`), tagging, optional signing secrets and how to test-run the pipeline without tagging.
 
