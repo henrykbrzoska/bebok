@@ -122,3 +122,18 @@
   color: var(--accent);
   margin: 0 2px;
 }
+
+/* --- WP-M4 (F10-14): Remote pill ----------------------------------------- */
+
+.chip.remote-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.chip.remote-pill:hover {
+  background: color-mix(in srgb, var(--success) 12%, var(--surface-2));
+}

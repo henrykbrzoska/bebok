@@ -29,6 +29,17 @@
   </nav>
 
   <div class="actions">
+    @if (remote.enabled()) {
+      <a
+        class="chip remote-pill"
+        routerLink="/settings"
+        [queryParams]="{ tab: 'remote' }"
+        [title]="remoteTooltip()"
+        data-testid="topbar-remote-pill"
+      >
+        {{ t('topbar.remotePill', { n: remote.devicesOnline() }) }}
+      </a>
+    }
     <a
       class="chip about"
       routerLink="/about"
