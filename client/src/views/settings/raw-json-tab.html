@@ -3,7 +3,7 @@
   <p>{{ t('settings.rawHint') }}</p>
 </div>
 
-<div class="card">
+<div class="card raw-wide">
   <div class="layer-tabs" role="tablist">
     <button
       type="button"
@@ -24,19 +24,38 @@
     </span>
   </div>
 
-  <div class="editor">
-    <pre class="highlight mono" aria-hidden="true" [innerHTML]="highlighted()"></pre>
-    <textarea
-      class="input mono"
-      spellcheck="false"
-      autocomplete="off"
-      autocapitalize="off"
-      wrap="off"
-      [attr.aria-label]="t('settings.rawTitle')"
-      [ngModel]="text()"
-      (ngModelChange)="setText($event)"
-      (scroll)="syncScroll($event)"
-    ></textarea>
+  <div class="raw-split">
+    <section class="pane" [attr.aria-label]="t('settings.rawEasyTitle')">
+      <header class="pane-head">
+        <span class="pane-title">{{ t('settings.rawEasyTitle') }}</span>
+        @if (!treeLive()) {
+          <span class="pane-note small">{{ t('settings.rawTreeStale') }}</span>
+        }
+      </header>
+      <div class="tree-wrap">
+        <app-tree-json-editor [value]="treeValue()" (changed)="onTreeChanged($event)" />
+      </div>
+    </section>
+
+    <section class="pane" [attr.aria-label]="t('settings.rawRawTitle')">
+      <header class="pane-head">
+        <span class="pane-title">{{ t('settings.rawRawTitle') }}</span>
+      </header>
+      <div class="editor">
+        <pre class="highlight mono" aria-hidden="true" [innerHTML]="highlighted()"></pre>
+        <textarea
+          class="input mono"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          wrap="off"
+          [attr.aria-label]="t('settings.rawTitle')"
+          [ngModel]="text()"
+          (ngModelChange)="setText($event)"
+          (scroll)="syncScroll($event)"
+        ></textarea>
+      </div>
+    </section>
   </div>
 
   @if (diagnostics().length > 0) {

@@ -1,4 +1,58 @@
-/* Raw JSON tab (F2-29): layer switcher + highlighted editor + diagnostics. */
+/* Raw JSON tab (F2-29): two columns - easy tree left, raw text right. */
+
+:host {
+  max-width: 1200px;
+}
+
+.raw-wide {
+  max-width: none;
+}
+
+.raw-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+  align-items: stretch;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+.pane-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pane-note {
+  color: var(--warning);
+}
+
+.tree-wrap {
+  height: 420px;
+  min-height: 0;
+}
+
+.tree-wrap app-tree-json-editor {
+  display: block;
+  height: 100%;
+}
+
+@media (max-width: 900px) {
+  .raw-split {
+    grid-template-columns: 1fr;
+  }
+}
 
 .layer-tabs {
   display: flex;

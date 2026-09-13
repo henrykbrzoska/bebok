@@ -1,0 +1,28 @@
+/* Clickable JSON tree (left column of the RAW JSON tab). */
+
+.tree-host {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+  /* vanilla-jsoneditor theming hooks */
+  --jse-theme-color: var(--accent);
+  --jse-theme-color-highlight: var(--accent);
+  --jse-background-color: var(--bg);
+  --jse-text-color: var(--text);
+  --jse-panel-background: var(--surface);
+  --jse-panel-background-highlight: var(--surface-3);
+  --jse-panel-border: var(--border);
+  --jse-main-border: var(--border);
+  --jse-menu-color: var(--surface);
+  --jse-menu-button-primary-background: var(--surface-3);
+  --jse-value-color-string: var(--diff-add-text);
+  --jse-value-color-number: #86b6e0;
+  --jse-value-color-boolean: var(--warning);
+  --jse-value-color-null: var(--warning);
+  --jse-value-color-url: var(--accent);
+  --jse-key-color: var(--accent);
+  font-size: var(--fs-12);
+}
