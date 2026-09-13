@@ -26,8 +26,12 @@
  */
 
 import { setEngineToken, splitEngineUrl } from './auth.interceptor';
+import type { EngineTargetKind } from './engine-target.store';
 
 export type PlatformKind = 'tauri' | 'http';
+
+/** The target kinds a platform resolves on its own (never `desktop`). */
+export type PlatformTargetKind = Exclude<EngineTargetKind, 'desktop'>;
 
 export interface EngineConnection {
   kind: PlatformKind;
@@ -37,6 +41,40 @@ export interface EngineConnection {
 
 export interface EngineInfo {
   baseUrl: string;
+}
+
+/**
+ * F10-7: what the platform resolved as its default engine - the connection
+ * plus the pieces `EngineTargetStore` needs to register it as a target.
+ */
+export interface ResolvedTarget {
+  kind: PlatformTargetKind;
+  connection: EngineConnection;
+  /** Token the engine announced (or the saved one), null for `BEBOK_NO_AUTH`. */
+  token: string | null;
+}
+
+/**
+ * F10-7: the Capacitor shell could not launch (or reach) its embedded engine.
+ * Deliberately NOT swallowed into the saved remote URL any more - the caller
+ * decides (and the target store exposes the reason to onboarding).
+ */
+export class EmbeddedEngineError extends Error {
+  constructor(
+    message: string,
+    override readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'EmbeddedEngineError';
+  }
+}
+
+/** Test seams for the platform-specific branches of `TransportStrategy`. */
+export interface TransportOverrides {
+  /** Force the Capacitor branch (Karma cannot fake the UA / `window.Capacitor`). */
+  capacitor?: boolean;
+  /** Replaces the dynamic `EngineLauncher.start()` import. */
+  launchEmbedded?: () => Promise<EngineInfo>;
 }
 
 const REMOTE_URL_KEY = 'bebok.remote.baseUrl';
@@ -83,10 +121,14 @@ export function stripBootstrapParam(href: string): string {
 export class TransportStrategy {
   private readonly kind: PlatformKind;
   private readonly capacitor: boolean;
+  private readonly launchEmbedded: (() => Promise<EngineInfo>) | null;
+  /** Last embedded-engine launch failure (Capacitor only), null when fine. */
+  private embeddedError: string | null = null;
 
-  constructor() {
+  constructor(overrides: TransportOverrides = {}) {
     this.kind = this.detect();
-    this.capacitor = this.detectCapacitor();
+    this.capacitor = overrides.capacitor ?? this.detectCapacitor();
+    this.launchEmbedded = overrides.launchEmbedded ?? null;
     if (this.kind === 'http') {
       this.adoptBootstrapParam();
     }
@@ -127,23 +169,45 @@ export class TransportStrategy {
    * `BEBOK_READY` handshake (Rust blocks until the port is known). On the
    * mobile (Capacitor) shell the embedded engine is launched natively and its
    * local URL is returned.
+   *
+   * F10-7: a Capacitor shell whose embedded engine fails to launch now rejects
+   * with `EmbeddedEngineError` instead of silently switching to the saved
+   * remote URL (see `resolveDefaultTarget`).
    */
   async connect(): Promise<EngineConnection> {
+    return (await this.resolveDefaultTarget()).connection;
+  }
+
+  /**
+   * F10-7: resolve the platform's default engine as a target - the connection
+   * plus its kind and token - and install the token for `authFetch`.
+   *
+   * - Tauri     -> `sidecar`, from the shell's `engine_info`.
+   * - Capacitor -> `embedded`, from the native `EngineLauncher` plugin; a
+   *                launch failure is recorded in `lastEmbeddedError()` and
+   *                rethrown as `EmbeddedEngineError` - never swallowed.
+   * - otherwise -> `remote-url`, the typed / bootstrapped / saved address.
+   */
+  async resolveDefaultTarget(): Promise<ResolvedTarget> {
     if (this.kind === 'tauri') {
       const { invoke } = await import('@tauri-apps/api/core');
       const info = await invoke<EngineInfo>('engine_info');
-      return this.adopt('tauri', info.baseUrl);
+      const { token } = splitEngineUrl(info.baseUrl);
+      return { kind: 'sidecar', connection: this.adopt('tauri', info.baseUrl), token };
     }
 
     if (this.capacitor) {
       try {
-        const { EngineLauncher } = await import('./engine-launcher');
-        const info = await EngineLauncher.start();
-        return this.adopt('http', info.baseUrl);
+        const launch = this.launchEmbedded ?? (await this.defaultEmbeddedLauncher());
+        const info = await launch();
+        this.embeddedError = null;
+        const { token } = splitEngineUrl(info.baseUrl);
+        return { kind: 'embedded', connection: this.adopt('http', info.baseUrl), token };
       } catch (err) {
-        // Embedded engine unavailable (e.g. web build on a phone browser) -
-        // fall back to a manually configured remote URL.
-        console.error('embedded engine launch failed; falling back to remote URL', err);
+        const message = err instanceof Error ? err.message : String(err);
+        this.embeddedError = message;
+        console.error('embedded engine launch failed', err);
+        throw new EmbeddedEngineError(`embedded engine unavailable: ${message}`, err);
       }
     }
 
@@ -151,7 +215,22 @@ export class TransportStrategy {
     // previous session). A token pasted along with it - the engine prints
     // `BEBOK_READY http://host:port/?token=...` - is picked up here; against an
     // engine started with `BEBOK_NO_AUTH=1` there simply is none.
-    return this.adopt('http', this.readRemoteUrl(), this.readRemoteToken());
+    const token = this.readRemoteToken();
+    return {
+      kind: 'remote-url',
+      connection: this.adopt('http', this.readRemoteUrl(), token),
+      token,
+    };
+  }
+
+  /** Why the embedded engine could not be launched (Capacitor), else null. */
+  lastEmbeddedError(): string | null {
+    return this.embeddedError;
+  }
+
+  private async defaultEmbeddedLauncher(): Promise<() => Promise<EngineInfo>> {
+    const { EngineLauncher } = await import('./engine-launcher');
+    return () => EngineLauncher.start();
   }
 
   /**

@@ -9,10 +9,11 @@
  * No polling anywhere.
  */
 
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 
 import { authFetch } from './auth.interceptor';
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
+import { EngineTargetStore } from './engine-target.store';
 import { EngineEvent } from './engine.dtos';
 
 /**
@@ -29,7 +30,8 @@ type Listener = (event: EngineEvent) => void;
 
 @Injectable({ providedIn: 'root' })
 export class EventsStore {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
+  private readonly targets = inject(EngineTargetStore);
 
   readonly state = signal<SseState>('idle');
   /** Bumped every time the SSE stream is (re)established. */
@@ -42,6 +44,28 @@ export class EventsStore {
   private controller: AbortController | null = null;
   /** True once a stream was established at least once in this session. */
   private everLive = false;
+  /** The target the running stream was opened against (F10-7). */
+  private streamTarget: string | null = null;
+  /**
+   * Bumped by every `start()`. A `run()` loop that wakes from its retry sleep
+   * after a `restart()` sees a newer generation and exits instead of racing
+   * the fresh loop (two streams against two targets otherwise).
+   */
+  private generation = 0;
+
+  constructor() {
+    // F10-7: `EngineClient.switchTarget()` changes the active target; the
+    // stream against the old engine is aborted and a new one opened against
+    // the new base URL/token - `reconnectVersion` bumps, views `refreshFull`.
+    effect(() => {
+      const active = this.targets.activeId();
+      untracked(() => {
+        if (this.started && this.streamTarget !== null && active !== this.streamTarget) {
+          this.restart();
+        }
+      });
+    });
+  }
 
   /** Subscribe to the global event stream. Returns an unsubscribe function. */
   onEvent(listener: Listener): () => void {
@@ -79,7 +103,8 @@ export class EventsStore {
   }
 
   private async run(): Promise<void> {
-    while (!this.stopped) {
+    const gen = ++this.generation;
+    while (!this.stopped && gen === this.generation) {
       let connection = this.engine.connection();
       if (!connection) {
         this.state.set('connecting');
@@ -95,6 +120,7 @@ export class EventsStore {
 
       const controller = new AbortController();
       this.controller = controller;
+      this.streamTarget = this.targets.activeId();
       this.state.set('connecting');
 
       try {
@@ -117,6 +143,9 @@ export class EventsStore {
 
         this.state.set('live');
         this.everLive = true;
+        if (this.streamTarget !== null) {
+          this.targets.markOk(this.streamTarget);
+        }
         this.reconnectVersion.update((v) => v + 1);
         await this.readStream(res.body, controller.signal);
 
@@ -127,14 +156,18 @@ export class EventsStore {
         }
         this.state.set(this.everLive ? 'reconnecting' : 'error');
       } finally {
-        this.controller = null;
+        if (this.controller === controller) {
+          this.controller = null;
+        }
       }
 
-      if (!this.stopped) {
+      if (!this.stopped && gen === this.generation) {
         await this.sleep(RECONNECT_DELAY_MS);
       }
     }
-    this.running = false;
+    if (gen === this.generation) {
+      this.running = false;
+    }
   }
 
   private async readStream(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {

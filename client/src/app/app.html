@@ -1,5 +1,9 @@
 @if (bare()) {
   <router-outlet />
+} @else if (isMobile()) {
+  @defer (on immediate) {
+    <app-mobile-shell />
+  }
 } @else {
   <app-shell />
 }

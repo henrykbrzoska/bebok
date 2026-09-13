@@ -8,6 +8,7 @@
 import { getEngineToken, setEngineToken } from './auth.interceptor';
 import {
   BOOTSTRAP_ENGINE_PARAM,
+  EmbeddedEngineError,
   TransportStrategy,
   readBootstrapEngine,
   stripBootstrapParam,
@@ -117,5 +118,69 @@ describe('TransportStrategy bootstrap adoption', () => {
     const transport = new TransportStrategy();
 
     expect(transport.readRemoteUrl()).toBe('http://127.0.0.1:9999');
+  });
+});
+
+/**
+ * WP-M2 / F10-7: on the Capacitor shell the embedded engine is a *target*.
+ * A launch failure is surfaced (`EmbeddedEngineError` + `lastEmbeddedError`)
+ * instead of silently falling back to the saved remote URL.
+ */
+describe('TransportStrategy Capacitor branch (F10-7)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setEngineToken(null);
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    setEngineToken(null);
+  });
+
+  it('resolves the embedded engine as an `embedded` target and adopts its token', async () => {
+    const transport = new TransportStrategy({
+      capacitor: true,
+      launchEmbedded: async () => ({ baseUrl: 'http://127.0.0.1:41234/?token=emb-tok' }),
+    });
+    expect(transport.isCapacitor).toBeTrue();
+
+    const resolved = await transport.resolveDefaultTarget();
+    expect(resolved.kind).toBe('embedded');
+    expect(resolved.connection).toEqual({ kind: 'http', baseUrl: 'http://127.0.0.1:41234' });
+    expect(resolved.token).toBe('emb-tok');
+    expect(getEngineToken()).toBe('emb-tok');
+    expect(transport.lastEmbeddedError()).toBeNull();
+    // Nothing leaks into the browser-mode "remote URL" slot.
+    expect(localStorage.getItem('bebok.remote.baseUrl')).toBeNull();
+  });
+
+  it('does not fall back to the saved remote URL when the embedded engine fails', async () => {
+    localStorage.setItem('bebok.remote.baseUrl', 'http://192.168.1.20:8787');
+    localStorage.setItem('bebok.remote.token', 'saved');
+    spyOn(console, 'error');
+    const transport = new TransportStrategy({
+      capacitor: true,
+      launchEmbedded: async () => {
+        throw new Error('plugin not implemented');
+      },
+    });
+
+    await expectAsync(transport.connect()).toBeRejectedWithError(
+      EmbeddedEngineError,
+      /plugin not implemented/,
+    );
+    expect(transport.lastEmbeddedError()).toBe('plugin not implemented');
+    // The saved token was NOT adopted behind the user's back.
+    expect(getEngineToken()).toBeNull();
+  });
+
+  it('browser mode resolves a `remote-url` target from the saved address', async () => {
+    localStorage.setItem('bebok.remote.baseUrl', 'http://127.0.0.1:8812');
+    localStorage.setItem('bebok.remote.token', 'tok');
+    const transport = new TransportStrategy({ capacitor: false });
+    const resolved = await transport.resolveDefaultTarget();
+    expect(resolved.kind).toBe('remote-url');
+    expect(resolved.connection.baseUrl).toBe('http://127.0.0.1:8812');
+    expect(resolved.token).toBe('tok');
   });
 });

@@ -15,7 +15,7 @@
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 import { ProjectEntry, ProjectPatch } from './engine.dtos';
 
 /** How many entries the Start screen's "recent" chips show. */
@@ -30,7 +30,7 @@ export interface ProjectGroup {
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsStore {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
 
   readonly projects = signal<ProjectEntry[]>([]);
   readonly loading = signal(false);

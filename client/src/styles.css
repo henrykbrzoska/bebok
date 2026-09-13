@@ -457,3 +457,21 @@ app-text-part .md .ic-jt-bool {
 app-text-part .md .ic-jt-punct {
   color: var(--text-faint);
 }
+
+/* --- WP-M2 (F10-8): phone form factor ----------------------------------
+ * `100dvh` instead of `100%`/`100vh` so the browser/WebView chrome never
+ * hides the bottom tab bar, and the safe-area insets (notch, gesture bar)
+ * are exposed as tokens the mobile shell pads with. Desktop untouched. */
+@media (max-width: 767px) {
+  :root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+  }
+
+  html,
+  body {
+    height: 100dvh;
+  }
+}

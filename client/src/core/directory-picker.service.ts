@@ -24,7 +24,7 @@
 
 import { Injectable, inject, signal } from '@angular/core';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 
 interface PickRequest {
   title: string;
@@ -33,7 +33,7 @@ interface PickRequest {
 
 @Injectable({ providedIn: 'root' })
 export class DirectoryPicker {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
 
   /** Non-null while the in-app browser modal should be open. */
   readonly request = signal<PickRequest | null>(null);

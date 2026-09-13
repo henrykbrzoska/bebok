@@ -7,7 +7,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API, EngineApi } from './engine-api';
 import { SafetyCategory, ToolSafetyEntry, ToolSafetyResponse } from './engine.dtos';
 import { ToolSafetyStore } from './tool-safety.store';
 
@@ -40,12 +40,12 @@ function response(
 
 describe('ToolSafetyStore (F7-7)', () => {
   let store: ToolSafetyStore;
-  let engine: EngineClient;
+  let engine: EngineApi;
 
   beforeEach(() => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
-    engine = TestBed.inject(EngineClient);
+    engine = TestBed.inject(ENGINE_API);
     store = TestBed.inject(ToolSafetyStore);
   });
 

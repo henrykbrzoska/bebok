@@ -7,6 +7,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { DirectoryPicker } from './directory-picker.service';
+import { ENGINE_API } from './engine-api';
 import { EngineClient } from './engine-client.service';
 import { ProjectEntry } from './engine.dtos';
 import { ProjectsStore } from './projects.store';
@@ -146,7 +147,7 @@ describe('DirectoryPicker (F5-4)', () => {
 
   it('falls back to the in-app picker when the Tauri dialog is unavailable', async () => {
     const picker = setup('tauri');
-    const engine = TestBed.inject(EngineClient) as unknown as { pickDirectory: jasmine.Spy };
+    const engine = TestBed.inject(ENGINE_API) as unknown as { pickDirectory: jasmine.Spy };
     engine.pickDirectory.and.returnValue(Promise.reject(new Error('dialog capability unavailable')));
     const pending = picker.pick('title');
     await Promise.resolve();

@@ -2,7 +2,8 @@
  * Root component. Since the redesign (WP-SHELL / F1-11) it only mounts the
  * persistent `AppShell` - sidebar, topbar, right drawer, command palette and
  * the `<router-outlet>` all live inside the shell, so the old top-nav and the
- * session tabs strip are gone.
+ * session tabs strip are gone. WP-M2 adds the phone-sized `MobileShell`,
+ * picked by `FormFactor` (Capacitor, narrow viewport or `?ff=mobile`).
  *
  * What stays here is the cross-cutting wiring the shell does not own:
  * directory-scoped custom CSS, re-synced on navigation and on
@@ -15,12 +16,14 @@ import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterOutlet } from '@an
 import { CustomCssService } from '../core/custom-css.service';
 import { EngineClient } from '../core/engine-client.service';
 import { EventsStore } from '../core/events.store';
+import { FormFactor } from '../core/form-factor';
 import { ToolSafetyStore } from '../core/tool-safety.store';
+import { MobileShell } from '../ui/mobile-shell/mobile-shell';
 import { AppShell } from '../ui/shell/app-shell';
 
 @Component({
   selector: 'app-root',
-  imports: [AppShell, RouterOutlet],
+  imports: [AppShell, MobileShell, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
@@ -30,6 +33,13 @@ export class App implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly customCss = inject(CustomCssService);
   private readonly toolSafety = inject(ToolSafetyStore);
+
+  /**
+   * WP-M2 (F10-8): phone form factor -> `MobileShell` instead of `AppShell`.
+   * The mobile shell is referenced only inside a `@defer` block, so it (and
+   * its tabs) ships as a lazy chunk the desktop never downloads.
+   */
+  readonly isMobile = inject(FormFactor).isMobile;
 
   /**
    * WP-BROWSER2 (F7-6): routes flagged `data.bare` (the browser viewer
