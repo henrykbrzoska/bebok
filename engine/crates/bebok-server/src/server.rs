@@ -77,6 +77,11 @@ pub fn build_app() -> (Router, AppState) {
         llm_trace,
     };
 
+    // WP-M1: the remote module (device registry, pairing, listener) rides
+    // along as a request extension so the auth layer can verify device
+    // tokens and `/remote/*` can reach the registry. Outermost layer, so it
+    // is present before CORS/auth run.
+    let remote = crate::routes::remote::RemoteState::global();
     let app = build_api_router()
         // Image attachments: up to 5 images x 5 MiB base64 (~35 MB JSON).
         // Axum's default 2 MiB Json limit would reject those with 413 before
@@ -85,7 +90,9 @@ pub fn build_app() -> (Router, AppState) {
         .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(middleware::from_fn_with_state(state.clone(), log_http))
         .layer(cors_layer())
+        .layer(axum::Extension(remote.clone()))
         .with_state(state.clone());
+    remote.set_app(app.clone());
     (app, state)
 }
 
@@ -131,6 +138,23 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
     }
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
+
+    // WP-M1 (F10-2): the remote listener (tailnet / LAN) after the local one
+    // is up. Never on Android (the phone is not a hub); a missing eligible
+    // interface is logged and the engine keeps running.
+    #[cfg(not(target_os = "android"))]
+    {
+        let remote = crate::routes::remote::RemoteState::global();
+        if remote.config().enabled {
+            match crate::routes::remote::listener::start_from_config(app.clone(), &remote).await {
+                Ok(Some(handle)) => {
+                    tracing::info!("remote access enabled on {:?}", handle.endpoints());
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("remote listener failed to start: {e}"),
+            }
+        }
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async {

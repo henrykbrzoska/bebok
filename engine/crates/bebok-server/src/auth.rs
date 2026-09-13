@@ -25,13 +25,30 @@
 //! - `OPTIONS` — CORS preflight never carries credentials (it is answered by
 //!   the CORS layer wrapped around this one; the check here only matters when
 //!   the router is used without it, e.g. in tests).
+//!
+//! WP-M1 (F10-2) adds a second kind of credential: **device tokens** from
+//! the remote pairing registry (`remote::devices`). The bearer value is
+//! classified as
+//! - the launch token → [`RequestScope::Local`] (only on the loopback
+//!   listener; it is never accepted on the remote one),
+//! - a registered device token → [`RequestScope::Remote`], restricted to the
+//!   route allowlist in `remote::scope` (`403 {"error":"remote_scope"}`
+//!   otherwise) and rate-limited per device (`429`),
+//! - anything else → 401.
+//!
+//! The scope is inserted into the request extensions for handlers that
+//! behave differently per scope. `BEBOK_NO_AUTH` and the PTY exemption only
+//! ever apply to the loopback listener. `POST /remote/pair` is the one
+//! unauthenticated route, and only on the remote listener.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use axum::extract::Request;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+
+use crate::routes::remote::{self, Listener, RemoteState, RequestScope};
 
 /// The per-launch capability token: 256 bits of randomness (two v4 UUIDs),
 /// kept in memory only — never written to disk, never reused across launches.
@@ -185,12 +202,45 @@ fn percent_decode(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// True when the request may proceed.
-pub fn is_authorized(req: &Request) -> bool {
-    if disabled() || is_exempt(req) {
-        return true;
+/// Classify the request's credential (see the module docs). `remote` is the
+/// device registry when the router carries one; without it only the launch
+/// token exists.
+pub fn authorize(
+    req: &Request,
+    listener: Listener,
+    remote: Option<&RemoteState>,
+) -> Result<RequestScope, ()> {
+    if req.method() == Method::OPTIONS {
+        return Ok(RequestScope::Local);
     }
-    presented(req).is_some_and(|t| ct_eq(&t, token()))
+    if listener == Listener::Local && (disabled() || is_exempt(req)) {
+        return Ok(RequestScope::Local);
+    }
+    let Some(presented) = presented(req) else {
+        return Err(());
+    };
+    // The launch token is handed to the local shell only: never valid on
+    // the remote listener, whatever the network path.
+    if listener == Listener::Local && ct_eq(&presented, token()) {
+        return Ok(RequestScope::Local);
+    }
+    if let Some(remote) = remote
+        && let Some(auth) = remote.verify_device(&presented)
+    {
+        return Ok(RequestScope::Remote {
+            device_id: auth.device_id,
+            generation: auth.generation,
+        });
+    }
+    Err(())
+}
+
+/// True when the request may proceed (any scope). Kept for the unit tests;
+/// the middleware uses [`authorize`] directly.
+#[cfg(test)]
+pub fn is_authorized(req: &Request) -> bool {
+    let remote = req.extensions().get::<Arc<RemoteState>>().cloned();
+    authorize(req, remote::listener_of(req), remote.as_deref()).is_ok()
 }
 
 /// 401 for a request without a usable token. The body is deliberately terse —
@@ -204,14 +254,68 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
+/// `403 {"error":"remote_scope"}` for a device token outside its allowlist.
+fn remote_scope_denied() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({
+            "error": "remote_scope",
+            "message": "this route is not available to remote devices",
+        })),
+    )
+        .into_response()
+}
+
+fn rate_limited() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(header::RETRY_AFTER, "1")],
+        axum::Json(serde_json::json!({
+            "error": "rate_limited",
+            "message": "too many requests from this device",
+        })),
+    )
+        .into_response()
+}
+
 /// Axum middleware: the single place the capability token is enforced.
 /// Applied once around the whole API router (`routes::build_api_router`).
-pub async fn require_token(req: Request, next: Next) -> Response {
-    if is_authorized(&req) {
-        next.run(req).await
-    } else {
-        unauthorized()
+pub async fn require_token(mut req: Request, next: Next) -> Response {
+    let listener = remote::listener_of(&req);
+    let remote_state = req.extensions().get::<Arc<RemoteState>>().cloned();
+
+    // The one unauthenticated route: a phone presenting its pairing code.
+    // Only on the remote listener (the handler re-checks the tag).
+    if listener == Listener::Remote
+        && req.method() == Method::POST
+        && req.uri().path().trim_end_matches('/') == "/remote/pair"
+    {
+        return next.run(req).await;
     }
+
+    let scope = match authorize(&req, listener, remote_state.as_deref()) {
+        Ok(scope) => scope,
+        Err(()) => return unauthorized(),
+    };
+    if let RequestScope::Remote { device_id, .. } = &scope {
+        if !remote::scope::remote_allowed(req.method(), req.uri().path()) {
+            tracing::warn!(
+                device = %device_id,
+                "remote scope denied: {} {}",
+                req.method(),
+                req.uri().path()
+            );
+            return remote_scope_denied();
+        }
+        if let Some(remote_state) = &remote_state
+            && !remote_state.rate_check(device_id)
+        {
+            tracing::warn!(device = %device_id, "remote device rate-limited");
+            return rate_limited();
+        }
+    }
+    req.extensions_mut().insert(scope);
+    next.run(req).await
 }
 
 #[cfg(test)]
