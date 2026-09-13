@@ -2,6 +2,7 @@
 
 mod deepseek;
 mod groq;
+pub mod mock;
 mod ollama;
 mod openrouter;
 mod qwen;

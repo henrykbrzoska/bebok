@@ -24,6 +24,10 @@ pub fn cors_layer() -> CorsLayer {
         "tauri://localhost",
         "capacitor://localhost",
         "http://localhost",
+        // WP-M1: the Capacitor Android webview serves the app from
+        // `https://localhost` (and `capacitor://localhost` above) and talks
+        // to the desktop's remote listener cross-origin.
+        "https://localhost",
     ];
     let mut origins: Vec<HeaderValue> = Vec::new();
     for o in DEFAULTS {
@@ -51,6 +55,8 @@ pub fn cors_layer() -> CorsLayer {
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
+            // WP-M1 (F10-4): SSE resume from a `fetch`-based reader.
+            axum::http::HeaderName::from_static("last-event-id"),
         ])
 }
 
@@ -119,6 +125,40 @@ mod tests {
                 allowed.contains(method),
                 "{method} {path}: allow-methods {allowed:?} does not list {method}"
             );
+        }
+    }
+
+    /// WP-M1: the Capacitor webview origins pass preflight, and the
+    /// `Last-Event-ID` header used to resume SSE is allowed.
+    #[tokio::test]
+    async fn capacitor_origins_and_last_event_id_pass_preflight() {
+        for origin in ["https://localhost", "capacitor://localhost"] {
+            let req = Request::builder()
+                .method("OPTIONS")
+                .uri("/event")
+                .header(header::ORIGIN, origin)
+                .header("access-control-request-method", "GET")
+                .header(
+                    "access-control-request-headers",
+                    "authorization,last-event-id",
+                )
+                .body(Body::empty())
+                .unwrap();
+            let res = test_app().oneshot(req).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "preflight from {origin}");
+            assert_eq!(
+                res.headers()
+                    .get("access-control-allow-origin")
+                    .and_then(|v| v.to_str().ok()),
+                Some(origin)
+            );
+            let headers = res
+                .headers()
+                .get("access-control-allow-headers")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            assert!(headers.contains("last-event-id"), "{headers}");
         }
     }
 }

@@ -28,6 +28,7 @@ pub use provider::{
     ToolResult, Usage, adapter_for, build_provider, classify_http, retry_after_from_headers,
 };
 pub use providers::adapter_config;
+pub use providers::mock::MockProvider;
 pub use spec::{
     ProviderAuth, ProviderExtraField, ProviderFieldType, ProviderKind, ProviderSpec,
     ProviderUiSpec, builtin_provider_specs, find_provider_spec, list_models, provider_catalog,

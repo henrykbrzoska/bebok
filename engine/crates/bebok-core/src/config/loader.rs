@@ -126,6 +126,11 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(d) = v.get("delegation") {
         apply_delegation(&mut cfg.delegation, d);
     }
+    // WP-M1 (F10-1): `remote` merges per key (a project layer may not
+    // meaningfully own it, but the loader treats every layer alike).
+    if let Some(r) = v.get("remote") {
+        cfg.remote.apply(r);
+    }
 }
 
 /// Apply one layer's `delegation` section on top of the current value.
@@ -583,6 +588,39 @@ mod tests {
             &serde_json::json!({ "delegation": { "model_policy": "cheaper" } }),
         );
         assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Cheaper);
+    }
+
+    /// WP-M1 (F10-1): the `remote` section parses from JSONC (comments)
+    /// with defaults for every key it does not set.
+    #[test]
+    fn remote_section_parses_from_jsonc_with_defaults() {
+        let base = std::env::temp_dir().join(format!("bebok-remote-cfg-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let cfg = load_with_global(&project_dir, None);
+        assert_eq!(cfg.remote, super::super::model::RemoteConfig::default());
+
+        std::fs::write(
+            &global,
+            r#"{
+                // phone access over Tailscale
+                "remote": { "enabled": true, "allow_lan": true, "push": { "provider": "ntfy" } }
+            }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(cfg.remote.enabled);
+        assert!(cfg.remote.allow_lan);
+        assert_eq!(cfg.remote.port, super::super::model::DEFAULT_REMOTE_PORT);
+        assert!(cfg.remote.publish.browser_frames);
+        assert_eq!(cfg.remote.push.provider, "ntfy");
+        // Serialised for `GET /config` under the `remote` key.
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["remote"]["enabled"], true);
+        assert_eq!(json["remote"]["port"], 8790);
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

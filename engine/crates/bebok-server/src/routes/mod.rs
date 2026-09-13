@@ -5,7 +5,7 @@
 //! CSS, …) register in `build_api_router` without changing this shape.
 
 use axum::Router;
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 
 use crate::state::AppState;
 
@@ -26,6 +26,10 @@ pub mod projects;
 pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
+/// WP-M1: remote access (tailnet/LAN listener, device tokens, pairing,
+/// SSE fan-out). Lives in `src/remote/` next to `routes/`.
+#[path = "../remote/mod.rs"]
+pub mod remote;
 pub mod session;
 pub mod stats;
 pub mod tools;
@@ -110,7 +114,27 @@ pub fn build_api_router() -> Router<AppState> {
         .route(
             "/debug/log",
             get(debug::debug_log).delete(debug::debug_clear),
-        );
+        )
+        // WP-M1 (F10-3): remote access — pairing, devices, status.
+        .route("/remote/enable", post(remote::routes::enable))
+        .route("/remote/disable", post(remote::routes::disable))
+        .route("/remote/pair/start", post(remote::routes::pair_start))
+        .route("/remote/pair", post(remote::routes::pair))
+        .route(
+            "/remote/pair/confirm/{pairId}",
+            post(remote::routes::pair_confirm),
+        )
+        .route(
+            "/remote/pair/reject/{pairId}",
+            post(remote::routes::pair_reject),
+        )
+        .route("/remote/devices", get(remote::routes::list_devices))
+        .route(
+            "/remote/devices/{id}",
+            delete(remote::routes::delete_device),
+        )
+        .route("/remote/status", get(remote::routes::status))
+        .route("/remote/heartbeat", post(remote::routes::heartbeat));
 
     // Terminal (PTY) is unavailable on Android (portable-pty/termios does not
     // compile there); everything else is identical.
