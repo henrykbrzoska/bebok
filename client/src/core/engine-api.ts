@@ -1,0 +1,223 @@
+/**
+ * `EngineApi` (WP-M2 / F10-6): the public surface of the engine client as an
+ * interface, plus the `ENGINE_API` injection token.
+ *
+ * The 1.6 mobile shell talks to two engines - the one embedded on the phone
+ * (mode "Chat") and a paired desktop engine (mode "Remote") - through the very
+ * same HTTP + SSE implementation (`EngineClient`), which only swaps its base
+ * URL and token (`EngineTargetStore`). A relay-backed transport planned for
+ * 1.7 must slot in *without* touching the UI, so everything in `core/*` and
+ * the `EventsStore` depends on this contract rather than on the concrete
+ * class. Views/panels may keep injecting `EngineClient` directly: the token
+ * resolves to the same singleton (`useExisting`), so both paths share state.
+ *
+ * Every method below mirrors `EngineClient` one to one - see the class for
+ * the per-route documentation. Keep the two in sync (the `implements` clause
+ * makes the compiler enforce it).
+ */
+
+import { InjectionToken, Signal, WritableSignal, inject } from '@angular/core';
+
+import { EngineClient } from './engine-client.service';
+import type {
+  AbortResponse,
+  AbortTaskResponse,
+  AgentEntry,
+  AgentInfo,
+  BrowserAction,
+  BrowserActionResult,
+  BrowserFrame,
+  BrowserState,
+  ChangeDiffResponse,
+  ChangeEntry,
+  CompactResponse,
+  ConfigResponse,
+  CreatePtyResponse,
+  CreateSessionResponse,
+  CreateSessionResult,
+  DebugLogResponse,
+  DelegationModelsResponse,
+  DeleteSessionResponse,
+  DockerStatus,
+  ExportResponse,
+  FsBrowseResponse,
+  FsFileResponse,
+  FsTreeResponse,
+  McpStatus,
+  Message,
+  ModelsResponse,
+  PendingPermissionSnapshot,
+  PermissionResponse,
+  ProcessInfo,
+  ProcessLogResponse,
+  ProjectEntry,
+  ProjectGitInfo,
+  ProjectPatch,
+  PromptBody,
+  PtyInfo,
+  RemoveWorktreeResponse,
+  RevertChangeResponse,
+  SafetyCategory,
+  SessionMeta,
+  StatsQuery,
+  StatsResponse,
+  ToolSafetyResponse,
+  WorktreeSpec,
+} from './engine.dtos';
+import type { EngineConnection, PlatformKind } from './transport.strategy';
+
+export interface PermissionDecisionInput {
+  decision: 'allow' | 'deny';
+  always?: boolean;
+}
+
+/** Connection state + lifecycle - the part every store reads. */
+export interface EngineConnectionApi {
+  /** The resolved engine connection (null until `connect()` succeeds). */
+  readonly connection: WritableSignal<EngineConnection | null>;
+  readonly connected: Signal<boolean>;
+  /** True when the runtime is the Tauri desktop webview. */
+  readonly isTauri: Signal<boolean>;
+  /** True once the engine rejected our capability token (401). */
+  readonly unauthorized: WritableSignal<boolean>;
+  readonly platform: PlatformKind;
+  /** True on the Capacitor (mobile) shell. */
+  readonly isCapacitor: boolean;
+
+  connect(): Promise<EngineConnection>;
+  reconfigure(conn: EngineConnection): void;
+  reconnect(rawUrl?: string): Promise<void>;
+  ping(): Promise<void>;
+
+  pickDirectory(title: string): Promise<string | null>;
+  pickFile(title: string): Promise<string | null>;
+  remoteDefaults(): { baseUrl: string };
+  saveDirectory(directory: string): void;
+  readLastDirectory(): string | null;
+  /** Absolute URL of the global SSE stream (used by `EventsStore`). */
+  eventUrl(): string;
+}
+
+/** Every REST route the UI uses, in the order `EngineClient` declares them. */
+export interface EngineRestApi {
+  // sessions
+  createSession(
+    directory: string,
+    agent?: string,
+    model?: string,
+    worktree?: WorktreeSpec,
+  ): Promise<CreateSessionResponse>;
+  forkSession(
+    directory: string,
+    sessionID: string,
+    messageIndex: number,
+  ): Promise<CreateSessionResult>;
+  continueLast(directory: string): Promise<CreateSessionResult>;
+  truncateSession(sessionID: string, keep: number): Promise<CreateSessionResult>;
+  deleteSession(sessionID: string): Promise<DeleteSessionResponse>;
+  listSessions(directory: string): Promise<SessionMeta[]>;
+  sessionMeta(id: string): Promise<SessionMeta>;
+  messages(id: string): Promise<Message[]>;
+  sessionAgents(id: string): Promise<AgentEntry[]>;
+  exportSession(id: string): Promise<ExportResponse>;
+  compactSession(id: string, budget?: number): Promise<CompactResponse>;
+
+  // changes
+  sessionChanges(id: string): Promise<ChangeEntry[]>;
+  sessionChangeDiff(id: string, path: string, session?: string): Promise<ChangeDiffResponse>;
+  revertSessionChange(id: string, path: string, session?: string): Promise<RevertChangeResponse>;
+
+  // turn control
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string): Promise<unknown>;
+  abort(id: string): Promise<AbortResponse>;
+  abortTask(sessionID: string, taskID: string): Promise<AbortTaskResponse>;
+
+  // browser viewer
+  browserState(id: string): Promise<BrowserState>;
+  browserFrame(id: string): Promise<BrowserFrame>;
+  browserAction(
+    id: string,
+    action: BrowserAction,
+    body?: Record<string, unknown>,
+  ): Promise<BrowserActionResult>;
+
+  // permissions
+  resolvePermission(
+    id: string,
+    requestId: string,
+    decision: PermissionDecisionInput,
+  ): Promise<PermissionResponse>;
+  pendingPermissions(directory: string): Promise<PendingPermissionSnapshot[]>;
+
+  // agents, MCP, config
+  listAgents(directory: string): Promise<AgentInfo[]>;
+  listMcp(directory: string): Promise<McpStatus[]>;
+  toggleMcp(directory: string, name: string, enabled: boolean): Promise<McpStatus[]>;
+  getConfig(directory: string): Promise<ConfigResponse>;
+  putConfig(
+    directory: string,
+    delta: unknown,
+    opts?: { scope?: 'project' | 'global'; replace?: boolean },
+  ): Promise<ConfigResponse>;
+  delegationModels(directory: string): Promise<DelegationModelsResponse>;
+  getToolSafety(directory: string): Promise<ToolSafetyResponse>;
+  putToolSafety(
+    directory: string,
+    overrides: Record<string, SafetyCategory | null>,
+    opts?: { scope?: 'project' | 'global' },
+  ): Promise<ToolSafetyResponse>;
+  checkDocker(directory: string): Promise<DockerStatus>;
+
+  // explorer + providers
+  fsTree(directory: string, path?: string): Promise<FsTreeResponse>;
+  fsFile(directory: string, path: string): Promise<FsFileResponse>;
+  fsFileWrite(
+    directory: string,
+    path: string,
+    content: string,
+  ): Promise<{ path: string; saved: boolean }>;
+  listModels(directory: string, provider: string): Promise<ModelsResponse>;
+
+  // projects registry + git
+  listProjects(): Promise<ProjectEntry[]>;
+  addProject(path: string, name?: string): Promise<ProjectEntry>;
+  updateProject(id: string, patch: ProjectPatch): Promise<ProjectEntry>;
+  removeProject(id: string): Promise<{ removed: boolean; id: string }>;
+  openProject(id: string): Promise<ProjectEntry>;
+  projectGit(id: string): Promise<ProjectGitInfo>;
+  removeWorktree(id: string, path: string): Promise<RemoveWorktreeResponse>;
+  browseDirectory(path?: string | null, showHidden?: boolean): Promise<FsBrowseResponse>;
+
+  // debug log
+  debugLog(): Promise<DebugLogResponse>;
+  clearDebugLog(): Promise<{ ok: boolean }>;
+
+  // stats
+  stats(query?: StatsQuery): Promise<StatsResponse>;
+
+  // terminal (PTY)
+  createPty(directory: string, cols?: number, rows?: number): Promise<CreatePtyResponse>;
+  listPtys(): Promise<PtyInfo[]>;
+  getTicket(ptyId: string): Promise<string>;
+  ptyWebSocketUrl(ptyId: string): Promise<string>;
+
+  // background processes
+  sessionProcesses(sessionId: string): Promise<ProcessInfo[]>;
+  processLog(id: string, tail?: number): Promise<ProcessLogResponse>;
+  killProcess(id: string): Promise<ProcessInfo>;
+}
+
+/** The complete engine contract the client code depends on. */
+export interface EngineApi extends EngineConnectionApi, EngineRestApi {}
+
+/**
+ * Injection token for the engine contract. `app.config.ts` binds it to the
+ * `EngineClient` singleton (`useExisting`); the root factory below makes the
+ * same binding the default so `TestBed`s and lazily created injectors that do
+ * not replay the app config still resolve it - and a spec that overrides
+ * `EngineClient` with a spy sees that spy through the token as well.
+ */
+export const ENGINE_API = new InjectionToken<EngineApi>('ENGINE_API', {
+  providedIn: 'root',
+  factory: () => inject<EngineApi>(EngineClient),
+});

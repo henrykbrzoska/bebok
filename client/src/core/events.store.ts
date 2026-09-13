@@ -12,7 +12,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 
 import { authFetch } from './auth.interceptor';
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 import { EngineEvent } from './engine.dtos';
 
 /**
@@ -29,7 +29,7 @@ type Listener = (event: EngineEvent) => void;
 
 @Injectable({ providedIn: 'root' })
 export class EventsStore {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
 
   readonly state = signal<SseState>('idle');
   /** Bumped every time the SSE stream is (re)established. */

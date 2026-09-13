@@ -20,12 +20,12 @@
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 import { SafetyCategory, ToolSafetyEntry, ToolSafetyResponse } from './engine.dtos';
 
 @Injectable({ providedIn: 'root' })
 export class ToolSafetyStore {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
 
   /** Directory the cached list belongs to (`null` before the first load). */
   readonly directory = signal<string | null>(null);

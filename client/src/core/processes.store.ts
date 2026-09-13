@@ -16,7 +16,7 @@
 import { DestroyRef, Injectable, Signal, WritableSignal, computed, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 import {
   EngineEvent,
   ProcessExitedEvent,
@@ -113,7 +113,7 @@ function str(v: unknown): string {
 
 @Injectable({ providedIn: 'root' })
 export class ProcessesStore {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
   private readonly events = inject(EventsStore);
   private readonly destroyRef = inject(DestroyRef);
 

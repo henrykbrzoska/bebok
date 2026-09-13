@@ -11,7 +11,7 @@
 
 import { Injectable, inject } from '@angular/core';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 import type { ResolvedConfig } from './engine.dtos';
 
 const STYLE_ID = 'bebok-custom-css';
@@ -19,7 +19,7 @@ const MAX_CSS_CHARS = 200 * 1024;
 
 @Injectable({ providedIn: 'root' })
 export class CustomCssService {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
   private lastDirectory: string | null = null;
 
   /** Fetch `ui` for `directory` and (re)apply it. Safe to call repeatedly. */

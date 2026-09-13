@@ -11,7 +11,7 @@
 
 import { Injectable, inject } from '@angular/core';
 
-import { EngineClient } from './engine-client.service';
+import { ENGINE_API } from './engine-api';
 
 export const VIEWER_ROUTE = '/browser-view';
 export const VIEWER_WIDTH = 1360;
@@ -38,7 +38,7 @@ export function viewerWindowFeatures(
 
 @Injectable({ providedIn: 'root' })
 export class BrowserViewerService {
-  private readonly engine = inject(EngineClient);
+  private readonly engine = inject(ENGINE_API);
 
   /**
    * Open (or focus) the viewer window for `sessionId`. Returns `false` when

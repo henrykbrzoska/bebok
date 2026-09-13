@@ -63,15 +63,14 @@ import {
   BrowserFrame,
   BrowserState,
 } from './engine.dtos';
+import type { EngineApi, PermissionDecisionInput } from './engine-api';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
-export interface PermissionDecisionInput {
-  decision: 'allow' | 'deny';
-  always?: boolean;
-}
+export type { PermissionDecisionInput } from './engine-api';
 
+/** WP-M2 (F10-6): the HTTP implementation of the `EngineApi` contract. */
 @Injectable({ providedIn: 'root' })
-export class EngineClient {
+export class EngineClient implements EngineApi {
   private readonly transport = new TransportStrategy();
 
   /** The resolved engine connection (null until `connect()` succeeds). */
