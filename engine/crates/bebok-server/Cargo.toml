@@ -25,13 +25,24 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 dirs.workspace = true
 uuid.workspace = true
+# WP-M1 (remote listener): device-token hashing + constant-time compare +
+# token entropy. All pure Rust (no build scripts), build for Android too.
+sha2.workspace = true
+subtle = "2"
+rand = "0.9"
 
 [dev-dependencies]
 # `oneshot` in the auth middleware tests (drives the assembled Router without
 # binding a socket). Already in the lockfile via tower-http.
 tower = { version = "0.5", features = ["util"] }
+# WP-M1: registry fixtures + two-client pairing/SSE integration tests.
+tempfile = "3"
+reqwest.workspace = true
 
 # portable-pty -> serial -> termios does not compile on Android; the terminal is
 # disabled there (the rest of the engine - incl. the bash tool - still works).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 bebok-pty = { path = "../bebok-pty" }
+# WP-M1: tailnet/LAN interface enumeration for the remote listener. The phone
+# is never a hub, so the listener (and this crate) are absent on Android.
+if-addrs = "0.13"

@@ -19,6 +19,134 @@ pub const DEFAULT_TOOL_OUTPUT_CAP: usize = 32 * 1024;
 pub const MAX_CUSTOM_CSS_LEN: usize = 200 * 1024;
 /// Max number of entries in `ui.customCssFiles`.
 pub const MAX_CUSTOM_CSS_FILES: usize = 32;
+/// Default port of the remote (tailnet/LAN) listener (WP-M1, F10-1).
+pub const DEFAULT_REMOTE_PORT: u16 = 8790;
+
+/// WP-M1 (F10-1): which high-volume event families the remote listener
+/// republishes to paired phones (`remote.publish.*`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemotePublishConfig {
+    /// Forward `browser.frame` thumbnails (only when the stream asks for
+    /// them with `?interest=browser`).
+    pub browser_frames: bool,
+    /// Forward `process.output` / `process.exited` (coalesced).
+    pub processes: bool,
+}
+
+impl Default for RemotePublishConfig {
+    fn default() -> Self {
+        Self {
+            browser_frames: true,
+            processes: true,
+        }
+    }
+}
+
+/// WP-M1 (F10-1): push-notification settings, parsed here and consumed by
+/// `push.rs` (WP-M7). `provider` is `none` (default) or `ntfy`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemotePushConfig {
+    pub provider: String,
+    pub url: String,
+}
+
+impl Default for RemotePushConfig {
+    fn default() -> Self {
+        Self {
+            provider: "none".to_string(),
+            url: String::new(),
+        }
+    }
+}
+
+/// WP-M1 (F10-1): the `remote` section of the **global** config — the
+/// second listener that paired phones reach over Tailscale / LAN.
+///
+/// ```jsonc
+/// "remote": {
+///   "enabled": false, "port": 8790, "allow_lan": false,
+///   "publish": { "browser_frames": true, "processes": true },
+///   "push": { "provider": "none", "url": "" }
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemoteConfig {
+    pub enabled: bool,
+    pub port: u16,
+    /// Also bind RFC1918 addresses (LAN without TLS - off by default, see
+    /// the 1.6 threat model).
+    pub allow_lan: bool,
+    pub publish: RemotePublishConfig,
+    pub push: RemotePushConfig,
+}
+
+impl Default for RemoteConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: DEFAULT_REMOTE_PORT,
+            allow_lan: false,
+            publish: RemotePublishConfig::default(),
+            push: RemotePushConfig::default(),
+        }
+    }
+}
+
+impl RemoteConfig {
+    /// Parse a `remote` section on top of the defaults (see [`Self::apply`]).
+    pub fn from_value(v: &Value) -> Self {
+        let mut cfg = Self::default();
+        cfg.apply(v);
+        cfg
+    }
+
+    /// Apply one layer's `remote` section key by key; malformed values are
+    /// ignored per key. Both `snake_case` and `camelCase` keys are accepted
+    /// (`allow_lan` / `allowLan`, `browser_frames` / `browserFrames`).
+    pub fn apply(&mut self, v: &Value) {
+        let Some(obj) = v.as_object() else {
+            return;
+        };
+        let pick = |a: &str, b: &str| obj.get(a).or_else(|| obj.get(b));
+        if let Some(enabled) = obj.get("enabled").and_then(Value::as_bool) {
+            self.enabled = enabled;
+        }
+        if let Some(port) = obj.get("port").and_then(Value::as_u64)
+            && (1..=u64::from(u16::MAX)).contains(&port)
+        {
+            self.port = port as u16;
+        }
+        if let Some(lan) = pick("allow_lan", "allowLan").and_then(Value::as_bool) {
+            self.allow_lan = lan;
+        }
+        if let Some(publish) = obj.get("publish").and_then(Value::as_object) {
+            let pick = |a: &str, b: &str| publish.get(a).or_else(|| publish.get(b));
+            if let Some(b) = pick("browser_frames", "browserFrames").and_then(Value::as_bool) {
+                self.publish.browser_frames = b;
+            }
+            if let Some(b) = publish.get("processes").and_then(Value::as_bool) {
+                self.publish.processes = b;
+            }
+        }
+        if let Some(push) = obj.get("push").and_then(Value::as_object) {
+            if let Some(p) = push.get("provider").and_then(Value::as_str) {
+                let p = p.trim().to_ascii_lowercase();
+                self.push.provider = if p.is_empty() { "none".to_string() } else { p };
+            }
+            if let Some(u) = push.get("url").and_then(Value::as_str) {
+                self.push.url = u.trim().to_string();
+            }
+        }
+    }
+
+    /// True when a push provider other than `none` is configured.
+    pub fn push_enabled(&self) -> bool {
+        self.push.provider != "none" && !self.push.provider.is_empty()
+    }
+}
 
 /// Client-only UI overrides. Both fields are plain text (CSS), stored and
 /// served verbatim; the engine never executes them (consumed by the client).
@@ -294,6 +422,9 @@ pub struct ResolvedConfig {
     /// WP-DELEGATION (F8-2): sub-agent delegation policy + concurrency cap.
     #[serde(default)]
     pub delegation: DelegationConfig,
+    /// WP-M1 (F10-1): remote listener + device pairing settings (global).
+    #[serde(default)]
+    pub remote: RemoteConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -320,6 +451,7 @@ impl Default for ResolvedConfig {
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
             delegation: DelegationConfig::default(),
+            remote: RemoteConfig::default(),
         }
     }
 }
@@ -484,6 +616,11 @@ impl ResolvedConfigBuilder {
         self
     }
 
+    pub fn remote(mut self, remote: RemoteConfig) -> Self {
+        self.inner.remote = remote;
+        self
+    }
+
     pub fn ui(mut self, ui: UiConfig) -> Self {
         self.inner.ui = ui;
         self
@@ -519,6 +656,64 @@ mod tests {
         assert_eq!(cfg.model_for("code"), "openai/gpt-4o");
         assert_eq!(cfg.ui.custom_css, "body { color: red; }");
         assert_eq!(cfg.ui.custom_css_files, vec!["./theme.css"]);
+    }
+
+    /// WP-M1 (F10-1): `remote` defaults are off/8790/no-LAN, publish both,
+    /// push none; the section round-trips through serde with those keys.
+    #[test]
+    fn remote_config_defaults_and_serde_round_trip() {
+        let cfg = RemoteConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.port, DEFAULT_REMOTE_PORT);
+        assert!(!cfg.allow_lan);
+        assert!(cfg.publish.browser_frames);
+        assert!(cfg.publish.processes);
+        assert_eq!(cfg.push.provider, "none");
+        assert!(cfg.push.url.is_empty());
+        assert!(!cfg.push_enabled());
+
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["port"], 8790);
+        assert_eq!(json["publish"]["browser_frames"], true);
+        assert_eq!(json["push"]["provider"], "none");
+        let back: RemoteConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(back, cfg);
+
+        // Partial JSON keeps the other defaults.
+        let partial: RemoteConfig =
+            serde_json::from_value(serde_json::json!({ "enabled": true })).unwrap();
+        assert!(partial.enabled);
+        assert_eq!(partial.port, DEFAULT_REMOTE_PORT);
+    }
+
+    #[test]
+    fn remote_config_apply_is_per_key_and_tolerant() {
+        let mut cfg = RemoteConfig::default();
+        cfg.apply(&serde_json::json!({
+            "enabled": true, "port": 9000, "allowLan": true,
+            "publish": { "browserFrames": false },
+            "push": { "provider": "NTFY", "url": " https://ntfy.sh " }
+        }));
+        assert!(cfg.enabled);
+        assert_eq!(cfg.port, 9000);
+        assert!(cfg.allow_lan);
+        assert!(!cfg.publish.browser_frames);
+        assert!(cfg.publish.processes, "untouched key keeps its default");
+        assert_eq!(cfg.push.provider, "ntfy");
+        assert_eq!(cfg.push.url, "https://ntfy.sh");
+        assert!(cfg.push_enabled());
+
+        // Malformed values are ignored key by key; port 0 / > 65535 rejected.
+        cfg.apply(&serde_json::json!({ "enabled": "yes", "port": 0, "allow_lan": 1 }));
+        assert!(cfg.enabled);
+        assert_eq!(cfg.port, 9000);
+        assert!(cfg.allow_lan);
+        cfg.apply(&serde_json::json!({ "port": 70000, "push": { "provider": "" } }));
+        assert_eq!(cfg.port, 9000);
+        assert_eq!(cfg.push.provider, "none");
+        // Non-object section: no-op.
+        cfg.apply(&serde_json::json!("off"));
+        assert!(cfg.enabled);
     }
 
     #[test]
