@@ -1,31 +1,60 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  F10-10: scope cleartext (http://) traffic instead of the blanket
-  `usesCleartextTraffic` the app effectively had before (no manifest
-  attribute + targetSdk 35 would otherwise default to cleartext-off, but the
-  embedded engine on 127.0.0.1 is exempt from the platform's cleartext block
-  as loopback traffic - this file makes that exemption explicit and adds the
-  Android-emulator host alias used in local dev/CI).
+  Network security config for the Bebok Android app.
 
-  Base policy: cleartext is DENIED by default, so a request to any public
-  host over http:// is blocked (verified by the Maestro/manual check in the
-  WP-M3 report).
+  HISTORY
+  - F10-10 (WP-M3) introduced this file with `cleartextTrafficPermitted="false"`
+    as the base policy and an explicit allow-list of the only cleartext hosts
+    that package used: the embedded engine on loopback and the emulator's host
+    alias. It also documented the limitation below.
+  - F10-28 (WP-M6) switched the base policy to `cleartextTrafficPermitted="true"`.
+    Read the decision before "fixing" it back.
 
-  KNOWN LIMITATION (see WP-M3 report, "open issues"): Android's static
-  Network Security Config has no CIDR/range syntax - <domain> entries are
-  exact hostname/IP-literal matches only (this is a documented AOSP
-  limitation, not an oversight here). The design in PLAN-1.6-MOBILE.md #2
-  asks for "127.0.0.1, private RFC1918 ranges and 100.64.0.0/10 (Tailscale)"
-  to be allowed; only the literal, statically-known addresses this package
-  actually exercises are listed below. Remote mode (WP-M1/M4/M6) reaches
-  arbitrary LAN/tailnet IPs chosen at pairing time, which this file cannot
-  allow-list ahead of time - the actual enforcement point for "is this host
-  in a private/tailnet range" has to be a runtime check in the pairing flow
-  (client/src, out of this package's scope), with this NSC's job reduced to
-  "never allow cleartext to the open internet by default".
+  DECISION (F10-28, PLAN-1.6-MOBILE.md section 5, WP-M6 brief)
+  Remote mode reaches a desktop engine over plain HTTP at an address that is
+  only known at pairing time: a Tailscale CGNAT address (100.64.0.0/10) or,
+  when the user deliberately enables `remote.allow_lan`, an RFC1918 LAN
+  address. Android's static Network Security Config has no CIDR / range
+  syntax - `<domain>` entries are exact hostname or IP-literal matches only
+  (documented AOSP limitation) - so "allow cleartext to private and tailnet
+  ranges, deny it to the internet" cannot be expressed here. Two options were
+  weighed:
+
+    (A) HTTPS with the engine's self-signed certificate pinned at pairing.
+        Needs TLS termination in the engine's remote listener plus client
+        pinning. Rejected for 1.6: engine changes are out of WP-M6's scope and
+        the plan schedules `tailscale cert` + rustls for 1.7 (section 9, risk 8).
+        That is the upgrade path: once the listener serves TLS, the base policy
+        below can return to `false` with the pinned cert as the trust anchor.
+
+    (B) Plain HTTP with cleartext scoped by the app, not the OS. CHOSEN.
+        - Over Tailscale the traffic is already WireGuard-encrypted below HTTP;
+          TLS on top would be redundant.
+        - Over LAN the plan accepts cleartext as a 1.6 limitation:
+          `remote.allow_lan` is off by default and the desktop shows a warning
+          when it is switched on.
+        - The enforcement point for "never talk cleartext to the internet"
+          moves into the client: `client/src/core/remote/endpoint-probe.ts`
+          (`hostClass` / `isAllowedRemoteHost`) refuses to pair with or probe
+          any `http://` endpoint whose host is not loopback, RFC1918,
+          link-local, CGNAT 100.64/10, or a `.local` / `.ts.net` / single-label
+          name. The engine only ever publishes addresses from those ranges.
+
+  RESIDUAL RISK (accepted, not introduced here)
+  A device on the same LAN as a desktop with `allow_lan=true` could observe or
+  tamper with the plaintext HTTP between phone and desktop. Mitigations: LAN
+  is off by default, the desktop warns when it is enabled, the per-device
+  bearer token still gates every request, and the tailnet path is encrypted.
+  A malicious page cannot exploit the permissive base policy either: the
+  WebView only loads the bundled app, and every engine request goes through
+  the app's own client code with the address checks above.
+
+  The explicit entries below are kept as documentation of the always-on
+  cleartext hosts (they were the whole allow-list before F10-28 and stay the
+  same when the base policy is tightened again in 1.7).
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
