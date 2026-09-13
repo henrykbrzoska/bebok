@@ -20,7 +20,8 @@
     "cap:android": "cap add android",
     "cap:ios": "cap add ios",
     "android:bundle": "bash scripts/bundle-android.sh",
-    "android:sync": "ng build && cap sync android"
+    "android:sync": "ng build && cap sync android",
+    "android:maestro": "maestro test maestro/smoke.yaml"
   },
   "prettier": {
     "printWidth": 100,
