@@ -7,7 +7,9 @@ import { I18nService } from '../../../i18n/i18n.service';
 /**
  * Reasoning block (F2-5): a bordered `--surface` card, clearly distinct from
  * ordinary assistant text - 11.5px italic muted body behind a "💭 Thinking"
- * header that collapses and expands.
+ * header that collapses and expands. Collapsed to a one-line
+ * "Thinking · N chars" row by default (F6-1b); never affected by the "Expand
+ * tool calls by default" preference, which is about tool calls only.
  */
 @Component({
   selector: 'app-thinking-part',
@@ -21,6 +23,7 @@ import { I18nService } from '../../../i18n/i18n.service';
       >
         <span class="emoji" aria-hidden="true">💭</span>
         <span class="head">{{ t('thinking.head') }}</span>
+        <span class="sep" aria-hidden="true">·</span>
         <span class="preview">{{ preview() }}</span>
         <span class="chevron" aria-hidden="true">{{ open() ? '▾' : '▸' }}</span>
       </button>
@@ -61,6 +64,11 @@ import { I18nService } from '../../../i18n/i18n.service';
     .head {
       font-weight: 600;
       flex: none;
+    }
+    .sep {
+      flex: none;
+      color: var(--text-faint);
+      font-style: normal;
     }
     .preview {
       flex: 1 1 auto;
@@ -111,10 +119,7 @@ export class ThinkingPartComponent {
   readonly open = signal(false);
   readonly html = computed(() => renderMarkdown(this.thinkingPart().text));
 
-  /** First line of the reasoning, shown next to the header while collapsed. */
-  readonly preview = computed(() => {
-    const text = this.thinkingPart().text;
-    const first = text.trim().split('\n', 1)[0] ?? '';
-    return first.length > 80 ? `${first.slice(0, 80)}…` : first;
-  });
+  /** Character count shown next to the header while collapsed, e.g. "1234 chars". */
+  readonly charCount = computed(() => this.thinkingPart().text.trim().length);
+  readonly preview = computed(() => this.t('thinking.charCount', { n: this.charCount() }));
 }

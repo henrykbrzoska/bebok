@@ -3,20 +3,49 @@
     <div class="card" (click)="$event.stopPropagation()">
       <header class="head"><h2><img class="switcher-logo" src="/logo.svg" alt="" aria-hidden="true" />{{ t('projectSwitcher.title') }}</h2><button type="button" class="close" [title]="t('browser.cancel')" (click)="close()">✕</button></header>
       <div class="projects" role="list">
-        @for (entry of entries(); track entry.id) {
-          <div class="project" [class.active]="activeProject()?.id === entry.id" role="listitem">
-            <button type="button" class="project-main" [disabled]="busy()" (click)="select(entry)">
-              <span class="project-name">{{ entry.name }}</span>
-              <span class="project-path">{{ entry.path }}</span>
-              <span class="last-opened">{{ t('projectSwitcher.lastOpened', { time: relativeLastOpened(entry) }) }}</span>
+        @for (bucket of groups(); track groupKey(bucket.name)) {
+          <div class="group">
+            <button type="button" class="group-header" [attr.aria-expanded]="!isCollapsed(bucket.name)" (click)="toggleGroup(bucket.name)">
+              <span class="chevron" [class.collapsed]="isCollapsed(bucket.name)" aria-hidden="true">▾</span>
+              <span class="group-name">{{ bucket.name ?? t('projectSwitcher.group.ungrouped') }}</span>
+              <span class="group-count">{{ bucket.projects.length }}</span>
             </button>
-            <span class="actions">
-              <button type="button" class="icon" [title]="t(entry.pinned ? 'projectSwitcher.unpin' : 'projectSwitcher.pin')" (click)="togglePinned(entry)">{{ entry.pinned ? '★' : '☆' }}</button>
-              <button type="button" class="icon remove" [title]="t('projectSwitcher.remove')" (click)="remove(entry)">✕</button>
-            </span>
+            @if (!isCollapsed(bucket.name)) {
+              @for (entry of bucket.projects; track entry.id) {
+                <div class="project" [class.active]="activeProject()?.id === entry.id" role="listitem">
+                  <button type="button" class="project-main" [disabled]="busy()" (click)="select(entry)">
+                    <span class="project-name">{{ entry.name }}</span>
+                    <span class="project-path">{{ entry.path }}</span>
+                    <span class="last-opened">{{ t('projectSwitcher.lastOpened', { time: relativeLastOpened(entry) }) }}</span>
+                  </button>
+                  <span class="actions">
+                    @if (editingGroupId() === entry.id) {
+                      <input
+                        class="group-input"
+                        type="text"
+                        list="project-switcher-group-names"
+                        [placeholder]="t('projectSwitcher.group.placeholder')"
+                        [ngModel]="groupDraft()"
+                        (ngModelChange)="groupDraft.set($event)"
+                        (keydown.enter)="confirmMoveGroup(entry)"
+                        (keydown.escape)="cancelMoveGroup()"
+                        (blur)="confirmMoveGroup(entry)"
+                      />
+                    } @else {
+                      <button type="button" class="icon" [title]="t('projectSwitcher.group.move')" (click)="startMoveGroup(entry)">🏷️</button>
+                    }
+                    <button type="button" class="icon" [title]="t(entry.pinned ? 'projectSwitcher.unpin' : 'projectSwitcher.pin')" (click)="togglePinned(entry)">{{ entry.pinned ? '★' : '☆' }}</button>
+                    <button type="button" class="icon remove" [title]="t('projectSwitcher.remove')" (click)="remove(entry)">✕</button>
+                  </span>
+                </div>
+              }
+            }
           </div>
         } @empty { <p class="empty">{{ t('projectSwitcher.empty') }}</p> }
       </div>
+      <datalist id="project-switcher-group-names">
+        @for (name of groupNames(); track name) { <option [value]="name"></option> }
+      </datalist>
       <footer class="foot"><button type="button" class="add" [disabled]="busy()" (click)="add()">{{ t('projectSwitcher.add') }}</button></footer>
     </div>
   </div>

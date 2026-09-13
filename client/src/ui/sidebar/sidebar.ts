@@ -5,27 +5,49 @@
  * switcher, session search, agent picker + "+ New", the grouped session list,
  * the bottom nav rail and the engine-status/language footer. Collapsed it
  * animates to a 60px icon rail.
+ *
+ * F9-12: sub-agent sessions (`isSubAgentSession`: parent + alias) render as
+ * nested rows under their parent - indented, with a ↳ glyph, muted, tooltip
+ * "Sub-agent of <parent>". A child whose parent is not in the list (deleted,
+ * or filtered out by the search box) still renders with the glyph at the top
+ * level so it is never mistaken for a normal session.
+ *
+ * F9-13: the bottom nav is an icon rail (inline SVG, `app-nav-icon`) in both
+ * layouts - a horizontal row when expanded, stacked when collapsed - with a
+ * delayed CSS tooltip / native title, `aria-label`, and a badge dot on
+ * Settings while any tool is still uncategorized.
  */
 
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
-import { AgentInfo, SessionMeta } from '../../core/engine.dtos';
-import { EngineClient } from '../../core/engine-client.service';
+import { AgentInfo, SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
+import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
+import { BranchBadge } from '../new-session-dialog/branch-badge';
+import { NewSessionDialog } from '../new-session-dialog/new-session-dialog';
+import { NewSessionDialogStore } from '../new-session-dialog/new-session-dialog.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore, type Screen } from '../shell/shell.store';
 import { StatusDot, type StatusTone } from '../status-dot/status-dot';
+import { NavIcon, type NavIconName } from './nav-icon';
+
+/** Indent per nesting level of a sub-agent row (px). */
+const ROW_INDENT_PX = 14;
+/** Base horizontal padding of a session row (matches `.session-row` CSS). */
+const ROW_BASE_PADDING_PX = 8;
+/** Deepest nesting drawn; deeper chains keep the glyph but stop indenting. */
+const MAX_ROW_DEPTH = 4;
 
 @Component({
   selector: 'app-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, StatusDot],
+  imports: [FormsModule, StatusDot, BranchBadge, NewSessionDialog, NavIcon],
   templateUrl: './sidebar.html',
   styleUrl: './sidebar.css',
 })
@@ -35,7 +57,8 @@ export class Sidebar {
   readonly project = inject(ProjectSessionsStore);
   readonly tabs = inject(OpenSessionsStore);
   readonly activity = inject(SessionActivityStore);
-  private readonly engine = inject(EngineClient);
+  private readonly toolSafety = inject(ToolSafetyStore);
+  private readonly newSessionDialog = inject(NewSessionDialogStore);
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
 
@@ -52,8 +75,9 @@ export class Sidebar {
 
   /** Session search box (filters the grouped list below it). */
   readonly search = signal('');
-  /** Agent preset used by the "+ New" button. */
+  /** Agent preset preselected in the "New session" dialog by "+ New". */
   readonly selectedAgent = signal('code');
+  /** The dialog owns the in-flight state now; kept so the button binding is unchanged. */
   readonly creating = signal(false);
 
   /** Label for the agent `<select>`: `name · model` when a model is pinned. */
@@ -61,32 +85,31 @@ export class Sidebar {
     return agent.model ? `${agent.name} · ${agent.model}` : agent.name;
   }
 
-  /** Create a session in the current directory and open its chat. */
-  async newSession(): Promise<void> {
+  /**
+   * Open the "New session" dialog for the current directory (WP-GIT /
+   * F6-16). The dialog offers agent, model and the git-worktree option, then
+   * creates the session and opens its chat itself.
+   */
+  newSession(): void {
     const dir = this.directory();
-    if (!dir || this.creating()) {
+    if (!dir) {
       return;
     }
-    this.creating.set(true);
-    try {
-      const created = await this.engine.createSession(dir, this.selectedAgent());
-      await this.project.refresh();
-      await this.router.navigate(['/chat', created.sessionID]);
-    } catch {
-      // The Start screen owns error reporting; the sidebar stays quiet.
-      await this.router.navigate(['/']);
-    } finally {
-      this.creating.set(false);
-    }
+    this.newSessionDialog.openFor(dir, { agent: this.selectedAgent() });
   }
 
-  /** Bottom nav rail entries; `rail` is the 2-letter collapsed glyph. */
-  readonly navItems: { screen: Screen; path: string; labelKey: NavLabelKey; railKey: RailKey }[] = [
-    { screen: 'explorer', path: '/explorer', labelKey: 'nav.explorer', railKey: 'sidebar.railExplorer' },
-    { screen: 'terminal', path: '/terminal', labelKey: 'nav.terminal', railKey: 'sidebar.railTerminal' },
-    { screen: 'debug', path: '/debug', labelKey: 'nav.debugLog', railKey: 'sidebar.railDebug' },
-    { screen: 'settings', path: '/settings', labelKey: 'nav.settings', railKey: 'sidebar.railSettings' },
-  ];
+  /** Bottom nav rail entries (F9-13: one SVG icon each, see `nav-icon.ts`). */
+  readonly navItems: { screen: Screen; path: string; labelKey: NavLabelKey; icon: NavIconName }[] =
+    [
+      { screen: 'explorer', path: '/explorer', labelKey: 'nav.explorer', icon: 'explorer' },
+      { screen: 'terminal', path: '/terminal', labelKey: 'nav.terminal', icon: 'terminal' },
+      { screen: 'debug', path: '/debug', labelKey: 'nav.debugLog', icon: 'debug' },
+      { screen: 'stats', path: '/stats', labelKey: 'nav.stats', icon: 'stats' },
+      { screen: 'settings', path: '/settings', labelKey: 'nav.settings', icon: 'settings' },
+    ];
+
+  /** F9-13: Settings badge - tools the safety table does not categorize yet. */
+  readonly uncategorizedCount = this.toolSafety.uncategorizedCount;
 
   /** Engine status: color is never used alone - `statusLabel()` goes with it. */
   readonly statusTone = computed<StatusTone>(() => {
@@ -97,6 +120,7 @@ export class Sidebar {
       case 'reconnecting':
         return 'warning';
       case 'error':
+      case 'unauthorized':
         return 'danger';
       default:
         return 'idle';
@@ -113,6 +137,8 @@ export class Sidebar {
         return this.t('status.reconnecting');
       case 'error':
         return this.t('status.error');
+      case 'unauthorized':
+        return this.t('status.unauthorized');
       default:
         return this.t('status.idle');
     }
@@ -121,6 +147,10 @@ export class Sidebar {
   /**
    * Sessions grouped Pinned / Today / Older. "Pinned" are the sessions the
    * user keeps open (the persisted open-tabs list), the rest split by day.
+   *
+   * F9-12: within a group each top-level session is followed by its
+   * sub-agent children (depth-first, spawn order), so a `task`/`fleet`
+   * child sits right under its parent instead of interleaving by time.
    */
   readonly groups = computed<SessionGroup[]>(() => {
     const query = this.search().trim().toLowerCase();
@@ -139,28 +169,50 @@ export class Sidebar {
       .slice()
       .sort((a, b) => b.updated_at - a.updated_at);
 
-    const pinned = matches.filter((s) => pinnedIds.has(s.id));
-    const rest = matches.filter((s) => !pinnedIds.has(s.id));
+    const tree = buildSessionTree(matches);
+    const pinned = tree.roots.filter((s) => pinnedIds.has(s.id));
+    const rest = tree.roots.filter((s) => !pinnedIds.has(s.id));
+    const expand = (list: SessionMeta[]): SessionRow[] => list.flatMap((s) => tree.rows(s));
 
     return [
-      { key: 'pinned' as const, labelKey: 'sidebar.pinned' as const, sessions: pinned },
+      { key: 'pinned' as const, labelKey: 'sidebar.pinned' as const, rows: expand(pinned) },
       {
         key: 'today' as const,
         labelKey: 'sidebar.today' as const,
-        sessions: rest.filter((s) => s.updated_at >= startOfToday),
+        rows: expand(rest.filter((s) => s.updated_at >= startOfToday)),
       },
       {
         key: 'older' as const,
         labelKey: 'sidebar.older' as const,
-        sessions: rest.filter((s) => s.updated_at < startOfToday),
+        rows: expand(rest.filter((s) => s.updated_at < startOfToday)),
       },
-    ].filter((group) => group.sessions.length > 0);
+    ].filter((group) => group.rows.length > 0);
   });
 
   readonly hasSessions = computed(() => this.project.sessions().length > 0);
 
   sessionTitle(session: SessionMeta): string {
-    return session.alias?.trim() || session.title?.trim() || `${session.id.slice(0, 8)} — ${this.t('start.untitled')}`;
+    return (
+      session.alias?.trim() ||
+      session.title?.trim() ||
+      `${session.id.slice(0, 8)} — ${this.t('start.untitled')}`
+    );
+  }
+
+  /** F9-12: left padding grows with nesting depth (capped). */
+  rowIndent(row: SessionRow): number {
+    return ROW_BASE_PADDING_PX + Math.min(row.depth, MAX_ROW_DEPTH) * ROW_INDENT_PX;
+  }
+
+  /** F9-12: "Sub-agent of <parent>" for children, the plain title otherwise. */
+  rowTooltip(row: SessionRow): string {
+    if (!row.subAgent) {
+      return this.sessionTitle(row.session);
+    }
+    const parent = row.parent
+      ? this.sessionTitle(row.parent)
+      : (parentSessionId(row.session)?.slice(0, 8) ?? '');
+    return `${this.sessionTitle(row.session)} — ${this.t('sidebar.subAgentOf', { parent })}`;
   }
 
   /** `agent · Nk tok · time` - monospace meta line under the title. */
@@ -168,6 +220,11 @@ export class Sidebar {
     const tokens = session.usage.input_tokens + session.usage.output_tokens;
     const formatted = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
     return `${session.agent} · ${formatted} tok · ${this.sessionTime(session.updated_at)}`;
+  }
+
+  /** Branch of a git-worktree session (engine-derived), or null. */
+  worktreeBranch(session: SessionMeta): string | null {
+    return session.worktree_branch?.trim() || null;
   }
 
   sessionTone(session: SessionMeta): StatusTone {
@@ -212,15 +269,68 @@ export class Sidebar {
   }
 }
 
-type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.settings';
-type RailKey =
-  | 'sidebar.railExplorer'
-  | 'sidebar.railTerminal'
-  | 'sidebar.railDebug'
-  | 'sidebar.railSettings';
+type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.stats' | 'nav.settings';
+
+/** One rendered line of the session list (F9-12). */
+export interface SessionRow {
+  session: SessionMeta;
+  /** 0 for a top-level session, 1+ for nested sub-agent children. */
+  depth: number;
+  /** True for a `task`/`fleet` child - drawn with the ↳ glyph even at depth 0
+   *  (orphan: its parent is not in the visible list). */
+  subAgent: boolean;
+  /** The parent row's session when it is in the list (tooltip text). */
+  parent: SessionMeta | null;
+}
 
 interface SessionGroup {
   key: 'pinned' | 'today' | 'older';
   labelKey: 'sidebar.pinned' | 'sidebar.today' | 'sidebar.older';
-  sessions: SessionMeta[];
+  rows: SessionRow[];
+}
+
+/**
+ * F9-12: fold a flat, time-sorted session list into parent -> children.
+ * `roots` are the sessions that render at the top level (normal sessions and
+ * orphaned children); `rows(root)` expands one root into its depth-first
+ * rows. Children are ordered by `created_at` (spawn order). Exported for the
+ * spec.
+ */
+export function buildSessionTree(sessions: readonly SessionMeta[]): {
+  roots: SessionMeta[];
+  rows: (root: SessionMeta) => SessionRow[];
+} {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const children = new Map<string, SessionMeta[]>();
+  const roots: SessionMeta[] = [];
+  for (const session of sessions) {
+    const parentId = parentSessionId(session);
+    if (isSubAgentSession(session) && parentId && byId.has(parentId)) {
+      const list = children.get(parentId) ?? [];
+      list.push(session);
+      children.set(parentId, list);
+    } else {
+      roots.push(session);
+    }
+  }
+  for (const list of children.values()) {
+    list.sort((a, b) => a.created_at - b.created_at);
+  }
+  const rows = (root: SessionMeta): SessionRow[] => {
+    const out: SessionRow[] = [];
+    const seen = new Set<string>();
+    const walk = (session: SessionMeta, depth: number, parent: SessionMeta | null): void => {
+      if (seen.has(session.id)) {
+        return; // defensive: a corrupt parent cycle must not hang the sidebar
+      }
+      seen.add(session.id);
+      out.push({ session, depth, subAgent: isSubAgentSession(session), parent });
+      for (const child of children.get(session.id) ?? []) {
+        walk(child, depth + 1, session);
+      }
+    };
+    walk(root, 0, null);
+    return out;
+  };
+  return { roots, rows };
 }

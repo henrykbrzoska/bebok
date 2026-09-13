@@ -8,6 +8,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { CdkScrollable } from '@angular/cdk/scrolling';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { ElementRef } from '@angular/core';
@@ -26,13 +27,25 @@ import {
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
+import { TaskProgressStore } from '../../core/task-progress.store';
+import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
+import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
+import { ToastHost } from '../../ui/toast/toast-host';
 import { ChatSessionStore } from './chat-session.store';
+import { resolveEffectiveModel } from './effective-model';
 import { MessageRowComponent } from './parts/message-row';
-import { ScrollMinimapComponent } from './parts/scroll-minimap';
+import { ToolRunRowComponent } from './parts/tool-run-row';
 
 const REFRESH_DEBOUNCE_MS = 300;
+/**
+ * F6-2: how many of the newest messages the transcript renders initially, and
+ * how many more each "Load earlier messages" click reveals. `messages` always
+ * holds the full history (index-based SSE patches depend on it); only the
+ * rendered slice is windowed.
+ */
+export const MESSAGE_WINDOW = 60;
 const DRAFT_KEY = 'bebok.sessionDrafts';
 const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -158,17 +171,23 @@ function persistDrafts(drafts: Record<string, string>): void {
 @Component({
   selector: 'app-chat',
   imports: [
+    CdkScrollable,
     FormsModule,
     RouterLink,
     PermissionPopup,
     MessageRowComponent,
-    ScrollMinimapComponent,
+    ToolRunRowComponent,
+    TaskProgressLine,
+    ToastHost,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
 })
 export class ChatView implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
+  private readonly toolSafety = inject(ToolSafetyStore);
+  /** WP-DELEGATION: live progress of the children listed in the active-tasks block. */
+  readonly liveTasks = inject(TaskProgressStore);
   private readonly events = inject(EventsStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -202,12 +221,48 @@ export class ChatView implements OnInit, OnDestroy {
   readonly selectedAgent = signal('code');
   readonly availableModels = signal<string[]>([]);
   readonly selectedModel = signal('');
+  /** F9-9: `config.model` (provider-qualified when the engine gives one) as the last fallback. */
+  readonly configDefaultModel = signal<string | null>(null);
+  /**
+   * F9-9: the model a prompt will actually run on - the explicit selection,
+   * else the engine's `effective_model` (never "(default)"). Empty when
+   * nothing is known yet, which hides the toolbar badge.
+   */
+  readonly effectiveModel = computed(() =>
+    resolveEffectiveModel(
+      this.selectedModel(),
+      this.meta(),
+      this.agents(),
+      this.configDefaultModel(),
+    ),
+  );
 
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
 
   /** M6: filter the transcript by model (driven from the drawer's Session panel). */
   readonly filterModel = this.sessionStore.filterModel;
+
+  /** F6-3: context meter in the toolbar (`42k / 200k · 21%`), from the store. */
+  readonly contextLabel = this.sessionStore.contextLabel;
+  readonly contextLevel = this.sessionStore.contextLevel;
+  readonly contextFill = computed(() =>
+    Math.min(100, Math.max(0, this.sessionStore.contextPercent() ?? 0)),
+  );
+
+  /** F6-4: a compaction request is in flight (manual or automatic). */
+  readonly compacting = signal(false);
+  /** "Compact now" is offered once the engine has enough to summarize. */
+  readonly canCompact = computed(
+    () =>
+      this.sessionStore.canCompact() &&
+      !this.running() &&
+      !this.sending() &&
+      !this.loading() &&
+      !this.compacting(),
+  );
+  /** Sessions already auto-compacted once (never loop on a stubborn gauge). */
+  private readonly autoCompacted = new Set<string>();
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
@@ -246,6 +301,33 @@ export class ChatView implements OnInit, OnDestroy {
     return this.messages().filter((m) => m.meta?.model === filter);
   });
 
+  /**
+   * F6-2: number of newest (filtered) messages actually rendered. Starts at
+   * `MESSAGE_WINDOW`, grows by `loadEarlier()`, resets on session switch.
+   */
+  readonly visibleCount = signal(MESSAGE_WINDOW);
+
+  /** The rendered slice: the last `visibleCount()` of `filteredMessages()`. */
+  readonly windowedMessages = computed<Message[]>(() =>
+    windowMessages(this.filteredMessages(), this.visibleCount()),
+  );
+
+  /** Older messages kept out of the DOM (drives the "Load earlier" control). */
+  readonly hiddenCount = computed(() =>
+    Math.max(0, this.filteredMessages().length - this.visibleCount()),
+  );
+
+  /**
+   * F6-1c: `windowedMessages()` with runs of >= 2 consecutive tool-only
+   * assistant turns folded into one `RunRow` (rendered as `<app-tool-run-row>`
+   * instead of one `<app-message-row>` per turn). Computed from the already
+   * windowed slice, so a run can span - and be split by - the window edge;
+   * that is expected, not a bug (see `groupMessageRuns`).
+   */
+  readonly transcriptRows = computed<TranscriptRow[]>(() =>
+    groupMessageRuns(this.windowedMessages()),
+  );
+
   /** Show the "jump to last user message" button when user has scrolled up
    *  and there is at least one user message in the conversation. */
   readonly showJump = computed<boolean>(() => {
@@ -256,7 +338,8 @@ export class ChatView implements OnInit, OnDestroy {
   });
 
   readonly scrollArea = viewChild<ElementRef<HTMLElement>>('scroll');
-  readonly minimap = viewChild(ScrollMinimapComponent);
+  /** CDK handle on the same element (`cdkScrollable`) for offset measuring. */
+  private readonly scrollable = viewChild(CdkScrollable);
   /** Inline permission prompt (F2-8) - blocks sending while unresolved. */
   readonly permission = viewChild(PermissionPopup);
 
@@ -300,10 +383,15 @@ export class ChatView implements OnInit, OnDestroy {
       }
     });
 
-    // Follow the stream unless the user scrolled up.
+    // Follow the stream unless the user scrolled up. `loading` and the
+    // rendered window are read too: the rows only enter the DOM once the
+    // loading placeholder goes away, and the initial scroll-to-bottom must
+    // happen after that, not while the placeholder is still showing (F6-2).
     effect(() => {
       this.messages();
+      this.windowedMessages();
       this.running();
+      this.loading();
       const el = this.scrollArea();
       if (!el || !this.follow()) {
         return;
@@ -431,8 +519,7 @@ export class ChatView implements OnInit, OnDestroy {
     this.sending.set(false);
     this.filterModel.set(null);
     this.follow.set(true);
-    // Reset minimap geometry for the new session.
-    this.minimap()?.refresh();
+    this.visibleCount.set(MESSAGE_WINDOW);
     await this.loadAll(nextID, seq);
     // Stale navigation already moved on: leave the new tab alone.
     if (seq !== this.loadSeq || nextID !== this.sessionID()) {
@@ -466,6 +553,8 @@ export class ChatView implements OnInit, OnDestroy {
       // a reload or tab switch while a tool call is still in progress.
       this.running.set(meta.running === true || this.activity.isRunning(sessionID));
       this.directory.set(meta.directory);
+      // F7-7: the tool safety map colours historical tool calls' dots.
+      void this.toolSafety.ensure(meta.directory);
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
       // Restore this session's draft (per-session input, survives tab switches).
@@ -488,6 +577,14 @@ export class ChatView implements OnInit, OnDestroy {
         }
         this.agents.set(agents);
         this.thinking.set(cfg.config.thinking ?? 'off');
+        const defaultModel = (cfg.config.model ?? '').trim();
+        this.configDefaultModel.set(
+          !defaultModel
+            ? null
+            : defaultModel.includes('/') || !cfg.config.provider
+              ? defaultModel
+              : `${cfg.config.provider}/${defaultModel}`,
+        );
         const models: string[] = [];
         for (const provider of cfg.providers ?? []) {
           // Only show models whose provider has a resolvable API key.
@@ -502,8 +599,6 @@ export class ChatView implements OnInit, OnDestroy {
       } catch {
         /* switcher lists are non-critical */
       }
-      // Recompute minimap after messages load + render.
-      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
         return;
@@ -577,13 +672,27 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.messages.set(messages);
       this.reconcilePending();
-      // Refresh minimap after transcript sync.
-      requestAnimationFrame(() => this.minimap()?.refresh());
     } catch (err) {
       if (sessionID !== this.sessionID()) {
         return;
       }
       this.error.set(this.describe(err));
+    }
+  }
+
+  /** Re-read session metadata (usage, context gauge) once a turn settles. */
+  private async refreshMeta(): Promise<void> {
+    const sessionID = this.sessionID();
+    if (!sessionID || this.loading()) {
+      return;
+    }
+    try {
+      const meta = await this.engine.sessionMeta(sessionID);
+      if (sessionID === this.sessionID()) {
+        this.meta.set(meta);
+      }
+    } catch {
+      /* metadata refresh is best-effort; the next load re-reads it */
     }
   }
 
@@ -615,6 +724,7 @@ export class ChatView implements OnInit, OnDestroy {
         this.running.set(running);
         if (!running) {
           this.scheduleRefresh();
+          void this.refreshMeta();
           this.activeTasks.set([]);
           const err = event.properties?.['error'];
           if (typeof err === 'string' && err) {
@@ -702,13 +812,36 @@ export class ChatView implements OnInit, OnDestroy {
     if (!el) {
       return;
     }
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const distance =
+      this.scrollable()?.measureScrollOffset('bottom') ??
+      el.scrollHeight - el.scrollTop - el.clientHeight;
     this.follow.set(distance < 90);
   }
 
-  /** Scroll to the last user message in the current (filtered) transcript. */
+  /**
+   * F6-2: reveal the next `MESSAGE_WINDOW` older messages. The viewport is
+   * kept anchored on the row the user was looking at: the newly rendered rows
+   * grow the content above it, so `scrollTop` is advanced by that growth.
+   */
+  loadEarlier(): void {
+    if (this.hiddenCount() === 0) {
+      return;
+    }
+    const el = this.scrollArea()?.nativeElement;
+    const heightBefore = el?.scrollHeight ?? 0;
+    const topBefore = el?.scrollTop ?? 0;
+    this.visibleCount.update((count) => count + MESSAGE_WINDOW);
+    if (!el) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
+    });
+  }
+
+  /** Scroll to the last user message among the rendered (windowed) rows. */
   scrollToLastUser(): void {
-    const msgs = this.filteredMessages();
+    const msgs = this.windowedMessages();
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'user') {
         const el = this.scrollArea()?.nativeElement;
@@ -781,12 +914,34 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Send the first queued message when the agent is idle. */
   private async drainQueue(): Promise<void> {
-    if (this.running() || this.sending() || this.queue().length === 0) {
+    if (this.running() || this.sending() || this.compacting() || this.queue().length === 0) {
       return;
     }
     const sessionID = this.sessionID();
     if (!sessionID) {
       return;
+    }
+    // F6-4: the meter crossed the auto-compact threshold - compact first and
+    // carry the queue over to the fork, which drains it once loaded.
+    if (
+      this.sessionStore.needsAutoCompact() &&
+      this.sessionStore.canCompact() &&
+      !this.autoCompacted.has(sessionID)
+    ) {
+      this.autoCompacted.add(sessionID);
+      const forked = await this.compactInto(sessionID);
+      if (forked) {
+        this.queuedBySession.set(forked, this.queue());
+        this.pendingBySession.set(forked, this.pending());
+        this.queue.set([]);
+        this.pending.set([]);
+        await this.router.navigate(['/chat', forked]);
+        return;
+      }
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
+      // Compaction failed: fall through and send anyway (error is shown).
     }
     const head = this.queue()[0];
     this.sending.set(true);
@@ -941,6 +1096,42 @@ export class ChatView implements OnInit, OnDestroy {
   onAgentChange(value: string): void {
     this.selectedAgent.set(value);
     this.selectedModel.set('');
+  }
+
+  /**
+   * "Compact now" (toolbar + palette, F6-4): summarize the older messages into
+   * a fresh forked session and open it. Compaction is fork-based, so the
+   * caller navigates to the new id rather than expecting an in-place change.
+   */
+  async compactNow(): Promise<void> {
+    if (!this.canCompact()) {
+      return;
+    }
+    const sessionID = this.sessionID();
+    const forked = await this.compactInto(sessionID);
+    if (forked && sessionID === this.sessionID()) {
+      await this.router.navigate(['/chat', forked]);
+    }
+  }
+
+  /** Run one compaction of `sessionID`; the forked session id, or null on error. */
+  private async compactInto(sessionID: string): Promise<string | null> {
+    this.compacting.set(true);
+    this.error.set(null);
+    try {
+      const result = await this.engine.compactSession(
+        sessionID,
+        this.sessionStore.compactBudget(),
+      );
+      return result.sessionID;
+    } catch (err) {
+      if (sessionID === this.sessionID()) {
+        this.error.set(this.describe(err));
+      }
+      return null;
+    } finally {
+      this.compacting.set(false);
+    }
   }
 
   async abortTurn(): Promise<void> {
@@ -1157,6 +1348,78 @@ export class ChatView implements OnInit, OnDestroy {
   removeAttachment(id: string): void {
     this.attachments.update((list) => list.filter((a) => a.id !== id));
   }
+}
+
+/** F6-2: the newest `count` entries of `messages` (the whole list if shorter). */
+export function windowMessages<T>(messages: readonly T[], count: number): T[] {
+  if (count <= 0) {
+    return [];
+  }
+  return messages.length > count ? messages.slice(-count) : [...messages];
+}
+
+/**
+ * F6-1c: a "tool-only" turn - the unit `groupMessageRuns` merges - is an
+ * assistant message with no `text` part: only tool calls/results, and
+ * optionally thinking/usage/image parts. A user message, or any assistant
+ * message that *does* carry a text part, is never tool-only and always ends
+ * a run.
+ */
+export function isToolOnlyTurn(message: Message): boolean {
+  return message.role === 'assistant' && !message.parts.some((part) => part.type === 'text');
+}
+
+/** One rendered transcript row: an ordinary message, or a merged run. */
+export interface SingleMessageRow {
+  kind: 'single';
+  message: Message;
+}
+
+/**
+ * A run of >= 2 consecutive tool-only turns (F6-1c), rendered as one
+ * `<app-tool-run-row>`. `key` is the first message's id: stable for the
+ * run's lifetime (it never changes as later turns join the same run), used
+ * both as the `@for` track expression and, inside `ToolRunRowComponent`, to
+ * decide whether an expand/collapse override still applies.
+ */
+export interface ToolRunRow {
+  kind: 'run';
+  key: string;
+  messages: Message[];
+}
+
+export type TranscriptRow = SingleMessageRow | ToolRunRow;
+
+/**
+ * F6-1c: walk a (already windowed/filtered) message list and fold every run
+ * of >= 2 consecutive tool-only assistant turns into one `ToolRunRow`. A
+ * lone tool-only turn - one with no tool-only neighbour - stays a
+ * `SingleMessageRow`, rendered exactly as before merging existed; so does
+ * every user message and every assistant turn that carries a text part.
+ */
+export function groupMessageRuns(messages: readonly Message[]): TranscriptRow[] {
+  const rows: TranscriptRow[] = [];
+  let run: Message[] = [];
+
+  const flush = (): void => {
+    if (run.length >= 2) {
+      rows.push({ kind: 'run', key: run[0].id, messages: run });
+    } else if (run.length === 1) {
+      rows.push({ kind: 'single', message: run[0] });
+    }
+    run = [];
+  };
+
+  for (const message of messages) {
+    if (isToolOnlyTurn(message)) {
+      run.push(message);
+      continue;
+    }
+    flush();
+    rows.push({ kind: 'single', message });
+  }
+  flush();
+  return rows;
 }
 
 /** Recover a user prompt into the composer when opening its retry branch. */

@@ -1,0 +1,283 @@
+/**
+ * F6-1 / F6-1c: `ToolGroupComponent` and `summarizeToolRun`, the shared
+ * collapsible "N tool calls · read ×2, edit" summary row used both for a run
+ * of tool calls inside one message (`message-row.ts`) and for a merged run
+ * of tool-only messages (`tool-run-row.ts`).
+ */
+
+import { provideZonelessChangeDetection } from '@angular/core';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+
+import { Part, SafetyCategory } from '../../../core/engine.dtos';
+import {
+  EMPTY_SAFETY,
+  GroupRow,
+  RenderedPart,
+  ToolGroupComponent,
+  childModelsOf,
+  shortModel,
+  summarizeToolRun,
+} from './tool-group';
+
+function task(model: string | undefined, name = 'task'): Part {
+  return {
+    type: 'tool',
+    id: `${name}-${Math.random()}`,
+    name,
+    state: {
+      state: 'completed',
+      input: {},
+      output: 'ok',
+      title: name,
+      structured: { taskID: 't', name: 'n', agent: 'code', childSessionID: 'c', ...(model ? { model } : {}) },
+    },
+  };
+}
+
+function tool(
+  name: string,
+  state: 'completed' | 'error' | 'running' = 'completed',
+  safety?: SafetyCategory,
+): Part {
+  const extra = safety ? { safety } : {};
+  switch (state) {
+    case 'error':
+      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, error: 'boom' }, ...extra };
+    case 'running':
+      return { type: 'tool', id: `${name}-${Math.random()}`, name, state: { state, input: {}, started_at: 1 }, ...extra };
+    default:
+      return {
+        type: 'tool',
+        id: `${name}-${Math.random()}`,
+        name,
+        state: { state: 'completed', input: {}, output: 'ok', title: name },
+        ...extra,
+      };
+  }
+}
+
+function row(part: Part, toolIndex = 0): RenderedPart {
+  return { kind: 'part', part, toolIndex };
+}
+
+describe('summarizeToolRun (F6-1 / F6-1c)', () => {
+  it('is completed with an empty name summary for no rows', () => {
+    expect(summarizeToolRun([])).toEqual({
+      state: 'completed',
+      names: '',
+      safety: { ...EMPTY_SAFETY },
+      childModels: [],
+    });
+  });
+
+  it('F7-7: counts calls per stamped safety category, gray for unstamped ones', () => {
+    const summary = summarizeToolRun([
+      row(tool('read', 'completed', 'safe')),
+      row(tool('read', 'completed', 'safe')),
+      row(tool('fetch', 'running', 'caution')),
+      row(tool('bash', 'error', 'dangerous')),
+      row(tool('mcp__x__y')),
+    ]);
+    expect(summary.safety).toEqual({ safe: 2, caution: 1, dangerous: 1, uncategorized: 1 });
+  });
+
+  it('F7-7: resolves unstamped (historical) parts by tool name through the resolver', () => {
+    const resolve = (name: string): SafetyCategory | null =>
+      ({ read: 'safe', edit: 'dangerous' } as Record<string, SafetyCategory>)[name] ?? null;
+    const summary = summarizeToolRun(
+      [row(tool('read')), row(tool('edit')), row(tool('mystery')), row(tool('bash', 'completed', 'caution'))],
+      resolve,
+    );
+    // A stamped category always wins over the resolver.
+    expect(summary.safety).toEqual({ safe: 1, caution: 1, dangerous: 1, uncategorized: 1 });
+  });
+
+  it('counts repeated names in first-appearance order', () => {
+    const summary = summarizeToolRun([row(tool('read')), row(tool('read')), row(tool('grep'))]);
+    expect(summary.names).toBe('read ×2, grep');
+    expect(summary.state).toBe('completed');
+  });
+
+  it('reports the worst state: error beats running beats completed', () => {
+    expect(summarizeToolRun([row(tool('a')), row(tool('b', 'running'))]).state).toBe('running');
+    expect(
+      summarizeToolRun([row(tool('a', 'running')), row(tool('b', 'error')), row(tool('c'))]).state,
+    ).toBe('error');
+  });
+
+  it('F9-9: lists task/fleet child models that differ from the session model, deduped', () => {
+    const rows = [
+      row(task('openai/gpt-5.6-mini')),
+      row(task('openai/gpt-5.6-luna')),
+      row(task('openai/gpt-5.6-mini', 'fleet')),
+      row(task(undefined)),
+      row(task('zai/glm-4.5', 'task_wait')),
+      row(tool('read')),
+    ];
+    expect(summarizeToolRun(rows, undefined, 'openai/gpt-5.6-luna').childModels).toEqual(['openai/gpt-5.6-mini']);
+    expect(childModelsOf(rows, '')).toEqual(['openai/gpt-5.6-mini', 'openai/gpt-5.6-luna']);
+    // Provider-less session model still matches its prefixed twin.
+    expect(childModelsOf(rows, 'gpt-5.6-luna')).toEqual(['openai/gpt-5.6-mini']);
+    expect(shortModel('openai/gpt-5.6-mini')).toBe('gpt-5.6-mini');
+    expect(shortModel('gpt-5')).toBe('gpt-5');
+  });
+
+  it('truncates the name list beyond 4 entries with an ellipsis', () => {
+    const summary = summarizeToolRun(
+      ['a', 'b', 'c', 'd', 'e'].map((n) => row(tool(n))),
+    );
+    expect(summary.names).toBe('a, b, c, d, …');
+  });
+});
+
+describe('ToolGroupComponent (F6-1 / F6-1c)', () => {
+  let fixture: ComponentFixture<ToolGroupComponent>;
+
+  function root(): HTMLElement {
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [ToolGroupComponent],
+      providers: [provideZonelessChangeDetection(), provideRouter([])],
+    });
+    fixture = TestBed.createComponent(ToolGroupComponent);
+  });
+
+  function setInputs(rows: GroupRow[], open: boolean): void {
+    fixture.componentRef.setInput('rows', rows);
+    fixture.componentRef.setInput('state', 'completed');
+    fixture.componentRef.setInput('names', 'read ×2, edit');
+    fixture.componentRef.setInput('count', 3);
+    fixture.componentRef.setInput('open', open);
+  }
+
+  it('renders the collapsed summary button with the given count/names, closed', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], false);
+    await fixture.whenStable();
+
+    const button = root().querySelector<HTMLButtonElement>('.group-head');
+    expect(button).not.toBeNull();
+    expect(button!.getAttribute('type')).toBe('button');
+    expect(button!.getAttribute('aria-expanded')).toBe('false');
+    expect(button!.textContent).toContain('3 tool calls');
+    expect(button!.textContent).toContain('read ×2, edit');
+    expect(root().querySelector('.group-body')).toBeNull();
+  });
+
+  it('emits (toggle) on click without owning the open state itself', async () => {
+    setInputs([row(tool('read'))], false);
+    await fixture.whenStable();
+    let toggled = 0;
+    fixture.componentInstance.toggle.subscribe(() => toggled++);
+
+    root().querySelector<HTMLButtonElement>('.group-head')!.click();
+    await fixture.whenStable();
+
+    expect(toggled).toBe(1);
+    // The component is stateless: `open` still reflects the (unchanged) input.
+    expect(root().querySelector('.group-head')!.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('renders each RenderedPart row via app-part-renderer when open', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], true);
+    await fixture.whenStable();
+
+    expect(root().querySelectorAll('app-part-renderer').length).toBe(2);
+    expect(root().querySelectorAll('.turn-strip').length).toBe(0);
+  });
+
+  it('renders a TurnStrip row as a small per-turn usage label, not a part', async () => {
+    const rows: GroupRow[] = [
+      { kind: 'turn', tokensIn: 12, tokensOut: 340 },
+      row(tool('read')),
+      { kind: 'turn', tokensIn: 5, tokensOut: 20 },
+      row(tool('edit')),
+    ];
+    setInputs(rows, true);
+    await fixture.whenStable();
+
+    const strips = root().querySelectorAll('.turn-strip');
+    expect(strips.length).toBe(2);
+    expect(strips[0].textContent).toContain('12');
+    expect(strips[0].textContent).toContain('340');
+    expect(strips[0].classList.contains('first')).toBeTrue();
+    expect(strips[1].classList.contains('first')).toBeFalse();
+    expect(root().querySelectorAll('app-part-renderer').length).toBe(2);
+  });
+
+  it('falls back to the legacy single worst-state dot with no safety input', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], false);
+    await fixture.whenStable();
+
+    expect(root().querySelector('.safety-cluster')).toBeNull();
+    expect(root().querySelector('.group-head > .dot.state-completed')).not.toBeNull();
+  });
+
+  it('renders a per-category count cluster once safety counts are present (F7-7)', async () => {
+    setInputs([row(tool('read')), row(tool('edit'))], false);
+    fixture.componentRef.setInput('safety', { safe: 3, caution: 1, dangerous: 2, uncategorized: 4 });
+    await fixture.whenStable();
+
+    const cluster = root().querySelector('.safety-cluster');
+    expect(cluster).not.toBeNull();
+    expect(root().querySelector('.group-head > .dot')).toBeNull();
+    const dots = root().querySelectorAll('.cluster-dot');
+    expect(dots.length).toBe(4);
+    expect(dots[0].classList.contains('safety-safe')).toBeTrue();
+    expect(dots[0].textContent).toContain('3');
+    expect(dots[1].classList.contains('safety-caution')).toBeTrue();
+    expect(dots[1].textContent).toContain('1');
+    expect(dots[2].classList.contains('safety-dangerous')).toBeTrue();
+    expect(dots[2].textContent).toContain('2');
+    expect(dots[3].classList.contains('safety-uncategorized')).toBeTrue();
+    expect(dots[3].textContent).toContain('4');
+    // Tooltip: per-category counts + the colour legend.
+    const title = cluster!.getAttribute('title') ?? '';
+    expect(title).toContain('3 safe');
+    expect(title).toContain('4 uncategorized');
+    expect(title).toContain('legend');
+  });
+
+  it('omits zero-count categories from the cluster', async () => {
+    setInputs([row(tool('read'))], false);
+    fixture.componentRef.setInput('safety', { safe: 0, caution: 0, dangerous: 5, uncategorized: 0 });
+    await fixture.whenStable();
+
+    expect(root().querySelectorAll('.cluster-dot').length).toBe(1);
+    expect(root().querySelector('.cluster-dot')!.classList.contains('safety-dangerous')).toBeTrue();
+  });
+
+  it('F9-9: renders " · <model>" after the names for a differing child model, deriving it from rows', async () => {
+    setInputs([row(task('openai/gpt-5.6-mini')), row(tool('task_wait'))], false);
+    fixture.componentRef.setInput('sessionModel', 'openai/gpt-5.6-luna');
+    await fixture.whenStable();
+
+    const badge = root().querySelector('[data-testid="group-child-model"]');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent!.trim()).toBe('gpt-5.6-mini');
+    expect(root().querySelectorAll('.group-sep').length).toBe(2);
+
+    // Same model as the session: nothing to show.
+    fixture.componentRef.setInput('sessionModel', 'openai/gpt-5.6-mini');
+    await fixture.whenStable();
+    expect(root().querySelector('[data-testid="group-child-model"]')).toBeNull();
+
+    // A precomputed list wins over the derivation.
+    fixture.componentRef.setInput('childModels', ['anthropic/claude-z', 'zai/claude-z']);
+    await fixture.whenStable();
+    expect(root().querySelector('[data-testid="group-child-model"]')!.textContent!.trim()).toBe('claude-z');
+  });
+
+  it('rings the cluster when the worst state is error', async () => {
+    setInputs([row(tool('a', 'error'))], false);
+    fixture.componentRef.setInput('state', 'error');
+    fixture.componentRef.setInput('safety', { safe: 0, caution: 0, dangerous: 1, uncategorized: 0 });
+    await fixture.whenStable();
+
+    expect(root().querySelector('.safety-cluster')!.classList.contains('ring-failed')).toBeTrue();
+  });
+});

@@ -72,3 +72,53 @@
   background: var(--surface-3);
   border-color: var(--border-strong);
 }
+
+.chip.about {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  text-decoration: none;
+}
+
+.about-icon {
+  font-size: var(--fs-12-5);
+  line-height: 1;
+}
+
+/* Icon-only below ~1100px: the label collapses, the tooltip (`title`) still
+   carries the full text - keeps the topbar from crowding the breadcrumb on
+   narrower windows while the 1400px layout stays untouched. */
+@media (max-width: 1100px) {
+  .about-label {
+    display: none;
+  }
+}
+
+/* --- F9-12: sub-agent breadcrumb ---------------------------------------- */
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+
+.crumb-parent:hover {
+  text-decoration-color: var(--accent);
+}
+
+.crumb-subagent {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  margin: 0 2px;
+}

@@ -7,18 +7,23 @@
 
 import { Injectable, computed, signal } from '@angular/core';
 
-import { authFetch } from './auth.interceptor';
+import { authFetch, onEngineUnauthorized } from './auth.interceptor';
 import {
   AbortResponse,
   AbortTaskResponse,
+  AgentEntry,
   AgentInfo,
   AgentListResponse,
+  ChangeDiffResponse,
+  ChangeEntry,
+  ChangesResponse,
   CompactResponse,
   ConfigResponse,
   CreatePtyResponse,
   CreateSessionResponse,
   CreateSessionResult,
   DebugLogResponse,
+  DelegationModelsResponse,
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
@@ -33,14 +38,30 @@ import {
   PermissionResponse,
   PendingPermissionSnapshot,
   ProjectEntry,
+  ProjectGitInfo,
   ProjectPatch,
   ProjectsListResponse,
+  ProcessInfo,
+  ProcessLogResponse,
   PromptBody,
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
+  RevertChangeResponse,
+  SessionProcessesResponse,
+  RemoveWorktreeResponse,
+  SessionAgentsResponse,
   SessionListResponse,
   SessionMeta,
+  SafetyCategory,
+  StatsQuery,
+  StatsResponse,
+  ToolSafetyResponse,
+  WorktreeSpec,
+  BrowserAction,
+  BrowserActionResult,
+  BrowserFrame,
+  BrowserState,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -62,6 +83,18 @@ export class EngineClient {
    * succeeds, so the start view must know the platform before that.
    */
   readonly isTauri = signal(this.transport.platform === 'tauri');
+  /**
+   * True once the engine rejected our capability token (401): the engine was
+   * restarted (new per-launch token) or the address changed. Every request
+   * keeps failing until the user hands us the new `BEBOK_READY` address (or,
+   * on the desktop shell, we re-read it from the sidecar), so the shell shows
+   * a blocking reconnect prompt while this is set. Cleared by `reconnect()`.
+   */
+  readonly unauthorized = signal(false);
+
+  constructor() {
+    onEngineUnauthorized(() => this.unauthorized.set(true));
+  }
 
   get platform(): TransportStrategy['platform'] {
     return this.transport.platform;
@@ -90,6 +123,31 @@ export class EngineClient {
    */
   reconfigure(conn: EngineConnection): void {
     this.connection.set(this.transport.adoptRemote(conn));
+  }
+
+  /**
+   * Recover from a rejected token. Browser/remote mode: `rawUrl` is the new
+   * `BEBOK_READY http://host:port/?token=…` line (a plain URL keeps the saved
+   * token). Desktop shell: re-reads the sidecar's current address. Resolves
+   * once a probe gets through; rejects (leaving `unauthorized` set) when the
+   * engine still answers 401 or is unreachable.
+   */
+  async reconnect(rawUrl?: string): Promise<void> {
+    if (rawUrl !== undefined) {
+      const normalized = rawUrl.trim().replace(/\/+$/, '');
+      if (!normalized) {
+        throw new Error('engine address is empty');
+      }
+      this.reconfigure({ kind: 'http', baseUrl: normalized });
+    } else {
+      this.connection.set(null);
+      await this.connect();
+    }
+    this.unauthorized.set(false);
+    await this.ping();
+    if (this.unauthorized()) {
+      throw new Error('engine rejected the token (401)');
+    }
   }
 
   /**
@@ -130,11 +188,23 @@ export class EngineClient {
   // REST endpoints
   // ---------------------------------------------------------------------------
 
-  createSession(directory: string, agent?: string, model?: string): Promise<CreateSessionResponse> {
+  /**
+   * Create a session in `directory`. With a `worktree` spec (WP-GIT) the
+   * engine first runs `git worktree add <directory>/.bebok/worktrees/<branch>`
+   * and binds the session to that worktree instead; the response then also
+   * carries `directory` + `worktree` (see `CreateWorktreeSessionResponse`).
+   */
+  createSession(
+    directory: string,
+    agent?: string,
+    model?: string,
+    worktree?: WorktreeSpec,
+  ): Promise<CreateSessionResponse> {
     return this.request<CreateSessionResponse>('POST', '/session', {
       directory,
       agent: agent ?? 'code',
       ...(model ? { model } : {}),
+      ...(worktree ? { worktree } : {}),
     });
   }
 
@@ -205,6 +275,13 @@ export class EngineClient {
     );
   }
 
+  /** F6-12: live + finished sub-agents delegated from `id` (`task`/`fleet`). */
+  sessionAgents(id: string): Promise<AgentEntry[]> {
+    return this.request<SessionAgentsResponse>('GET', `/session/${id}/agents`).then(
+      (d) => d.agents,
+    );
+  }
+
   exportSession(id: string): Promise<ExportResponse> {
     return this.request<ExportResponse>('GET', `/session/${id}/export`);
   }
@@ -215,12 +292,42 @@ export class EngineClient {
     });
   }
 
-  prompt(
-    id: string,
-    body: PromptBody | string,
-    agent?: string,
-    model?: string,
-  ): Promise<unknown> {
+  // ---------------------------------------------------------------------------
+  // WP-CHANGES (F6-9): engine-tracked file changes
+  // ---------------------------------------------------------------------------
+
+  /** `GET /session/{id}/changes` -> tracked files with +/- line counts. */
+  sessionChanges(id: string): Promise<ChangeEntry[]> {
+    return this.request<ChangesResponse>('GET', `/session/${encodeURIComponent(id)}/changes`).then(
+      (d) => d.changes,
+    );
+  }
+
+  /**
+   * `GET /session/{id}/changes/diff?path=[&session=]` -> unified diff against
+   * the baseline. F9-6: `session` picks the (descendant) session whose
+   * tracker holds the path; omitted, the engine searches main then children.
+   */
+  sessionChangeDiff(id: string, path: string, session?: string): Promise<ChangeDiffResponse> {
+    const query =
+      `path=${encodeURIComponent(path)}` +
+      (session ? `&session=${encodeURIComponent(session)}` : '');
+    return this.request<ChangeDiffResponse>(
+      'GET',
+      `/session/${encodeURIComponent(id)}/changes/diff?${query}`,
+    );
+  }
+
+  /** `POST /session/{id}/changes/revert` -> restore the baseline (bytes or absence). */
+  revertSessionChange(id: string, path: string, session?: string): Promise<RevertChangeResponse> {
+    return this.request<RevertChangeResponse>(
+      'POST',
+      `/session/${encodeURIComponent(id)}/changes/revert`,
+      session ? { path, session } : { path },
+    );
+  }
+
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string): Promise<unknown> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
@@ -230,8 +337,8 @@ export class EngineClient {
           }
         : {
             message: body.message,
-            ...(body.agent ?? agent ? { agent: (body.agent ?? agent) as string } : {}),
-            ...(body.model ?? model ? { model: (body.model ?? model) as string } : {}),
+            ...((body.agent ?? agent) ? { agent: (body.agent ?? agent) as string } : {}),
+            ...((body.model ?? model) ? { model: (body.model ?? model) as string } : {}),
             ...(body.images?.length ? { images: body.images } : {}),
           };
     return this.request('POST', `/session/${id}/prompt`, payload);
@@ -239,6 +346,31 @@ export class EngineClient {
 
   abort(id: string): Promise<AbortResponse> {
     return this.request<AbortResponse>('POST', `/session/${id}/abort`);
+  }
+
+  // --- browser viewer (WP-BROWSER2 / F7-6) ---------------------------------
+
+  /** State of the session's agent browser (open/headed/url/display). */
+  browserState(id: string): Promise<BrowserState> {
+    return this.request<BrowserState>('GET', `/session/${id}/browser`);
+  }
+
+  /** One frame right now; rejects with a 404 error when no browser is open. */
+  browserFrame(id: string): Promise<BrowserFrame> {
+    return this.request<BrowserFrame>('GET', `/session/${id}/browser/frame`);
+  }
+
+  /** Drive the session's browser by hand (same tools + permission rules as the model). */
+  browserAction(
+    id: string,
+    action: BrowserAction,
+    body: Record<string, unknown> = {},
+  ): Promise<BrowserActionResult> {
+    return this.request<BrowserActionResult>(
+      'POST',
+      `/session/${id}/browser/${encodeURIComponent(action)}`,
+      body,
+    );
   }
 
   /** Abort a specific child task spawned by the orchestrator. */
@@ -338,6 +470,38 @@ export class EngineClient {
     return this.request<ConfigResponse>('PUT', `/config?${query}`, delta);
   }
 
+  /** F9-10: `GET /delegation/models?directory=` -> the sub-agent model policy resolved right now. */
+  delegationModels(directory: string): Promise<DelegationModelsResponse> {
+    return this.request<DelegationModelsResponse>(
+      'GET',
+      `/delegation/models?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /** F7-7: every tool the engine knows with its safety category. */
+  getToolSafety(directory: string): Promise<ToolSafetyResponse> {
+    return this.request<ToolSafetyResponse>(
+      'GET',
+      `/tools/safety?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * F7-7: merge category overrides into a config layer's `tool_safety` map
+   * (`null` removes an override = reset to default). Global by default - a
+   * category is a user-level judgement shared by every project.
+   */
+  putToolSafety(
+    directory: string,
+    overrides: Record<string, SafetyCategory | null>,
+    opts?: { scope?: 'project' | 'global' },
+  ): Promise<ToolSafetyResponse> {
+    const query =
+      `directory=${encodeURIComponent(directory)}` +
+      (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '');
+    return this.request<ToolSafetyResponse>('PUT', `/tools/safety?${query}`, { overrides });
+  }
+
   /** Probe Docker access for a directory (resolves `runtimes.docker`). */
   checkDocker(directory: string): Promise<DockerStatus> {
     return this.request<{ docker: DockerStatus }>(
@@ -364,7 +528,11 @@ export class EngineClient {
     );
   }
 
-  fsFileWrite(directory: string, path: string, content: string): Promise<{ path: string; saved: boolean }> {
+  fsFileWrite(
+    directory: string,
+    path: string,
+    content: string,
+  ): Promise<{ path: string; saved: boolean }> {
     return this.request<{ path: string; saved: boolean }>(
       'PUT',
       `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
@@ -414,13 +582,39 @@ export class EngineClient {
     return this.request<ProjectEntry>('POST', `/projects/${encodeURIComponent(id)}/open`);
   }
 
+  // ---------------------------------------------------------------------------
+  // WP-GIT: git probe + worktree removal (/projects/{id}/git*)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Probe the registered project's git state. Never fails for a non-repo:
+   * `is_repo` is false and the other fields null (missing `git` included).
+   */
+  projectGit(id: string): Promise<ProjectGitInfo> {
+    return this.request<ProjectGitInfo>('GET', `/projects/${encodeURIComponent(id)}/git`);
+  }
+
+  /**
+   * Remove a Bebok worktree (`git worktree remove --force`). Explicit and
+   * separate from `deleteSession` by design; the engine refuses (400) any
+   * path outside the project's own `.bebok/worktrees/`.
+   */
+  removeWorktree(id: string, path: string): Promise<RemoveWorktreeResponse> {
+    return this.request<RemoveWorktreeResponse>(
+      'POST',
+      `/projects/${encodeURIComponent(id)}/git/worktree/remove`,
+      { path },
+    );
+  }
+
   /**
    * List the subdirectories of `path`, or the host's roots when `path` is
    * omitted. Directory names only - this endpoint never returns file contents.
    */
   browseDirectory(path?: string | null, showHidden = false): Promise<FsBrowseResponse> {
     const query =
-      (path ? `path=${encodeURIComponent(path)}&` : '') + `show_hidden=${showHidden ? 'true' : 'false'}`;
+      (path ? `path=${encodeURIComponent(path)}&` : '') +
+      `show_hidden=${showHidden ? 'true' : 'false'}`;
     return this.request<FsBrowseResponse>('GET', `/fs/browse?${query}`);
   }
 
@@ -437,14 +631,30 @@ export class EngineClient {
   }
 
   // ---------------------------------------------------------------------------
+  // F7-5: usage statistics
+  // ---------------------------------------------------------------------------
+
+  /** `GET /stats` - aggregates over every persisted session (all projects when `directory` is omitted). */
+  stats(query: StatsQuery = {}): Promise<StatsResponse> {
+    const params = new URLSearchParams();
+    if (query.directory) {
+      params.set('directory', query.directory);
+    }
+    if (query.from !== undefined && query.from !== null) {
+      params.set('from', String(query.from));
+    }
+    if (query.to !== undefined && query.to !== null) {
+      params.set('to', String(query.to));
+    }
+    const qs = params.toString();
+    return this.request<StatsResponse>('GET', qs ? `/stats?${qs}` : '/stats');
+  }
+
+  // ---------------------------------------------------------------------------
   // M5: terminal (PTY)
   // ---------------------------------------------------------------------------
 
-  createPty(
-    directory: string,
-    cols?: number,
-    rows?: number,
-  ): Promise<CreatePtyResponse> {
+  createPty(directory: string, cols?: number, rows?: number): Promise<CreatePtyResponse> {
     return this.request<CreatePtyResponse>('POST', '/pty', {
       ...(directory ? { directory } : {}),
       ...(cols ? { cols } : {}),
@@ -478,6 +688,32 @@ export class EngineClient {
   }
 
   // ---------------------------------------------------------------------------
+  // F9-14: background process registry
+  // ---------------------------------------------------------------------------
+
+  /** `GET /session/{id}/processes` -> processes of the session and its descendants. */
+  sessionProcesses(sessionId: string): Promise<ProcessInfo[]> {
+    return this.request<SessionProcessesResponse>(
+      'GET',
+      `/session/${encodeURIComponent(sessionId)}/processes`,
+    ).then((d) => d.processes ?? []);
+  }
+
+  /** `GET /processes/{id}/log?tail=<bytes>` -> the (tail of the) log file. */
+  processLog(id: string, tail?: number): Promise<ProcessLogResponse> {
+    const query = tail !== undefined ? `?tail=${encodeURIComponent(String(tail))}` : '';
+    return this.request<ProcessLogResponse>(
+      'GET',
+      `/processes/${encodeURIComponent(id)}/log${query}`,
+    );
+  }
+
+  /** `POST /processes/{id}/kill` -> the process row after the kill (whole tree). */
+  killProcess(id: string): Promise<ProcessInfo> {
+    return this.request<ProcessInfo>('POST', `/processes/${encodeURIComponent(id)}/kill`);
+  }
+
+  // ---------------------------------------------------------------------------
   // helpers
   // ---------------------------------------------------------------------------
 
@@ -503,9 +739,7 @@ export class EngineClient {
       } catch {
         /* keep status only */
       }
-      throw new Error(
-        `engine ${method} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`,
-      );
+      throw new Error(`engine ${method} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
     }
     if (res.status === 204) {
       return undefined as T;

@@ -72,14 +72,14 @@ describe('ShellStore', () => {
     store.closeCommandPalette();
     expect(store.commandPaletteOpen()).toBeFalse();
 
-    expect(store.density()).toBe('comfortable');
-    store.toggleDensity();
-    expect(store.density()).toBe('compact');
-
     expect(store.rightDrawerPanels()).toEqual({
       session: true,
       explorer: true,
       terminal: false,
+      agents: false,
+      changes: false,
+      preview: false,
+      browser: false,
     });
     store.toggleRightDrawerPanel('terminal');
     expect(store.rightDrawerPanels().terminal).toBeTrue();

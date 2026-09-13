@@ -26,6 +26,14 @@ mod server;
 mod services;
 mod state;
 
+/// Default `RUST_LOG` when the environment does not set one. chromiumoxide's
+/// CDP handler logs a WARN for every event it cannot deserialise (~20 per
+/// `browser_open` against current Chrome, all harmless), so it is capped at
+/// ERROR to keep the engine log readable (E2E R12).
+fn default_log_filter() -> &'static str {
+    "info,chromiumoxide::handler=error"
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Logs go to stderr; stdout stays clean for the `BEBOK_READY` line that
@@ -33,7 +41,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_log_filter().into()),
         )
         .init();
 
@@ -42,5 +51,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let spec = cli::parse_cli(&std::env::args().skip(1).collect::<Vec<_>>())?;
-    server::serve(spec).await
+    let result = server::serve(spec).await;
+    // F9-14: last-resort sweep (runtime-free) so a serve error or an early
+    // return never leaves a background process behind.
+    let swept = bebok_tools::processes::ProcessRegistry::global().kill_all_blocking();
+    if swept > 0 {
+        tracing::warn!("swept {swept} background process(es) still running at exit");
+    }
+    result
 }

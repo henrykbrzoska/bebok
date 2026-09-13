@@ -25,6 +25,45 @@ pub struct ChildTask {
     pub child_session_id: String,
     pub name: String,
     pub agent: String,
+    /// Effective model the child runs on (F6-12; `None` for legacy callers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Unix ms when the child turn was registered (F6-12).
+    #[serde(rename = "startedAt")]
+    pub started_at: i64,
+    /// WP-DELEGATION: `queued` while waiting for a concurrency slot
+    /// (`delegation.max_concurrent`), `running` once its turn loop started.
+    pub status: String,
+    /// WP-DELEGATION: `true` when spawned with `background: true` (the parent
+    /// collects the result later via `task_wait`).
+    pub background: bool,
+}
+
+/// WP-DELEGATION: outcome of one finished child task, kept on the parent so
+/// `task_wait` / `task_status` can hand it to the model after the fact
+/// (background tasks return nothing from the spawning `task` call).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TaskResult {
+    #[serde(rename = "taskID")]
+    pub task_id: String,
+    pub name: String,
+    pub agent: String,
+    #[serde(rename = "childSessionID")]
+    pub child_session_id: String,
+    /// `completed` | `error` | `aborted` (same vocabulary as `task.ended`).
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The child's final assistant text (its report); empty on failure.
+    pub text: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(rename = "startedAt")]
+    pub started_at: i64,
+    #[serde(rename = "endedAt")]
+    pub ended_at: i64,
+    /// Set once a `task_wait` handed this result to the model.
+    pub collected: bool,
 }
 
 struct PendingPermissionRequest {
@@ -40,6 +79,12 @@ pub struct SessionState {
     pub(crate) instance_dir: PathBuf,
     disk_dir: PathBuf,
     config: ResolvedConfig,
+    /// The owning instance's *live* config (F7-7), so a tool-safety
+    /// re-categorization saved in Settings applies to the next call of an
+    /// already-open session without reopening it. `None` only in unit tests
+    /// that build a bare state; `config` above stays the per-session snapshot
+    /// everything else reads.
+    live_config: Option<std::sync::Arc<std::sync::RwLock<ResolvedConfig>>>,
     pub(crate) meta: RwLock<Session>,
     pub(crate) messages: RwLock<Vec<Message>>,
     pub(crate) max_message_index: AtomicUsize,
@@ -59,6 +104,12 @@ pub struct SessionState {
     child_names: Mutex<HashSet<String>>,
     /// Monotonic counter for fallback child names (`<role>-<n>`).
     child_name_counter: Mutex<u64>,
+    /// WP-DELEGATION: finished child results awaiting / after collection by
+    /// `task_wait` (in completion order), plus the wake-up for waiters.
+    task_results: Mutex<Vec<TaskResult>>,
+    task_done: tokio::sync::Notify,
+    /// WP-DELEGATION: per-session concurrency gate for running children.
+    child_slots: crate::agent::delegation::SlotGate,
 }
 
 impl SessionState {
@@ -74,6 +125,7 @@ impl SessionState {
             instance_dir,
             disk_dir,
             config,
+            live_config: None,
             meta: RwLock::new(meta),
             messages: RwLock::new(Vec::new()),
             max_message_index: AtomicUsize::new(0),
@@ -85,6 +137,9 @@ impl SessionState {
             child_tasks: Mutex::new(HashMap::new()),
             child_names: Mutex::new(HashSet::new()),
             child_name_counter: Mutex::new(1),
+            task_results: Mutex::new(Vec::new()),
+            task_done: tokio::sync::Notify::new(),
+            child_slots: crate::agent::delegation::SlotGate::new(),
         }
     }
 
@@ -102,6 +157,25 @@ impl SessionState {
 
     pub fn config_snapshot(&self) -> ResolvedConfig {
         self.config.clone()
+    }
+
+    /// Attach the owning instance's live config (see `live_config`).
+    pub(crate) fn with_live_config(
+        mut self,
+        live: std::sync::Arc<std::sync::RwLock<ResolvedConfig>>,
+    ) -> Self {
+        self.live_config = Some(live);
+        self
+    }
+
+    /// The current `tool_safety` overrides (F7-7): the instance's live config
+    /// when attached, else this session's snapshot.
+    pub fn tool_safety_overrides(&self) -> crate::tool_safety::SafetyOverrides {
+        let section = match &self.live_config {
+            Some(live) => live.read().unwrap().tool_safety.clone(),
+            None => self.config.tool_safety.clone(),
+        };
+        crate::tool_safety::SafetyOverrides::parse(&section)
     }
 
     pub async fn meta_snapshot(&self) -> Session {
@@ -187,6 +261,23 @@ impl SessionState {
         Ok(idx)
     }
 
+    /// F9-7: append a status row to the latest assistant message, persist
+    /// it and return the message index. Returns `None` when the transcript
+    /// has no assistant message yet. Never creates a message of its own: an
+    /// empty assistant turn would be sent to the provider on the next call.
+    pub async fn append_status_part(&self, part: crate::session::Part) -> Option<usize> {
+        let idx = {
+            let mut messages = self.messages.write().await;
+            let idx = messages
+                .iter()
+                .rposition(|m| m.role == crate::session::Role::Assistant)?;
+            messages[idx].parts.push(part);
+            idx
+        };
+        self.persist_message_at(idx).await;
+        Some(idx)
+    }
+
     /// Set the session title from the first prompt (M1 heuristic).
     pub async fn set_title_if_empty(&self, prompt: &str) -> bool {
         let mut meta = self.meta.write().await;
@@ -233,6 +324,64 @@ impl SessionState {
         let session = {
             let mut meta = self.meta.write().await;
             meta.usage.add(input, output, cost, cache_read, cache_write);
+            meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// F9-9: persist a per-prompt model override so `effective_model` (and
+    /// the next turn) reflect what the user picked in the toolbar.
+    pub async fn set_model(&self, model: Option<&str>) {
+        let model = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_string);
+        let session = {
+            let mut meta = self.meta.write().await;
+            if meta.model == model {
+                return;
+            }
+            meta.model = model;
+            meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// Record the context size of the latest LLM call (tokens the provider
+    /// read as input, cache hits included) together with the model that
+    /// produced it, and persist metadata. Overwrites: this is a live gauge,
+    /// not a running total (see `Session::context_used`).
+    pub async fn set_context_used(&self, tokens: u64, model: &str) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            meta.context_used = Some(tokens);
+            meta.context_model = Some(model.to_string());
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// Record the outcome of this session's delegated sub-turn (F6-12).
+    ///
+    /// Called by the `task`/`fleet` tools on the *child* session when its
+    /// turn ends, with the same `status` string that goes out in the
+    /// `task.ended` SSE event (`completed` | `aborted` | `error`). Persisted
+    /// to the session metadata so `GET /session/{parent}/agents` can report
+    /// an honest `done` / `failed` / `aborted` after the fact instead of
+    /// guessing from the transcript.
+    pub async fn set_task_status(&self, status: &str, error: Option<&str>) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            meta.task_status = Some(status.to_string());
+            meta.task_error = error.map(str::to_string);
             meta.touch();
             meta.clone()
         };
@@ -353,18 +502,139 @@ impl SessionState {
         agent: &str,
         token: CancellationToken,
     ) -> ChildTask {
+        self.register_child_task_with_model(
+            task_id,
+            description,
+            child_session_id,
+            name,
+            agent,
+            None,
+            token,
+        )
+        .await
+    }
+
+    /// Same as [`register_child_task`](Self::register_child_task) but records
+    /// the child's effective model so `GET /session/{id}/agents` can show it
+    /// while the child is still running (F6-12).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_child_task_with_model(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        model: Option<&str>,
+        token: CancellationToken,
+    ) -> ChildTask {
         let info = ChildTask {
             task_id: task_id.to_string(),
             description: description.to_string(),
             child_session_id: child_session_id.to_string(),
             name: name.to_string(),
             agent: agent.to_string(),
+            model: model.map(str::to_string),
+            started_at: crate::util::now_ms(),
+            status: "running".to_string(),
+            background: false,
         };
         self.child_tasks
             .lock()
             .await
             .insert(task_id.to_string(), (token, info.clone()));
         info
+    }
+
+    /// WP-DELEGATION: register a child with an explicit initial `status`
+    /// (`queued` | `running`) and `background` flag.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_child_task_full(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        model: Option<&str>,
+        status: &str,
+        background: bool,
+        token: CancellationToken,
+    ) -> ChildTask {
+        let info = ChildTask {
+            task_id: task_id.to_string(),
+            description: description.to_string(),
+            child_session_id: child_session_id.to_string(),
+            name: name.to_string(),
+            agent: agent.to_string(),
+            model: model.map(str::to_string),
+            started_at: crate::util::now_ms(),
+            status: status.to_string(),
+            background,
+        };
+        self.child_tasks
+            .lock()
+            .await
+            .insert(task_id.to_string(), (token, info.clone()));
+        info
+    }
+
+    /// WP-DELEGATION: flip a live child's `status` (`queued` -> `running`).
+    pub async fn set_child_task_status(&self, task_id: &str, status: &str) -> Option<ChildTask> {
+        let mut tasks = self.child_tasks.lock().await;
+        let (_, info) = tasks.get_mut(task_id)?;
+        info.status = status.to_string();
+        Some(info.clone())
+    }
+
+    /// WP-DELEGATION: look up one live child by task id or by name.
+    pub async fn find_child_task(&self, id_or_name: &str) -> Option<ChildTask> {
+        let tasks = self.child_tasks.lock().await;
+        if let Some((_, info)) = tasks.get(id_or_name) {
+            return Some(info.clone());
+        }
+        tasks
+            .values()
+            .find(|(_, info)| info.name == id_or_name)
+            .map(|(_, info)| info.clone())
+    }
+
+    /// WP-DELEGATION: the per-session gate that caps concurrently running
+    /// children (`delegation.max_concurrent`).
+    pub fn child_slots(&self) -> &crate::agent::delegation::SlotGate {
+        &self.child_slots
+    }
+
+    /// WP-DELEGATION: record a finished child's outcome and wake `task_wait`.
+    pub async fn push_task_result(&self, result: TaskResult) {
+        self.task_results.lock().await.push(result);
+        self.task_done.notify_waiters();
+    }
+
+    /// WP-DELEGATION: every recorded result (collected or not), oldest first.
+    pub async fn task_results_snapshot(&self) -> Vec<TaskResult> {
+        self.task_results.lock().await.clone()
+    }
+
+    /// WP-DELEGATION: mark results as handed to the model. Returns the ones
+    /// that were newly collected.
+    pub async fn collect_task_results(&self, task_ids: &[String]) -> Vec<TaskResult> {
+        let mut results = self.task_results.lock().await;
+        let mut out = Vec::new();
+        for r in results.iter_mut() {
+            if !r.collected && task_ids.iter().any(|id| id == &r.task_id) {
+                r.collected = true;
+                out.push(r.clone());
+            }
+        }
+        out
+    }
+
+    /// WP-DELEGATION: resolves when the next child result is pushed (a
+    /// `Notified` future armed *before* the caller re-checks the results, so
+    /// a result landing in between is not missed).
+    pub fn task_done_notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.task_done.notified()
     }
 
     /// Unregister a child task (when it finishes or is aborted).
@@ -433,6 +703,15 @@ impl SessionState {
             .values()
             .map(|request| request.properties.clone())
             .collect()
+    }
+
+    /// The registered properties of one pending ask (`None` once resolved).
+    pub async fn pending_permission_request(&self, request_id: &str) -> Option<Value> {
+        self.pending_asks
+            .lock()
+            .await
+            .get(request_id)
+            .map(|request| request.properties.clone())
     }
 
     /// Drop a pending permission request (the turn moved on / aborted).

@@ -15,6 +15,18 @@ pub enum Role {
     Assistant,
 }
 
+/// Safety tier of a tool call, resolved by the permission engine (F7-1).
+/// Kept independent from `permission::Verdict` so the wire model in this
+/// module doesn't need a dependency on the permission crate module; the
+/// mapping is a one-line match at the call site (`agent::gate`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionLevel {
+    Allow,
+    Ask,
+    Deny,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Part {
@@ -34,6 +46,24 @@ pub enum Part {
         id: String,
         name: String,
         state: ToolState,
+        /// Verdict the permission engine applied to this call (F7-1).
+        /// `None` until the gate resolves it (briefly, while still
+        /// `Pending`) and for parts persisted before this field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        permission: Option<PermissionLevel>,
+        /// Whether the call is considered mutating/dangerous (F7-1),
+        /// independent of the verdict that was actually applied - e.g. a
+        /// project rule can auto-`allow` a mutating call, which still shows
+        /// as mutating. Same `None`-until-resolved rule as `permission`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mutating: Option<bool>,
+        /// Explicit safety category of the tool (F7-7): `safe` / `caution` /
+        /// `dangerous` / `uncategorized`, resolved from the built-in default
+        /// table plus the `tool_safety` config map when the gate runs.
+        /// `None` for parts persisted before this field existed - clients
+        /// derive it from the tool name via `GET /tools/safety` then.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        safety: Option<crate::tool_safety::SafetyCategory>,
     },
     Usage {
         input_tokens: u64,
@@ -44,6 +74,28 @@ pub enum Part {
         cache_read_input_tokens: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cache_creation_input_tokens: Option<u64>,
+    },
+    /// F9-7: a deterministic, token-free status row the engine appends to
+    /// the parent transcript while sub-agents run (`task.started`,
+    /// `task.progress` milestones, `task.ended`). Rendered by the client as
+    /// a compact system-style line; never sent to the model
+    /// (`agent::request` ignores it) and never counted as assistant text.
+    Status {
+        /// `task.started` | `task.progress` | `task.ended` | free-form.
+        kind: String,
+        text: String,
+        /// Unix ms.
+        at: i64,
+        #[serde(rename = "taskID", default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(
+            rename = "childSessionID",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        child_session_id: Option<String>,
     },
 }
 
@@ -189,6 +241,9 @@ impl Message {
             id,
             name,
             state: ToolState::Pending { input },
+            permission: None,
+            mutating: None,
+            safety: None,
         });
     }
 
@@ -239,6 +294,7 @@ impl Message {
                     id,
                     name,
                     state: ToolState::Pending { input },
+                    ..
                 } => Some((id.clone(), name.clone(), input.clone())),
                 _ => None,
             })
@@ -257,19 +313,43 @@ impl Message {
         let Some(idx) = self.tool_part_index(id) else {
             return false;
         };
-        let Part::Tool { name, state, .. } = &mut self.parts[idx] else {
+        let Part::Tool { state, .. } = &mut self.parts[idx] else {
             return false;
         };
         let ToolState::Pending { input } = state else {
             return false;
         };
         let input = input.clone();
-        let name = name.clone();
-        self.parts[idx] = Part::Tool {
-            id: id.to_string(),
-            name,
-            state: ToolState::Running { input, started_at },
+        *state = ToolState::Running { input, started_at };
+        true
+    }
+
+    /// Stamp the permission verdict + mutating flag resolved for a tool call
+    /// (F7-1). Called once by the permission gate, right after it resolves
+    /// the call - before it runs or is denied - so the tier is visible even
+    /// while the state is still `Pending`/`Running`.
+    pub fn set_tool_permission(
+        &mut self,
+        id: &str,
+        permission: PermissionLevel,
+        mutating: bool,
+        safety: crate::tool_safety::SafetyCategory,
+    ) -> bool {
+        let Some(idx) = self.tool_part_index(id) else {
+            return false;
         };
+        let Part::Tool {
+            permission: p,
+            mutating: m,
+            safety: s,
+            ..
+        } = &mut self.parts[idx]
+        else {
+            return false;
+        };
+        *p = Some(permission);
+        *m = Some(mutating);
+        *s = Some(safety);
         true
     }
 
@@ -380,8 +460,28 @@ pub struct Session {
     pub updated_at: i64,
     #[serde(default)]
     pub usage: UsageTotals,
+    /// Tokens the provider read for the *last* LLM call of the most recent
+    /// turn (input + cache read + cache write): the live size of the context
+    /// window in use. Unlike `usage`, this is not cumulative. `None` until
+    /// the first turn completes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_used: Option<u64>,
+    /// Model that produced `context_used`. The context window is resolved
+    /// live from the model catalog at response time (never persisted), so a
+    /// catalog update takes effect without a migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share: Option<Value>,
+    /// F6-12: outcome of the delegated sub-turn for sessions spawned by the
+    /// `task`/`fleet` tools (`completed` | `aborted` | `error`), persisted
+    /// when `task.ended` fires. `None` for top-level sessions and for
+    /// children still running (or interrupted by an engine restart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<String>,
+    /// F6-12: error text that accompanied `task_status` (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_error: Option<String>,
 }
 
 impl Session {
@@ -398,7 +498,11 @@ impl Session {
             created_at: now,
             updated_at: now,
             usage: UsageTotals::default(),
+            context_used: None,
+            context_model: None,
             share: None,
+            task_status: None,
+            task_error: None,
         }
     }
 
@@ -467,5 +571,126 @@ mod image_tests {
         assert!(matches!(m.parts[0], Part::Text { .. }));
         assert!(matches!(m.parts[1], Part::Image { .. }));
         assert_eq!(m.text_content(), "hi");
+    }
+}
+
+#[cfg(test)]
+mod tool_permission_tests {
+    use super::*;
+    use crate::tool_safety::SafetyCategory;
+
+    #[test]
+    fn add_tool_call_starts_with_no_permission_resolved() {
+        let mut m = Message::new(Role::Assistant);
+        m.add_tool_call("c1".into(), "bash".into(), serde_json::json!({}));
+        let Part::Tool {
+            permission,
+            mutating,
+            ..
+        } = &m.parts[0]
+        else {
+            panic!("expected a tool part");
+        };
+        assert!(permission.is_none());
+        assert!(mutating.is_none());
+    }
+
+    #[test]
+    fn set_tool_permission_stamps_the_matching_call() {
+        let mut m = Message::new(Role::Assistant);
+        m.add_tool_call("c1".into(), "bash".into(), serde_json::json!({}));
+        assert!(m.set_tool_permission("c1", PermissionLevel::Ask, true, SafetyCategory::Dangerous));
+        let Part::Tool {
+            permission,
+            mutating,
+            safety,
+            ..
+        } = &m.parts[0]
+        else {
+            panic!("expected a tool part");
+        };
+        assert_eq!(*permission, Some(PermissionLevel::Ask));
+        assert_eq!(*mutating, Some(true));
+        assert_eq!(*safety, Some(SafetyCategory::Dangerous));
+
+        // Unknown id: no-op, reports false.
+        assert!(!m.set_tool_permission(
+            "missing",
+            PermissionLevel::Allow,
+            false,
+            SafetyCategory::Safe
+        ));
+    }
+
+    #[test]
+    fn mark_tool_running_preserves_the_stamped_permission() {
+        // F7-1: the gate stamps permission/mutating while the call is still
+        // `Pending`; the later `Pending -> Running` transition must not drop
+        // those fields (this used to reconstruct the whole `Part::Tool`).
+        let mut m = Message::new(Role::Assistant);
+        m.add_tool_call("c1".into(), "write_file".into(), serde_json::json!({}));
+        assert!(m.set_tool_permission(
+            "c1",
+            PermissionLevel::Allow,
+            true,
+            SafetyCategory::Dangerous
+        ));
+        assert!(m.mark_tool_running("c1", 1234));
+        let Part::Tool {
+            permission,
+            mutating,
+            state,
+            ..
+        } = &m.parts[0]
+        else {
+            panic!("expected a tool part");
+        };
+        assert_eq!(*permission, Some(PermissionLevel::Allow));
+        assert_eq!(*mutating, Some(true));
+        assert!(matches!(state, ToolState::Running { .. }));
+    }
+
+    #[test]
+    fn permission_and_mutating_are_omitted_from_json_until_resolved() {
+        let mut m = Message::new(Role::Assistant);
+        m.add_tool_call("c1".into(), "read_file".into(), serde_json::json!({}));
+        let v = serde_json::to_value(&m).unwrap();
+        let tool_json = &v["parts"][0];
+        assert!(tool_json.get("permission").is_none());
+        assert!(tool_json.get("mutating").is_none());
+        assert!(tool_json.get("safety").is_none());
+
+        m.set_tool_permission("c1", PermissionLevel::Allow, false, SafetyCategory::Safe);
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["parts"][0]["permission"], "allow");
+        assert_eq!(v["parts"][0]["mutating"], false);
+        assert_eq!(v["parts"][0]["safety"], "safe");
+    }
+
+    #[test]
+    fn legacy_tool_part_without_permission_fields_still_deserializes() {
+        let legacy = serde_json::json!({
+            "id": "00000000-0000-0000-0000-000000000002",
+            "role": "assistant",
+            "parts": [{
+                "type": "tool",
+                "id": "c1",
+                "name": "bash",
+                "state": { "state": "completed", "input": {}, "output": "ok", "title": "bash" },
+            }],
+        });
+        let m: Message = serde_json::from_value(legacy).unwrap();
+        let Part::Tool {
+            permission,
+            mutating,
+            safety,
+            ..
+        } = &m.parts[0]
+        else {
+            panic!("expected a tool part");
+        };
+        assert!(permission.is_none());
+        assert!(mutating.is_none());
+        assert!(safety.is_none());
     }
 }

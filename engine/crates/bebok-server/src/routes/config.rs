@@ -223,6 +223,12 @@ pub async fn put_config(
             instance.add_context_note(note);
         }
     }
+    if delta.get("verify").is_some() && old_cfg.frontend_verify() != cfg.frontend_verify() {
+        instance.add_context_note(format!(
+            "Frontend verification policy changed to '{}' (verify.frontend)",
+            cfg.frontend_verify().as_str()
+        ));
+    }
     if delta.get("yolo").is_some() {
         instance.add_context_note(format!(
             "YOLO mode was {} (permission prompts {} bypassed)",

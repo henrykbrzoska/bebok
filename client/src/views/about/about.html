@@ -1,0 +1,13 @@
+<section class="about">
+  <div class="about-col">
+    <a class="back" routerLink="/">{{ t('about.back') }}</a>
+
+    @if (loading()) {
+      <p class="status">{{ t('about.loading') }}</p>
+    } @else if (error()) {
+      <p class="status error">{{ t('about.error') }}</p>
+    } @else {
+      <app-markdown-view [source]="content()" />
+    }
+  </div>
+</section>

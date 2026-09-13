@@ -1,4 +1,4 @@
-<div class="shell" [class.density-compact]="density() === 'compact'">
+<div class="shell density-compact">
   <app-sidebar />
 
   <div class="main">
@@ -15,6 +15,7 @@
     </div>
   </div>
 
+  <app-reconnect-banner />
   <app-command-palette />
   <app-project-switcher />
   <app-directory-browser />

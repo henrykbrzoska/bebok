@@ -21,6 +21,8 @@ import { ProjectsStore } from '../../core/projects.store';
 import { EventsStore } from '../../core/events.store';
 import { AgentInfo, ProjectEntry, SessionMeta } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { BranchBadge } from '../../ui/new-session-dialog/branch-badge';
+import { NewSessionDialogStore } from '../../ui/new-session-dialog/new-session-dialog.store';
 import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { StatusDot, type StatusTone } from '../../ui/status-dot/status-dot';
 
@@ -28,7 +30,7 @@ export type ConnectionPhase = 'connecting' | 'live' | 'error';
 
 @Component({
   selector: 'app-start',
-  imports: [FormsModule, RouterLink, StatusDot],
+  imports: [FormsModule, RouterLink, StatusDot, BranchBadge],
   templateUrl: './start.html',
   styleUrl: './start.css',
 })
@@ -41,6 +43,7 @@ export class StartView implements OnInit, OnDestroy {
   private readonly project = inject(ProjectSessionsStore);
   private readonly projects = inject(ProjectsStore);
   private readonly picker = inject(DirectoryPicker);
+  private readonly newSessionDialog = inject(NewSessionDialogStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -68,6 +71,14 @@ export class StartView implements OnInit, OnDestroy {
   /** Session id pending delete confirmation (two-step confirm). */
   readonly confirmDeleteId = signal<string | null>(null);
   readonly deletingId = signal<string | null>(null);
+  /**
+   * WP-GIT: "also remove the git worktree" checkbox shown while a worktree
+   * session's delete is armed. Off by default - removal is offered, never
+   * forced, and only runs after the session delete succeeded.
+   */
+  readonly removeWorktreeToo = signal(false);
+  /** Transient confirmation after a worktree was removed. */
+  readonly notice = signal<string | null>(null);
   private deleteTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** One of the three states the handoff asks for: connecting / live / error. */
@@ -214,20 +225,17 @@ export class StartView implements OnInit, OnDestroy {
     await this.project.refresh();
   }
 
-  async startSession(): Promise<void> {
+  /**
+   * Open the "New session" dialog (WP-GIT / F6-16): agent, model and the
+   * git-worktree option live there; it creates the session and navigates.
+   */
+  startSession(): void {
     const dir = this.directory();
     if (!dir) {
       return;
     }
-    this.creating.set(true);
     this.error.set(null);
-    try {
-      const created = await this.engine.createSession(dir, this.selectedAgent());
-      await this.router.navigate(['/chat', created.sessionID]);
-    } catch (err) {
-      this.error.set(this.describe(err));
-      this.creating.set(false);
-    }
+    this.newSessionDialog.openFor(dir, { agent: this.selectedAgent() });
   }
 
   async openSession(session: SessionMeta): Promise<void> {
@@ -238,6 +246,11 @@ export class StartView implements OnInit, OnDestroy {
     return agent.model ? `${agent.name} · ${agent.model}` : agent.name;
   }
 
+  /** Branch of a git-worktree session (engine-derived), or null. */
+  worktreeBranch(session: SessionMeta): string | null {
+    return session.worktree_branch?.trim() || null;
+  }
+
   /** First click on the delete button: arm the confirmation (auto-cancels). */
   requestDeleteSession(session: SessionMeta, event: Event): void {
     event.stopPropagation();
@@ -245,7 +258,9 @@ export class StartView implements OnInit, OnDestroy {
       return;
     }
     this.confirmDeleteId.set(session.id);
+    this.removeWorktreeToo.set(false);
     this.error.set(null);
+    this.notice.set(null);
     if (this.deleteTimer) {
       clearTimeout(this.deleteTimer);
     }
@@ -258,17 +273,39 @@ export class StartView implements OnInit, OnDestroy {
     if (this.deletingId() !== null) {
       return;
     }
+    const removeWorktree = this.removeWorktreeToo();
     this.cancelDelete();
     this.deletingId.set(session.id);
     this.error.set(null);
+    this.notice.set(null);
     try {
-      await this.engine.deleteSession(session.id);
+      const deleted = await this.engine.deleteSession(session.id);
       this.project.forget(session.id);
       this.openSessions.close(session.id);
+      // WP-GIT: the engine never removes the worktree on its own; only an
+      // explicitly ticked checkbox triggers the separate removal call.
+      if (removeWorktree && deleted.is_worktree && deleted.worktree_path) {
+        await this.removeWorktree(deleted.project_root ?? this.directory(), deleted.worktree_path);
+      }
     } catch (err) {
       this.error.set(this.describe(err));
     } finally {
       this.deletingId.set(null);
+    }
+  }
+
+  /** `POST /projects/{id}/git/worktree/remove` for the project owning `root`. */
+  private async removeWorktree(root: string | null, path: string): Promise<void> {
+    const entry = this.projects.findByPath(root) ?? this.projects.findByPath(this.directory());
+    if (!entry) {
+      this.error.set(this.t('start.worktreeRemoveFailed', { error: this.t('newSession.worktreeNoProject') }));
+      return;
+    }
+    try {
+      await this.engine.removeWorktree(entry.id, path);
+      this.notice.set(this.t('start.worktreeRemoved'));
+    } catch (err) {
+      this.error.set(this.t('start.worktreeRemoveFailed', { error: this.describe(err) }));
     }
   }
 
@@ -278,6 +315,7 @@ export class StartView implements OnInit, OnDestroy {
       this.deleteTimer = null;
     }
     this.confirmDeleteId.set(null);
+    this.removeWorktreeToo.set(false);
   }
 
   ngOnDestroy(): void {

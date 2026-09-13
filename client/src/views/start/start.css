@@ -357,3 +357,28 @@
   border-color: var(--border-strong);
   color: var(--text);
 }
+
+/* WP-GIT (F6-16): worktree-removal offer next to the armed delete confirm,
+   and the transient "worktree removed" notice. */
+.worktree-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.worktree-check input {
+  accent-color: var(--danger);
+}
+
+.notice-banner {
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-panel);
+  padding: var(--space-10) var(--space-14);
+  font-size: var(--fs-12);
+}

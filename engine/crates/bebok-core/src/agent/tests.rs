@@ -7,7 +7,7 @@ mod tests {
     use crate::permission::{PermissionAnswer, ResolveOutcome};
     use crate::session::Part;
     use crate::session::ToolState;
-    use crate::store::InstanceStore;
+    use crate::store::{InstanceStore, SessionState};
     use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost, Verdict};
     use bebok_llm::{ChatRequest, Provider, StreamEvent, ToolCall, Usage};
     use bebok_mcp::{McpManager, McpServerSpec, McpTransport};
@@ -653,13 +653,18 @@ if __name__ == "__main__":
             .count();
         assert_eq!(resolved, 1);
 
-        // A rule `ask -> allow` was persisted to the project config.
+        // A rule `ask -> allow` was persisted to the project config — for
+        // the TOOL (`bash(*)`), not the exact call (F9-5).
         let config_text = tokio::fs::read_to_string(project.join(".bebok").join("config.json"))
             .await
             .unwrap();
         assert!(
-            config_text.contains("bash(pwd)"),
+            config_text.contains("bash(*)"),
             "rule persisted: {config_text}"
+        );
+        assert!(
+            !config_text.contains("bash(pwd)"),
+            "rule must not be per call: {config_text}"
         );
         assert!(
             config_text.contains("allow"),
@@ -1217,6 +1222,10 @@ if __name__ == "__main__":
             child_session_id: "uuid-child".to_string(),
             name: "fix-ci".to_string(),
             agent: "code".to_string(),
+            model: None,
+            started_at: 0,
+            status: "running".to_string(),
+            background: false,
         };
         let json = serde_json::to_value(&task).unwrap();
         assert!(json.get("taskID").is_some(), "expected camelCase taskID");
@@ -1302,5 +1311,217 @@ if __name__ == "__main__":
             }
             _ => panic!("expected Completed"),
         }
+    }
+
+    /// WP-DELEGATION: under an active delegation policy a child session gets
+    /// no `task`/`fleet`/`task_*` tool definitions; the main thread keeps
+    /// them; `off` restores the old behaviour for children.
+    #[tokio::test]
+    async fn subagents_get_no_delegation_tools_under_a_policy() {
+        use crate::agent::request::{DELEGATION_TOOLS, RequestBuilder};
+        use crate::config::DelegationMode;
+
+        let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(project.join(".bebok"))
+            .await
+            .unwrap();
+        let data = base.join("data");
+
+        let build = |store: &Arc<InstanceStore>, agent: &'static str| {
+            let store = store.clone();
+            let project = project.clone();
+            async move {
+                let parent = store
+                    .create_session(project.to_str().unwrap(), agent, None)
+                    .await
+                    .unwrap();
+                parent.append_user_message("hi").await.unwrap();
+                let child = store
+                    .create_subagent_session(&parent, "code", None, Some("worker"))
+                    .await
+                    .unwrap();
+                child.append_user_message("do it").await.unwrap();
+                let tools = Arc::new(ToolRegistry::new(builtin_tools()));
+                for t in [
+                    Arc::new(crate::agent::TaskTool::new(Arc::downgrade(&store)))
+                        as Arc<dyn bebok_tools::Tool>,
+                    Arc::new(crate::agent::FleetTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskWaitTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskStatusTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskCancelTool::new(Arc::downgrade(&store))),
+                ] {
+                    tools.register_tool(t);
+                }
+                let preset = Agent::code();
+                let names = |state: &Arc<SessionState>| {
+                    let tools = tools.clone();
+                    let preset = preset.clone();
+                    let state = state.clone();
+                    async move {
+                        let req = RequestBuilder::new(
+                            &state,
+                            &preset,
+                            &tools,
+                            "test/model",
+                            1024,
+                            bebok_llm::Thinking::Off,
+                        )
+                        .build()
+                        .await
+                        .unwrap();
+                        req.tools.into_iter().map(|t| t.name).collect::<Vec<_>>()
+                    }
+                };
+                (names(&parent).await, names(&child).await)
+            }
+        };
+
+        // Default policy (auto): parent has the tools, child does not.
+        let store = InstanceStore::with_data_dir(data.clone());
+        let (parent_tools, child_tools) = build(&store, "code").await;
+        for t in ["task", "task_wait", "task_status", "task_cancel"] {
+            assert!(parent_tools.iter().any(|n| n == t), "parent lacks {t}");
+            assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
+        }
+        assert!(
+            !parent_tools.iter().any(|n| n == "fleet"),
+            "fleet is orchestrator-only"
+        );
+        assert!(child_tools.iter().any(|n| n == "read_file"));
+        assert_eq!(DELEGATION_TOOLS.len(), 5);
+
+        // Policy off: the child gets `task` again (depth guard is the backstop).
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "delegation": { "mode": "off" } }"#,
+        )
+        .unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data2"));
+        let cfg = store
+            .get_or_create_instance(project.to_str().unwrap())
+            .await
+            .unwrap()
+            .config_snapshot();
+        assert_eq!(cfg.delegation.mode, DelegationMode::Off);
+        let (_, child_tools) = build(&store, "code").await;
+        assert!(child_tools.iter().any(|n| n == "task"), "{child_tools:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// F9-7: running a child through `prepare_child` + `run_child` writes
+    /// token-free status rows into the PARENT transcript — started, a
+    /// first-tool progress row, and the closing "finished in … · N tok ·
+    /// 1 file changed" line — and none of them reaches the provider request.
+    #[tokio::test]
+    async fn child_run_writes_status_rows_into_the_parent_transcript() {
+        use crate::agent::delegation::{ChildSpec, prepare_child, run_child};
+        use crate::agent::request::RequestBuilder;
+
+        let base = std::env::temp_dir().join(format!("bebok-status-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        write_project_permission(
+            &project,
+            r#"{ "rules": [ { "pattern": "write_file(*)", "action": "allow" } ] }"#,
+        );
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let instance = store
+            .get_or_create_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        let parent = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        parent.append_user_message("build it").await.unwrap();
+        // The parent is mid-turn: its assistant message holds the `task` call.
+        {
+            let mut messages = parent.messages.write().await;
+            let mut m = crate::session::Message::new(crate::session::Role::Assistant);
+            m.add_tool_call("t1".into(), "task".into(), serde_json::json!({}));
+            messages.push(m);
+        }
+
+        let provider: Arc<dyn Provider> = Arc::new(ScriptProvider::new(vec![
+            tool_step(
+                "write_file",
+                serde_json::json!({ "path": "orders.ts", "content": "export {};" }),
+                1,
+            ),
+            text_step(
+                "Status: PASS
+wrote orders.ts",
+            ),
+        ]));
+        let name = parent.allocate_child_name(Some("api-orders"), "code").await;
+        let spec = ChildSpec {
+            store: store.clone(),
+            instance: instance.clone(),
+            parent: parent.clone(),
+            agent: Agent::code(),
+            agent_name: "code".into(),
+            model: "mock/model".into(),
+            provider,
+            name,
+            prompt: "write orders.ts".into(),
+            images: Vec::new(),
+            parent_abort: CancellationToken::new(),
+            parent_session_id: parent.id().to_string(),
+            directory: parent.directory().to_string(),
+            max_concurrent: 3,
+            background: true,
+            origin: "task",
+        };
+        let prepared = prepare_child(spec).await.unwrap();
+        let outcome = run_child(prepared).await;
+        assert_eq!(outcome.status, "completed");
+        assert!(outcome.text.starts_with("Status: PASS"));
+
+        let messages = parent.messages_snapshot().await;
+        assert_eq!(messages.len(), 2, "status rows never add messages");
+        let rows: Vec<(String, String)> = messages[1]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Status { kind, text, .. } => Some((kind.clone(), text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            rows.iter()
+                .any(|(k, t)| k == "task.started" && t == "api-orders started (code · mock/model)"),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|(k, t)| k == "task.progress" && t.starts_with("api-orders: write_file")),
+            "first-tool milestone: {rows:?}"
+        );
+        let ended = rows
+            .iter()
+            .find(|(k, _)| k == "task.ended")
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        assert!(ended.starts_with("api-orders finished in "), "{ended}");
+        assert!(ended.ends_with(" · 1 file changed"), "{ended}");
+        // Rows stay out of the model's context: the provider request built
+        // from the parent transcript has only the tool call, no status text.
+        let tools = Arc::new(ToolRegistry::new(builtin_tools()));
+        let req = RequestBuilder::new(
+            &parent,
+            &Agent::code(),
+            &tools,
+            "mock/model",
+            1024,
+            bebok_llm::Thinking::Off,
+        )
+        .build()
+        .await
+        .unwrap();
+        let dumped = serde_json::to_string(&req.messages).unwrap();
+        assert!(!dumped.contains("finished in"), "{dumped}");
+        assert!(!dumped.contains("api-orders started"), "{dumped}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

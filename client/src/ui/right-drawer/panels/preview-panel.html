@@ -1,0 +1,169 @@
+<div class="panel-body" data-testid="preview-panel">
+  <!-- F9-15: what is shown + the toolbar -->
+  <div class="head">
+    <button
+      type="button"
+      class="nav-btn"
+      (click)="back()"
+      [disabled]="!canBack()"
+      [title]="t('preview.back')"
+      [attr.aria-label]="t('preview.back')"
+    >‹</button>
+    <button
+      type="button"
+      class="nav-btn"
+      (click)="forward()"
+      [disabled]="!canForward()"
+      [title]="t('preview.forward')"
+      [attr.aria-label]="t('preview.forward')"
+    >›</button>
+    @if (currentPath(); as path) {
+      <span class="file" [title]="path" data-testid="preview-file-name">
+        <span class="file-name">{{ currentName() }}</span>
+        @if (pinned()) {
+          <span class="badge pin" [title]="t('preview.pinnedHint')">{{ t('preview.pinnedBadge') }}</span>
+        }
+        @if (modified()) {
+          <span class="badge modified" data-testid="preview-modified" [title]="t('preview.modifiedHint')">{{ t('preview.modifiedBadge') }}</span>
+        }
+      </span>
+    } @else {
+      <span class="file none">{{ t('preview.noFile') }}</span>
+    }
+    <span class="tools">
+      <button
+        type="button"
+        class="tool-btn"
+        (click)="openPicker()"
+        [disabled]="!directory()"
+        [title]="t('preview.openFile')"
+        [attr.aria-label]="t('preview.openFile')"
+        data-testid="preview-open-file"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button
+        type="button"
+        class="tool-btn"
+        (click)="openInExplorer()"
+        [disabled]="!currentPath()"
+        [title]="t('preview.openInExplorer')"
+        [attr.aria-label]="t('preview.openInExplorer')"
+        data-testid="preview-open-explorer"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </button>
+      <button
+        type="button"
+        class="tool-btn"
+        (click)="refresh()"
+        [disabled]="!currentPath() || loading()"
+        [title]="t('preview.refresh')"
+        [attr.aria-label]="t('preview.refresh')"
+        data-testid="preview-refresh"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="pinned()"
+        (click)="togglePin()"
+        [disabled]="!currentPath()"
+        [title]="pinned() ? t('preview.unpin') : t('preview.pin')"
+        [attr.aria-label]="pinned() ? t('preview.unpin') : t('preview.pin')"
+        [attr.aria-pressed]="pinned()"
+        data-testid="preview-pin"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3H7l3-3z"/></svg>
+      </button>
+    </span>
+  </div>
+
+  @if (pickerOpen()) {
+    <div class="picker" data-testid="preview-picker" (keydown)="onPickerKey($event)">
+      <input
+        #pickerInput
+        type="text"
+        class="picker-input"
+        [value]="pickerQuery()"
+        (input)="onPickerQuery(pickerInput.value)"
+        [placeholder]="t('preview.pickerPlaceholder')"
+        [attr.aria-label]="t('preview.openFile')"
+        role="combobox"
+        aria-autocomplete="list"
+        [attr.aria-expanded]="pickerResults().length > 0"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <button
+        type="button"
+        class="picker-close"
+        (click)="closePicker()"
+        [title]="t('preview.pickerClose')"
+        [attr.aria-label]="t('preview.pickerClose')"
+      >✕</button>
+      <div class="picker-list" role="listbox">
+        @if (pickerLoading() && pickerResults().length === 0) {
+          <div class="picker-empty">{{ t('preview.pickerLoading') }}</div>
+        } @else if (pickerError()) {
+          <div class="picker-empty error">{{ pickerError() }}</div>
+        } @else if (pickerResults().length === 0) {
+          <div class="picker-empty">{{ t('preview.pickerNoMatch') }}</div>
+        } @else {
+          @for (file of pickerResults(); track file; let i = $index) {
+            <button
+              type="button"
+              class="picker-row"
+              role="option"
+              [class.active]="i === pickerIndex()"
+              [attr.aria-selected]="i === pickerIndex()"
+              (click)="pickFile(file)"
+              (mouseenter)="pickerIndex.set(i)"
+              [title]="file"
+            >{{ file }}</button>
+          }
+        }
+      </div>
+      <div class="picker-hint">{{ t('preview.pickerHint') }}</div>
+    </div>
+  }
+
+  @if (blockedRequest(); as blocked) {
+    <div class="notice" data-testid="preview-blocked">
+      <span class="notice-text" [title]="blocked.path">{{ t('preview.pinnedBlocked', { path: blocked.path }) }}</span>
+      <button type="button" class="notice-btn" (click)="openBlocked()">{{ t('preview.openAnyway') }}</button>
+      <button type="button" class="notice-btn ghost" (click)="dismissBlocked()" [attr.aria-label]="t('preview.pickerClose')">✕</button>
+    </div>
+  }
+
+  @if (modified()) {
+    <div class="notice modified" data-testid="preview-modified-notice">
+      <span class="notice-text">{{ t('preview.modifiedNotice') }}</span>
+      <button type="button" class="notice-btn" (click)="refresh()" data-testid="preview-reload">{{ t('preview.reload') }}</button>
+    </div>
+  }
+
+  @if (!currentPath()) {
+    <div class="empty" data-testid="preview-empty">
+      <p>{{ t('preview.emptyHow') }}</p>
+      <button type="button" class="empty-btn" (click)="openPicker()" [disabled]="!directory()">
+        {{ t('preview.openFile') }}
+      </button>
+    </div>
+  } @else if (loading()) {
+    <div class="empty">{{ t('preview.loading') }}</div>
+  } @else if (error()) {
+    <div class="error">{{ t('preview.cannotPreview', { path: currentPath() }) }}</div>
+  } @else if (isMarkdown()) {
+    <div class="body">
+      <app-markdown-view
+        [source]="content()"
+        [basePath]="currentPath() ?? ''"
+        (linkClick)="navigate($event)"
+      />
+    </div>
+  } @else {
+    <pre class="raw"><code>{{ content() }}</code></pre>
+  }
+</div>

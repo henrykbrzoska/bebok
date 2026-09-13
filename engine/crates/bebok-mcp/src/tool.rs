@@ -17,6 +17,10 @@ pub struct McpTool {
     description: String,
     input_schema: Value,
     read_only: bool,
+    /// Raw MCP annotations (F7-7): `readOnlyHint` / `destructiveHint` as
+    /// the server declared them (`None` when absent). Informational only.
+    read_only_hint: Option<bool>,
+    destructive_hint: Option<bool>,
     peer: Peer<RoleClient>,
 }
 
@@ -30,6 +34,31 @@ impl McpTool {
         read_only: bool,
         peer: Peer<RoleClient>,
     ) -> Arc<dyn Tool> {
+        Self::with_hints(
+            server,
+            raw_name,
+            description,
+            input_schema,
+            read_only,
+            if read_only { Some(true) } else { None },
+            None,
+            peer,
+        )
+    }
+
+    /// Like [`McpTool::new`] but keeping the server's raw
+    /// `readOnlyHint`/`destructiveHint` annotations (F7-7).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_hints(
+        server: &str,
+        raw_name: String,
+        description: String,
+        input_schema: Value,
+        read_only: bool,
+        read_only_hint: Option<bool>,
+        destructive_hint: Option<bool>,
+        peer: Peer<RoleClient>,
+    ) -> Arc<dyn Tool> {
         let name = format!("mcp__{server}__{raw_name}");
         Arc::new(Self {
             name,
@@ -37,6 +66,8 @@ impl McpTool {
             description,
             input_schema,
             read_only,
+            read_only_hint,
+            destructive_hint,
             peer,
         })
     }
@@ -58,6 +89,14 @@ impl Tool for McpTool {
 
     fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    fn read_only_hint(&self) -> Option<bool> {
+        self.read_only_hint
+    }
+
+    fn destructive_hint(&self) -> Option<bool> {
+        self.destructive_hint
     }
 
     async fn execute(&self, ctx: ToolCtx, args: Value) -> ToolOutput {
@@ -82,6 +121,7 @@ impl Tool for McpTool {
                         text,
                         title: self.name.clone(),
                         structured: res.structured_content,
+                        image: None,
                     }
                 }
             }

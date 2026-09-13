@@ -9,19 +9,26 @@ use axum::routing::{get, patch, post};
 
 use crate::state::AppState;
 
+pub mod agents;
+pub mod browser;
+pub mod changes;
 pub mod common;
 pub mod config;
 pub mod debug;
 pub mod events;
 pub mod fs;
 pub mod fs_browse;
+pub mod git;
 pub mod mcp;
 pub mod meta;
+pub mod processes;
 pub mod projects;
 pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod session;
+pub mod stats;
+pub mod tools;
 
 /// Build all API routes (same paths/methods as before; only module paths
 /// changed). The caller adds middleware/CORS/state (see `server.rs`).
@@ -44,12 +51,29 @@ pub fn build_api_router() -> Router<AppState> {
             "/session/{id}/task/{taskID}/abort",
             post(session::abort_task),
         )
+        .route("/session/{id}/agents", get(agents::list_agents))
+        // F9-10: what `delegation.model_policy` resolves to.
+        .route("/delegation/models", get(agents::delegation_models))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
+        .route("/session/{id}/changes", get(changes::list_changes))
+        .route("/session/{id}/changes/diff", get(changes::change_diff))
+        .route("/session/{id}/changes/revert", post(changes::revert_change))
+        // F9-14: background processes started by `bash { background: true }`.
+        .route("/session/{id}/processes", get(processes::list_processes))
+        .route("/processes/{id}/log", get(processes::process_log))
+        .route("/processes/{id}/kill", post(processes::kill_process))
         .route("/session/{id}/truncate", post(session::truncate_session))
         .route(
             "/session/{id}/permission/{requestID}",
             post(session::permission_decision),
+        )
+        // WP-BROWSER2 (F7-6): browser viewer window API.
+        .route("/session/{id}/browser", get(browser::browser_state))
+        .route("/session/{id}/browser/frame", get(browser::browser_frame))
+        .route(
+            "/session/{id}/browser/{action}",
+            post(browser::browser_action),
         )
         .route("/agent", get(meta::list_agents))
         .route("/mcp", get(mcp::list_mcp))
@@ -70,7 +94,18 @@ pub fn build_api_router() -> Router<AppState> {
             patch(projects::patch_project).delete(projects::delete_project),
         )
         .route("/projects/{id}/open", post(projects::open_project))
+        .route("/projects/{id}/git", get(git::project_git))
+        .route(
+            "/projects/{id}/git/worktree/remove",
+            post(git::remove_worktree),
+        )
         .route("/plugins", get(meta::list_plugins))
+        // WP-CHAT4 (F7-7): explicit per-tool safety categories.
+        .route(
+            "/tools/safety",
+            get(tools::get_tool_safety).put(tools::put_tool_safety),
+        )
+        .route("/stats", get(stats::get_stats))
         .route("/event", get(events::event_stream))
         .route(
             "/debug/log",

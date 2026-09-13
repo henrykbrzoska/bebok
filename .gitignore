@@ -10,6 +10,7 @@ target/
 
 # ---- Node / Angular ----
 node_modules/
+/package-lock.json
 client/dist/
 client/.angular/
 client/tsconfig.tsbuildinfo

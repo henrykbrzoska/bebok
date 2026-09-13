@@ -25,34 +25,69 @@
     }
   </div>
 
-  @for (pill of pills; track pill.id) {
-    @if (isOpen(pill.id)) {
-      <section class="panel">
-        <header class="panel-head">
-          <h2 class="panel-title">{{ t(pill.labelKey) }}</h2>
-          <button
-            type="button"
-            class="panel-close"
-            (click)="toggle(pill.id)"
-            [title]="t('drawer.close')"
-            [attr.aria-label]="t('drawer.close')"
+  <!-- F9-2: one scroll container for the whole stack; headers stick to its top. -->
+  <div class="panels" data-testid="drawer-panels">
+    @for (pill of pills; track pill.id) {
+      @if (isOpen(pill.id)) {
+        <section
+          class="panel"
+          [class.collapsed]="isCollapsed(pill.id)"
+          [attr.data-panel]="pill.id"
+          [attr.data-collapsed]="isCollapsed(pill.id)"
+        >
+          <header class="panel-head">
+            <button
+              type="button"
+              class="panel-toggle"
+              (click)="toggleCollapsed(pill.id)"
+              [attr.aria-expanded]="!isCollapsed(pill.id)"
+              [attr.aria-controls]="'drawer-panel-body-' + pill.id"
+              [title]="isCollapsed(pill.id) ? t('drawer.expandPanel') : t('drawer.collapsePanel')"
+            >
+              <span class="chevron" aria-hidden="true">{{ isCollapsed(pill.id) ? '▸' : '▾' }}</span>
+              <h2 class="panel-title">{{ t(pill.labelKey) }}</h2>
+            </button>
+            <button
+              type="button"
+              class="panel-close"
+              (click)="close(pill.id, $event)"
+              [title]="t('drawer.close')"
+              [attr.aria-label]="t('drawer.close')"
+            >
+              ✕
+            </button>
+          </header>
+          <div
+            class="section-body"
+            [id]="'drawer-panel-body-' + pill.id"
+            [hidden]="isCollapsed(pill.id)"
           >
-            ✕
-          </button>
-        </header>
-        <!-- Placeholder slot: WP-CHAT replaces these panel bodies. -->
-        @switch (pill.id) {
-          @case ('session') {
-            <app-session-panel />
-          }
-          @case ('explorer') {
-            <app-explorer-panel />
-          }
-          @case ('terminal') {
-            <app-terminal-panel />
-          }
-        }
-      </section>
+            @switch (pill.id) {
+              @case ('session') {
+                <app-session-panel />
+              }
+              @case ('explorer') {
+                <app-explorer-panel />
+              }
+              @case ('terminal') {
+                <app-terminal-panel />
+              }
+              @case ('agents') {
+                <app-agents-panel />
+              }
+              @case ('changes') {
+                <app-changes-panel />
+              }
+              @case ('preview') {
+                <app-preview-panel />
+              }
+              @case ('browser') {
+                <app-browser-panel />
+              }
+            }
+          </div>
+        </section>
+      }
     }
-  }
+  </div>
 </aside>

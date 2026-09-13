@@ -29,8 +29,7 @@
 //! If the child is aborted, the `task` tool returns a descriptive error so the
 //! user sees *which* task was cancelled.
 
-use std::sync::Weak;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -38,10 +37,9 @@ use serde_json::{Value, json};
 
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
+use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
-use super::turn::run_turn;
 use crate::provider::build_provider;
-use crate::session::Role;
 use crate::store::InstanceStore;
 
 /// Maximum sub-agent nesting depth (a sub-agent delegating further counts as
@@ -54,9 +52,6 @@ pub struct TaskTool {
     /// instance, the instance's tool registry owns this tool, so a strong
     /// reference here would leak the whole graph.
     store: Weak<InstanceStore>,
-    /// Current delegation depth (shared across concurrent sub-turns; a coarse
-    /// but safe guard).
-    depth: AtomicUsize,
     max_depth: usize,
 }
 
@@ -64,7 +59,6 @@ impl TaskTool {
     pub fn new(store: Weak<InstanceStore>) -> Self {
         Self {
             store,
-            depth: AtomicUsize::new(0),
             max_depth: MAX_TASK_DEPTH,
         }
     }
@@ -90,22 +84,11 @@ struct TaskArgs {
     /// png/jpeg/webp/gif, max 5 MB each). Forwards parent images the
     /// sub-agent needs.
     images: Option<Vec<AgentImageInput>>,
-}
-
-/// RAII depth guard: decrements the shared counter on drop.
-struct DepthGuard<'a>(&'a AtomicUsize);
-
-impl<'a> DepthGuard<'a> {
-    fn enter(counter: &'a AtomicUsize) -> Self {
-        counter.fetch_add(1, Ordering::AcqRel);
-        Self(counter)
-    }
-}
-
-impl Drop for DepthGuard<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
+    /// WP-DELEGATION: `true` returns immediately with the task id; collect
+    /// the result later with `task_wait`. `false` (default) blocks until the
+    /// sub-agent finishes and returns its report directly.
+    #[serde(default)]
+    background: bool,
 }
 
 #[async_trait]
@@ -121,7 +104,10 @@ impl Tool for TaskTool {
          with `plan`, or a focused edit with `code`); sequence dependent work \
          yourself. Provide a complete, standalone `prompt` — the sub-agent cannot \
          see this conversation. Optional `images` forwards parent images the \
-         sub-agent needs (raw base64, max 5)."
+         sub-agent needs (raw base64, max 5). Set `background: true` to spawn the \
+         sub-agent and return at once with its `taskID` (spawn several in one turn \
+         for parallel work, then `task_wait` for the results; `task_status` shows \
+         live progress, `task_cancel` stops one)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -138,11 +124,15 @@ impl Tool for TaskTool {
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model override for the sub-agent (e.g. provider/model-id). Overrides the agent-type default model."
+                    "description": "Optional model for the sub-agent: \"heavy\" = your own (parent) model for a demanding part (large refactor, architecture, multi-file debugging); or an explicit provider/model-id. Omit for the configured delegation.model_policy (default: a cheaper sibling of your model)."
                 },
                 "name": {
                     "type": "string",
                     "description": "Short kebab-case name for this subtask (e.g. auth-flow-audit). Engine guarantees uniqueness within the session; if omitted or taken the engine assigns <agent>-<n>."
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "true: return immediately with the taskID and let the sub-agent run in the background (collect with task_wait). false (default): block until it finishes and return its report."
                 },
                 "images": {
                     "type": "array",
@@ -183,7 +173,14 @@ impl Tool for TaskTool {
             Err(e) => return ToolOutput::new(format!("task: {e}"), "task"),
         };
 
-        if self.depth.load(Ordering::Acquire) >= self.max_depth {
+        let Some(store) = self.store.upgrade() else {
+            return ToolOutput::new("task: engine store is gone", "task");
+        };
+
+        // Nesting guard: depth is derived from the session's parent chain, so
+        // siblings running concurrently never count against it.
+        let parent_uuid = parse_uuid(&ctx.session_id);
+        if delegation_depth(&store, parent_uuid).await >= self.max_depth {
             return ToolOutput::new(
                 format!(
                     "task: maximum delegation depth ({}) reached; complete the work directly",
@@ -192,11 +189,6 @@ impl Tool for TaskTool {
                 "task",
             );
         }
-
-        let Some(store) = self.store.upgrade() else {
-            return ToolOutput::new("task: engine store is gone", "task");
-        };
-        let _guard = DepthGuard::enter(&self.depth);
 
         let directory = ctx.root.to_string_lossy().to_string();
         let instance = match store.get_or_create_instance(&directory).await {
@@ -209,21 +201,33 @@ impl Tool for TaskTool {
             .as_deref()
             .map(str::trim)
             .filter(|a| !a.is_empty())
-            .unwrap_or("code");
-        let mut agent = instance.resolve_agent(agent_name);
+            .unwrap_or("code")
+            .to_string();
+        let mut agent = instance.resolve_agent(&agent_name);
         let cfg = instance.config_snapshot();
 
-        // Effective model: explicit task arg, else preset override, else
-        // `models.<agent>` / global model.
-        let explicit_model = args
-            .model
-            .as_deref()
-            .map(str::trim)
-            .filter(|m| !m.is_empty());
-        let model = explicit_model
-            .map(str::to_string)
-            .or_else(|| agent.model.clone())
-            .unwrap_or_else(|| cfg.model_for(&agent.name));
+        // Fresh child session for the sub-agent (isolated transcript).
+        let parent = match store.open_session(parent_uuid).await {
+            Ok(p) => p,
+            Err(_) => {
+                return ToolOutput::new("task: parent session not found", "task");
+            }
+        };
+
+        // F9-10: the sub-agent model follows `delegation.model_policy`
+        // applied to the PARENT's effective model (`model: "heavy"` lifts a
+        // sub-task back onto it; any other explicit `model` wins outright).
+        let parent_model = crate::store::parent_model_for_delegation(
+            &parent.meta_snapshot().await,
+            &instance,
+            &cfg,
+        );
+        let model = crate::agent::resolve_subagent_model(
+            bebok_llm::ModelCatalog::global(),
+            &cfg.delegation,
+            &parent_model,
+            args.model.as_deref(),
+        );
 
         // Ground the sub-agent in AGENTS.md + enabled skills (same as the
         // server's prompt assembly, minus the parent-only context notes).
@@ -239,127 +243,75 @@ impl Tool for TaskTool {
             }
         };
 
-        // Fresh child session for the sub-agent (isolated transcript).
-        let parent = match store.open_session(parse_uuid(&ctx.session_id)).await {
-            Ok(p) => p,
-            Err(_) => {
-                return ToolOutput::new("task: parent session not found", "task");
-            }
-        };
-
         // Allocate a unique human-readable name for this subtask.
         let name = parent
             .allocate_child_name(args.name.as_deref(), &agent.name)
             .await;
 
-        let child = match store
-            .create_subagent_session(&parent, &agent.name, Some(&model), Some(&name))
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                return ToolOutput::new(format!("task: cannot create sub-session: {e}"), "task");
-            }
-        };
-
-        if let Err(e) = child
-            .append_user_message_with_images(&prompt, image_parts)
-            .await
-        {
-            return ToolOutput::new(format!("task: cannot record subtask: {e}"), "task");
-        }
-
-        // The sub-turn runs under the parent turn's abort tree and claims the
-        // child's turn slot so it is cancellable via the session endpoints.
-        if !child.try_begin_turn() {
-            return ToolOutput::new("task: sub-session is already busy", "task");
-        }
-        let abort = ctx.abort.child_token();
-        child.set_abort(abort.clone()).await;
-
-        // Generate a task ID and register the child in the parent's task map.
-        let task_id = uuid::Uuid::new_v4().to_string();
-        let description: String = prompt.chars().take(80).collect();
-        let child_session_id = child.id().to_string();
-        let bus = store.bus();
-
-        let child_info = parent
-            .register_child_task(
-                &task_id,
-                &description,
-                &child_session_id,
-                &name,
-                agent_name,
-                abort.clone(),
-            )
-            .await;
-
-        // Emit task.started so the client can render the sub-task with an
-        // individual abort button.
-        bus.publish(
-            crate::event::Event::new("task.started", &directory, &ctx.session_id)
-                .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
-        );
-
-        let result = run_turn(
-            child.clone(),
+        let spec = ChildSpec {
+            store: store.clone(),
+            instance: instance.clone(),
+            parent: parent.clone(),
             agent,
-            instance.tools.clone(),
+            agent_name: agent_name.clone(),
+            model: model.clone(),
             provider,
-            instance.permission.clone(),
-            store.bus(),
-            abort.clone(),
-            &model,
-        )
-        .await;
-
-        child.clear_abort().await;
-        child.end_turn();
-
-        // Determine the final status and clean up.
-        let (status, error_msg) = match &result {
-            Ok(()) => {
-                if abort.is_cancelled() {
-                    (
-                        "aborted".to_string(),
-                        Some("sub-task was cancelled".to_string()),
-                    )
-                } else {
-                    ("completed".to_string(), None)
-                }
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if abort.is_cancelled() {
-                    (
-                        "aborted".to_string(),
-                        Some(format!("sub-task was cancelled: {msg}")),
-                    )
-                } else {
-                    ("error".to_string(), Some(msg))
-                }
-            }
+            name: name.clone(),
+            prompt,
+            images: image_parts,
+            parent_abort: ctx.abort.clone(),
+            parent_session_id: ctx.session_id.clone(),
+            directory,
+            max_concurrent: cfg.delegation.effective_max_concurrent(),
+            background: args.background,
+            origin: "task",
         };
 
-        // Unregister and emit task.ended.
-        parent.unregister_child_task(&task_id).await;
-        bus.publish(
-            crate::event::Event::new("task.ended", &directory, &ctx.session_id).with_properties(
-                json!({
-                    "taskID": task_id,
-                    "status": status,
-                    "error": error_msg,
-                    "childSessionID": child_session_id,
-                    "name": name,
-                }),
-            ),
-        );
+        let prepared = match prepare_child(spec).await {
+            Ok(p) => p,
+            Err(e) => return ToolOutput::new(format!("task: {e}"), "task"),
+        };
+        let task_id = prepared.info.task_id.clone();
+        let child_session_id = prepared.info.child_session_id.clone();
+        let queued = prepared.info.status == "queued";
+
+        if args.background {
+            // Detach: the child runs on its own; `task_wait` collects it. The
+            // strong store reference keeps the engine graph alive for the
+            // child's lifetime.
+            let keep_store: Arc<InstanceStore> = store.clone();
+            tokio::spawn(async move {
+                let _ = run_child(prepared).await;
+                drop(keep_store);
+            });
+            let status = if queued { "queued" } else { "running" };
+            let mut out = ToolOutput::new(
+                format!(
+                    "task [{agent_name}] '{name}' spawned in the background (taskID={task_id}, \
+                     status={status}). Call `task_wait` to collect its result; `task_status` \
+                     shows progress."
+                ),
+                format!("task: {name}"),
+            );
+            out.structured = Some(json!({
+                "taskID": task_id,
+                "name": name,
+                "agent": agent_name,
+                "model": model,
+                "childSessionID": child_session_id,
+                "background": true,
+                "status": status,
+            }));
+            return out;
+        }
+
+        let outcome = run_child(prepared).await;
 
         // If the child was aborted, the abort token was already cancelled.
         // The parent turn loop will pick this up and break out, persisting
         // a "Turn aborted" message. We return an error here so the tool
         // output clearly tells the orchestrator which task was cancelled.
-        if abort.is_cancelled() {
+        if outcome.status == "aborted" {
             return ToolOutput::new(
                 format!(
                     "task [{agent_name}] (taskID={task_id}): sub-task was cancelled by the user. \
@@ -368,42 +320,35 @@ impl Tool for TaskTool {
                 format!("task: {name}"),
             );
         }
-
-        if let Err(e) = result {
+        if outcome.status == "error" {
             return ToolOutput::new(
-                format!("task [{agent_name}] (taskID={task_id}): subtask failed: {e}"),
+                format!(
+                    "task [{agent_name}] (taskID={task_id}): subtask failed: {}",
+                    outcome.error.unwrap_or_default()
+                ),
                 format!("task: {name}"),
             );
         }
 
+        let structured = json!({
+            "taskID": task_id,
+            "name": name,
+            "agent": agent_name,
+            "model": model,
+            "childSessionID": child_session_id,
+            "tokens": { "input": outcome.input_tokens, "output": outcome.output_tokens },
+        });
         // The sub-agent's final assistant text is the delegation result.
-        let messages = child.messages_snapshot().await;
-        let text = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == Role::Assistant)
-            .map(|m| m.text_content())
-            .unwrap_or_default();
-        if text.trim().is_empty() {
+        if outcome.text.trim().is_empty() {
             let mut out = ToolOutput::new(
                 format!("task [{agent_name}] (taskID={task_id}): sub-agent produced no output"),
                 format!("task: {name}"),
             );
-            out.structured = Some(json!({
-                "taskID": task_id,
-                "name": name,
-                "agent": agent_name,
-                "childSessionID": child_session_id,
-            }));
+            out.structured = Some(structured);
             return out;
         }
-        let mut out = ToolOutput::new(text, format!("task: {name}"));
-        out.structured = Some(json!({
-            "taskID": task_id,
-            "name": name,
-            "agent": agent_name,
-            "childSessionID": child_session_id,
-        }));
+        let mut out = ToolOutput::new(outcome.text, format!("task: {name}"));
+        out.structured = Some(structured);
         out
     }
 }
@@ -430,6 +375,17 @@ fn assemble_prompt(
     // pipelines on Windows that `cmd /C` cannot run, so the delegated task
     // fails on Windows but succeeds on Linux.
     agent.prompt = format!("{}\n\n{}", agent.prompt, super::prompt_env::host_os_note());
+    // WP-AUTOVERIFY (F8-1): browser + dev-server capabilities and the
+    // `verify.frontend` policy (skipped for presets without browser tools).
+    if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+    // WP-DELEGATION: a worker's brief, not the main thread's policy.
+    agent.prompt = format!(
+        "{}\n\n{}",
+        agent.prompt,
+        super::delegation_policy::subagent_note()
+    );
 }
 
 #[cfg(test)]
@@ -488,7 +444,6 @@ mod tests {
     fn task_schema_documents_images() {
         let tool = TaskTool {
             store: Weak::new(),
-            depth: AtomicUsize::new(0),
             max_depth: 3,
         };
         let schema = Tool::parameters_schema(&tool);

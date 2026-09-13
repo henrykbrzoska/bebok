@@ -1,5 +1,26 @@
 /* Appearance tab (F2-28): runtime paths, density segmented control, CSS. */
 
+/* F6-1: "Expand tool calls by default" checkbox row. */
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  cursor: pointer;
+}
+
+.toggle-row input {
+  margin-top: 3px;
+  flex: none;
+}
+
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-13);
+  color: var(--text);
+}
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--border);

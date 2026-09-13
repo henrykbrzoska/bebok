@@ -1,0 +1,392 @@
+import { Component, computed, inject, input, output } from '@angular/core';
+
+import {
+  Part,
+  SAFETY_CATEGORIES,
+  SafetyCategory,
+  SafetyResolver,
+  ToolStateKind,
+  safetyCategory,
+} from '../../../core/engine.dtos';
+import { I18nService } from '../../../i18n/i18n.service';
+import { PartRendererComponent } from './part-renderer';
+import { safetyCategoryLabel, safetyLegend } from './safety-legend';
+
+/** Per-category call counts for the group header's safety cluster (F7-7). */
+export type SafetyCounts = Record<SafetyCategory, number>;
+
+export const EMPTY_SAFETY: SafetyCounts = {
+  safe: 0,
+  caution: 0,
+  dangerous: 0,
+  uncategorized: 0,
+};
+
+/** One part plus the info the renderer needs to pick its default state. */
+export interface RenderedPart {
+  kind: 'part';
+  part: Part;
+  /** 0-based index of this part among the tool parts of the same message
+   *  (or, inside a merged run, among the tool parts of the whole run). */
+  toolIndex: number;
+}
+
+/**
+ * A thin divider marking where one merged turn ends and the next begins
+ * inside a cross-message run (F6-1c), carrying that turn's own token usage
+ * so it stays visible once the run is expanded even though the group header
+ * only shows the sum.
+ */
+export interface TurnStrip {
+  kind: 'turn';
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/** Anything `ToolGroupComponent` can render inside its expanded body. */
+export type GroupRow = RenderedPart | TurnStrip;
+
+/** Names beyond this many are folded into a trailing ellipsis. */
+const MAX_SUMMARY_NAMES = 4;
+
+/** Tools whose completed structured output carries the child's `model` (F9-9). */
+const CHILD_TOOLS: ReadonlySet<string> = new Set(['task', 'fleet']);
+
+/** `openai/gpt-5.6-mini` -> `gpt-5.6-mini` (the badge drops the provider for brevity). */
+export function shortModel(model: string): string {
+  const slash = model.indexOf('/');
+  return slash >= 0 ? model.slice(slash + 1) : model;
+}
+
+/**
+ * F9-9: models of the delegated children in a run (`task` / `fleet` rows
+ * whose completed `structured.model` is set) that differ from the session's
+ * effective model. Deduplicated, first-appearance order, full ids (the
+ * header shortens them for display).
+ */
+export function childModelsOf(rows: readonly GroupRow[], sessionModel = ''): string[] {
+  const out: string[] = [];
+  for (const row of rows) {
+    if (row.kind !== 'part' || row.part.type !== 'tool' || !CHILD_TOOLS.has(row.part.name)) {
+      continue;
+    }
+    const state = row.part.state;
+    if (state.state !== 'completed') {
+      continue;
+    }
+    const model = (state.structured as { model?: unknown } | undefined)?.model;
+    if (typeof model !== 'string' || !model || out.includes(model)) {
+      continue;
+    }
+    // Same model spelled with or without the provider prefix is not a difference.
+    if (model === sessionModel || (sessionModel && shortModel(model) === shortModel(sessionModel))) {
+      continue;
+    }
+    out.push(model);
+  }
+  return out;
+}
+
+/**
+ * Summarize a run of tool-call rows for a group header: the worst state
+ * across the run (error > running/pending > completed), a "read ×2, edit"
+ * name list (first-appearance order, counts collapsed, capped at
+ * `MAX_SUMMARY_NAMES` names before an ellipsis) and per-category safety
+ * counts (F7-7; `resolve` supplies the category of historical parts that
+ * carry no stamped one). Shared by the per-message grouping pass (F6-1,
+ * `message-row.ts`) and the cross-message merge (F6-1c, `tool-run-row.ts`)
+ * so both read the same rules.
+ */
+export function summarizeToolRun(
+  rows: readonly RenderedPart[],
+  resolve?: SafetyResolver,
+  sessionModel = '',
+): { state: ToolStateKind; names: string; safety: SafetyCounts; childModels: string[] } {
+  const counts = new Map<string, number>();
+  let state: ToolStateKind = 'completed';
+  const safety: SafetyCounts = { ...EMPTY_SAFETY };
+  for (const row of rows) {
+    if (row.part.type !== 'tool') {
+      continue;
+    }
+    counts.set(row.part.name, (counts.get(row.part.name) ?? 0) + 1);
+    const kind = row.part.state.state;
+    if (kind === 'error') {
+      state = 'error';
+    } else if ((kind === 'running' || kind === 'pending') && state !== 'error') {
+      state = 'running';
+    }
+    safety[safetyCategory(row.part, resolve)]++;
+  }
+  const labels = [...counts.entries()].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
+  const names =
+    labels.length > MAX_SUMMARY_NAMES
+      ? `${labels.slice(0, MAX_SUMMARY_NAMES).join(', ')}, …`
+      : labels.join(', ');
+  return { state, names, safety, childModels: childModelsOf(rows, sessionModel) };
+}
+
+/**
+ * Collapsible "N tool calls · read ×2, edit" summary row (F6-1), reused for
+ * two cases: a run of >= 2 consecutive tool calls inside one message
+ * (`message-row.ts`) and a run of >= 2 consecutive tool-only *messages*
+ * merged into one group (F6-1c, `tool-run-row.ts`). The caller owns the
+ * open/closed state (a per-message record in the first case, a single flag
+ * in the second) and passes the already-summarized `state`/`names`/`count`.
+ *
+ * `rows` interleaves `RenderedPart`s with `TurnStrip` dividers: a lone
+ * message never has any strips, a merged run has one before each turn's own
+ * rows so the per-turn token counts stay visible once expanded even though
+ * the header only shows the combined total.
+ */
+@Component({
+  selector: 'app-tool-group',
+  imports: [PartRendererComponent],
+  template: `
+    <div class="tool-group" [class.open]="open()">
+      <button
+        type="button"
+        class="group-head"
+        (click)="toggle.emit()"
+        [attr.aria-expanded]="open()"
+        [title]="open() ? t('toolGroup.collapse') : t('toolGroup.expand')"
+      >
+        @if (hasSafety()) {
+          <span
+            class="safety-cluster"
+            [class.pulse]="state() === 'running'"
+            [class.ring-failed]="state() === 'error'"
+            [title]="safetyTitle()"
+            aria-hidden="true"
+          >
+            @for (category of categories; track category) {
+              @if (safety()[category] > 0) {
+                <span class="cluster-dot safety-{{ category }}" [attr.data-safety]="category"
+                  >●{{ safety()[category] }}</span
+                >
+              }
+            }
+          </span>
+        } @else {
+          <span class="dot state-{{ state() }}" aria-hidden="true"></span>
+        }
+        <span class="group-count">{{ t('toolGroup.summary', { n: count() }) }}</span>
+        <span class="group-sep" aria-hidden="true">·</span>
+        <span class="group-names">{{ names() }}</span>
+        @if (childModelLabel(); as label) {
+          <span class="group-sep" aria-hidden="true">·</span>
+          <span class="group-model" data-testid="group-child-model" [title]="models().join(', ')">{{ label }}</span>
+        }
+        <span class="chevron" aria-hidden="true">{{ open() ? '▾' : '▸' }}</span>
+      </button>
+      @if (open()) {
+        <div class="group-body">
+          @for (row of rows(); track $index) {
+            @if (row.kind === 'turn') {
+              <div class="turn-strip" [class.first]="$first">
+                <span class="turn-usage">
+                  {{ t('drawer.tokensIn') }} {{ row.tokensIn }} · {{ t('drawer.tokensOut') }} {{ row.tokensOut }}
+                </span>
+              </div>
+            } @else {
+              <app-part-renderer [part]="row.part" [toolIndex]="row.toolIndex" [taskLinks]="taskLinks()" />
+            }
+          }
+        </div>
+      }
+    </div>
+  `,
+  styles: `
+    .tool-group {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .group-head {
+      display: flex;
+      align-items: center;
+      gap: var(--space-8);
+      width: 100%;
+      min-height: 28px;
+      background: none;
+      border: none;
+      border-radius: 0;
+      padding: 5px var(--space-12);
+      cursor: pointer;
+      text-align: left;
+      min-width: 0;
+    }
+    .group-head:hover {
+      background: var(--surface-2);
+    }
+    .group-head .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex: none;
+      background: var(--text-faint);
+    }
+    .group-head .dot.state-completed {
+      background: var(--success);
+    }
+    .group-head .dot.state-running {
+      background: var(--accent);
+      animation: tool-dot-pulse 1.4s ease-in-out infinite;
+    }
+    .group-head .dot.state-error {
+      background: var(--danger);
+    }
+    @keyframes tool-dot-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* F7-7: per-category count cluster ("●3 ●1 ●2") replacing the single
+       worst-state dot once the group has any tool call. */
+    .safety-cluster {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: none;
+      border-radius: 20px;
+      padding: 1px 2px;
+    }
+    .safety-cluster.pulse {
+      animation: tool-dot-pulse 1.4s ease-in-out infinite;
+    }
+    .safety-cluster.ring-failed {
+      box-shadow: 0 0 0 2px var(--danger);
+    }
+    .cluster-dot {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      line-height: 1;
+    }
+    .cluster-dot.safety-safe {
+      color: var(--success);
+    }
+    .cluster-dot.safety-caution {
+      color: var(--warning);
+    }
+    .cluster-dot.safety-dangerous {
+      color: var(--accent);
+    }
+    .cluster-dot.safety-uncategorized {
+      color: var(--text-faint);
+    }
+    .group-count {
+      flex: none;
+      font-family: var(--font-mono);
+      font-size: var(--fs-12-5);
+      font-weight: 600;
+      color: var(--text);
+    }
+    .group-sep {
+      flex: none;
+      color: var(--text-faint);
+      font-size: var(--fs-11-5);
+    }
+    .group-names {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11-5);
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* F9-9: child model badge ("gpt-5.6-mini") when a task/fleet row ran on a
+       model other than the session's. */
+    .group-model {
+      flex: 0 1 auto;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--text-faint);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .group-head .chevron {
+      flex: none;
+      font-size: 10px;
+      color: var(--text-faint);
+    }
+    .group-body {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+      padding: var(--space-8);
+      border-top: 1px solid var(--border);
+    }
+
+    /* F6-1c: subtle divider between merged turns, carrying that turn's own
+       token counts as a small label (the header only shows the sum). */
+    .turn-strip {
+      display: flex;
+      align-items: center;
+      padding-top: var(--space-4);
+      margin-top: 2px;
+      border-top: 1px dashed var(--border);
+    }
+    .turn-strip.first {
+      padding-top: 0;
+      margin-top: 0;
+      border-top: none;
+    }
+    .turn-usage {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--text-faint);
+    }
+  `,
+})
+export class ToolGroupComponent {
+  private readonly i18n = inject(I18nService);
+  readonly t = this.i18n.t.bind(this.i18n);
+
+  readonly rows = input.required<GroupRow[]>();
+  readonly state = input.required<ToolStateKind>();
+  readonly names = input.required<string>();
+  readonly count = input.required<number>();
+  readonly open = input.required<boolean>();
+  readonly taskLinks = input<Map<string, string>>(new Map());
+  readonly toggle = output<void>();
+
+  /** F7-7 per-category counts for the header cluster; defaults to all-zero
+   *  for callers that don't pass one (kept optional so existing call sites -
+   *  and specs - don't have to change). */
+  readonly safety = input<SafetyCounts>(EMPTY_SAFETY);
+  readonly categories = SAFETY_CATEGORIES;
+
+  /** F9-9: the session's effective model (chat passes `meta.effective_model`). */
+  readonly sessionModel = input<string>('');
+  /** F9-9: precomputed child models; `null` derives them from `rows` (merged runs). */
+  readonly childModels = input<string[] | null>(null);
+  readonly models = computed(
+    () => this.childModels() ?? childModelsOf(this.rows(), this.sessionModel()),
+  );
+  /** "gpt-5.6-mini" / "gpt-5.6-mini, o5-nano" - deduped, provider prefix stripped. */
+  readonly childModelLabel = computed(() => {
+    const short = [...new Set(this.models().map(shortModel))];
+    return short.join(', ');
+  });
+  /** False (legacy single worst-state dot) only when no counts were passed. */
+  readonly hasSafety = computed(() => {
+    const s = this.safety();
+    return this.categories.some((c) => s[c] > 0);
+  });
+  /** "Safety: 3 safe · 1 caution · 2 dangerous" + the colour legend. */
+  readonly safetyTitle = computed(() => {
+    const s = this.safety();
+    const parts = this.categories
+      .filter((c) => s[c] > 0)
+      .map((c) => `${s[c]} ${safetyCategoryLabel(this.t, c)}`);
+    return `${this.t('toolGroup.safetyTitle')}: ${parts.join(' · ')}\n${safetyLegend(this.t)}`;
+  });
+}

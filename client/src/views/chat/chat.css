@@ -38,11 +38,14 @@
 
 .session-toolbar {
   flex: 0 0 auto;
-  height: 44px;
+  min-height: 44px;
   display: flex;
+  /* E2E R5: when the column is narrow (drawer open at ~1400px) the fields
+     first shrink their selects, then wrap onto a second row - never overlap. */
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-16);
-  padding: 0 var(--space-16);
+  gap: 4px var(--space-16);
+  padding: 4px var(--space-16);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
@@ -51,6 +54,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-6);
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -70,7 +74,12 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-control-sm);
   padding: 3px 6px;
+  /* Shrinkable: a long model id truncates inside the select instead of
+     pushing the control over the next label. */
+  flex: 1 1 auto;
+  min-width: 72px;
   max-width: 200px;
+  text-overflow: ellipsis;
   outline: none;
 }
 
@@ -78,8 +87,105 @@
   border-color: var(--accent);
 }
 
-.tb-abort {
+/* F9-9: effective model badge next to the model select ("openai gpt-5.6-luna"). */
+.tb-model-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11-5);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-model-badge .provider {
+  color: var(--text-faint);
+  text-transform: lowercase;
+}
+
+/* F6-3: context meter (`42k / 200k · 21%`) between the selectors and Abort. */
+.tb-context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.tb-context-bar {
+  /* Shrinks before the numbers do when the toolbar gets tight. */
+  flex: 0 1 64px;
+  min-width: 28px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tb-context-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.tb-context-value {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.tb-context.warning .tb-context-fill {
+  background: var(--warning);
+}
+
+.tb-context.warning .tb-context-value {
+  color: var(--warning);
+}
+
+.tb-context.danger .tb-context-fill {
+  background: var(--danger);
+}
+
+.tb-context.danger .tb-context-value {
+  color: var(--danger);
+}
+
+/* F6-4: "Compact now" sits right before Abort. */
+.tb-compact {
   margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+}
+
+.tb-compact:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tb-compact:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tb-abort {
   flex: 0 0 auto;
   font-size: var(--fs-12);
   padding: 4px 14px;
@@ -103,7 +209,6 @@
   overflow-y: auto;
   /* Keep the transcript dense enough for code-review conversations. */
   padding: var(--space-12) var(--space-16);
-  padding-right: calc(var(--space-16) + 88px);
   display: flex;
   flex-direction: column;
 }
@@ -124,6 +229,34 @@
   flex-direction: column;
   gap: var(--space-10);
   width: 100%;
+}
+
+/* F6-2: "Load earlier messages" control above the windowed transcript. */
+.load-earlier {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: var(--space-4) 0;
+}
+
+.load-earlier-btn {
+  font-size: var(--fs-12);
+  padding: 4px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+}
+
+.load-earlier-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.load-earlier-hint {
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
 }
 
 /* F2-11: empty state - centred "No messages. / Send the first prompt below." */
@@ -327,7 +460,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 
 .active-task-spinner {
@@ -518,7 +651,6 @@ button.small {
 @media (max-width: 700px) {
   .scroll {
     padding: var(--space-10) var(--space-10);
-    padding-right: var(--space-10);
   }
 
   .thread {
@@ -579,4 +711,11 @@ button.small {
 .perm-blocked {
   font-size: var(--fs-12);
   color: var(--warning);
+}
+
+/* WP-DELEGATION: one-line live progress next to each active sub-task. */
+.active-task-progress {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 var(--space-12);
 }

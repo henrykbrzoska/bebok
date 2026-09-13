@@ -109,10 +109,26 @@
                 >
                   <span class="session-text">
                     <span class="session-title">{{ session.title || t('start.untitled') }}</span>
-                    <span class="session-meta">{{ sessionMeta(session) }}</span>
+                    <span class="session-meta">
+                      {{ sessionMeta(session) }}
+                      @if (worktreeBranch(session); as branch) {
+                        <app-branch-badge [branch]="branch" />
+                      }
+                    </span>
                   </span>
                   @if (confirmDeleteId() === session.id) {
                     <span class="delete-confirm">
+                      @if (worktreeBranch(session)) {
+                        <label class="worktree-check" (click)="$event.stopPropagation()">
+                          <input
+                            type="checkbox"
+                            [ngModel]="removeWorktreeToo()"
+                            (ngModelChange)="removeWorktreeToo.set($event)"
+                            [disabled]="deletingId() !== null"
+                          />
+                          {{ t('start.removeWorktreeToo') }}
+                        </label>
+                      }
                       <button
                         class="delete-btn confirm"
                         (click)="confirmDeleteSession(session, $event)"
@@ -166,6 +182,10 @@
         </div>
       }
     </div>
+  }
+
+  @if (notice()) {
+    <div class="notice-banner">{{ notice() }}</div>
   }
 
   @if (error()) {

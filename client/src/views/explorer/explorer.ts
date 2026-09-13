@@ -3,16 +3,23 @@
  * preview, both served through the engine API (`GET /fs/tree`, `GET /fs/file`)
  * - not the client's raw filesystem, so one permission model covers
  * everything. Task 6: right-click a `.html` file to preview it sandboxed.
+ *
+ * F7-3: also opens on demand with a file pre-selected and its content
+ * loaded, when navigated to from the right-drawer Explorer panel (see the
+ * constructor's `openRequest` effect and `ui/right-drawer/panels/explorer-panel.ts`).
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
+import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
 import { I18nService } from '../../i18n/i18n.service';
+import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
+import { ShellStore } from '../../ui/shell/shell.store';
 import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
 interface FsNode {
@@ -40,8 +47,36 @@ export class ExplorerView implements OnInit {
   private readonly engine = inject(EngineClient);
   private readonly route = inject(ActivatedRoute);
   private readonly i18n = inject(I18nService);
+  private readonly selection = inject(ExplorerSelectionStore);
+  private readonly shell = inject(ShellStore);
+  private readonly codeHighlight = inject(CodeHighlightService);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /** Last `ExplorerSelectionStore.openRequest()` nonce this view has already
+   *  acted on (F7-3), so a stale/repeated request is never replayed. */
+  private lastOpenNonce = 0;
+
+  constructor() {
+    // F7-3: the right-drawer Explorer panel points here via `openRequest`
+    // (directory + path + nonce) and navigates to `/explorer`. Reading
+    // `directory()` as a dependency means this waits, without polling, for
+    // `ngOnInit` to set it from the matching query param before opening the
+    // file - whichever of the two settles last re-triggers the effect.
+    effect(() => {
+      const req = this.selection.openRequest();
+      const dir = this.directory();
+      if (!req || req.nonce === this.lastOpenNonce || dir !== req.directory) {
+        return;
+      }
+      this.lastOpenNonce = req.nonce;
+      this.selection.clearOpenRequest();
+      void this.openFile({ name: '', path: req.path, is_dir: false, depth: 0, expanded: false });
+      // E2E R9: also expand the tree down to the file so it is highlighted in
+      // context instead of every folder staying collapsed.
+      void this.revealPath(req.path);
+    });
+  }
 
   readonly directory = signal<string | null>(null);
   readonly loading = signal(false);
@@ -88,6 +123,19 @@ export class ExplorerView implements OnInit {
 
   readonly markdownRows = computed<MarkdownRow[]>(() =>
     this.isMarkdownSelection() ? toMarkdownRows(this.fileContent()) : [],
+  );
+
+  /**
+   * F7-4: syntax-highlighted HTML for the plain-text content view (raw
+   * files - markdown/html get their own dedicated views above). Language is
+   * resolved from the selected file's extension; `CodeHighlightService`
+   * already escapes and skips highlighting for files over its size guard, so
+   * `html` is always safe to bind with `[innerHTML]` (no wrapping
+   * `<pre>`/`<code>` - the template keeps its own for the existing
+   * `.file-body.file-content` layout).
+   */
+  readonly highlightedFileContent = computed(() =>
+    this.codeHighlight.highlight(this.fileContent(), { filename: this.selectedPath() }),
   );
 
   async ngOnInit(): Promise<void> {
@@ -158,6 +206,41 @@ export class ExplorerView implements OnInit {
     }
   }
 
+  /**
+   * Expand every ancestor directory of `path` (lazy-loading the ones the
+   * engine has not listed yet) so the file's row is visible in the tree.
+   */
+  async revealPath(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const segments = path.split('/').filter((s) => s.length > 0);
+    segments.pop(); // the file itself
+    let ancestor = '';
+    for (const segment of segments) {
+      ancestor = ancestor ? `${ancestor}/${segment}` : segment;
+      const state = this.dirs()[ancestor];
+      if (state?.loaded) {
+        if (!state.expanded) {
+          this.dirs.update((d) => ({ ...d, [ancestor]: { ...state, expanded: true } }));
+          this.version.update((v) => v + 1);
+        }
+        continue;
+      }
+      try {
+        const res = await this.engine.fsTree(dir, ancestor);
+        this.dirs.update((d) => ({
+          ...d,
+          [ancestor]: { entries: res.entries, loaded: true, expanded: true },
+        }));
+        this.version.update((v) => v + 1);
+      } catch {
+        return; // a missing/unlistable ancestor: leave the tree as it is
+      }
+    }
+  }
+
   async openFile(node: FsNode): Promise<void> {
     const dir = this.directory();
     if (!dir) {
@@ -200,6 +283,27 @@ export class ExplorerView implements OnInit {
     }
     event.preventDefault();
     this.htmlPreview.set(this.htmlPreview() === null ? this.fileContent() : null);
+  }
+
+  /**
+   * F6-11: "Open in preview" - point the right-drawer Preview panel (F6-10)
+   * at the currently selected file and open it (the drawer itself only
+   * renders on the Chat screen; from here this just arms the state, same as
+   * every other `RightDrawerPanels` toggle - see `preview-panel.ts`).
+   */
+  openInPreview(): void {
+    const dir = this.directory();
+    const path = this.selectedPath();
+    if (!dir || !path) {
+      return;
+    }
+    this.selection.openInPreview(dir, path);
+    if (!this.shell.rightDrawerPanels().preview) {
+      this.shell.toggleRightDrawerPanel('preview');
+    }
+    if (!this.shell.rightDrawerOpen()) {
+      this.shell.toggleRightDrawer();
+    }
   }
 
   startEdit(): void {

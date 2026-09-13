@@ -6,15 +6,16 @@
  * router - each route carries `data.screen` (see `app.routes.ts`) - rather
  * than being a hand-rolled parallel signal, so deep links keep working.
  *
- * Layout preferences (sidebar/drawer/density) live in `UiPrefsStore` so they
- * persist to localStorage; this store re-exports them so components have one
- * place to read shell state from.
+ * Layout preferences (sidebar/drawer) live in `UiPrefsStore` so they persist
+ * to localStorage; this store re-exports them so components have one place
+ * to read shell state from. The density toggle that used to live here was
+ * removed in F7-2 - compact spacing is now the app's only layout.
  */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 
-import { UiPrefsStore } from '../../core/ui-prefs.store';
+import { UiPrefsStore, type RightDrawerPanelId } from '../../core/ui-prefs.store';
 
 export type Screen =
   | 'start'
@@ -23,7 +24,9 @@ export type Screen =
   | 'explorer'
   | 'terminal'
   | 'debug'
-  | 'settings';
+  | 'stats'
+  | 'settings'
+  | 'about';
 
 interface RouteSnapshot {
   screen: Screen;
@@ -52,7 +55,9 @@ export class ShellStore {
   readonly rightDrawerOpen = this.prefs.rightDrawerOpen;
   readonly rightDrawerPanels = this.prefs.rightDrawerPanels;
   readonly rightDrawerWidth = this.prefs.rightDrawerWidth;
-  readonly density = this.prefs.density;
+  /** F9-2: per-panel collapsed state + the latest programmatic reveal. */
+  readonly rightDrawerCollapsed = this.prefs.rightDrawerCollapsed;
+  readonly rightDrawerReveal = this.prefs.rightDrawerReveal;
 
   /** Command palette (ephemeral, never persisted). */
   readonly commandPaletteOpen = signal(false);
@@ -100,7 +105,7 @@ export class ShellStore {
     this.prefs.toggleRightDrawer();
   }
 
-  toggleRightDrawerPanel(panel: 'session' | 'explorer' | 'terminal'): void {
+  toggleRightDrawerPanel(panel: RightDrawerPanelId): void {
     this.prefs.toggleRightDrawerPanel(panel);
   }
 
@@ -108,8 +113,14 @@ export class ShellStore {
     this.prefs.setRightDrawerWidth(px);
   }
 
-  toggleDensity(): void {
-    this.prefs.toggleDensity();
+  /** F9-2: collapse/expand a stacked section (header stays visible). */
+  toggleRightDrawerPanelCollapsed(panel: RightDrawerPanelId): void {
+    this.prefs.toggleRightDrawerPanelCollapsed(panel);
+  }
+
+  /** F9-2/F9-3: open the drawer + panel, expand it and scroll it into view. */
+  revealRightDrawerPanel(panel: RightDrawerPanelId, openDrawer = true): void {
+    this.prefs.revealRightDrawerPanel(panel, openDrawer);
   }
 
   /** Walk to the deepest activated route and read its `data.screen`. */
@@ -133,7 +144,9 @@ const SCREENS: readonly string[] = [
   'explorer',
   'terminal',
   'debug',
+  'stats',
   'settings',
+  'about',
 ];
 
 function isScreen(value: unknown): value is Screen {

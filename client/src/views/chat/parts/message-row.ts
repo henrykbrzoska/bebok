@@ -1,15 +1,100 @@
-import { Component, computed, inject, input, output } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, output } from '@angular/core';
 
-import { Message, Part } from '../../../core/engine.dtos';
+import { Message, Part, SafetyResolver, ToolStateKind } from '../../../core/engine.dtos';
+import { ToolSafetyStore } from '../../../core/tool-safety.store';
+import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
 import { PartRendererComponent } from './part-renderer';
+import { RenderedPart, SafetyCounts, ToolGroupComponent, summarizeToolRun } from './tool-group';
 
-/** One part plus the info the renderer needs to pick its default state. */
-interface RenderedPart {
-  part: Part;
-  /** 0-based index of this part among the tool parts of the same message. */
-  toolIndex: number;
+export type { RenderedPart };
+
+/**
+ * A run of >= 2 consecutive tool calls folded into one collapsible summary
+ * row (F6-1). `key` is the index of the run's first part in `message.parts`,
+ * stable for the lifetime of the message and used to remember toggles.
+ */
+export interface ToolGroup {
+  kind: 'group';
+  key: number;
+  rows: RenderedPart[];
+  /** Worst state across the run: error > running/pending > completed. */
+  state: ToolStateKind;
+  /** "read ×3, edit ×2" - tool names by first appearance with their counts. */
+  names: string;
+  /** F7-7 per-category safety counts for the group header's dot cluster. */
+  safety: SafetyCounts;
+  /** F9-9: child models (`task`/`fleet` structured output) differing from the session's. */
+  childModels: string[];
+}
+
+export type RenderedItem = RenderedPart | ToolGroup;
+
+/**
+ * Grouping pass (F6-1): walks one message's parts, numbering tool calls with
+ * their per-message ordinal (`toolIndex`, so the first call of the turn can
+ * open by default) and folding any run of two or more consecutive tool parts
+ * into a single `ToolGroup`. A lone tool call - one with no tool neighbour -
+ * stays an ungrouped `RenderedPart`, exactly as before grouping existed.
+ *
+ * F9-7: a `status` part (delegation progress row) never splits a run of tool
+ * calls. Statuses seen while a run is open are collected and emitted right
+ * after the run (group first, then its statuses, in order); a status outside
+ * a run is emitted in place. `sessionModel` feeds the group header's child
+ * model badge (F9-9).
+ */
+export function groupParts(
+  parts: readonly Part[],
+  resolve?: SafetyResolver,
+  sessionModel = '',
+): RenderedItem[] {
+  const items: RenderedItem[] = [];
+  let toolIndex = -1;
+  let run: RenderedPart[] = [];
+  let runStart = -1;
+  let deferred: RenderedPart[] = [];
+
+  const flush = (): void => {
+    if (run.length >= 2) {
+      items.push(makeGroup(runStart, run, resolve, sessionModel));
+    } else if (run.length === 1) {
+      items.push(run[0]);
+    }
+    items.push(...deferred);
+    run = [];
+    runStart = -1;
+    deferred = [];
+  };
+
+  parts.forEach((part, index) => {
+    if (part.type === 'tool') {
+      toolIndex += 1;
+      if (run.length === 0) {
+        runStart = index;
+      }
+      run.push({ kind: 'part', part, toolIndex });
+      return;
+    }
+    if (part.type === 'status' && run.length > 0) {
+      deferred.push({ kind: 'part', part, toolIndex: -1 });
+      return;
+    }
+    flush();
+    items.push({ kind: 'part', part, toolIndex: -1 });
+  });
+  flush();
+  return items;
+}
+
+function makeGroup(
+  key: number,
+  rows: RenderedPart[],
+  resolve?: SafetyResolver,
+  sessionModel = '',
+): ToolGroup {
+  const { state, names, safety, childModels } = summarizeToolRun(rows, resolve, sessionModel);
+  return { kind: 'group', key, rows, state, names, safety, childModels };
 }
 
 /**
@@ -20,7 +105,7 @@ interface RenderedPart {
  */
 @Component({
   selector: 'app-message-row',
-  imports: [PartRendererComponent],
+  imports: [PartRendererComponent, ToolGroupComponent],
   host: { '[id]': 'rowId()', '[class.user]': 'isUser()' },
   template: `
     @if (isUser()) {
@@ -35,12 +120,14 @@ interface RenderedPart {
           >&#8617;</button>
         }
         <div class="bubble">
-          @for (row of parts(); track $index) {
-            <app-part-renderer
-              [part]="row.part"
-              [toolIndex]="row.toolIndex"
-              [taskLinks]="taskLinks()"
-            />
+          @for (item of items(); track $index) {
+            @if (item.kind === 'part') {
+              <app-part-renderer
+                [part]="item.part"
+                [toolIndex]="item.toolIndex"
+                [taskLinks]="taskLinks()"
+              />
+            }
           }
         </div>
       </div>
@@ -56,12 +143,27 @@ interface RenderedPart {
           }
         </div>
         <div class="body">
-          @for (row of parts(); track $index) {
-            <app-part-renderer
-              [part]="row.part"
-              [toolIndex]="row.toolIndex"
-              [taskLinks]="taskLinks()"
-            />
+          @for (item of items(); track $index) {
+            @if (item.kind === 'group') {
+              <app-tool-group
+                [rows]="item.rows"
+                [state]="item.state"
+                [names]="item.names"
+                [count]="item.rows.length"
+                [safety]="item.safety"
+                [childModels]="item.childModels"
+                [sessionModel]="sessionModel()"
+                [open]="groupOpen(item.key)"
+                [taskLinks]="taskLinks()"
+                (toggle)="toggleGroup(item.key)"
+              />
+            } @else {
+              <app-part-renderer
+                [part]="item.part"
+                [toolIndex]="item.toolIndex"
+                [taskLinks]="taskLinks()"
+              />
+            }
           }
         </div>
       </div>
@@ -146,6 +248,10 @@ interface RenderedPart {
       overflow-wrap: anywhere;
     }
 
+    /* F6-1: the grouped-run summary row itself is app-tool-group now
+       (./tool-group.ts), reused as-is by the cross-message merge (F6-1c,
+       tool-run-row.ts); its styles live there. */
+
     @media (max-width: 700px) {
       .bubble {
         max-width: 86%;
@@ -155,6 +261,8 @@ interface RenderedPart {
 })
 export class MessageRowComponent {
   private readonly i18n = inject(I18nService);
+  private readonly prefs = inject(UiPrefsStore);
+  private readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly message = input.required<Message>();
   readonly rollbackEnabled = input(false);
@@ -162,22 +270,44 @@ export class MessageRowComponent {
   readonly rowId = input('');
   /** Task name/ID → childSessionID map for clickable sub-agent links. */
   readonly taskLinks = input<Map<string, string>>(new Map());
+  /** F9-9: the session's effective model; child models equal to it are not badged. */
+  readonly sessionModel = input<string>('');
   readonly isUser = computed(() => this.message().role === 'user');
 
   /**
-   * Parts plus their tool ordinal: the first tool call of a turn renders
-   * expanded, every later one collapsed (F2-6).
+   * Parts plus their tool ordinal (F2-6, now only used for numbering - every
+   * tool call starts collapsed regardless, F6-1b), with runs of >= 2
+   * consecutive tool calls folded into collapsible groups (F6-1).
    */
-  readonly parts = computed<RenderedPart[]>(() => {
-    let toolIndex = -1;
-    return this.message().parts.map((part) => {
-      if (part.type === 'tool') {
-        toolIndex += 1;
-        return { part, toolIndex };
-      }
-      return { part, toolIndex: -1 };
-    });
+  readonly items = computed<RenderedItem[]>(() =>
+    groupParts(
+      this.message().parts,
+      (name) => this.toolSafety.categoryOf(name),
+      this.sessionModel(),
+    ),
+  );
+
+  /**
+   * Per-group open/closed overrides (keyed by `ToolGroup.key`). Reset whenever
+   * the message identity or the "expand by default" preference changes, so a
+   * flipped preference takes effect immediately, like `ToolPartComponent`.
+   */
+  private readonly groupOverrides = linkedSignal<
+    { id: string; expand: boolean },
+    Record<number, boolean>
+  >({
+    source: () => ({ id: this.message().id, expand: this.prefs.expandToolCallsByDefault() }),
+    computation: () => ({}),
   });
+
+  groupOpen(key: number): boolean {
+    return this.groupOverrides()[key] ?? this.prefs.expandToolCallsByDefault();
+  }
+
+  toggleGroup(key: number): void {
+    const open = this.groupOpen(key);
+    this.groupOverrides.update((current) => ({ ...current, [key]: !open }));
+  }
 
   readonly time = computed(() => {
     const created = this.message().meta?.created_at;

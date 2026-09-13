@@ -1,15 +1,20 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
-import { DirectoryPicker } from '../../core/directory-picker.service';
 import { ProjectEntry } from '../../core/engine.dtos';
+import { DirectoryPicker } from '../../core/directory-picker.service';
 import { ProjectsStore } from '../../core/projects.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
 
+/** Key used to track a group's collapsed state - `null` names collapse under this. */
+const UNGROUPED_KEY = '__ungrouped__';
+
 @Component({
   selector: 'app-project-switcher',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [FormsModule],
   templateUrl: './project-switcher.html',
   styleUrl: './project-switcher.css',
   host: { '(document:keydown)': 'onDocumentKeydown($event)' },
@@ -23,10 +28,17 @@ export class ProjectSwitcher {
 
   readonly t = this.i18n.t.bind(this.i18n);
   readonly open = this.shell.projectSwitcherOpen;
-  readonly entries = this.projects.projects;
+  readonly groups = this.projects.groups;
+  readonly groupNames = this.projects.distinctGroupNames.bind(this.projects);
   readonly activePath = this.project.directory;
   readonly busy = signal(false);
   readonly activeProject = computed(() => this.projects.findByPath(this.activePath()));
+
+  /** Group names (or `UNGROUPED_KEY`) collapsed for the current modal session only. */
+  private readonly collapsedGroups = signal<ReadonlySet<string>>(new Set());
+  /** Id of the project row whose "move to group" input is currently shown. */
+  readonly editingGroupId = signal<string | null>(null);
+  readonly groupDraft = signal('');
 
   constructor() {
     effect(() => {
@@ -82,6 +94,45 @@ export class ProjectSwitcher {
 
   async togglePinned(entry: ProjectEntry): Promise<void> {
     await this.projects.togglePinned(entry.id);
+  }
+
+  /** Stable key for a group bucket, usable as a template `track` expression and a `Set` member. */
+  groupKey(name: string | null): string {
+    return name ?? UNGROUPED_KEY;
+  }
+
+  isCollapsed(name: string | null): boolean {
+    return this.collapsedGroups().has(this.groupKey(name));
+  }
+
+  toggleGroup(name: string | null): void {
+    const key = this.groupKey(name);
+    const next = new Set(this.collapsedGroups());
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    this.collapsedGroups.set(next);
+  }
+
+  /** Open the inline "move to group" input for `entry`, prefilled with its current group. */
+  startMoveGroup(entry: ProjectEntry): void {
+    this.groupDraft.set(entry.group ?? '');
+    this.editingGroupId.set(entry.id);
+  }
+
+  cancelMoveGroup(): void {
+    this.editingGroupId.set(null);
+  }
+
+  /** Confirmed on Enter/blur - round-trips through the engine and re-renders under the new group. */
+  async confirmMoveGroup(entry: ProjectEntry): Promise<void> {
+    if (this.editingGroupId() !== entry.id) return;
+    const group = this.groupDraft();
+    this.editingGroupId.set(null);
+    if ((entry.group ?? '') === group.trim()) return;
+    await this.projects.moveToGroup(entry.id, group);
   }
 
   async remove(entry: ProjectEntry): Promise<void> {

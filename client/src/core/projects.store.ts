@@ -21,6 +21,13 @@ import { ProjectEntry, ProjectPatch } from './engine.dtos';
 /** How many entries the Start screen's "recent" chips show. */
 export const RECENT_LIMIT = 5;
 
+/** One collapsible section of the project switcher (F6-7). */
+export interface ProjectGroup {
+  /** `null` is the always-last "Ungrouped" bucket. */
+  name: string | null;
+  projects: ProjectEntry[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class ProjectsStore {
   private readonly engine = inject(EngineClient);
@@ -36,6 +43,39 @@ export class ProjectsStore {
       .sort((a, b) => (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0))
       .slice(0, RECENT_LIMIT),
   );
+
+  /**
+   * `projects()` grouped by `group`, preserving each project's position
+   * within its bucket (the registry's own pinned -> recent -> name order).
+   * Named groups sort alphabetically (case-insensitive); the `name: null`
+   * "Ungrouped" bucket is always last, whatever its alphabetical position
+   * would be, and is omitted entirely when every project is grouped.
+   */
+  readonly groups = computed<ProjectGroup[]>(() => {
+    const buckets = new Map<string, ProjectEntry[]>();
+    const ungrouped: ProjectEntry[] = [];
+    for (const entry of this.projects()) {
+      const name = entry.group?.trim();
+      if (!name) {
+        ungrouped.push(entry);
+        continue;
+      }
+      const bucket = buckets.get(name);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        buckets.set(name, [entry]);
+      }
+    }
+    const named = [...buckets.keys()].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    );
+    const result: ProjectGroup[] = named.map((name) => ({ name, projects: buckets.get(name)! }));
+    if (ungrouped.length > 0) {
+      result.push({ name: null, projects: ungrouped });
+    }
+    return result;
+  });
 
   private migrated = false;
 
@@ -98,6 +138,15 @@ export class ProjectsStore {
     return this.patch(id, { pinned: !current?.pinned });
   }
 
+  /**
+   * Move a project to `group` (or ungroup it when `group` is `null`/blank -
+   * see the `ProjectPatch.group` wire contract in `engine.dtos.ts`). Typing a
+   * brand-new name simply creates that group on the fly.
+   */
+  moveToGroup(id: string, group: string | null): Promise<void> {
+    return this.patch(id, { group: group?.trim() ?? '' });
+  }
+
   /** Forget a project. Never deletes anything on disk. */
   async remove(id: string): Promise<void> {
     try {
@@ -121,6 +170,13 @@ export class ProjectsStore {
       this.error.set(describe(err));
       return null;
     }
+  }
+
+  /** Distinct existing group names, alphabetical - offered as move-to-group suggestions. */
+  distinctGroupNames(): string[] {
+    return this.groups()
+      .map((g) => g.name)
+      .filter((name): name is string => name !== null);
   }
 
   findById(id: string): ProjectEntry | null {

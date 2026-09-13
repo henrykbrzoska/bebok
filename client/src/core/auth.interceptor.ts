@@ -15,6 +15,30 @@
 /** The token for the engine we are currently attached to (memory only). */
 let engineToken: string | null = null;
 
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+/**
+ * Called whenever the engine answers 401: the token we hold is not the one
+ * the running engine minted (it restarted, or the address was changed by
+ * hand). `EngineClient` turns this into its `unauthorized` state so the UI
+ * can ask for the new `BEBOK_READY` address instead of failing silently.
+ */
+export function onEngineUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+function notifyUnauthorized(): void {
+  for (const listener of [...unauthorizedListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error('engine unauthorized listener failed', err);
+    }
+  }
+}
+
 /** Store the capability token handed to us by the engine handshake. */
 export function setEngineToken(token: string | null): void {
   engineToken = token && token.length > 0 ? token : null;
@@ -62,5 +86,9 @@ export async function authFetch(url: string, init: RequestInit = {}): Promise<Re
   if (engineToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${engineToken}`);
   }
-  return fetch(url, { ...init, headers });
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+  return res;
 }

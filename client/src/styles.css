@@ -21,6 +21,11 @@
   --text-faint: #6b7280;
   --code-text: #8b93a1;
   --code-text-strong: #c7cbd3;
+  /* F8-3: the palette had no blue. Derived, not picked from a brand -
+   * lightness/saturation land in the same ~55-66% L / ~30-75% S band as
+   * --accent/--success/--warning/--danger above, so a file/dir path chip
+   * reads as another categorical status color rather than a foreign hue. */
+  --path-color: #6fa8dc;
 
   /* --- Accent & status ------------------------------------------------ */
   --accent: #e8935a;
@@ -115,6 +120,13 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  /* F9-1: the document itself never scrolls. The shell is a fixed 100vh
+   * three-zone layout; only the sidebar session list, the chat thread, the
+   * right drawer and each panel body are scroll containers. Anything that
+   * would otherwise grow the document (an absolutely positioned box anchored
+   * to the initial containing block, an oversized fixed-height view) is
+   * clipped here instead of pushing the topbar off-screen. */
+  overflow: hidden;
 }
 
 body {
@@ -198,6 +210,91 @@ pre {
   font-family: var(--font-mono);
 }
 
+/* --- Syntax highlighting (F7-4) -----------------------------------------
+ * `highlight.js`'s own theme stylesheets are not used - `ui/code-highlight`
+ * only ever emits the plain `hljs-*` token classes it authors, and they are
+ * themed here directly against the app's existing dark-palette tokens so
+ * highlighted code always matches the rest of the UI (Explorer content pane,
+ * Preview panel + chat fenced code blocks, and the diff view's +/- lines).
+ */
+.hljs {
+  color: var(--code-text-strong);
+  background: transparent;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-link,
+.hljs-built_in,
+.hljs-builtin-name {
+  color: var(--accent);
+}
+
+.hljs-string,
+.hljs-addition,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--success);
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-doctag {
+  color: var(--warning);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-section,
+.hljs-name {
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.hljs-type,
+.hljs-class .hljs-title {
+  color: var(--code-text-strong);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-attribute,
+.hljs-params {
+  color: var(--text);
+}
+
+.hljs-tag {
+  color: var(--text-muted);
+}
+.hljs-tag .hljs-name {
+  color: var(--accent);
+}
+.hljs-tag .hljs-attr {
+  color: var(--code-text-strong);
+}
+
+.hljs-meta {
+  color: var(--text-faint);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
+
 a {
   color: var(--accent);
 }
@@ -206,11 +303,17 @@ a {
   color: var(--text-muted);
 }
 
-/* --- Density (WP-SHELL / F1-12) ---------------------------------------
- * The shell root carries `.density-compact` when the user picks Compact in
- * the topbar. Compact tightens the shared spacing scale, which every shell
+/* --- Density (WP-SHELL / F1-12, made permanent by F7-2) ----------------
+ * `.density-compact` tightens the shared spacing scale, which every shell
  * component is built on, and trims the card/list padding used by the Start
- * and Settings screens. The choice is persisted by `ui-prefs.store.ts`.
+ * and Settings screens. F7-2 removed the Comfortable/Compact toggle (it
+ * duplicated the chat toolbar's "Compact context" button in name only) and
+ * made this the app's only layout: `app-shell.html` now always applies the
+ * class instead of binding it to a preference, so this selector - and the
+ * matching `:host-context(.density-compact)` rules in `ui/sidebar/sidebar.css`
+ * - are effectively unconditional. Left as a class (rather than merged into
+ * the base selectors) to keep this change dead-simple and low-risk; a
+ * follow-up can fold them together.
  */
 
 .density-compact {
@@ -238,4 +341,119 @@ a {
 .density-compact .agent-list li {
   padding-top: 5px;
   padding-bottom: 5px;
+}
+
+/* --- Inline code chip kinds (F8-3, chat text) ---------------------------
+ * `core/inline-classify.ts` tags each chat inline-code span with a base
+ * `.ic` class plus an `.ic-<kind>` modifier - `.ic` alone (no modifier) is
+ * the unclassified fallback, visually identical to the plain gray chip it
+ * replaces (that look itself stays defined in `text-part.ts`'s pre-existing
+ * `app-text-part .md code` rule; only *color*, and the two structural
+ * exceptions below, are added here).
+ *
+ * `text-part.ts` renders with `ViewEncapsulation.None`, so its `.md`-scoped
+ * rules are already plain global CSS, not shadow-scoped - the selectors
+ * below are qualified with the same `app-text-part .md` prefix purely to
+ * win the specificity needed to layer over that rule (e.g. `.ic-shell`'s
+ * darker background), not because of any encapsulation boundary.
+ */
+.ic {
+  font-family: var(--font-mono);
+}
+/* A `path`-classified span that's clickable (a relative path, wrapped as
+ * `<a class="preview-link ic ic-path">` by `renderClassifiedInlineCode`)
+ * gets the same chip look as `<code>`, since `code, pre` element rules
+ * don't apply to an `<a>`. */
+app-text-part .md a.ic {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+  text-decoration: none;
+}
+app-text-part .md a.ic:hover {
+  text-decoration: underline;
+}
+app-text-part .md .ic-path {
+  color: var(--path-color);
+}
+/* `url` renders as a real `<a target="_blank">`, not a `<code>` chip - see
+ * module header in `inline-classify.ts` - so it reads as an actual link. */
+app-text-part .md .ic-url {
+  color: var(--accent);
+}
+app-text-part .md .ic-route {
+  color: var(--accent);
+}
+app-text-part .md .ic-env {
+  color: var(--warning);
+}
+app-text-part .md .ic-number {
+  color: var(--warning);
+}
+app-text-part .md .ic-identifier {
+  color: var(--accent-hover);
+}
+app-text-part .md .ic-package {
+  color: var(--code-text-strong);
+}
+app-text-part .md .ic-pkg-version {
+  color: var(--text-faint);
+}
+app-text-part .md code.ic-shell {
+  background: var(--terminal-bg);
+  color: var(--code-text-strong);
+}
+app-text-part .md .ic-shell-glyph {
+  color: var(--text-faint);
+  margin-right: 4px;
+  user-select: none;
+}
+app-text-part .md code.ic-http {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+app-text-part .md .ic-method {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 700;
+  line-height: 1.5;
+}
+app-text-part .md .ic-method-get {
+  background: rgba(95, 184, 138, 0.22);
+  color: var(--success);
+}
+app-text-part .md .ic-method-post,
+app-text-part .md .ic-method-put,
+app-text-part .md .ic-method-patch {
+  background: rgba(224, 182, 74, 0.22);
+  color: var(--warning);
+}
+app-text-part .md .ic-method-delete {
+  background: rgba(232, 147, 90, 0.22);
+  color: var(--accent);
+}
+app-text-part .md .ic-method-head,
+app-text-part .md .ic-method-options {
+  background: rgba(152, 160, 173, 0.22);
+  color: var(--text-muted);
+}
+app-text-part .md .ic-jt-key {
+  color: var(--code-text-strong);
+  font-weight: 600;
+}
+app-text-part .md .ic-jt-string {
+  color: var(--success);
+}
+app-text-part .md .ic-jt-num {
+  color: var(--warning);
+}
+app-text-part .md .ic-jt-bool {
+  color: var(--accent);
+}
+app-text-part .md .ic-jt-punct {
+  color: var(--text-faint);
 }

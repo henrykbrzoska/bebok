@@ -1,0 +1,102 @@
+/**
+ * F6-10: the shared markdown-view renderer. Pins headings/code/table/link
+ * parsing - the four things the Preview panel needs that `explorer-markdown.ts`
+ * deliberately does not support (see that file's header comment).
+ */
+
+import { preloadLanguage } from '../code-highlight/code-highlight';
+import { renderMarkdownView } from './markdown-view.render';
+
+describe('renderMarkdownView', () => {
+  it('renders headings h1-h3', () => {
+    const html = renderMarkdownView('# Title\n\n## Sub\n\n### Sub sub');
+    expect(html).toContain('<h1>Title</h1>');
+    expect(html).toContain('<h2>Sub</h2>');
+    expect(html).toContain('<h3>Sub sub</h3>');
+  });
+
+  it('renders a fenced code block, escaped and syntax-highlighted (F7-4)', async () => {
+    await preloadLanguage('ts');
+    const html = renderMarkdownView('```ts\nconst a = <b>1</b>;\n```');
+    expect(html).toContain('<pre><code class="hljs language-typescript">');
+    // Never a raw, unescaped `<b>` - highlight.js escapes as it tokenizes.
+    expect(html).not.toContain('<b>1</b>');
+    // Once the `xml` grammar is registered (by any earlier spec), TypeScript
+    // tokenizes `<b>` as embedded markup; compare the text between the spans.
+    expect(html.replace(/<\/?span[^>]*>/g, '')).toContain('&lt;b&gt;1&lt;/b&gt;');
+    // Actually tokenized, not just escaped verbatim.
+    expect(html).toContain('hljs-keyword');
+  });
+
+  it('falls back to plain escaped text for an unknown language hint', () => {
+    const html = renderMarkdownView('```not-a-real-language\n<b>x</b>\n```');
+    expect(html).toContain('<pre><code class="hljs">&lt;b&gt;x&lt;/b&gt;</code></pre>');
+  });
+
+  it('parses a GFM pipe table with alignment', () => {
+    const html = renderMarkdownView(
+      ['| Name | Score |', '| :--- | ----: |', '| a | 1 |', '| b | 2 |'].join('\n'),
+    );
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th style="text-align:left">Name</th>');
+    expect(html).toContain('<th style="text-align:right">Score</th>');
+    expect(html).toContain('<td style="text-align:left">a</td>');
+    expect(html).toContain('<td style="text-align:right">1</td>');
+  });
+
+  it('does not treat a plain paragraph containing `|` as a table', () => {
+    const html = renderMarkdownView('a | b | c');
+    expect(html).not.toContain('<table>');
+    expect(html).toContain('<p>a | b | c</p>');
+  });
+
+  it('marks a relative link for click interception, leaves absolute links alone', () => {
+    const html = renderMarkdownView('[see](./other.md) and [site](https://example.com)');
+    expect(html).toContain('<a href="./other.md" class="relative-link">see</a>');
+    expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener noreferrer">site</a>');
+  });
+
+  it('renders bullet and numbered lists', () => {
+    expect(renderMarkdownView('- a\n- b')).toBe('<ul><li>a</li><li>b</li></ul>');
+    expect(renderMarkdownView('1. a\n2. b')).toBe('<ol><li>a</li><li>b</li></ol>');
+  });
+
+  it('renders a blockquote', () => {
+    expect(renderMarkdownView('> quoted')).toBe('<blockquote><p>quoted</p></blockquote>');
+  });
+
+  it('escapes stray HTML in plain text so it is never injected verbatim', () => {
+    const html = renderMarkdownView('<script>alert(1)</script>');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  describe('F9-11 bare URL linkification', () => {
+    it('linkifies a bare URL in prose, excluding trailing punctuation', () => {
+      const html = renderMarkdownView('See https://example.com for details.');
+      expect(html).toBe(
+        '<p>See <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a> for details.</p>',
+      );
+    });
+
+    it('does not double-wrap a URL already in markdown link syntax', () => {
+      const html = renderMarkdownView('[site](https://example.com)');
+      expect((html.match(/<a /g) ?? []).length).toBe(1);
+    });
+
+    it('linkifies a bare URL inside a table cell', () => {
+      const html = renderMarkdownView(['| Link |', '| --- |', '| https://example.com |'].join('\n'));
+      expect(html).toContain(
+        '<td><a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a></td>',
+      );
+    });
+
+    it('keeps a Wikipedia-style URL with a balanced trailing paren intact', () => {
+      const html = renderMarkdownView('See https://en.wikipedia.org/wiki/Foo_(bar) for background.');
+      expect(html).toContain(
+        '<a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noopener noreferrer">' +
+          'https://en.wikipedia.org/wiki/Foo_(bar)</a>',
+      );
+    });
+  });
+});

@@ -39,8 +39,7 @@
 //! matches) else `task.name` else the agent name. A `task.member` that
 //! matches no configured member is an error listing valid members.
 
-use std::sync::Weak;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -48,19 +47,16 @@ use serde_json::{Value, json};
 
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
+use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use super::task_tool::MAX_TASK_DEPTH;
-use super::turn::run_turn;
 use crate::provider::build_provider;
-use crate::session::Role;
 use crate::store::InstanceStore;
 
 /// The `fleet` tool. One instance is registered per directory `Instance`.
 pub struct FleetTool {
     /// Weak back-reference to the store (same ownership reasoning as `TaskTool`).
     store: Weak<InstanceStore>,
-    /// Delegation depth guard (shared; a fleet fan-out counts as one level).
-    depth: AtomicUsize,
     max_depth: usize,
 }
 
@@ -68,7 +64,6 @@ impl FleetTool {
     pub fn new(store: Weak<InstanceStore>) -> Self {
         Self {
             store,
-            depth: AtomicUsize::new(0),
             max_depth: MAX_TASK_DEPTH,
         }
     }
@@ -305,22 +300,6 @@ fn select_members(
     Ok(filtered)
 }
 
-/// RAII depth guard: decrements the shared counter on drop.
-struct DepthGuard<'a>(&'a AtomicUsize);
-
-impl<'a> DepthGuard<'a> {
-    fn enter(counter: &'a AtomicUsize) -> Self {
-        counter.fetch_add(1, Ordering::AcqRel);
-        Self(counter)
-    }
-}
-
-impl Drop for DepthGuard<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
 /// Per-member outcome collected from the concurrent fan-out.
 struct MemberResult {
     name: String,
@@ -429,7 +408,12 @@ impl Tool for FleetTool {
             return ToolOutput::new("fleet: `prompt` must not be empty", "fleet");
         }
 
-        if self.depth.load(Ordering::Acquire) >= self.max_depth {
+        let Some(store) = self.store.upgrade() else {
+            return ToolOutput::new("fleet: engine store is gone", "fleet");
+        };
+        // Nesting guard (WP-DELEGATION): derived from the parent chain, so
+        // concurrently running siblings never count against it.
+        if delegation_depth(&store, parse_uuid(&ctx.session_id)).await >= self.max_depth {
             return ToolOutput::new(
                 format!(
                     "fleet: maximum delegation depth ({}) reached; complete the work directly",
@@ -438,11 +422,6 @@ impl Tool for FleetTool {
                 "fleet",
             );
         }
-
-        let Some(store) = self.store.upgrade() else {
-            return ToolOutput::new("fleet: engine store is gone", "fleet");
-        };
-        let _guard = DepthGuard::enter(&self.depth);
 
         let directory = ctx.root.to_string_lossy().to_string();
         let instance = match store.get_or_create_instance(&directory).await {
@@ -610,11 +589,16 @@ fn render_results(results: &[MemberResult]) -> ToolOutput {
 }
 
 /// Run one fleet member to completion: child session + turn + result text.
+///
+/// WP-DELEGATION: the child itself runs through the shared
+/// `delegation::run_child` (concurrency cap, `task.progress`, result record);
+/// this function only resolves the member into a `ChildSpec` and maps the
+/// outcome back to a `MemberResult`.
 #[allow(clippy::too_many_arguments)]
 async fn run_member(
-    store: &InstanceStore,
-    instance: &crate::store::Instance,
-    parent: &crate::store::SessionState,
+    store: &Arc<InstanceStore>,
+    instance: &Arc<crate::store::Instance>,
+    parent: &Arc<crate::store::SessionState>,
     cfg: &crate::config::ResolvedConfig,
     member: &crate::config::FleetMember,
     prompt: &str,
@@ -636,17 +620,16 @@ async fn run_member(
     };
     let mut agent = instance.resolve_agent(agent_name);
 
-    // Effective model: member override, else preset override, else
-    // `models.<agent>` / global model.
-    let explicit = member.model.trim();
-    let model = if explicit.is_empty() {
-        agent
-            .model
-            .clone()
-            .unwrap_or_else(|| cfg.model_for(&agent.name))
-    } else {
-        explicit.to_string()
-    };
+    // Effective model (F9-10): member override, else the delegation model
+    // policy applied to the parent's model (`heavy` = the parent's model).
+    let parent_model =
+        crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
+    let model = crate::agent::resolve_subagent_model(
+        bebok_llm::ModelCatalog::global(),
+        &cfg.delegation,
+        &parent_model,
+        Some(member.model.trim()),
+    );
 
     assemble_prompt(instance, &mut agent, cfg);
 
@@ -674,158 +657,67 @@ async fn run_member(
         )
         .await;
 
-    let child = match store
-        .create_subagent_session(parent, &agent.name, Some(&model), Some(&name))
-        .await
-    {
-        Ok(c) => c,
+    let spec = ChildSpec {
+        store: store.clone(),
+        instance: instance.clone(),
+        parent: parent.clone(),
+        agent,
+        agent_name: agent_name.to_string(),
+        model,
+        provider,
+        name: name.clone(),
+        prompt: prompt.to_string(),
+        images,
+        parent_abort: ctx.abort.clone(),
+        parent_session_id: ctx.session_id.clone(),
+        directory: parent.directory().to_string(),
+        max_concurrent: cfg.delegation.effective_max_concurrent(),
+        background: false,
+        origin: "fleet",
+    };
+    let prepared = match prepare_child(spec).await {
+        Ok(p) => p,
         Err(e) => {
             return MemberResult {
                 name,
                 agent: agent_name.to_string(),
                 child_session_id: String::new(),
                 ok: false,
-                text: format!("cannot create sub-session: {e}"),
+                text: e,
             };
         }
     };
-
-    if let Err(e) = child.append_user_message_with_images(prompt, images).await {
-        return MemberResult {
-            name,
-            agent: agent_name.to_string(),
-            child_session_id: child.id().to_string(),
-            ok: false,
-            text: format!("cannot record subtask: {e}"),
-        };
-    }
-
-    if !child.try_begin_turn() {
-        return MemberResult {
-            name,
-            agent: agent_name.to_string(),
-            child_session_id: child.id().to_string(),
-            ok: false,
-            text: "sub-session is already busy".to_string(),
-        };
-    }
-    let abort = ctx.abort.child_token();
-    child.set_abort(abort.clone()).await;
-
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let description: String = prompt.chars().take(80).collect();
-    let child_session_id = child.id().to_string();
-    let bus = store.bus();
-
-    let child_info = parent
-        .register_child_task(
-            &task_id,
-            &description,
-            &child_session_id,
-            &name,
-            agent_name,
-            abort.clone(),
-        )
-        .await;
-    bus.publish(
-        crate::event::Event::new("task.started", child.directory(), &ctx.session_id)
-            .with_properties(serde_json::to_value(&child_info).unwrap_or_default()),
-    );
-
-    let result = run_turn(
-        child.clone(),
-        agent,
-        instance.tools.clone(),
-        provider,
-        instance.permission.clone(),
-        store.bus(),
-        abort.clone(),
-        &model,
-    )
-    .await;
-
-    child.clear_abort().await;
-    child.end_turn();
-
-    let (status, error_msg) = match &result {
-        Ok(()) => {
-            if abort.is_cancelled() {
-                (
-                    "aborted".to_string(),
-                    Some("sub-task was cancelled".to_string()),
-                )
-            } else {
-                ("completed".to_string(), None)
-            }
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            if abort.is_cancelled() {
-                (
-                    "aborted".to_string(),
-                    Some(format!("sub-task was cancelled: {msg}")),
-                )
-            } else {
-                ("error".to_string(), Some(msg))
-            }
-        }
-    };
-
-    parent.unregister_child_task(&task_id).await;
-    bus.publish(
-        crate::event::Event::new("task.ended", child.directory(), &ctx.session_id).with_properties(
-            json!({
-                "taskID": task_id,
-                "status": status,
-                "error": error_msg,
-                "childSessionID": child_session_id,
-                "name": name,
-            }),
-        ),
-    );
-
-    if abort.is_cancelled() {
-        return MemberResult {
+    let outcome = run_child(prepared).await;
+    let child_session_id = outcome.child_session_id.clone();
+    match outcome.status.as_str() {
+        "aborted" => MemberResult {
             name,
             agent: agent_name.to_string(),
             child_session_id,
             ok: false,
             text: "[aborted] sub-task was cancelled".to_string(),
-        };
-    }
-
-    if let Err(e) = result {
-        return MemberResult {
+        },
+        "error" => MemberResult {
             name,
             agent: agent_name.to_string(),
             child_session_id,
             ok: false,
-            text: format!("subtask failed: {e}"),
-        };
-    }
-
-    let messages = child.messages_snapshot().await;
-    let text = messages
-        .iter()
-        .rev()
-        .find(|m| m.role == Role::Assistant)
-        .map(|m| m.text_content())
-        .unwrap_or_default();
-    if text.trim().is_empty() {
-        return MemberResult {
+            text: format!("subtask failed: {}", outcome.error.unwrap_or_default()),
+        },
+        _ if outcome.text.trim().is_empty() => MemberResult {
             name,
             agent: agent_name.to_string(),
             child_session_id,
             ok: false,
             text: "sub-agent produced no output".to_string(),
-        };
-    }
-    MemberResult {
-        name,
-        agent: agent_name.to_string(),
-        child_session_id,
-        ok: true,
-        text,
+        },
+        _ => MemberResult {
+            name,
+            agent: agent_name.to_string(),
+            child_session_id,
+            ok: true,
+            text: outcome.text,
+        },
     }
 }
 
@@ -850,6 +742,17 @@ fn assemble_prompt(
     // Fleet members are sub-agents too: they need the host-OS/shell note, or on
     // Windows they emit POSIX pipelines `cmd /C` cannot run.
     agent.prompt = format!("{}\n\n{}", agent.prompt, super::prompt_env::host_os_note());
+    // WP-AUTOVERIFY (F8-1): browser + dev-server capabilities and the
+    // `verify.frontend` policy (skipped for presets without browser tools).
+    if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+    // WP-DELEGATION: a worker's brief, not the main thread's policy.
+    agent.prompt = format!(
+        "{}\n\n{}",
+        agent.prompt,
+        super::delegation_policy::subagent_note()
+    );
 }
 
 #[cfg(test)]
@@ -964,7 +867,6 @@ mod tests {
         // Weak store: schema/description don't touch the store.
         let tool = FleetTool {
             store: Weak::new(),
-            depth: AtomicUsize::new(0),
             max_depth: 3,
         };
         let schema = Tool::parameters_schema(&tool);
@@ -1107,7 +1009,6 @@ mod tests {
     fn schema_documents_tasks() {
         let tool = FleetTool {
             store: Weak::new(),
-            depth: AtomicUsize::new(0),
             max_depth: 3,
         };
         let schema = Tool::parameters_schema(&tool);
@@ -1171,7 +1072,6 @@ mod tests {
     fn schema_documents_images() {
         let tool = FleetTool {
             store: Weak::new(),
-            depth: AtomicUsize::new(0),
             max_depth: 3,
         };
         let schema = Tool::parameters_schema(&tool);

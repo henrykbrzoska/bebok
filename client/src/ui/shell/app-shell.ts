@@ -14,6 +14,8 @@ import { RouterOutlet } from '@angular/router';
 import { CommandPalette } from '../command-palette/command-palette';
 import { DirectoryBrowser } from '../directory-browser/directory-browser';
 import { ProjectSwitcher } from '../project-switcher/project-switcher';
+import { ReconnectBanner } from '../reconnect-banner/reconnect-banner';
+import { DrawerAutoReveal } from '../right-drawer/drawer-auto-reveal.service';
 import { RightDrawer } from '../right-drawer/right-drawer';
 import { Sidebar } from '../sidebar/sidebar';
 import { Topbar } from '../topbar/topbar';
@@ -22,7 +24,16 @@ import { ShellStore } from './shell.store';
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, Sidebar, Topbar, RightDrawer, CommandPalette, DirectoryBrowser, ProjectSwitcher],
+  imports: [
+    RouterOutlet,
+    Sidebar,
+    Topbar,
+    RightDrawer,
+    CommandPalette,
+    DirectoryBrowser,
+    ProjectSwitcher,
+    ReconnectBanner,
+  ],
   templateUrl: './app-shell.html',
   styleUrl: './app-shell.css',
 })
@@ -31,5 +42,10 @@ export class AppShell {
 
   /** The right drawer belongs to the Chat screen only. */
   readonly showDrawer = computed(() => this.shell.isChat() && this.shell.rightDrawerOpen());
-  readonly density = this.shell.density;
+
+  constructor() {
+    // F9-2: Agents/Browser panels surface themselves on task.started /
+    // browser_* tool calls for the open session (see the service).
+    inject(DrawerAutoReveal).start();
+  }
 }

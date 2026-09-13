@@ -1,0 +1,128 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: #00000099;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  z-index: 50;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  width: 1100px;
+  max-width: 96vw;
+  height: 88vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-bubble);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-14);
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.baseline {
+  flex: none;
+  padding: 1px var(--space-6);
+  border-radius: var(--radius-bubble);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: var(--label-tracking);
+  color: var(--text-faint);
+}
+
+.baseline.git {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex: none;
+}
+
+.action {
+  padding: var(--space-6) var(--space-10);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.action.danger {
+  color: var(--danger);
+}
+
+.close {
+  padding: 3px var(--space-8);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--text);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-12) var(--space-14);
+}
+
+.empty,
+.error {
+  padding: var(--space-16);
+  font-size: var(--fs-12-5);
+  color: var(--text-faint);
+}
+
+.error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}

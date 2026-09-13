@@ -15,6 +15,14 @@
  * capability token as `?token=…`. Every path through this file funnels the URL
  * through `adopt()`, which stores the token (`setEngineToken`) and keeps only
  * the clean base URL for request building.
+ *
+ * Bootstrap (F9-17): in browser mode the page URL itself may carry the engine
+ * address as `?engine=<url-encoded BEBOK_READY url>`. A launcher (the root
+ * `npm run full-build-dev` orchestrator) opens the dev server that way so the
+ * `BEBOK_READY` line never has to be pasted by hand. The parameter is adopted
+ * exactly once - persisted like a manual "Connect" - and then stripped from
+ * the address bar (`history.replaceState`) so reloads, bookmarks and copied
+ * links do not keep re-applying (or leaking) the token.
  */
 
 import { setEngineToken, splitEngineUrl } from './auth.interceptor';
@@ -37,6 +45,41 @@ const DIRECTORY_KEY = 'bebok.lastDirectory';
 
 const DEFAULT_REMOTE_URL = 'http://127.0.0.1:8787';
 
+/** Query parameter carrying the engine URL (+ token) on first load (F9-17). */
+export const BOOTSTRAP_ENGINE_PARAM = 'engine';
+
+/**
+ * Read the `?engine=` bootstrap value from a page query string. Returns the
+ * decoded engine URL (still carrying its own `?token=` when the engine issued
+ * one), or null when the parameter is absent, empty or not an http(s) URL.
+ */
+export function readBootstrapEngine(search: string): string | null {
+  const raw = new URLSearchParams(search ?? '').get(BOOTSTRAP_ENGINE_PARAM);
+  const value = (raw ?? '').trim();
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return value;
+}
+
+/**
+ * The same page URL without the `?engine=` parameter (other query parameters
+ * and the hash are kept). Used to rewrite the address bar after adoption.
+ */
+export function stripBootstrapParam(href: string): string {
+  const url = new URL(href);
+  url.searchParams.delete(BOOTSTRAP_ENGINE_PARAM);
+  return url.toString();
+}
+
 export class TransportStrategy {
   private readonly kind: PlatformKind;
   private readonly capacitor: boolean;
@@ -44,6 +87,9 @@ export class TransportStrategy {
   constructor() {
     this.kind = this.detect();
     this.capacitor = this.detectCapacitor();
+    if (this.kind === 'http') {
+      this.adoptBootstrapParam();
+    }
   }
 
   get platform(): PlatformKind {
@@ -106,6 +152,50 @@ export class TransportStrategy {
     // `BEBOK_READY http://host:port/?token=...` - is picked up here; against an
     // engine started with `BEBOK_NO_AUTH=1` there simply is none.
     return this.adopt('http', this.readRemoteUrl(), this.readRemoteToken());
+  }
+
+  /**
+   * F9-17: adopt `?engine=<url>` from the page address (browser mode only).
+   * Behaves like a manual "Connect" with that URL: the base URL and token are
+   * persisted so the normal `connect()` path (and the Start view's address
+   * form) pick them up. A bootstrap URL without a token (engine started with
+   * `BEBOK_NO_AUTH=1`) also drops any token remembered from an earlier engine,
+   * which would otherwise be sent - harmlessly, but confusingly - as a stale
+   * bearer. Finally the parameter is removed from the address bar.
+   */
+  private adoptBootstrapParam(): void {
+    if (typeof window === 'undefined' || !window.location) {
+      return;
+    }
+    const raw = readBootstrapEngine(window.location.search);
+    if (!raw) {
+      return;
+    }
+    const { baseUrl, token } = splitEngineUrl(raw);
+    if (!baseUrl) {
+      return;
+    }
+    this.saveRemote(baseUrl, token);
+    if (!token) {
+      this.clearRemoteToken();
+    }
+    try {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        stripBootstrapParam(window.location.href),
+      );
+    } catch {
+      /* history API unavailable (tests / odd embeds) - the param is simply left in place */
+    }
+  }
+
+  private clearRemoteToken(): void {
+    try {
+      localStorage.removeItem(REMOTE_TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
   }
 
   /**

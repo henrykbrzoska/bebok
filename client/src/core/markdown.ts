@@ -4,8 +4,29 @@
  * The input is first HTML-escaped, then structural markup is applied from the
  * escaped text. Raw HTML is never passed through, so this stays safe to inject
  * with `[innerHTML]`. Scope is intentionally small (M3): paragraphs, fenced
- * code blocks, inline code/bold/links and simple lists.
+ * code blocks, headings, inline code/bold/links and simple lists.
+ *
+ * F7-4: fenced code blocks are additionally run through
+ * `ui/code-highlight` for syntax highlighting (language resolved from the
+ * fence hint). That module escapes/tokenizes safely on its own, so this file
+ * still never binds raw text.
+ *
+ * F8-3: inline (single-backtick) code spans are further classified by
+ * `core/inline-classify.ts` so a file path, a shell command, an HTTP route,
+ * etc. each get a distinct chip instead of one generic gray one. That
+ * module only ever wraps the already-escaped span text, so it introduces
+ * no new way for raw model text to reach the DOM.
+ *
+ * F9-11: a bare `http(s)://` URL mentioned in plain prose (not already part
+ * of `[label](url)` syntax or a backtick span) is linkified too, via
+ * `core/linkify.ts` - shared with the Preview panel renderer
+ * (`markdown-view.render.ts`) and the tool-output rendering helper
+ * (`diff-view.ts`).
  */
+
+import { renderClassifiedInlineCode } from './inline-classify';
+import { highlightBlockHtml } from '../ui/code-highlight/code-highlight';
+import { linkifyOutsideTags, renderSchemeLink } from './linkify';
 
 interface Block {
   kind: 'code' | 'md';
@@ -59,24 +80,100 @@ function tokenize(text: string): Block[] {
   return out;
 }
 
+/** True for an absolute URL (`http:`, `mailto:`, ...) - anything with a scheme. */
+function hasUriScheme(href: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href);
+}
+
+/**
+ * F6-11: a bare `docs/plan.md`-looking token in plain text (not already part
+ * of `[label](url)` syntax) is linkified too, so a relative path an assistant
+ * just mentions in prose is still clickable. Matched only outside any tag
+ * already produced by `renderInline` (skipping `<a>…</a>` and `<code>…</code>`
+ * spans) so an already-linked or code-quoted path is never double-wrapped.
+ */
+const BARE_MD_PATH = /(^|[\s([])((?:\.{1,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.(?:md|markdown))\b/g;
+
+function linkifyBarePaths(html: string): string {
+  const segments = html.split(/(<[^>]+>)/g);
+  let skipDepth = 0;
+  return segments
+    .map((segment) => {
+      if (segment.startsWith('<')) {
+        const lower = segment.toLowerCase();
+        if (/^<(a|code)\b/.test(lower)) {
+          skipDepth += 1;
+        } else if (/^<\/(a|code)>/.test(lower)) {
+          skipDepth = Math.max(0, skipDepth - 1);
+        }
+        return segment;
+      }
+      if (skipDepth > 0) {
+        return segment;
+      }
+      return segment.replace(
+        BARE_MD_PATH,
+        (_, pre: string, path: string) => `${pre}<a href="${path}" class="preview-link">${path}</a>`,
+      );
+    })
+    .join('');
+}
+
 function renderInline(value: string): string {
-  // value is already HTML-escaped; apply text-level formatting on top.
+  // `value` is already HTML-escaped by `renderMarkdown` (see `escapeHtml`), so
+  // model text such as `<main>` or `Array<string>` arrives as `&lt;main&gt;`
+  // and only the markup produced here is real HTML.
   let html = value
-    .replace(/`([^`\n]+)`/g, (_, code: string) => `<code>${code}</code>`)
+    .replace(/`([^`\n]+)`/g, (_, code: string) => renderClassifiedInlineCode(code, { pathLinkClass: 'preview-link' }))
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
-    .replace(
-      /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
-      (_, label: string, href: string) =>
-        `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`,
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
+      renderSchemeLink(label, href, 'preview-link', hasUriScheme(href)),
     );
+  // F6-11: a plain-looking relative `.md` path gets the same treatment.
+  html = linkifyBarePaths(html);
+  // F9-11: a bare http(s) URL mentioned in prose becomes a clickable link
+  // too - run last, and skipping `<a>`/`<code>` spans, so it never touches a
+  // URL already linked above (markdown syntax, the `.md`-path pass) or a
+  // still-plain-code backtick span.
+  html = linkifyOutsideTags(html);
   // <br> inside block paragraphs from escaped newlines.
   html = html.replace(/\n/g, '<br>');
   return html;
 }
 
-/** Render a paragraph; simple all-bullet / all-numbered blocks become lists. */
+/** ATX heading line: `#`..`######`, a space, then the text (`#hashtag` is not one). */
+const HEADING = /^(#{1,6})\s+(.+)$/;
+
+/**
+ * Render a paragraph: heading lines become `<h2>`..`<h6>` (clamped to h2+ so
+ * model output never competes with the view's own title); the runs of lines
+ * between them go through `renderLines`.
+ */
 function renderParagraph(value: string): string {
-  const lines = value.split('\n');
+  const out: string[] = [];
+  let run: string[] = [];
+  const flush = (): void => {
+    if (run.length > 0) {
+      out.push(renderLines(run));
+      run = [];
+    }
+  };
+  for (const line of value.split('\n')) {
+    const heading = HEADING.exec(line);
+    if (!heading) {
+      run.push(line);
+      continue;
+    }
+    flush();
+    const level = Math.min(6, Math.max(2, heading[1].length));
+    out.push(`<h${level}>${renderInline(heading[2].trim())}</h${level}>`);
+  }
+  flush();
+  return out.join('');
+}
+
+/** Render a run of lines; simple all-bullet / all-numbered runs become lists. */
+function renderLines(lines: string[]): string {
   const bullets = /^[-*+]\s+/;
   const numbers = /^\d+[.)]\s+/;
   if (lines.length > 0 && lines.every((l) => bullets.test(l))) {
@@ -91,7 +188,7 @@ function renderParagraph(value: string): string {
       .join('');
     return `<ol>${items}</ol>`;
   }
-  return `<p>${renderInline(value)}</p>`;
+  return `<p>${renderInline(lines.join('\n'))}</p>`;
 }
 
 export function renderMarkdown(source: string): string {
@@ -99,10 +196,12 @@ export function renderMarkdown(source: string): string {
   return blocks
     .map((block) => {
       if (block.kind === 'code') {
-        const lang = block.lang ? ` data-lang="${escapeHtml(block.lang)}"` : '';
-        return `<pre><code${lang}>${escapeHtml(block.code ?? '')}</code></pre>`;
+        return highlightBlockHtml(block.code ?? '', { language: block.lang || null });
       }
-      const paragraphs = (block.text ?? '')
+      // Escape once, up front: every transform below only ever sees
+      // entity-encoded text, so raw `<tag>`s from the model can never reach
+      // the DOM. Fenced code is escaped by `highlightBlockHtml` itself.
+      const paragraphs = escapeHtml(block.text ?? '')
         .split(/\n{2,}/)
         .map((p) => p.trim())
         .filter((p) => p.length > 0);

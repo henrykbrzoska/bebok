@@ -7,14 +7,18 @@
 //! `permission.resolved` / `permission.resolved`-hook events exactly as before.
 
 use crate::event::{Event, EventBus};
-use crate::permission::{CachedDecision, DecisionKey, Evaluation, PermissionEngine, Verdict};
+use crate::permission::{
+    CachedDecision, DecisionKey, Evaluation, PermissionEngine, Verdict, is_mutating,
+};
 use crate::plugin::{Hook, PermissionHook, PluginHost};
+use crate::session::PermissionLevel;
 use crate::store::SessionState;
 use bebok_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use super::exec::ToolOutcome;
+use super::observe::emit_part;
 use crate::permission::CompiledLayer;
 
 /// Everything the permission gate needs for one tool call.
@@ -31,8 +35,20 @@ pub struct GateCtx<'a> {
 
 /// Evaluate one tool call against the permission engine, falling back to the
 /// session decision cache and - for `Ask` - to the user decision flow.
+///
+/// F7-1: stamps the resolved verdict (`allow`/`ask`/`deny`) and the
+/// mutating/dangerous flag onto the tool part *before* returning, so the
+/// safety tier is visible over SSE even while the call is still
+/// `pending`/`running` - independent of whether it goes on to complete,
+/// fail, or (for `ask`) get denied by the user.
+///
+/// F7-7: also stamps the tool's explicit safety *category* (built-in
+/// default table + `tool_safety` config overrides, see
+/// `crate::tool_safety`). The category is informational: it is computed
+/// next to the verdict but never feeds it.
 pub async fn resolve_permission(
     ctx: &GateCtx<'_>,
+    call_id: &str,
     tool_name: &str,
     input: &serde_json::Value,
 ) -> ToolOutcome {
@@ -46,6 +62,32 @@ pub async fn resolve_permission(
     let evaluation = ctx
         .permission
         .evaluate(ctx.agent_layer, tool_name, input, read_only);
+    let mutating = is_mutating(tool_name, read_only);
+    let safety = crate::tool_safety::categorize_by_name(
+        ctx.tools,
+        tool_name,
+        &ctx.state.tool_safety_overrides(),
+    );
+    let permission = match evaluation.verdict {
+        Verdict::Allow => PermissionLevel::Allow,
+        Verdict::Ask => PermissionLevel::Ask,
+        Verdict::Deny => PermissionLevel::Deny,
+    };
+    let stamped = ctx
+        .state
+        .update_tool_state(ctx.assistant_idx, call_id, |m, _name| {
+            m.set_tool_permission(call_id, permission, mutating, safety)
+        })
+        .await;
+    if stamped {
+        emit_part(
+            ctx.bus,
+            ctx.state,
+            "message.part.updated",
+            ctx.assistant_idx,
+        )
+        .await;
+    }
     match evaluation.verdict {
         Verdict::Allow => ToolOutcome::Run,
         Verdict::Deny => ToolOutcome::Denied("denied by policy"),
@@ -78,14 +120,24 @@ pub async fn ask_for_permission(
 ) -> ToolOutcome {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let properties = serde_json::json!({
+    // F9-5: say *who* is asking. A sub-agent's ask is answered from the
+    // parent's chat, so the popup needs the child's name and its parent.
+    let meta = ctx.state.meta_snapshot().await;
+    let mut properties = serde_json::json!({
         "requestID": request_id,
         "messageIndex": ctx.assistant_idx,
         "toolName": tool_name,
         "agent": ctx.agent_name,
         "input": input.clone(),
         "pattern": evaluation.pattern.clone(),
+        "suggestedRule": evaluation.suggested_rule.clone(),
     });
+    if let Some(alias) = meta.alias.as_deref() {
+        properties["sessionAlias"] = serde_json::json!(alias);
+    }
+    if let Some((parent, _)) = meta.parent {
+        properties["parentSessionID"] = serde_json::json!(parent.to_string());
+    }
     ctx.state
         .register_permission_request(&request_id, tx, properties.clone())
         .await;
@@ -121,16 +173,22 @@ pub async fn ask_for_permission(
     };
     ctx.state.remember_decision(key, cached).await;
 
-    // `always` persists `ask -> allow` for the matched pattern to the project
-    // config and recompiles the engine's project layer in memory.
-    if answer.always
-        && answer.allow
-        && let Err(e) = ctx.permission.always_allow(&evaluation.pattern)
-    {
-        tracing::error!(
-            "failed to persist always-allow rule for {}: {e}",
-            evaluation.pattern
-        );
+    // `always` persists `ask -> allow` for the TOOL (`tool(*)`, or the
+    // explicit rule that produced the verdict) to the project config and
+    // recompiles the engine's project layer in memory. The engine is shared
+    // by every session of the directory, so running and future sub-agent
+    // sessions are covered too (F9-5: the old code persisted the exact call
+    // string, e.g. `write_file(src/a.ts)`, which never matched the next
+    // write and made "always allow" look broken).
+    let mut persisted_rule: Option<String> = None;
+    if answer.always && answer.allow {
+        match ctx.permission.always_allow(&evaluation.suggested_rule) {
+            Ok(()) => persisted_rule = Some(evaluation.suggested_rule.clone()),
+            Err(e) => tracing::error!(
+                "failed to persist always-allow rule for {}: {e}",
+                evaluation.suggested_rule
+            ),
+        }
     }
 
     ctx.bus.publish(
@@ -148,6 +206,8 @@ pub async fn ask_for_permission(
             "decision": if answer.allow { "allow" } else { "deny" },
             "always": answer.always,
             "allowed": answer.allow,
+            "rule": persisted_rule,
+            "scope": persisted_rule.as_ref().map(|_| "project"),
         })),
     );
 

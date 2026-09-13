@@ -6,6 +6,9 @@ import { SettingsView } from '../views/settings/settings';
 import { TerminalView } from '../views/terminal/terminal';
 import { ExplorerView } from '../views/explorer/explorer';
 import { DebugView } from '../views/debug/debug';
+import { StatsView } from '../views/stats/stats';
+import { BrowserView } from '../views/browser-view/browser-view';
+import { AboutView } from '../views/about/about';
 
 /**
  * Flat routes rendered inside `AppShell` (WP-SHELL / F1-11). Each route
@@ -21,6 +24,16 @@ export const routes: Routes = [
   { path: 'terminal', component: TerminalView, data: { screen: 'terminal' } },
   { path: 'explorer', component: ExplorerView, data: { screen: 'explorer' } },
   { path: 'debug', component: DebugView, data: { screen: 'debug' } },
+  { path: 'stats', component: StatsView, data: { screen: 'stats' } },
+  // F8-4: static, localized "What is Bebok?" explainer page.
+  { path: 'about', component: AboutView, data: { screen: 'about' } },
+  // WP-BROWSER2 (F7-6): the browser viewer window. `bare: true` makes `App`
+  // render it without the shell (own window, no sidebar/topbar/drawer).
+  {
+    path: 'browser-view',
+    component: BrowserView,
+    data: { screen: 'browserView', bare: true },
+  },
   // The standalone Config page is retired; its replacement is the Settings
   // "Raw JSON" tab (built by WP-SETTINGS). Keep the old link working.
   { path: 'config', redirectTo: 'settings', pathMatch: 'full' },

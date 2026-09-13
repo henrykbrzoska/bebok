@@ -25,6 +25,24 @@ pub struct CreateSession {
     /// `forkOf: { sessionID, messageIndex }` -> fork that session.
     #[serde(rename = "forkOf", default)]
     pub fork_of: Option<ForkSpec>,
+    /// WP-GIT / F6-15: `worktree: { branch, base? }` -> create the session in
+    /// a fresh `git worktree` of `directory` at
+    /// `<directory>/.bebok/worktrees/<branch>` (additive; absent = unchanged
+    /// behaviour). Ignored for `forkOf`/`continueLast`.
+    #[serde(default)]
+    pub worktree: Option<WorktreeSpec>,
+}
+
+/// Worktree request for `POST /session`.
+#[derive(Deserialize)]
+pub struct WorktreeSpec {
+    /// Branch to check out (created from `base` when it does not exist yet).
+    /// Doubles as the path below `.bebok/worktrees`, so it must be a safe
+    /// relative path (validated in `bebok_core::git`).
+    pub branch: String,
+    /// Start point for a new branch; default: the current `HEAD`.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +136,35 @@ pub async fn create_session(
     }
     // No prior session -> fall through and create one.
 
+    // Worktree-backed session (F6-15): the store shells out to `git worktree
+    // add` and binds the session to the worktree path.
+    if let Some(spec) = body.worktree {
+        let base = spec
+            .base
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty());
+        let (session, path) = state
+            .store
+            .create_worktree_session(
+                &body.directory,
+                spec.branch.trim(),
+                base,
+                body.agent.as_deref().unwrap_or("code"),
+                body.model.as_deref(),
+            )
+            .await
+            .map_err(|e| err_response(&e))?;
+        return Ok(Json(serde_json::json!({
+            "sessionID": session.id().to_string(),
+            "directory": session.directory(),
+            "worktree": {
+                "path": path.to_string_lossy(),
+                "branch": spec.branch.trim(),
+            },
+        })));
+    }
+
     let session = state
         .store
         .create_session(
@@ -141,7 +188,70 @@ pub async fn list_sessions(
         return Err(ApiError::bad_request("missing ?directory= parameter").into_response());
     };
     let sessions = state.store.list_sessions(&directory).await;
+    // Default model for sessions that never ran a turn and carry no override.
+    let instance = state.store.get_or_create_instance(&directory).await.ok();
+    let default_model = instance
+        .as_ref()
+        .and_then(|instance| instance.config.read().ok().map(|cfg| cfg.model.clone()));
+    let sessions: Vec<serde_json::Value> = sessions
+        .iter()
+        .map(|session| {
+            let mut value = serde_json::to_value(session).unwrap_or_default();
+            attach_context_window(&mut value, session, default_model.as_deref());
+            attach_worktree(&mut value, session);
+            if let Some(instance) = instance.as_ref() {
+                attach_effective_model(&mut value, session, instance);
+            }
+            value
+        })
+        .collect();
     Ok(Json(serde_json::json!({ "sessions": sessions })))
+}
+
+/// Add the live `context_window` (tokens) for the model that produced the
+/// session's last turn (`context_model`), else the session's model override,
+/// else the directory default. Resolved from the catalog on every response so
+/// it is never persisted and a catalog update needs no migration.
+pub fn attach_context_window(
+    value: &mut serde_json::Value,
+    session: &bebok_core::session::Session,
+    default_model: Option<&str>,
+) {
+    let model = session
+        .context_model
+        .as_deref()
+        .or(session.model.as_deref())
+        .or(default_model);
+    value["context_window"] = serde_json::json!(bebok_core::context::context_window_for(model));
+}
+
+/// F9-9: add `effective_model` / `effective_provider` — the model id the
+/// session runs on when nothing overrides it per prompt (session override,
+/// else the agent preset's model, else `models.<agent>` / the default), so
+/// the client never shows "(default)" where a real id is known.
+pub fn attach_effective_model(
+    value: &mut serde_json::Value,
+    session: &bebok_core::session::Session,
+    instance: &bebok_core::Instance,
+) {
+    let cfg = instance.config_snapshot();
+    let model = bebok_core::store::effective_model(session, instance, &cfg);
+    let provider = model
+        .split_once('/')
+        .map(|(p, _)| p.to_string())
+        .unwrap_or_else(|| cfg.provider.clone());
+    value["effective_model"] = serde_json::json!(model);
+    value["effective_provider"] = serde_json::json!(provider);
+}
+
+/// WP-GIT: add `worktree_branch` (the branch name, or `null`) when the
+/// session's directory is a Bebok worktree (`<root>/.bebok/worktrees/<branch>`).
+/// Derived from the directory at response time - nothing is persisted, and
+/// the client never has to split paths itself.
+pub fn attach_worktree(value: &mut serde_json::Value, session: &bebok_core::session::Session) {
+    let branch = bebok_core::git::worktree_info(std::path::Path::new(&session.directory))
+        .map(|info| info.branch);
+    value["worktree_branch"] = serde_json::json!(branch);
 }
 
 /// `GET /session/{id}` -> metadata + usage totals
@@ -154,8 +264,19 @@ pub async fn get_session(
         .open_session(id)
         .await
         .map_err(|e| err_response(&e))?;
-    let mut meta = serde_json::to_value(session.meta_snapshot().await).unwrap_or_default();
+    let snapshot = session.meta_snapshot().await;
+    let mut meta = serde_json::to_value(&snapshot).unwrap_or_default();
     meta["running"] = serde_json::json!(session.is_running());
+    let default_model = session.config_snapshot().model_for(&snapshot.agent);
+    attach_context_window(&mut meta, &snapshot, Some(&default_model));
+    attach_worktree(&mut meta, &snapshot);
+    if let Ok(instance) = state
+        .store
+        .get_or_create_instance(session.directory())
+        .await
+    {
+        attach_effective_model(&mut meta, &snapshot, &instance);
+    }
     Ok(Json(meta))
 }
 
@@ -306,6 +427,17 @@ pub async fn permission_decision(
         .await
         .map_err(|e| err_response(&e))?;
 
+    // F9-5: the rule an `always` answer writes (`tool(*)` for a default ask),
+    // read before the request is consumed so sibling asks can be settled.
+    let suggested_rule = session
+        .pending_permission_request(&request_id)
+        .await
+        .and_then(|p| {
+            p.get("suggestedRule")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
     let outcome = session
         .resolve_permission_request(
             &request_id,
@@ -317,12 +449,30 @@ pub async fn permission_decision(
         .await;
 
     match outcome {
-        ResolveOutcome::Resolved => Ok(Json(serde_json::json!({
-            "sessionID": id.to_string(),
-            "requestID": request_id,
-            "decision": if allow { "allow" } else { "deny" },
-            "resolved": true,
-        }))),
+        ResolveOutcome::Resolved => {
+            // An always-allow rule covers every session of the directory at
+            // once (shared permission engine); asks already waiting in
+            // sibling sub-agent sessions for the same tool are answered here
+            // so nobody is prompted for a rule that now exists.
+            let mut also_resolved = 0;
+            if body.always
+                && allow
+                && let Some(rule) = suggested_rule.as_deref()
+            {
+                also_resolved = state
+                    .store
+                    .resolve_pending_matching(session.directory(), rule, &request_id)
+                    .await;
+            }
+            Ok(Json(serde_json::json!({
+                "sessionID": id.to_string(),
+                "requestID": request_id,
+                "decision": if allow { "allow" } else { "deny" },
+                "resolved": true,
+                "rule": if body.always && allow { suggested_rule } else { None },
+                "alsoResolved": also_resolved,
+            })))
+        }
         ResolveOutcome::NotFound => Err(ApiError::not_found(format!(
             "no pending permission request {request_id}"
         ))
@@ -372,16 +522,51 @@ pub async fn compact_session(
     }
 
     let summary = bebok_core::context::compact_summary(&messages, cutoff);
+    let source_meta = source.meta_snapshot().await;
+    // "From" is the live gauge when a turn has run (provider-counted), else
+    // the chars/4 estimate of the whole transcript; "to" is always estimated
+    // because the fork has not been sent to a provider yet.
+    let before = source_meta
+        .context_used
+        .unwrap_or_else(|| bebok_core::context::estimate_transcript(&messages));
     let fork = state
         .store
         .compact_session(id, summary, cutoff)
         .await
         .map_err(|e| err_response(&e))?;
+    let after = bebok_core::context::estimate_transcript(&fork.messages_snapshot().await);
+
+    // Visible marker at the end of the forked transcript (F6-4). Appended by
+    // the route rather than inside `InstanceStore::compact_session` so the
+    // fork mechanics stay untouched; it is a user-role text like the summary
+    // itself, so providers see it as a plain note.
+    let marker = compaction_marker(before, after, cutoff);
+    fork.append_user_message(&marker)
+        .await
+        .map_err(|e| err_response(&e))?;
+    // Seed the fork's gauge with the estimate so the meter reflects the
+    // reduction immediately; the first real turn overwrites it.
+    let model = source_meta
+        .context_model
+        .clone()
+        .or(source_meta.model.clone())
+        .unwrap_or_else(|| source.config_snapshot().model_for(&source_meta.agent));
+    fork.set_context_used(after, &model).await;
 
     Ok(Json(serde_json::json!({
         "sessionID": fork.id().to_string(),
         "parent": serde_json::json!([id.to_string(), cutoff]),
+        "before": before,
+        "after": after,
     })))
+}
+
+/// The human-readable "Context compacted" note appended to a compacted fork.
+pub fn compaction_marker(before: u64, after: u64, cutoff: usize) -> String {
+    let noun = if cutoff == 1 { "message" } else { "messages" };
+    format!(
+        "[Context compacted: from {before} to {after} tokens ({cutoff} earlier {noun} summarized)]"
+    )
 }
 
 /// `POST /session/{id}/truncate` -> rollback in place: erase every message from
@@ -414,10 +599,18 @@ pub async fn delete_session(
         .delete_session(id)
         .await
         .map_err(|e| err_response(&e))?;
+    // WP-GIT: tell the client when the directory was a Bebok worktree so it
+    // can *offer* removal. The worktree itself is never touched here - that
+    // only happens through `POST /projects/{id}/git/worktree/remove`.
+    let worktree = bebok_core::git::worktree_info(std::path::Path::new(&meta.directory));
     Ok(Json(serde_json::json!({
         "sessionID": id.to_string(),
         "directory": meta.directory,
         "deleted": true,
+        "is_worktree": worktree.is_some(),
+        "worktree_path": worktree.as_ref().map(|_| meta.directory.clone()),
+        "worktree_branch": worktree.as_ref().map(|w| w.branch.clone()),
+        "project_root": worktree.as_ref().map(|w| w.root.to_string_lossy().to_string()),
     })))
 }
 
@@ -434,4 +627,116 @@ pub fn compact_cutoff(messages: &[bebok_core::session::Message], budget: usize) 
         keep += 1;
     }
     n.saturating_sub(keep)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bebok_core::session::Message;
+
+    /// WP-GIT: the `worktree` field is additive - bodies without it still
+    /// parse, bodies with it carry branch + optional base.
+    #[test]
+    fn create_session_body_accepts_an_optional_worktree_spec() {
+        let plain: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","agent":"code"}"#).unwrap();
+        assert!(plain.worktree.is_none());
+        let with: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","worktree":{"branch":"bebok/session-1"}}"#)
+                .unwrap();
+        let spec = with.worktree.unwrap();
+        assert_eq!(spec.branch, "bebok/session-1");
+        assert!(spec.base.is_none());
+        let with_base: CreateSession =
+            serde_json::from_str(r#"{"directory":"/p","worktree":{"branch":"x","base":"main"}}"#)
+                .unwrap();
+        assert_eq!(with_base.worktree.unwrap().base.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn attach_worktree_derives_the_branch_from_the_directory() {
+        let root = std::env::temp_dir().join("proj");
+        let wt = bebok_core::git::worktrees_dir(&root)
+            .join("bebok")
+            .join("feat");
+        let session = bebok_core::session::Session::new(wt.to_string_lossy().to_string(), "code");
+        let mut value = serde_json::json!({});
+        attach_worktree(&mut value, &session);
+        assert_eq!(value["worktree_branch"], "bebok/feat");
+
+        let plain = bebok_core::session::Session::new(root.to_string_lossy().to_string(), "code");
+        let mut value = serde_json::json!({});
+        attach_worktree(&mut value, &plain);
+        assert!(value["worktree_branch"].is_null());
+    }
+
+    /// F9-9: "(default)" resolves to a real model id: the session override,
+    /// else the agent preset's model, else `models.<agent>`, else the config
+    /// default; the provider is the id's prefix.
+    #[tokio::test]
+    async fn attach_effective_model_resolves_default_to_a_real_id() {
+        let base = std::env::temp_dir().join(format!("bebok-effmodel-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "model": "openai/gpt-5.6-luna", "models": { "ask": "zai/glm-5.3-flash" } }"#,
+        )
+        .unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_string_lossy().to_string();
+        let instance = store.get_or_create_instance(&dir).await.unwrap();
+
+        // No override anywhere: the config default.
+        let plain = bebok_core::session::Session::new(dir.clone(), "code");
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &plain, &instance);
+        assert_eq!(value["effective_model"], "openai/gpt-5.6-luna");
+        assert_eq!(value["effective_provider"], "openai");
+
+        // Per-agent config model.
+        let ask = bebok_core::session::Session::new(dir.clone(), "ask");
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &ask, &instance);
+        assert_eq!(value["effective_model"], "zai/glm-5.3-flash");
+        assert_eq!(value["effective_provider"], "zai");
+
+        // Session override wins.
+        let mut picked = bebok_core::session::Session::new(dir.clone(), "ask");
+        picked.model = Some("anthropic/claude-sonnet-5".into());
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &picked, &instance);
+        assert_eq!(value["effective_model"], "anthropic/claude-sonnet-5");
+        assert_eq!(value["effective_provider"], "anthropic");
+
+        // Listed sessions carry the fields too.
+        let session = store.create_session(&dir, "code", None).await.unwrap();
+        let listed = store.list_sessions(&dir).await;
+        assert_eq!(listed[0].id, session.id());
+        let mut value = serde_json::to_value(&listed[0]).unwrap();
+        attach_effective_model(&mut value, &listed[0], &instance);
+        assert_eq!(value["effective_model"], "openai/gpt-5.6-luna");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn compaction_marker_is_human_readable() {
+        let text = compaction_marker(120_000, 30_000, 12);
+        assert!(text.starts_with("[Context compacted: from 120000 to 30000 tokens"));
+        assert!(text.contains("12 earlier messages"));
+        assert!(compaction_marker(1, 1, 1).contains("1 earlier message summarized"));
+    }
+
+    #[test]
+    fn compact_cutoff_keeps_the_latest_exchange_and_fits_half_budget() {
+        // Six ~100-token messages (400 chars each) and a budget of 400 tokens:
+        // the tail may hold 200 tokens -> the last 2 messages stay, 4 go.
+        let messages: Vec<Message> = (0..6)
+            .map(|i| Message::user(format!("{i}").repeat(400)))
+            .collect();
+        assert_eq!(compact_cutoff(&messages, 400), 4);
+        // A generous budget keeps everything except the very first message
+        // (the loop always leaves at least one message to summarize).
+        assert_eq!(compact_cutoff(&messages, 100_000), 1);
+    }
 }

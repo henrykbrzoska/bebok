@@ -1,14 +1,18 @@
 /**
  * Appearance tab (WP-SETTINGS / F2-28): runtime-path inputs in a 2-column
- * grid, a Comfortable/Compact density segmented control wired to WP-SHELL's
- * `ui-prefs.store.ts` density signal (read, never redefined), plus the custom
- * CSS editor and the Docker probe that already lived under "Others".
+ * grid, the F6-1 "Expand tool calls by default" toggle (`ui-prefs.store.ts`),
+ * plus the custom CSS editor and the Docker probe that already lived under
+ * "Others".
+ *
+ * F7-2: the Comfortable/Compact density control that used to live here was
+ * removed - compact spacing is now the app's only layout, so there is
+ * nothing left to choose (see `ui-prefs.store.ts` and `styles.css`).
  */
 
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { Density, UiPrefsStore } from '../../core/ui-prefs.store';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { SettingsStore } from './settings.store';
 
@@ -27,17 +31,13 @@ export class AppearanceTab {
   readonly store = inject(SettingsStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
-  readonly density = this.prefs.density;
-  readonly densities: Density[] = ['comfortable', 'compact'];
+  /** F6-1: tool calls in the transcript start expanded. */
+  readonly expandToolCalls = this.prefs.expandToolCallsByDefault;
 
   readonly runtimes: RuntimeField[] = ['python', 'python3', 'node', 'php', 'docker', 'git'];
 
-  setDensity(density: Density): void {
-    this.prefs.setDensity(density);
-  }
-
-  densityLabel(density: Density): string {
-    return density === 'compact' ? this.t('settings.densityCompact') : this.t('settings.densityComfortable');
+  setExpandToolCalls(expand: boolean): void {
+    this.prefs.setExpandToolCallsByDefault(expand);
   }
 
   pathFor(field: RuntimeField): string {

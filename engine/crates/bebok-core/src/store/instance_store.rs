@@ -61,9 +61,11 @@ impl InstanceStore {
         let recovered = persist::repair(&data_dir);
         let meta: HashMap<Uuid, Session> = recovered.into_iter().map(|s| (s.id, s)).collect();
         tracing::info!("recovered {} session(s) from disk", meta.len());
+        let bus = EventBus::default();
+        install_browser_frame_sink(bus.clone());
         Self {
             data_dir,
-            bus: EventBus::default(),
+            bus,
             instances: RwLock::new(HashMap::new()),
             sessions: RwLock::new(HashMap::new()),
             meta: RwLock::new(meta),
@@ -97,9 +99,17 @@ impl InstanceStore {
         }
 
         let config = Arc::new(std::sync::RwLock::new(config::load(&root)));
+        configure_browser(&root, &config.read().unwrap());
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let permission = Arc::new(PermissionEngine::load(&root));
         permission.set_yolo(config.read().unwrap().yolo);
+        permission.set_browser_auto(
+            config
+                .read()
+                .unwrap()
+                .frontend_verify()
+                .auto_allows_browser(),
+        );
         let agents = Arc::new(std::sync::RwLock::new(AgentCatalog::load(&root)));
         let mcp = Arc::new(McpManager::new());
         let instance = Arc::new(Instance {
@@ -137,6 +147,16 @@ impl InstanceStore {
                 .register_tool(Arc::new(crate::agent::fleet_tool::FleetTool::new(
                     weak.clone(),
                 )));
+            // WP-DELEGATION: supervision tools for background children.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskStatusTool::new(weak.clone())));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskWaitTool::new(weak.clone())));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskCancelTool::new(weak.clone())));
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -160,6 +180,10 @@ impl InstanceStore {
         *instance.config.write().unwrap() = config.clone();
         instance.permission.reload();
         instance.permission.set_yolo(config.yolo);
+        instance
+            .permission
+            .set_browser_auto(config.frontend_verify().auto_allows_browser());
+        configure_browser(&instance.root, &config);
 
         let specs = McpServerSpec::parse_all(&config.mcp);
         let runtimes = Runtimes::from_config(&config.runtimes);
@@ -188,6 +212,30 @@ impl InstanceStore {
         session.model = model.map(str::to_string);
 
         self.spawn_session(&instance, session).await
+    }
+
+    /// Create a session bound to a fresh git worktree of `root` (WP-GIT /
+    /// F6-15): runs `git worktree add <root>/.bebok/worktrees/<branch>
+    /// [<base>]`, then creates the session with the worktree path as its
+    /// directory like any other session. Returns the session and the
+    /// worktree path (unnormalised; `session.directory()` is the normalised
+    /// form). Session-creation internals are untouched - only the directory
+    /// string differs.
+    pub async fn create_worktree_session(
+        &self,
+        root: &str,
+        branch: &str,
+        base: Option<&str>,
+        agent: &str,
+        model: Option<&str>,
+    ) -> Result<(Arc<SessionState>, PathBuf)> {
+        let root_path = PathBuf::from(normalize_path(Path::new(root)));
+        let path = crate::git::add_worktree(&root_path, branch, base)
+            .await
+            .map_err(CoreError::from)?;
+        let directory = path.to_string_lossy().to_string();
+        let session = self.create_session(&directory, agent, model).await?;
+        Ok((session, path))
     }
 
     /// Resolve the most recent session for a directory (for `continueLast`).
@@ -220,12 +268,10 @@ impl InstanceStore {
         let inst_dir = persist::instance_dir(self.data_dir(), &meta.directory);
         let disk_dir = persist::session_dir(&inst_dir, meta.id);
 
-        let state = Arc::new(SessionState::new(
-            meta,
-            inst_dir,
-            disk_dir,
-            instance.config_snapshot(),
-        ));
+        let state = Arc::new(
+            SessionState::new(meta, inst_dir, disk_dir, instance.config_snapshot())
+                .with_live_config(instance.config.clone()),
+        );
 
         // Load the transcript (msg-000000.json, msg-000001.json, ...).
         let mut messages = Vec::new();
@@ -268,14 +314,22 @@ impl InstanceStore {
 
     /// List session metadata for a directory. The startup scan supplies closed
     /// sessions; open sessions contribute their current title, usage and time.
+    ///
+    /// Sessions running in one of the directory's git worktrees
+    /// (`<directory>/.bebok/worktrees/<branch>`, WP-GIT) are listed with the
+    /// project they belong to, so they show up in its sidebar and Start list.
     pub async fn list_sessions(&self, directory: &str) -> Vec<Session> {
         let normalized = normalize_path(Path::new(directory));
+        let root = Path::new(&normalized);
         let mut sessions: Vec<Session> = self
             .meta
             .read()
             .await
             .values()
-            .filter(|s| s.directory == normalized)
+            .filter(|s| {
+                s.directory == normalized
+                    || crate::git::is_worktree_of(Path::new(&s.directory), root)
+            })
             .cloned()
             .collect();
         // The startup/creation index is not rewritten after every turn. Take
@@ -311,6 +365,39 @@ impl InstanceStore {
             .ok_or_else(|| CoreError::SessionNotFound(id.to_string()))
     }
 
+    /// F9-6: every session spawned (directly or transitively) by `id`, in
+    /// creation order, breadth-first: `task`/`fleet` children first, then
+    /// their children. Walks persisted `parent` links, so finished children
+    /// are included. Bounded (depth 16) against corrupt cycles.
+    pub async fn descendant_sessions(&self, id: Uuid) -> Vec<crate::session::Session> {
+        let Ok(root) = self.session_meta(id).await else {
+            return Vec::new();
+        };
+        let mut all = self.list_sessions(&root.directory).await;
+        all.sort_by_key(|s| s.created_at);
+        let mut out: Vec<crate::session::Session> = Vec::new();
+        let mut frontier = vec![id];
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id);
+        for _ in 0..16 {
+            if frontier.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for s in &all {
+                if let Some((parent, _)) = s.parent
+                    && frontier.contains(&parent)
+                    && seen.insert(s.id)
+                {
+                    next.push(s.id);
+                    out.push(s.clone());
+                }
+            }
+            frontier = next;
+        }
+        out
+    }
+
     /// Return unresolved permission requests for all live sessions in a directory,
     /// including delegated child sessions whose asks appear in the parent UI.
     pub async fn pending_permissions(&self, directory: &str) -> Vec<serde_json::Value> {
@@ -333,12 +420,89 @@ impl InstanceStore {
         }
         asks
     }
+
+    /// F9-5: after an "always allow" answer wrote `rule`, answer every other
+    /// pending ask in the directory that the new rule now covers (a sibling
+    /// sub-agent waiting on the same tool must not prompt again). Returns the
+    /// number of asks resolved. `except` is the request that was answered by
+    /// hand and is skipped.
+    pub async fn resolve_pending_matching(
+        &self,
+        directory: &str,
+        rule: &str,
+        except: &str,
+    ) -> usize {
+        let normalized = normalize_path(Path::new(directory));
+        let sessions: Vec<Arc<SessionState>> = self
+            .sessions
+            .read()
+            .await
+            .values()
+            .filter(|session| session.directory() == normalized)
+            .cloned()
+            .collect();
+        let mut resolved = 0;
+        for session in sessions {
+            for ask in session.pending_permission_requests().await {
+                let Some(request_id) = ask.get("requestID").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if request_id == except {
+                    continue;
+                }
+                let tool = ask.get("toolName").and_then(|v| v.as_str()).unwrap_or("");
+                let input = ask.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                let call = crate::permission::call_string(tool, &input);
+                if !PermissionEngine::rule_matches(rule, &call) {
+                    continue;
+                }
+                if session
+                    .resolve_permission_request(
+                        request_id,
+                        crate::permission::PermissionAnswer {
+                            allow: true,
+                            always: false,
+                        },
+                    )
+                    .await
+                    == crate::permission::ResolveOutcome::Resolved
+                {
+                    resolved += 1;
+                }
+            }
+        }
+        resolved
+    }
 }
 
 impl Default for InstanceStore {
     fn default() -> Self {
         Self::build_with(data_root())
     }
+}
+
+/// WP-BROWSER2 (F7-6): hand the instance's `browser` config section to the
+/// browser driver (display mode + window position; applied at the next launch).
+fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
+    bebok_tools::browser::configure(
+        root,
+        bebok_tools::browser::BrowserSettings::from_config(&cfg.browser),
+    );
+}
+
+/// WP-BROWSER2 (F7-6): every streamed browser frame becomes a `browser.frame`
+/// event on the bus (`properties` = the frame: url, title, media_type, data,
+/// width, height, seq, headed). The client's viewer window renders them; the
+/// chat view ignores the type.
+fn install_browser_frame_sink(bus: EventBus) {
+    bebok_tools::browser::set_frame_sink(Arc::new(move |frame: bebok_tools::browser::Frame| {
+        let (directory, session_id) = (frame.directory.clone(), frame.session_id.clone());
+        let properties = serde_json::to_value(&frame).unwrap_or(serde_json::Value::Null);
+        bus.publish(
+            crate::event::Event::new("browser.frame", &directory, &session_id)
+                .with_properties(properties),
+        );
+    }));
 }
 
 #[cfg(test)]
@@ -369,6 +533,97 @@ mod tests {
             assert_eq!(listed[0].usage.output_tokens, 3);
         }
 
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// WP-GIT / F6-15: a worktree session is a real `git worktree` on disk,
+    /// its directory is the worktree path, and it is listed under the project
+    /// root it belongs to. Deleting the session leaves the worktree alone.
+    #[tokio::test]
+    async fn worktree_session_creates_a_git_worktree_and_lists_under_the_root() {
+        if !crate::git::git_available().await {
+            eprintln!("skipping: git not on PATH");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("bebok-wt-session-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        for args in [
+            vec!["init", "-q"],
+            vec!["symbolic-ref", "HEAD", "refs/heads/main"],
+            vec!["config", "user.email", "bebok@example.com"],
+            vec!["config", "user.name", "Bebok Test"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["commit", "-q", "--allow-empty", "-m", "init"],
+        ] {
+            let out = crate::git::run(&project, &args).await.expect("git spawns");
+            assert!(out.success, "git {args:?}: {}", out.stderr);
+        }
+
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let (session, path) = store
+            .create_worktree_session(
+                project.to_str().unwrap(),
+                "bebok/session-abc",
+                None,
+                "code",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(
+            path.join(".git").exists(),
+            "a real worktree has a .git link file"
+        );
+        // CI's Windows TEMP may use an 8.3 path (RUNNER~1) while the store
+        // canonicalizes the root (runneradmin): compare canonical forms.
+        assert_eq!(
+            std::fs::canonicalize(&path).unwrap(),
+            std::fs::canonicalize(
+                crate::git::worktrees_dir(&project)
+                    .join("bebok")
+                    .join("session-abc")
+            )
+            .unwrap()
+        );
+        assert_eq!(session.directory(), crate::util::normalize_path(&path));
+        let info = crate::git::worktree_info(std::path::Path::new(session.directory())).unwrap();
+        assert_eq!(info.branch, "bebok/session-abc");
+
+        // Listed under the project root (and under its own directory).
+        let listed = store.list_sessions(project.to_str().unwrap()).await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, session.id());
+        assert_eq!(store.list_sessions(session.directory()).await.len(), 1);
+
+        // A second, plain session in the root is listed too; the worktree
+        // session is not listed under an unrelated directory.
+        store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.list_sessions(project.to_str().unwrap()).await.len(),
+            2
+        );
+        let other = base.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(
+            store
+                .list_sessions(other.to_str().unwrap())
+                .await
+                .is_empty()
+        );
+
+        // Deleting the session never removes the worktree by itself.
+        let meta = store.delete_session(session.id()).await.unwrap();
+        assert_eq!(meta.directory, session.directory());
+        assert!(
+            path.join(".git").exists(),
+            "worktree survives session deletion"
+        );
+
+        let _ = crate::git::remove_worktree(&project, &path).await;
         let _ = std::fs::remove_dir_all(base);
     }
 
@@ -420,6 +675,106 @@ mod tests {
                 .await
                 .is_empty()
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// F9-5 integration: the parent answers "always allow this tool" for a
+    /// `write_file` ask -> the project rule is `write_file(*)`, the shared
+    /// permission engine auto-allows the child's *next* write to a different
+    /// path, and a sibling child's ask already pending for the same tool is
+    /// settled without another prompt.
+    #[tokio::test]
+    async fn always_allow_on_parent_auto_allows_child_requests() {
+        use crate::permission::Verdict;
+        let base = std::env::temp_dir().join(format!("bebok-always-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_str().unwrap();
+        let parent = store.create_session(dir, "code", None).await.unwrap();
+        let child_a = store
+            .create_subagent_session(&parent, "code", None, Some("api-orders"))
+            .await
+            .unwrap();
+        let child_b = store
+            .create_subagent_session(&parent, "code", None, Some("frontend"))
+            .await
+            .unwrap();
+        let instance = store.get_or_create_instance(dir).await.unwrap();
+        let engine = instance.permission.clone();
+
+        // Child A asks for one path: default `Ask`, suggested rule is the TOOL.
+        let first = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "apps/api/src/orders.ts", "content": "x" }),
+            false,
+        );
+        assert_eq!(first.verdict, Verdict::Ask);
+        assert_eq!(first.pattern, "write_file(apps/api/src/orders.ts)");
+        assert_eq!(first.suggested_rule, "write_file(*)");
+
+        // Child B is already waiting on its own write_file ask.
+        let (sender_b, receiver_b) = tokio::sync::oneshot::channel();
+        child_b
+            .register_permission_request(
+                "ask-b",
+                sender_b,
+                serde_json::json!({
+                    "requestID": "ask-b",
+                    "toolName": "write_file",
+                    "input": { "path": "apps/frontend/src/app.ts", "content": "y" },
+                    "suggestedRule": "write_file(*)",
+                }),
+            )
+            .await;
+        // ...and so is a bash ask that the write_file rule must NOT cover.
+        let (sender_c, mut receiver_c) = tokio::sync::oneshot::channel();
+        child_b
+            .register_permission_request(
+                "ask-c",
+                sender_c,
+                serde_json::json!({
+                    "requestID": "ask-c",
+                    "toolName": "bash",
+                    "input": { "command": "npm test" },
+                    "suggestedRule": "bash(*)",
+                }),
+            )
+            .await;
+
+        // The user clicks "Always allow this tool" on child A's ask (what the
+        // gate does with the answer) ...
+        engine.always_allow(&first.suggested_rule).unwrap();
+        // ... and the route settles the siblings the new rule covers.
+        let settled = store
+            .resolve_pending_matching(dir, &first.suggested_rule, "ask-a")
+            .await;
+        assert_eq!(settled, 1);
+        let answer = receiver_b.await.unwrap();
+        assert!(answer.allow && !answer.always);
+        assert!(receiver_c.try_recv().is_err(), "bash ask stays pending");
+
+        // Every later write_file in ANY session of the directory is allowed
+        // (child A's next path, the parent's own edit) without a prompt.
+        for (session, path) in [
+            (&child_a, "apps/api/src/orders.spec.ts"),
+            (&parent, "README.md"),
+        ] {
+            let _ = session;
+            let eval = engine.evaluate(
+                None,
+                "write_file",
+                &serde_json::json!({ "path": path, "content": "z" }),
+                false,
+            );
+            assert_eq!(eval.verdict, Verdict::Allow, "{path}");
+            assert_eq!(eval.pattern, "write_file(*)");
+        }
+        // The rule is persisted at project level, not per path.
+        let cfg = std::fs::read_to_string(project.join(".bebok").join("config.json")).unwrap();
+        assert!(cfg.contains("write_file(*)"), "{cfg}");
+        assert!(!cfg.contains("orders.ts"), "{cfg}");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

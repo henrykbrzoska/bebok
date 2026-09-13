@@ -15,6 +15,7 @@ import { EngineEvent, PermissionAsked } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { prettyJson } from '../../core/format';
 import { I18nService } from '../../i18n/i18n.service';
+import { ToastStore } from '../toast/toast.store';
 
 export interface PendingAsk {
   /** Session that raised the ask (the sub-agent's child session for `task`). */
@@ -25,10 +26,20 @@ export interface PendingAsk {
   agent: string;
   pattern: string;
   input: unknown;
+  /** F9-5: alias of the asking session (sub-agent name), absent for a main session. */
+  sessionAlias?: string;
+  /** F9-5: present when the asking session is a child (sub-agent). */
+  parentSessionID?: string;
+  /** F9-5: the rule "Always allow" will write (e.g. `write_file(*)`). */
+  suggestedRule?: string;
   /** Short display of the arguments. */
   inputText: string;
   askedAt: number;
   busy: boolean;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function parseAsked(properties: Record<string, unknown> | undefined): PermissionAsked | null {
@@ -46,6 +57,9 @@ function parseAsked(properties: Record<string, unknown> | undefined): Permission
     agent: String(properties['agent'] ?? 'code'),
     input: properties['input'] ?? {},
     pattern: String(properties['pattern'] ?? ''),
+    sessionAlias: optionalString(properties['sessionAlias']),
+    parentSessionID: optionalString(properties['parentSessionID']),
+    suggestedRule: optionalString(properties['suggestedRule']),
   };
 }
 
@@ -85,13 +99,21 @@ let dialogSeq = 0;
           }
         </div>
 
-        <p class="perm-body" [id]="bodyId">
-          {{ t('perm.hint', { tool: current().toolName, agent: current().agent }) }}
+        <p class="perm-body" [id]="bodyId" data-testid="perm-body">
+          @if (current().parentSessionID) {
+            {{ t('perm.subagentHint', {
+              name: current().sessionAlias || current().agent,
+              agent: current().agent,
+              tool: current().toolName
+            }) }}
+          } @else {
+            {{ t('perm.hint', { tool: current().toolName, agent: current().agent }) }}
+          }
         </p>
 
         <div class="meta">
           <span class="meta-label">{{ t('perm.pattern') }}</span>
-          <code>{{ current().pattern }}</code>
+          <code data-testid="perm-pattern">{{ current().suggestedRule || current().pattern }}</code>
         </div>
 
         <details>
@@ -112,6 +134,8 @@ let dialogSeq = 0;
             class="always"
             (click)="allow(true)"
             [disabled]="current().busy"
+            [title]="alwaysTitle()"
+            data-testid="perm-always"
           >{{ t('perm.allowAlwaysTool') }}</button>
           <button
             type="button"
@@ -265,6 +289,7 @@ export class PermissionPopup implements OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly events = inject(EventsStore);
   private readonly i18n = inject(I18nService);
+  private readonly toasts = inject(ToastStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -280,6 +305,17 @@ export class PermissionPopup implements OnDestroy {
   readonly current = () => this.asks()[0];
   /** True while a decision is outstanding: the composer must not send. */
   readonly blocking = computed(() => this.asks().length > 0);
+
+  /** Tooltip of "Always allow": the rule the engine will write (F9-5). */
+  readonly alwaysTitle = computed(() => {
+    const item = this.current();
+    if (!item) {
+      return '';
+    }
+    const rule = item.suggestedRule || item.pattern;
+    const title = this.t('perm.allowAlwaysToolTitle', { tool: item.toolName });
+    return rule ? `${title}\n${rule}` : title;
+  });
 
   readonly titleId = `perm-title-${++dialogSeq}`;
   readonly bodyId = `perm-body-${dialogSeq}`;
@@ -433,6 +469,9 @@ export class PermissionPopup implements OnDestroy {
     );
     try {
       await this.engine.resolvePermission(sessionID, item.requestID, { decision, always });
+      if (always && decision === 'allow') {
+        this.toasts.show(this.t('perm.allowedToast', { tool: item.toolName }), { kind: 'success' });
+      }
     } catch (err) {
       console.error('permission decision failed', err);
     } finally {

@@ -34,6 +34,12 @@ pub struct Evaluation {
     /// the canonical call string when the default `Ask` applies. Used as the
     /// session decision-cache key and as the basis for `always allow` rules.
     pub pattern: String,
+    /// F9-5: the rule an "always allow" answer persists. When an explicit
+    /// rule produced the verdict this is that rule's (already generic)
+    /// pattern; when the *default* `Ask` applied it is the tool-level glob
+    /// `tool(*)` — never the exact call string, which would only ever match
+    /// the one path/command that was asked about.
+    pub suggested_rule: String,
 }
 
 /// Answer a user gives for one `permission.asked` request.
@@ -153,6 +159,11 @@ pub struct PermissionEngine {
     global: RwLock<Layer>,
     /// YOLO mode: when set, every tool call is auto-allowed without asking.
     yolo: AtomicBool,
+    /// WP-AUTOVERIFY (F8-1): `verify.frontend = auto` switches the *default*
+    /// verdict of the `browser_*` family (all but `browser_eval`) to `Allow`
+    /// so autonomous verification does not stall on prompts. Explicit
+    /// project/global/agent rules are evaluated first and still win.
+    browser_auto: AtomicBool,
 }
 
 impl PermissionEngine {
@@ -178,6 +189,7 @@ impl PermissionEngine {
             project: RwLock::new(Layer::new(project_rules)),
             global: RwLock::new(Layer::new(global_rules)),
             yolo: AtomicBool::new(false),
+            browser_auto: AtomicBool::new(false),
         }
     }
 
@@ -193,6 +205,16 @@ impl PermissionEngine {
 
     pub fn yolo(&self) -> bool {
         self.yolo.load(Ordering::Relaxed)
+    }
+
+    /// Enable/disable the `browser_*` auto-allow default (WP-AUTOVERIFY /
+    /// F8-1, driven by `verify.frontend = auto`).
+    pub fn set_browser_auto(&self, enabled: bool) {
+        self.browser_auto.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn browser_auto(&self) -> bool {
+        self.browser_auto.load(Ordering::Relaxed)
     }
 
     /// Recompile rules from the current config files (`config.changed` hook).
@@ -220,6 +242,7 @@ impl PermissionEngine {
         if self.yolo.load(Ordering::Relaxed) {
             return Evaluation {
                 verdict: Verdict::Allow,
+                suggested_rule: tool_rule(tool),
                 pattern: call,
             };
         }
@@ -233,6 +256,7 @@ impl PermissionEngine {
                     {
                         return Evaluation {
                             verdict: Verdict::Deny,
+                            suggested_rule: denied_pattern.clone(),
                             pattern: denied_pattern,
                         };
                     }
@@ -240,34 +264,59 @@ impl PermissionEngine {
             }
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
         if let Some((pattern, action)) = self.project.read().unwrap().compiled.first_match(&call) {
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
         if let Some((pattern, action)) = self.global.read().unwrap().compiled.first_match(&call) {
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
-        let verdict = if read_only && tool != "fetch" {
+        // `fetch` and the `browser_*` family (WP-BROWSER / F6-18) are `Ask`
+        // even when a call is read-only: reading a URL or a rendered page can
+        // expose local services. Projects relax this with explicit rules
+        // (e.g. `"browser_*": "allow"`).
+        //
+        // WP-AUTOVERIFY (F8-1): with `verify.frontend = auto` the family
+        // defaults to `Allow` instead — except `browser_eval`, which runs
+        // arbitrary JavaScript and keeps asking. Only the *default* arm is
+        // affected: any explicit rule above already returned.
+        let verdict = if self.browser_auto.load(Ordering::Relaxed) && browser_auto_allowed(tool) {
             Verdict::Allow
-        } else {
+        } else if is_mutating(tool, read_only) {
             Verdict::Ask
+        } else {
+            Verdict::Allow
         };
         Evaluation {
             verdict,
+            suggested_rule: tool_rule(tool),
             pattern: call,
         }
     }
 
+    /// Whether `call` (a canonical `tool(args)` string) matches `rule`.
+    pub fn rule_matches(rule: &str, call: &str) -> bool {
+        build_glob(rule)
+            .ok()
+            .map(|g| g.compile_matcher().is_match(call))
+            .unwrap_or(false)
+    }
+
     /// Persist `ask → allow` for `pattern` to the project config and update the
-    /// in-memory project layer (no restart needed).
+    /// in-memory project layer (no restart needed). The engine is shared by
+    /// every session of the directory (parent and sub-agent sessions alike),
+    /// so the rule applies to all of them at once.
     pub fn always_allow(&self, pattern: &str) -> Result<()> {
         let rule = Rule {
             pattern: pattern.to_string(),
@@ -277,6 +326,28 @@ impl PermissionEngine {
         self.project.write().unwrap().upsert(rule);
         Ok(())
     }
+}
+
+/// Whether a call should be flagged mutating/dangerous for display (F7-1)
+/// and, by the same rule, is *not* eligible for the engine's auto-`Allow`
+/// default: true for anything that isn't safely read-only, plus `fetch` and
+/// the `browser_*` family, which stay `Ask` even when read-only (see
+/// `evaluate`'s default arm) because they can reach local network services.
+pub fn is_mutating(tool: &str, read_only: bool) -> bool {
+    !read_only || tool == "fetch" || tool.starts_with("browser_")
+}
+
+/// The tool-level allow rule "always allow this tool" writes (F9-5):
+/// `write_file(*)`, `bash(*)`, `mcp__github__*`-style names stay as given.
+pub fn tool_rule(tool: &str) -> String {
+    format!("{tool}(*)")
+}
+
+/// The `browser_*` tools whose default becomes `Allow` under
+/// `verify.frontend = auto`: every member of the family except
+/// `browser_eval` (arbitrary page JavaScript stays `Ask`).
+pub fn browser_auto_allowed(tool: &str) -> bool {
+    tool.starts_with("browser_") && tool != "browser_eval"
 }
 
 fn verdict(action: Action) -> Verdict {
@@ -435,6 +506,157 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// WP-BROWSER (F6-18): every `browser_*` tool is `Ask` in a fresh config,
+    /// whether the call is classified read-only (screenshot, get_text) or not.
+    #[test]
+    fn browser_tools_default_to_ask_even_when_read_only() {
+        let dir = tmp_dir("browser-default");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        for tool in bebok_tools::browser::TOOL_NAMES {
+            for read_only in [true, false] {
+                let eval = engine.evaluate(
+                    None,
+                    tool,
+                    &serde_json::json!({ "url": "http://127.0.0.1:8787/" }),
+                    read_only,
+                );
+                assert_eq!(eval.verdict, Verdict::Ask, "{tool} read_only={read_only}");
+            }
+        }
+        // The read-only default for everything else is untouched.
+        let eval = engine.evaluate(None, "read_file", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Allow);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The config-only override: a `browser_*` glob rule beats the default.
+    #[test]
+    fn browser_glob_rule_can_allow_the_family() {
+        let dir = tmp_dir("browser-rule");
+        let project_cfg = dir.join(".bebok").join("config.json");
+        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project_cfg,
+            r#"{ "permission": { "rules": [ { "pattern": "browser_*", "action": "allow" } ] } }"#,
+        )
+        .unwrap();
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Allow);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// WP-AUTOVERIFY (F8-1): `set_browser_auto(true)` flips the default of
+    /// every `browser_*` tool except `browser_eval` to `Allow`; other
+    /// defaults are untouched and the switch is reversible.
+    #[test]
+    fn browser_auto_switch_allows_the_family_except_eval() {
+        let dir = tmp_dir("browser-auto");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        assert!(!engine.browser_auto());
+        engine.set_browser_auto(true);
+        assert!(engine.browser_auto());
+        for tool in bebok_tools::browser::TOOL_NAMES {
+            for read_only in [true, false] {
+                let eval = engine.evaluate(
+                    None,
+                    tool,
+                    &serde_json::json!({ "url": "http://localhost:4200/" }),
+                    read_only,
+                );
+                let expected = if *tool == "browser_eval" {
+                    Verdict::Ask
+                } else {
+                    Verdict::Allow
+                };
+                assert_eq!(eval.verdict, expected, "{tool} read_only={read_only}");
+            }
+        }
+        // Unrelated defaults are unchanged: mutating tools still ask, fetch still asks.
+        let eval = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "x" }),
+            false,
+        );
+        assert_eq!(eval.verdict, Verdict::Ask);
+        let eval = engine.evaluate(
+            None,
+            "fetch",
+            &serde_json::json!({ "url": "http://x/" }),
+            true,
+        );
+        assert_eq!(eval.verdict, Verdict::Ask);
+        // Reversible.
+        engine.set_browser_auto(false);
+        let eval = engine.evaluate(
+            None,
+            "browser_open",
+            &serde_json::json!({ "url": "http://x/" }),
+            false,
+        );
+        assert_eq!(eval.verdict, Verdict::Ask);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The user's explicit rules keep winning over the auto default: a
+    /// project `deny`/`ask` on `browser_*` is honoured with the switch on.
+    #[test]
+    fn browser_auto_never_overrides_explicit_rules() {
+        let dir = tmp_dir("browser-auto-rules");
+        let project_cfg = dir.join(".bebok").join("config.json");
+        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project_cfg,
+            r#"{ "permission": { "rules": [
+                { "pattern": "browser_open(*)", "action": "deny" },
+                { "pattern": "browser_screenshot*", "action": "ask" },
+                { "pattern": "browser_eval*", "action": "allow" }
+            ] } }"#,
+        )
+        .unwrap();
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        engine.set_browser_auto(true);
+        let eval = engine.evaluate(
+            None,
+            "browser_open",
+            &serde_json::json!({ "url": "http://x/" }),
+            false,
+        );
+        assert_eq!(eval.verdict, Verdict::Deny);
+        assert_eq!(eval.pattern, "browser_open(*)");
+        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        assert_eq!(eval.verdict, Verdict::Ask);
+        // ...and an explicit allow on eval beats the eval carve-out.
+        let eval = engine.evaluate(
+            None,
+            "browser_eval",
+            &serde_json::json!({ "js": "1" }),
+            false,
+        );
+        assert_eq!(eval.verdict, Verdict::Allow);
+        // Tools without a rule get the auto default.
+        let eval = engine.evaluate(
+            None,
+            "browser_click",
+            &serde_json::json!({ "selector": "a" }),
+            false,
+        );
+        assert_eq!(eval.verdict, Verdict::Allow);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn browser_auto_allowed_excludes_eval_and_non_browser_tools() {
+        assert!(browser_auto_allowed("browser_open"));
+        assert!(browser_auto_allowed("browser_console"));
+        assert!(browser_auto_allowed("browser_wait"));
+        assert!(browser_auto_allowed("browser_find"));
+        assert!(!browser_auto_allowed("browser_eval"));
+        assert!(!browser_auto_allowed("bash"));
+        assert!(!browser_auto_allowed("fetch"));
+    }
+
     #[test]
     fn always_allow_persists_and_recompiles() {
         let dir = tmp_dir("always");
@@ -535,6 +757,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F7-1: `is_mutating` backs both the engine's own auto-`Allow` default
+    /// and the client-facing `mutating` flag - they must never disagree.
+    #[test]
+    fn is_mutating_matches_the_auto_allow_default() {
+        assert!(!is_mutating("read_file", true), "plain read-only: safe");
+        assert!(is_mutating("write_file", false), "mutating tool");
+        assert!(is_mutating("bash", false), "mutating tool");
+        // `fetch` and `browser_*` stay flagged even when classified read-only.
+        assert!(is_mutating("fetch", true));
+        assert!(is_mutating("browser_screenshot", true));
+        assert!(is_mutating("browser_get_text", true));
+    }
+
     #[test]
     fn persist_via_store_module_path() {
         // Guards the engine -> store persistence seam (atomic write).
@@ -553,6 +788,58 @@ mod tests {
                 .unwrap()
                 .contains("bash(pwd)")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F9-5: a default `Ask` suggests the tool-level rule, an explicit rule
+    /// suggests itself, and persisting the suggestion makes every later call
+    /// of that tool pass (the old per-call pattern only matched one path).
+    #[test]
+    fn suggested_rule_is_tool_level_and_sticks_for_other_paths() {
+        let dir = tmp_dir("suggested");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        let a = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "src/a.ts" }),
+            false,
+        );
+        assert_eq!(a.verdict, Verdict::Ask);
+        assert_eq!(a.suggested_rule, "write_file(*)");
+        engine.always_allow(&a.suggested_rule).unwrap();
+        let b = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "src/b.ts" }),
+            false,
+        );
+        assert_eq!(b.verdict, Verdict::Allow);
+        // Another tool is not covered.
+        let c = engine.evaluate(None, "bash", &serde_json::json!({ "command": "ls" }), false);
+        assert_eq!(c.verdict, Verdict::Ask);
+        assert_eq!(c.suggested_rule, "bash(*)");
+
+        // An explicit `ask` rule suggests its own (generic) pattern.
+        let project = dir.join(".bebok/config.json");
+        std::fs::write(
+            &project,
+            r#"{ "permission": { "rules": [ { "pattern": "bash(git *)", "action": "ask" } ] } }"#,
+        )
+        .unwrap();
+        engine.reload();
+        let d = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "git push" }),
+            false,
+        );
+        assert_eq!(d.verdict, Verdict::Ask);
+        assert_eq!(d.suggested_rule, "bash(git *)");
+        assert!(PermissionEngine::rule_matches(
+            "write_file(*)",
+            "write_file(x/y.ts)"
+        ));
+        assert!(!PermissionEngine::rule_matches("write_file(*)", "bash(ls)"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -2,59 +2,130 @@
   "providers": {
     "zai": {
       "models": {
-        "glm-5.3-flash": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": { "input": 0.60, "output": 2.20, "cache_read": 0.10, "cache_write": 0.60 } },
-        "glm-4.7-flash": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": { "input": 0.60, "output": 2.20, "cache_read": 0.10, "cache_write": 0.60 } },
-        "glm-4.6": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": { "input": 0.60, "output": 2.20, "cache_read": 0.10, "cache_write": 0.60 } },
-        "glm-4.5-air": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": { "input": 0.14, "output": 0.60, "cache_read": 0.04, "cache_write": 0.14 } }
+        "glm-5.3-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 131072, "cost": {"input": 0.075, "output": 0.25, "cache_read": 0.015, "cache_write": 0}},
+        "glm-4.7-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": {"input": 0.6, "output": 2.2, "cache_read": 0.1, "cache_write": 0.6}},
+        "glm-4.6": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": {"input": 0.6, "output": 2.2, "cache_read": 0.1, "cache_write": 0.6}},
+        "glm-4.5-air": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192, "cost": {"input": 0.14, "output": 0.6, "cache_read": 0.04, "cache_write": 0.14}},
+        "glm-5": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 204800, "output": 131072, "cost": {"input": 1, "output": 3.2, "cache_read": 0.2, "cache_write": 0}},
+        "glm-5-turbo": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 131072, "cost": {"input": 1.2, "output": 4, "cache_read": 0.24, "cache_write": 0}},
+        "glm-5.1": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 131072, "cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_write": 0}},
+        "glm-5.2": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 131072, "cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_write": 0}},
+        "glm-5.3": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 131072, "cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_write": 0}},
+        "glm-5v-turbo": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 131072, "cost": {"input": 1.2, "output": 4, "cache_read": 0.24, "cache_write": 0}}
       }
     },
     "openai": {
       "models": {
-        "gpt-4.1": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768, "cost": { "input": 2.0, "output": 8.0, "cache_read": 0.50, "cache_write": 2.0 } },
-        "gpt-4.1-mini": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768, "cost": { "input": 0.40, "output": 1.60, "cache_read": 0.10, "cache_write": 0.40 } },
-        "gpt-4o": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 16384, "cost": { "input": 2.50, "output": 10.0, "cache_read": 0.63, "cache_write": 2.50 } },
-        "gpt-4o-mini": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 16384, "cost": { "input": 0.15, "output": 0.60, "cache_read": 0.038, "cache_write": 0.15 } },
-        "o3-mini": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 100000, "cost": { "input": 1.10, "output": 4.40, "cache_read": 0.28, "cache_write": 1.10 } }
+        "gpt-4.1": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768, "cost": {"input": 2.0, "output": 8.0, "cache_read": 0.5, "cache_write": 2.0}},
+        "gpt-4.1-mini": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768, "cost": {"input": 0.4, "output": 1.6, "cache_read": 0.1, "cache_write": 0.4}},
+        "gpt-4o": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 16384, "cost": {"input": 2.5, "output": 10.0, "cache_read": 0.63, "cache_write": 2.5}},
+        "gpt-4o-mini": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 16384, "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.038, "cache_write": 0.15}},
+        "o3-mini": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 100000, "cost": {"input": 1.1, "output": 4.4, "cache_read": 0.28, "cache_write": 1.1}},
+        "gpt-4.1-nano": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1047576, "output": 32768, "cost": {"input": 0.1, "output": 0.4, "cache_read": 0.025, "cache_write": 0}},
+        "gpt-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 0}},
+        "gpt-5-mini": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 0.25, "output": 2, "cache_read": 0.025, "cache_write": 0}},
+        "gpt-5-nano": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 0.05, "output": 0.4, "cache_read": 0.005, "cache_write": 0}},
+        "gpt-5-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 400000, "output": 272000, "cost": {"input": 15, "output": 120, "cache_read": 0, "cache_write": 0}},
+        "gpt-5.1": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 0}},
+        "gpt-5.2": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 1.75, "output": 14, "cache_read": 0.175, "cache_write": 0}},
+        "gpt-5.2-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 400000, "output": 128000, "cost": {"input": 21, "output": 168, "cache_read": 0, "cache_write": 0}},
+        "gpt-5.3-codex": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 1.75, "output": 14, "cache_read": 0.175, "cache_write": 0}},
+        "gpt-5.3-codex-spark": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 128000, "output": 32000, "cost": {"input": 1.75, "output": 14, "cache_read": 0.175, "cache_write": 0}},
+        "gpt-5.4": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 2.5, "output": 15, "cache_read": 0.25, "cache_write": 0}},
+        "gpt-5.4-mini": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 0.75, "output": 4.5, "cache_read": 0.075, "cache_write": 0}},
+        "gpt-5.4-nano": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 400000, "output": 128000, "cost": {"input": 0.2, "output": 1.25, "cache_read": 0.02, "cache_write": 0}},
+        "gpt-5.4-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 1050000, "output": 128000, "cost": {"input": 30, "output": 180, "cache_read": 0, "cache_write": 0}},
+        "gpt-5.5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 5, "output": 30, "cache_read": 0.5, "cache_write": 0}},
+        "gpt-5.5-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 1050000, "output": 128000, "cost": {"input": 30, "output": 180, "cache_read": 0, "cache_write": 0}},
+        "gpt-5.6": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 4, "output": 20, "cache_read": 0.4, "cache_write": 5}},
+        "gpt-5.6-luna": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 0.2, "output": 1.2, "cache_read": 0.02, "cache_write": 0.25}},
+        "gpt-5.6-sol": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 4, "output": 20, "cache_read": 0.4, "cache_write": 5}},
+        "gpt-5.6-terra": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 2, "output": 12, "cache_read": 0.2, "cache_write": 2.5}},
+        "gpt-6-astra": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1050000, "output": 128000, "cost": {"input": 10, "output": 50, "cache_read": 1, "cache_write": 12.5}},
+        "o3": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 100000, "cost": {"input": 2, "output": 8, "cache_read": 0.5, "cache_write": 0}},
+        "o4-mini": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 100000, "cost": {"input": 1.1, "output": 4.4, "cache_read": 0.275, "cache_write": 0}}
       }
     },
     "anthropic": {
       "models": {
-        "claude-opus-4-5": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 32000, "cost": { "input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75 } },
-        "claude-sonnet-4-5": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000, "cost": { "input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75 } },
-        "claude-haiku-4-5": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000, "cost": { "input": 1.0, "output": 5.0, "cache_read": 0.10, "cache_write": 1.25 } }
+        "claude-opus-4-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000, "cost": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}},
+        "claude-sonnet-4-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 64000, "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}},
+        "claude-haiku-4-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000, "cost": {"input": 1, "output": 5, "cache_read": 0.1, "cache_write": 1.25}},
+        "claude-fable-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 10, "output": 50, "cache_read": 1, "cache_write": 12.5}},
+        "claude-fable-5-1": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 10, "output": 50, "cache_read": 0.25, "cache_write": 12.5}},
+        "claude-opus-4-6": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}},
+        "claude-opus-4-7": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}},
+        "claude-opus-4-8": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}},
+        "claude-opus-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}},
+        "claude-sonnet-4-6": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}},
+        "claude-sonnet-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 128000, "cost": {"input": 2, "output": 10, "cache_read": 0.2, "cache_write": 2.5}}
       }
     },
-    "xai": { "models": {
-      "grok-4.6": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 256000, "output": 32768, "cost": { "input": 2.0, "output": 8.0 } },
-      "grok-4.3": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 131072, "output": 32768, "cost": { "input": 2.0, "output": 8.0 } }
-    } },
-    "deepseek": { "models": {
-      "deepseek-chat": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 8192, "cost": { "input": 0.27, "output": 1.10, "cache_read": 0.07, "cache_write": 0.27 } },
-      "deepseek-reasoner": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 128000, "output": 8192, "cost": { "input": 0.55, "output": 2.19, "cache_read": 0.14, "cache_write": 0.55 } }
-    } },
-    "google": { "models": {
-      "gemini-2.5-pro": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": { "input": 1.25, "output": 10.0, "cache_read": 0.31, "cache_write": 1.25 } },
-      "gemini-2.5-flash": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": { "input": 0.30, "output": 2.50, "cache_read": 0.075, "cache_write": 0.30 } }
-    } },
-    "mistralai": { "models": {
-      "mistral-large-latest": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": { "input": 2.0, "output": 6.0 } },
-      "mistral-medium-latest": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": { "input": 0.80, "output": 2.40 } }
-    } },
-    "groq": { "models": {
-      "llama-3.3-70b-versatile": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": { "input": 0.59, "output": 0.79 } }
-    } },
-    "qwen": { "models": {
-      "qwen-plus": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 131072, "output": 8192, "cost": { "input": 0.40, "output": 1.20 } },
-      "qwen3-235b-a22b": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 131072, "output": 8192, "cost": { "input": 0.40, "output": 1.20 } }
-    } },
-    "openrouter": { "models": {
-      "openai/gpt-4.1": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768 },
-      "anthropic/claude-sonnet-4-5": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000 },
-      "google/gemini-2.5-pro": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536 },
-      "z-ai/glm-5.3-flash": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192 },
-      "deepseek/deepseek-v4-flash": { "modalities": { "input": ["text"] }, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192 },
-      "acme/custom-vision": { "modalities": { "input": ["text", "image"] }, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 32768, "output": 4096 }
-    } },
-    "ollama": { "models": {} }
+    "xai": {
+      "models": {
+        "grok-4.6": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 500000, "output": 500000, "cost": {"input": 2, "output": 6, "cache_read": 0.5, "cache_write": 0}},
+        "grok-4.3": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 30000, "cost": {"input": 1.25, "output": 2.5, "cache_read": 0.2, "cache_write": 0}},
+        "grok-4.20-0309-non-reasoning": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1000000, "output": 30000, "cost": {"input": 1.25, "output": 2.5, "cache_read": 0.2, "cache_write": 0}},
+        "grok-4.20-0309-reasoning": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 30000, "cost": {"input": 1.25, "output": 2.5, "cache_read": 0.2, "cache_write": 0}},
+        "grok-4.20-multi-agent-0309": {"modalities": {"input": ["text", "image"]}, "tool_call": false, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 30000, "cost": {"input": 1.25, "output": 2.5, "cache_read": 0.2, "cache_write": 0}},
+        "grok-4.5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 500000, "output": 500000, "cost": {"input": 2, "output": 6, "cache_read": 0.3, "cache_write": 0}}
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-chat": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 128000, "output": 8192, "cost": {"input": 0.27, "output": 1.1, "cache_read": 0.07, "cache_write": 0.27}},
+        "deepseek-reasoner": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 128000, "output": 8192, "cost": {"input": 0.55, "output": 2.19, "cache_read": 0.14, "cache_write": 0.55}},
+        "deepseek-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 384000, "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": 0}},
+        "deepseek-v4-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 384000, "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": 0}},
+        "deepseek-v4-pro": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1000000, "output": 384000, "cost": {"input": 0.435, "output": 0.87, "cache_read": 0.003625, "cache_write": 0}}
+      }
+    },
+    "google": {
+      "models": {
+        "gemini-2.5-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 0}},
+        "gemini-2.5-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.3, "output": 2.5, "cache_read": 0.03, "cache_write": 0}},
+        "gemini-2.5-flash-lite": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.1, "output": 0.4, "cache_read": 0.01, "cache_write": 0}},
+        "gemini-3-flash-preview": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.5, "output": 3, "cache_read": 0.05, "cache_write": 0}},
+        "gemini-3.1-flash-lite": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.25, "output": 1.5, "cache_read": 0.025, "cache_write": 0}},
+        "gemini-3.1-flash-lite-preview": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.25, "output": 1.5, "cache_read": 0.025, "cache_write": 0}},
+        "gemini-3.1-pro-preview": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 2, "output": 12, "cache_read": 0.2, "cache_write": 0}},
+        "gemini-3.5-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 1.5, "output": 9, "cache_read": 0.15, "cache_write": 0}},
+        "gemini-3.5-flash-lite": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.3, "output": 2.5, "cache_read": 0.03, "cache_write": 0}},
+        "gemini-3.6-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.75, "output": 3.75, "cache_read": 0.075, "cache_write": 0}},
+        "gemini-3.7-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.75, "output": 3.75, "cache_read": 0.075, "cache_write": 0}},
+        "gemini-3.8-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536, "cost": {"input": 0.75, "output": 3.75, "cache_read": 0.075, "cache_write": 0}}
+      }
+    },
+    "mistralai": {
+      "models": {
+        "mistral-large-latest": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": {"input": 2.0, "output": 6.0}},
+        "mistral-medium-latest": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": {"input": 0.8, "output": 2.4}}
+      }
+    },
+    "groq": {
+      "models": {
+        "llama-3.3-70b-versatile": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 128000, "output": 32768, "cost": {"input": 0.59, "output": 0.79}}
+      }
+    },
+    "qwen": {
+      "models": {
+        "qwen-plus": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 131072, "output": 8192, "cost": {"input": 0.4, "output": 1.2}},
+        "qwen3-235b-a22b": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": false, "context": 131072, "output": 8192, "cost": {"input": 0.4, "output": 1.2}}
+      }
+    },
+    "openrouter": {
+      "models": {
+        "openai/gpt-4.1": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": true, "context": 1048576, "output": 32768},
+        "anthropic/claude-sonnet-4-5": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 200000, "output": 64000},
+        "google/gemini-2.5-pro": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 1048576, "output": 65536},
+        "z-ai/glm-5.3-flash": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192},
+        "deepseek/deepseek-v4-flash": {"modalities": {"input": ["text"]}, "tool_call": true, "reasoning": true, "prompt_cache": true, "context": 131072, "output": 8192},
+        "acme/custom-vision": {"modalities": {"input": ["text", "image"]}, "tool_call": true, "reasoning": false, "prompt_cache": false, "context": 32768, "output": 4096}
+      }
+    },
+    "ollama": {
+      "models": {
+      }
+    }
   }
 }

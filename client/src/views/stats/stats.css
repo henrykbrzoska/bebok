@@ -1,0 +1,350 @@
+/* Stats screen (F7-5).
+ *
+ * Same skeleton as the Debug log (44px header over a scrolling body), with
+ * the redesign tokens: `--surface` cards on the `--bg` ground, uppercase
+ * 10.5px labels, monospace for model ids and paths, `--accent` for the
+ * primary series of the daily chart.
+ */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* --- Header ------------------------------------------------------------- */
+
+.stats-head {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: 0 var(--space-18);
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-head .title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stats-head .note {
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.stats-head .actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  flex: none;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.seg {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.seg + .seg {
+  border-left: 1px solid var(--border);
+}
+
+.seg:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.seg.active {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.seg:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.head-btn {
+  flex: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control-sm);
+  padding: 5px 12px;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.head-btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.error-banner {
+  flex: none;
+  margin: var(--space-10) var(--space-18) 0;
+  padding: 8px 12px;
+  font-size: var(--fs-12);
+  color: var(--danger);
+  background: rgba(226, 100, 95, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control-sm);
+}
+
+/* --- Body --------------------------------------------------------------- */
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-16) var(--space-18) var(--space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  padding: var(--space-24);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  max-width: 420px;
+}
+
+.empty-title {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-hint {
+  margin-top: var(--space-6);
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* --- Tiles -------------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-12);
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-12) var(--space-14);
+  min-width: 0;
+}
+
+.tile-label {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.tile-value {
+  margin-top: var(--space-6);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.tile-cost .tile-value {
+  color: var(--accent);
+}
+
+.tile-detail {
+  margin-top: 3px;
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* `.body` is a scrolling flex column: without this the first card (the
+     daily chart) is squeezed to its header once the page is taller than the
+     viewport (E2E B2). */
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-14);
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+  font-size: var(--fs-13-5);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card-hint {
+  font-size: var(--fs-11-5);
+  color: var(--text-faint);
+}
+
+.card-foot {
+  padding: var(--space-8) var(--space-14);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--space-12);
+  align-items: start;
+}
+
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+/* --- Daily chart (pure CSS bars) ---------------------------------------- */
+
+.legend {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--space-12);
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.swatch.in,
+.seg-in {
+  background: var(--accent);
+}
+
+.swatch.out,
+.seg-out {
+  background: var(--success);
+}
+
+.swatch.cache,
+.seg-cache {
+  background: var(--border-strong);
+}
+
+.chart {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 180px;
+  box-sizing: border-box;
+  padding: var(--space-14) var(--space-14) var(--space-6);
+}
+
+.col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bar {
+  height: calc(100% - 18px);
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 2px 2px 0 0;
+  overflow: hidden;
+  background: linear-gradient(to top, var(--surface-2), transparent);
+}
+
+.col:hover .bar {
+  filter: brightness(1.15);
+}
+
+.seg-in,
+.seg-out,
+.seg-cache {
+  flex: none;
+  width: 100%;
+}
+
+.tick {
+  flex: none;
+  height: 14px;
+  margin-top: 4px;
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  text-align: center;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.tick.visible {
+  visibility: visible;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "bebok-workspace",
+  "private": true,
+  "description": "Root orchestration for the Bebok repo (engine/ + client/). Not a workspace: client/ keeps its own install.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "doctor": "node scripts/bebok.mjs doctor",
+    "full-build-dev": "node scripts/bebok.mjs full-build-dev",
+    "full-build-app": "node scripts/bebok.mjs full-build-app",
+    "engine": "node scripts/bebok.mjs engine",
+    "client": "node scripts/bebok.mjs client"
+  }
+}

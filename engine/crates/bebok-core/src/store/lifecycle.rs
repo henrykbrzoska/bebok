@@ -144,6 +144,12 @@ impl InstanceStore {
         // session was never opened this run, fall back to the scanned metadata.
         let _removed = self.sessions.write().await.remove(&id);
         let meta = self.meta.write().await.remove(&id).unwrap_or(snapshot);
+        // WP-BROWSER: a deleted session's headless browser (if any) goes too.
+        bebok_tools::browser::close_session(&id.to_string()).await;
+        // F9-14: background processes started by this session go too.
+        bebok_tools::processes::ProcessRegistry::global()
+            .kill_session(&id.to_string())
+            .await;
 
         // Drop the on-disk session directory (session.json + msg-*.json).
         let disk_dir = state.disk_dir().to_path_buf();
@@ -181,12 +187,15 @@ impl InstanceStore {
         persist::persist_session_meta(&disk_dir, &session).await?;
         persist::append_index_event(&inst_dir, "created", &session).await;
 
-        let state = Arc::new(SessionState::new(
-            session.clone(),
-            inst_dir,
-            disk_dir,
-            instance.config_snapshot(),
-        ));
+        let state = Arc::new(
+            SessionState::new(
+                session.clone(),
+                inst_dir,
+                disk_dir,
+                instance.config_snapshot(),
+            )
+            .with_live_config(instance.config.clone()),
+        );
 
         self.meta.write().await.insert(session.id, session.clone());
         self.sessions

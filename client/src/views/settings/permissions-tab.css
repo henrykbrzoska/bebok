@@ -76,3 +76,145 @@
   color: var(--danger);
   font-size: var(--fs-12);
 }
+
+/* --- WP-CHAT4 (F7-7): Tool safety card --------------------------------- */
+
+.safety-section {
+  margin-top: var(--space-14);
+}
+
+.safety-section.uncategorized {
+  margin-top: 0;
+  padding: var(--space-10) var(--space-12);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control-sm);
+  background: var(--surface-2);
+}
+
+.safety-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-12-5);
+  font-weight: 600;
+}
+
+.safety-heading .count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+/* The same colour mapping as the transcript dots (tool-part.ts). */
+.safety-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-faint);
+  vertical-align: middle;
+}
+
+.safety-swatch.safety-safe {
+  background: var(--success);
+}
+
+.safety-swatch.safety-caution {
+  background: var(--warning);
+}
+
+.safety-swatch.safety-dangerous {
+  background: var(--accent);
+}
+
+.safety-swatch.safety-uncategorized {
+  background: var(--text-faint);
+}
+
+.safety-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.safety-table th {
+  display: table-cell;
+  text-align: left;
+  padding: 0 var(--space-8) 6px 0;
+}
+
+.safety-table td {
+  padding: 3px var(--space-8) 3px 0;
+  vertical-align: middle;
+  font-size: var(--fs-12-5);
+}
+
+.safety-table td.shrink {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 0;
+}
+
+.safety-table .tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.safety-table .source {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.safety-table .default {
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.safety-table .default .safety-swatch {
+  margin-right: 5px;
+}
+
+.safety-table tr.overridden .tool-name {
+  font-weight: 600;
+}
+
+.category {
+  min-width: 150px;
+  font-weight: 600;
+  font-size: var(--fs-12);
+}
+
+.category-safe {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.category-caution {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.category-dangerous {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.category-uncategorized {
+  color: var(--text-muted);
+}
+
+.override-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  font-size: var(--fs-11);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}

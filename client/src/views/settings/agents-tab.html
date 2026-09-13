@@ -129,5 +129,11 @@
     } @else {
       <div class="card empty">{{ t('settings.noAgentSelected') }}</div>
     }
+
+    <!-- WP-AUTOVERIFY (F8-1): applies to every agent, so it sits below the preset card. -->
+    <app-settings-frontend-verify />
   </div>
 </div>
+
+<!-- WP-DELEGATION (F8-2): sub-agent delegation policy (own component). -->
+<app-settings-delegation />

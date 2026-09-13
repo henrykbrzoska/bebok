@@ -7,7 +7,9 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 base64.workspace = true
+chromiumoxide = "=0.9.1"
 flate2.workspace = true
+futures.workspace = true
 glob.workspace = true
 ignore.workspace = true
 regex.workspace = true
