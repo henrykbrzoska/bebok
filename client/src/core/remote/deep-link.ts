@@ -14,9 +14,8 @@
  * service normalises both sources into `pending`.
  */
 
-import { Injectable, signal } from '@angular/core';
-import { Router } from '@angular/router';
-import { inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { CanActivateChildFn, Router } from '@angular/router';
 
 import { PairInvite, parsePairUrl } from './pair-protocol';
 
@@ -40,10 +39,19 @@ export class PairDeepLinks {
 
   private installed = false;
 
-  /** Load `@capacitor/app` (overridable in specs). */
+  /**
+   * Load `@capacitor/app` (overridable in specs). The plugin object is a
+   * Proxy that throws for unknown members - including `then` - so it must
+   * never be returned straight out of an async function (`await` would probe
+   * `.then` and reject with "App.then() is not implemented"); wrap it.
+   */
   loadPlugin: () => Promise<AppPluginLike> = async () => {
     const mod = await import('@capacitor/app');
-    return mod.App as unknown as AppPluginLike;
+    const app = mod.App;
+    return {
+      getLaunchUrl: () => app.getLaunchUrl(),
+      addListener: (event, listener) => app.addListener(event, listener),
+    };
   };
 
   /**
@@ -68,7 +76,11 @@ export class PairDeepLinks {
     }
     try {
       const launch = await plugin.getLaunchUrl();
-      if (launch?.url) {
+      // The launch intent outlives the page: a reload of the WebView would
+      // see the same URL again and re-enter pairing with a spent code, so a
+      // launch URL is consumed once per app process (sessionStorage).
+      if (launch?.url && readConsumed() !== launch.url) {
+        markConsumed(launch.url);
         this.handle(launch.url);
       }
     } catch {
@@ -102,3 +114,32 @@ export class PairDeepLinks {
     return invite;
   }
 }
+
+const CONSUMED_KEY = 'bebok.pair.launchUrl';
+
+function readConsumed(): string | null {
+  try {
+    return sessionStorage.getItem(CONSUMED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function markConsumed(url: string): void {
+  try {
+    sessionStorage.setItem(CONSUMED_KEY, url);
+  } catch {
+    /* memory only */
+  }
+}
+
+/**
+ * Route hook (`mobile.routes.ts`): installs the native deep-link listener the
+ * first time any `/m/**` route activates, so a cold start from
+ * `bebok://pair?…` is picked up (`getLaunchUrl`) no matter which tab the app
+ * opens on. Idempotent, never blocks navigation.
+ */
+export const installPairDeepLinks: CanActivateChildFn = () => {
+  void inject(PairDeepLinks).install();
+  return true;
+};

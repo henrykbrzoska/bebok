@@ -28,7 +28,18 @@ export class QrScanner {
   /** Load the plugin (overridable in specs). */
   loadPlugin: () => Promise<BarcodeScannerLike> = async () => {
     const mod = await import('@capacitor-mlkit/barcode-scanning');
-    return mod.BarcodeScanner as unknown as BarcodeScannerLike;
+    // Never return the plugin Proxy itself from an async function: `await`
+    // probes `.then` and the Proxy throws "not implemented" for it.
+    const scanner = mod.BarcodeScanner;
+    return {
+      isSupported: () => scanner.isSupported(),
+      isGoogleBarcodeScannerModuleAvailable: () => scanner.isGoogleBarcodeScannerModuleAvailable(),
+      installGoogleBarcodeScannerModule: () => scanner.installGoogleBarcodeScannerModule(),
+      scan: (options) =>
+        scanner.scan(options as Parameters<typeof scanner.scan>[0]) as Promise<{
+          barcodes: { rawValue: string; displayValue: string }[];
+        }>,
+    };
   };
 
   /** True inside the Capacitor shell (the only place the plugin works). */

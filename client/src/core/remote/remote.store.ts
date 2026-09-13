@@ -91,7 +91,9 @@ export class RemoteStore {
   appLauncher: (() => Promise<AppLauncherLike>) | null = isNativePlatform()
     ? async () => {
         const mod = await import('@capacitor/app-launcher');
-        return mod.AppLauncher as unknown as AppLauncherLike;
+        // Wrapped: the plugin Proxy throws on `.then`, which `await` probes.
+        const launcher = mod.AppLauncher;
+        return { openUrl: (options) => launcher.openUrl(options) };
       }
     : null;
 
