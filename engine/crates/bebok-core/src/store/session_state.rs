@@ -261,6 +261,23 @@ impl SessionState {
         Ok(idx)
     }
 
+    /// F9-7: append a status row to the latest assistant message, persist
+    /// it and return the message index. Returns `None` when the transcript
+    /// has no assistant message yet. Never creates a message of its own: an
+    /// empty assistant turn would be sent to the provider on the next call.
+    pub async fn append_status_part(&self, part: crate::session::Part) -> Option<usize> {
+        let idx = {
+            let mut messages = self.messages.write().await;
+            let idx = messages
+                .iter()
+                .rposition(|m| m.role == crate::session::Role::Assistant)?;
+            messages[idx].parts.push(part);
+            idx
+        };
+        self.persist_message_at(idx).await;
+        Some(idx)
+    }
+
     /// Set the session title from the first prompt (M1 heuristic).
     pub async fn set_title_if_empty(&self, prompt: &str) -> bool {
         let mut meta = self.meta.write().await;
@@ -307,6 +324,27 @@ impl SessionState {
         let session = {
             let mut meta = self.meta.write().await;
             meta.usage.add(input, output, cost, cache_read, cache_write);
+            meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// F9-9: persist a per-prompt model override so `effective_model` (and
+    /// the next turn) reflect what the user picked in the toolbar.
+    pub async fn set_model(&self, model: Option<&str>) {
+        let model = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_string);
+        let session = {
+            let mut meta = self.meta.write().await;
+            if meta.model == model {
+                return;
+            }
+            meta.model = model;
             meta.touch();
             meta.clone()
         };
@@ -665,6 +703,15 @@ impl SessionState {
             .values()
             .map(|request| request.properties.clone())
             .collect()
+    }
+
+    /// The registered properties of one pending ask (`None` once resolved).
+    pub async fn pending_permission_request(&self, request_id: &str) -> Option<Value> {
+        self.pending_asks
+            .lock()
+            .await
+            .get(request_id)
+            .map(|request| request.properties.clone())
     }
 
     /// Drop a pending permission request (the turn moved on / aborted).

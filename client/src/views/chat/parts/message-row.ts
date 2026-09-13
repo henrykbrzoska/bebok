@@ -25,6 +25,8 @@ export interface ToolGroup {
   names: string;
   /** F7-7 per-category safety counts for the group header's dot cluster. */
   safety: SafetyCounts;
+  /** F9-9: child models (`task`/`fleet` structured output) differing from the session's. */
+  childModels: string[];
 }
 
 export type RenderedItem = RenderedPart | ToolGroup;
@@ -35,21 +37,34 @@ export type RenderedItem = RenderedPart | ToolGroup;
  * open by default) and folding any run of two or more consecutive tool parts
  * into a single `ToolGroup`. A lone tool call - one with no tool neighbour -
  * stays an ungrouped `RenderedPart`, exactly as before grouping existed.
+ *
+ * F9-7: a `status` part (delegation progress row) never splits a run of tool
+ * calls. Statuses seen while a run is open are collected and emitted right
+ * after the run (group first, then its statuses, in order); a status outside
+ * a run is emitted in place. `sessionModel` feeds the group header's child
+ * model badge (F9-9).
  */
-export function groupParts(parts: readonly Part[], resolve?: SafetyResolver): RenderedItem[] {
+export function groupParts(
+  parts: readonly Part[],
+  resolve?: SafetyResolver,
+  sessionModel = '',
+): RenderedItem[] {
   const items: RenderedItem[] = [];
   let toolIndex = -1;
   let run: RenderedPart[] = [];
   let runStart = -1;
+  let deferred: RenderedPart[] = [];
 
   const flush = (): void => {
     if (run.length >= 2) {
-      items.push(makeGroup(runStart, run, resolve));
+      items.push(makeGroup(runStart, run, resolve, sessionModel));
     } else if (run.length === 1) {
       items.push(run[0]);
     }
+    items.push(...deferred);
     run = [];
     runStart = -1;
+    deferred = [];
   };
 
   parts.forEach((part, index) => {
@@ -61,6 +76,10 @@ export function groupParts(parts: readonly Part[], resolve?: SafetyResolver): Re
       run.push({ kind: 'part', part, toolIndex });
       return;
     }
+    if (part.type === 'status' && run.length > 0) {
+      deferred.push({ kind: 'part', part, toolIndex: -1 });
+      return;
+    }
     flush();
     items.push({ kind: 'part', part, toolIndex: -1 });
   });
@@ -68,9 +87,14 @@ export function groupParts(parts: readonly Part[], resolve?: SafetyResolver): Re
   return items;
 }
 
-function makeGroup(key: number, rows: RenderedPart[], resolve?: SafetyResolver): ToolGroup {
-  const { state, names, safety } = summarizeToolRun(rows, resolve);
-  return { kind: 'group', key, rows, state, names, safety };
+function makeGroup(
+  key: number,
+  rows: RenderedPart[],
+  resolve?: SafetyResolver,
+  sessionModel = '',
+): ToolGroup {
+  const { state, names, safety, childModels } = summarizeToolRun(rows, resolve, sessionModel);
+  return { kind: 'group', key, rows, state, names, safety, childModels };
 }
 
 /**
@@ -127,6 +151,8 @@ function makeGroup(key: number, rows: RenderedPart[], resolve?: SafetyResolver):
                 [names]="item.names"
                 [count]="item.rows.length"
                 [safety]="item.safety"
+                [childModels]="item.childModels"
+                [sessionModel]="sessionModel()"
                 [open]="groupOpen(item.key)"
                 [taskLinks]="taskLinks()"
                 (toggle)="toggleGroup(item.key)"
@@ -244,6 +270,8 @@ export class MessageRowComponent {
   readonly rowId = input('');
   /** Task name/ID → childSessionID map for clickable sub-agent links. */
   readonly taskLinks = input<Map<string, string>>(new Map());
+  /** F9-9: the session's effective model; child models equal to it are not badged. */
+  readonly sessionModel = input<string>('');
   readonly isUser = computed(() => this.message().role === 'user');
 
   /**
@@ -252,7 +280,11 @@ export class MessageRowComponent {
    * consecutive tool calls folded into collapsible groups (F6-1).
    */
   readonly items = computed<RenderedItem[]>(() =>
-    groupParts(this.message().parts, (name) => this.toolSafety.categoryOf(name)),
+    groupParts(
+      this.message().parts,
+      (name) => this.toolSafety.categoryOf(name),
+      this.sessionModel(),
+    ),
   );
 
   /**

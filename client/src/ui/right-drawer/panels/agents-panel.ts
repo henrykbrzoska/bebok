@@ -109,7 +109,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
               <span class="row meta">
                 <span class="agent-preset">{{ agent.agent }}</span>
                 @if (agent.model) {
-                  <span class="model" [title]="agent.model">{{ agent.model }}</span>
+                  <span class="model badge" [title]="t('agents.model') + ': ' + agent.model" data-testid="agent-model">{{ agent.model }}</span>
                 }
               </span>
               <span class="row meta">
@@ -376,6 +376,16 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      /* F9-9: small muted model badge on every row. */
+      .model.badge {
+        min-width: 0;
+        font-size: 10px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--text-faint);
       }
 
       .error {

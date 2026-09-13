@@ -8,8 +8,8 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { ConfigResponse, DelegationConfig } from '../../core/engine.dtos';
-import { DelegationBlock, readLayerDelegation } from './delegation-block';
+import { ConfigResponse, DelegationConfig, DelegationModelsResponse } from '../../core/engine.dtos';
+import { DelegationBlock, policyKindOf, readLayerDelegation } from './delegation-block';
 import { SettingsStore } from './settings.store';
 
 function configResponse(
@@ -50,6 +50,23 @@ describe('readLayerDelegation (WP-DELEGATION)', () => {
     expect(
       readLayerDelegation('{"delegation":{"mode":"sometimes","maxConcurrent":5,"model":""}}'),
     ).toEqual({ max_concurrent: 5, model: '' });
+    expect(readLayerDelegation('{"delegation":{"model_policy":"cheaper"}}')).toEqual({
+      model_policy: 'cheaper',
+    });
+  });
+});
+
+describe('policyKindOf (F9-10)', () => {
+  it('maps the keywords, an explicit id and the legacy model key', () => {
+    expect(policyKindOf('inherit', null)).toEqual({ kind: 'inherit', model: null });
+    expect(policyKindOf('cheaper', 'zai/glm-4.5')).toEqual({ kind: 'cheaper', model: null });
+    expect(policyKindOf('openai/gpt-5.6-mini', null)).toEqual({
+      kind: 'explicit',
+      model: 'openai/gpt-5.6-mini',
+    });
+    // Legacy `delegation.model` == explicit policy; nothing set == cheaper (engine default).
+    expect(policyKindOf(undefined, 'zai/glm-4.5')).toEqual({ kind: 'explicit', model: 'zai/glm-4.5' });
+    expect(policyKindOf('', '')).toEqual({ kind: 'cheaper', model: null });
   });
 });
 
@@ -59,6 +76,17 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
   let engine: EngineClient;
   let lastDelta: unknown;
   let lastOpts: unknown;
+  let delegationModels: jasmine.Spy;
+
+  const RESOLVED: DelegationModelsResponse = {
+    policy: 'cheaper',
+    parent_model: 'zai/glm-4.6',
+    resolved: 'zai/glm-4.5',
+    mappings: [
+      { provider: 'zai', model: 'glm-4.6', cheaper: 'zai/glm-4.5' },
+      { provider: 'openai', model: 'gpt-5.6-luna', cheaper: null },
+    ],
+  };
 
   async function setup(
     delegation?: Partial<DelegationConfig>,
@@ -69,10 +97,13 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
       imports: [DelegationBlock],
       providers: [provideZonelessChangeDetection(), SettingsStore],
     });
+    lastDelta = undefined;
+    lastOpts = undefined;
     engine = TestBed.inject(EngineClient);
     spyOn(engine, 'getConfig').and.returnValue(
       Promise.resolve(configResponse(delegation, projectLayer)),
     );
+    delegationModels = spyOn(engine, 'delegationModels').and.resolveTo(RESOLVED);
     spyOn(engine, 'putConfig').and.callFake((_dir: string, delta: unknown, opts?: unknown) => {
       lastDelta = delta;
       lastOpts = opts;
@@ -91,9 +122,12 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
 
   afterEach(() => fixture?.destroy());
 
-  it('defaults to auto / 3 / no model when the engine has no delegation section', async () => {
+  it('defaults to auto / 3 / cheaper when the engine has no delegation section', async () => {
     await setup();
     expect(component.effective()).toEqual({ mode: 'auto', max_concurrent: 3, model: null });
+    expect(component.policyKind()).toBe('cheaper');
+    expect(el<HTMLInputElement>('delegation-policy-cheaper').checked).toBeTrue();
+    expect(el<HTMLSelectElement>('delegation-model').disabled).toBeTrue();
     expect(el<HTMLInputElement>('delegation-mode-auto').checked).toBeTrue();
     expect(el<HTMLInputElement>('delegation-mode-off').checked).toBeFalse();
     expect(component.projectOverride()).toBeNull();
@@ -106,6 +140,9 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
     });
     expect(el<HTMLInputElement>('delegation-mode-always').checked).toBeTrue();
     expect(component.maxDraft()).toBe(5);
+    // Legacy `model` key == explicit policy.
+    expect(component.policyKind()).toBe('explicit');
+    expect(el<HTMLInputElement>('delegation-policy-explicit').checked).toBeTrue();
     expect(el<HTMLSelectElement>('delegation-model').value).toBe('zai/glm-4.5');
     expect(component.projectOverride()).toEqual({ mode: 'always' });
     expect(el('delegation-override-note').textContent).toContain('mode');
@@ -126,7 +163,65 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
     expect(lastOpts).toEqual({ scope: 'global' });
   });
 
-  it('clamps and saves max_concurrent, and clears the model with an empty string', async () => {
+  it('F9-10: writes the policy keyword (clearing the legacy model) and reloads the resolved table', async () => {
+    await setup({ model: 'zai/glm-4.5' });
+    expect(delegationModels).toHaveBeenCalledWith('C:/tmp/project');
+    const calls = delegationModels.calls.count();
+    component.setPolicy('inherit');
+    await fixture.whenStable();
+    expect(lastDelta).toEqual({ delegation: { model_policy: 'inherit', model: '' } });
+    expect(delegationModels.calls.count()).toBe(calls + 1);
+
+    component.setPolicy('cheaper');
+    await fixture.whenStable();
+    expect(lastDelta).toEqual({ delegation: { model_policy: 'cheaper', model: '' } });
+    // Same policy again is a no-op.
+    const before = lastDelta;
+    component.setPolicy('cheaper');
+    await fixture.whenStable();
+    expect(lastDelta).toBe(before);
+  });
+
+  it('F9-10: explicit policy stores the picked model id as the policy string', async () => {
+    await setup({ model_policy: 'cheaper' });
+    expect(component.policyKind()).toBe('cheaper');
+    // Choosing "explicit" with no model yet only enables the select.
+    component.setPolicy('explicit');
+    await fixture.whenStable();
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(component.policyKind()).toBe('explicit');
+    expect(el<HTMLSelectElement>('delegation-model').disabled).toBeFalse();
+    expect(lastDelta).toBeUndefined();
+
+    component.setModel('zai/glm-4.5');
+    await fixture.whenStable();
+    expect(lastDelta).toEqual({ delegation: { model_policy: 'zai/glm-4.5', model: '' } });
+    expect(component.policyKind()).toBe('explicit');
+    expect(component.explicitDraft()).toBe('zai/glm-4.5');
+
+    // Clearing the explicit model falls back to inherit.
+    component.setModel('');
+    await fixture.whenStable();
+    expect(lastDelta).toEqual({ delegation: { model_policy: 'inherit', model: '' } });
+  });
+
+  it('F9-10: renders the resolved cheaper-model table', async () => {
+    await setup();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const rows = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="delegation-mapping"]'),
+    );
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain('zai');
+    expect(rows[0].textContent).toContain('glm-4.6');
+    expect(rows[0].textContent).toContain('zai/glm-4.5');
+    expect(rows[1].textContent).toContain('no cheaper sibling');
+    expect(el('delegation-resolved-now').textContent).toContain('zai/glm-4.5');
+  });
+
+  it('clamps and saves max_concurrent', async () => {
     await setup();
     component.maxDraft.set(99);
     component.commitMax();
@@ -138,13 +233,6 @@ describe('DelegationBlock (WP-DELEGATION)', () => {
     component.commitMax();
     await fixture.whenStable();
     expect(lastDelta).toEqual({ delegation: { max_concurrent: 1 } });
-
-    component.setModel('zai/glm-4.5');
-    await fixture.whenStable();
-    expect(lastDelta).toEqual({ delegation: { model: 'zai/glm-4.5' } });
-    component.setModel('');
-    await fixture.whenStable();
-    expect(lastDelta).toEqual({ delegation: { model: '' } });
   });
 
   it('removes the project override by rewriting the project layer without it', async () => {

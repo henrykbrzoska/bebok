@@ -270,20 +270,70 @@ pub async fn emit_progress(
     );
 }
 
+/// F9-7: decides when a progress *row* (a transcript line, not an SSE
+/// event) is due: on the first tool call, then every
+/// [`status_rows::PROGRESS_ROW_EVERY`]. Pure, so it is unit-testable.
+#[derive(Debug)]
+pub struct MilestoneTracker {
+    first_tool_seen: bool,
+    last_row: Option<std::time::Instant>,
+    every: Duration,
+}
+
+impl MilestoneTracker {
+    pub fn new(every: Duration) -> Self {
+        Self {
+            first_tool_seen: false,
+            last_row: None,
+            every,
+        }
+    }
+
+    /// Whether a row should be written for the given progress at `now`.
+    pub fn due(&mut self, progress: &TaskProgress, now: std::time::Instant) -> bool {
+        if !self.first_tool_seen && progress.tool_calls > 0 {
+            self.first_tool_seen = true;
+            self.last_row = Some(now);
+            return true;
+        }
+        match self.last_row {
+            Some(last) if now.duration_since(last) >= self.every => {
+                self.last_row = Some(now);
+                true
+            }
+            Some(_) => false,
+            // Nothing happened yet: no row, no clock.
+            None if progress.tool_calls == 0 && progress.steps == 0 => false,
+            // The child answered without a tool: start the clock silently.
+            None => {
+                self.last_row = Some(now);
+                false
+            }
+        }
+    }
+}
+
 /// Follow `child`'s own bus events and re-publish them as throttled
-/// `task.progress` events on the parent until `stop` fires.
+/// `task.progress` events on the parent until `stop` fires. Also writes
+/// the F9-7 progress rows into the parent transcript at milestones.
 pub fn spawn_progress_reporter(
     bus: EventBus,
     child: Arc<SessionState>,
-    parent_session_id: String,
+    parent: Arc<SessionState>,
     task: ChildTask,
     stop: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut rx = bus.subscribe();
         let child_id = child.id().to_string();
+        let parent_session_id = parent.id().to_string();
         let mut throttle = ProgressThrottle::new(PROGRESS_MIN_GAP);
         let mut deadline: Option<tokio::time::Instant> = None;
+        let mut milestones = MilestoneTracker::new(super::status_rows::PROGRESS_ROW_EVERY);
+        // Periodic tick so the "every ~60 s" row fires even when the child
+        // is quiet (a long build, a slow provider call).
+        let mut tick = tokio::time::interval(Duration::from_secs(15));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let sleep = async {
                 match deadline {
@@ -293,10 +343,14 @@ pub fn spawn_progress_reporter(
             };
             tokio::select! {
                 _ = stop.cancelled() => break,
+                _ = tick.tick() => {
+                    maybe_progress_row(&bus, &child, &parent, &task, &mut milestones).await;
+                }
                 _ = sleep => {
                     deadline = None;
                     throttle.emitted(std::time::Instant::now());
                     emit_progress(&bus, &child, &parent_session_id, &task).await;
+                    maybe_progress_row(&bus, &child, &parent, &task, &mut milestones).await;
                 }
                 recv = rx.recv() => {
                     let relevant = match recv {
@@ -314,6 +368,7 @@ pub fn spawn_progress_reporter(
                     match throttle.mark(std::time::Instant::now()) {
                         ThrottleAction::EmitNow => {
                             emit_progress(&bus, &child, &parent_session_id, &task).await;
+                            maybe_progress_row(&bus, &child, &parent, &task, &mut milestones).await;
                         }
                         ThrottleAction::Defer(at) => {
                             deadline = Some(tokio::time::Instant::from_std(at));
@@ -324,6 +379,28 @@ pub fn spawn_progress_reporter(
             }
         }
     })
+}
+
+/// Write a `task.progress` row into the parent transcript when a milestone
+/// is due (F9-7).
+async fn maybe_progress_row(
+    bus: &EventBus,
+    child: &Arc<SessionState>,
+    parent: &Arc<SessionState>,
+    task: &ChildTask,
+    milestones: &mut MilestoneTracker,
+) {
+    let progress = summarize_progress(&child.messages_snapshot().await);
+    if !milestones.due(&progress, std::time::Instant::now()) {
+        return;
+    }
+    let usage = child.meta_snapshot().await.usage;
+    let text = super::status_rows::progress_text(
+        task,
+        &progress,
+        usage.input_tokens + usage.output_tokens,
+    );
+    super::status_rows::push_status(bus, parent, "task.progress", text, Some(task)).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +558,15 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
         Event::new("task.started", &spec.directory, &spec.parent_session_id)
             .with_properties(serde_json::to_value(&info).unwrap_or_default()),
     );
+    // F9-7: a visible line in the parent's chat, right away.
+    super::status_rows::push_status(
+        &spec.store.bus(),
+        &spec.parent,
+        "task.started",
+        super::status_rows::started_text(&info),
+        Some(&info),
+    )
+    .await;
 
     // `prepare_child` took the slot when one was free; `run_child` takes it
     // otherwise. Encode that in the status so `run_child` knows.
@@ -531,7 +617,7 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
         let reporter = spawn_progress_reporter(
             bus.clone(),
             child.clone(),
-            spec.parent_session_id.clone(),
+            spec.parent.clone(),
             info.clone(),
             stop.clone(),
         );
@@ -618,6 +704,24 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
     spec.parent.push_task_result(record).await;
 
     spec.parent.unregister_child_task(&task_id).await;
+    // F9-7: the closing line ("finished in 4m20s · 151k tok · 3 files changed").
+    let files_changed =
+        crate::change_tracking::Tracker::new(child.directory(), child.disk_dir()).tracked_count();
+    super::status_rows::push_status(
+        &bus,
+        &spec.parent,
+        "task.ended",
+        super::status_rows::ended_text(
+            &name,
+            &status,
+            error_msg.as_deref(),
+            outcome.ended_at - started_at,
+            usage.input_tokens + usage.output_tokens,
+            files_changed,
+        ),
+        Some(&info),
+    )
+    .await;
     bus.publish(
         Event::new("task.ended", &spec.directory, &spec.parent_session_id).with_properties(json!({
             "taskID": task_id,
@@ -665,6 +769,35 @@ mod tests {
         let mut t = ProgressThrottle::new(Duration::from_secs(1));
         assert_eq!(t.mark(t0), ThrottleAction::EmitNow);
         assert_eq!(t.mark(t0 + Duration::from_secs(3)), ThrottleAction::EmitNow);
+    }
+
+    /// F9-7: a progress row on the first tool call, then one per interval,
+    /// never for a child that has done nothing yet.
+    #[test]
+    fn milestones_first_tool_then_every_interval() {
+        let t0 = Instant::now();
+        let mut m = MilestoneTracker::new(Duration::from_secs(60));
+        let idle = TaskProgress::default();
+        assert!(!m.due(&idle, t0));
+        assert!(!m.due(&idle, t0 + Duration::from_secs(120)));
+        let one = TaskProgress {
+            tool_calls: 1,
+            ..TaskProgress::default()
+        };
+        assert!(m.due(&one, t0 + Duration::from_secs(1)), "first tool");
+        assert!(!m.due(&one, t0 + Duration::from_secs(30)));
+        assert!(m.due(&one, t0 + Duration::from_secs(61)), "interval");
+        assert!(!m.due(&one, t0 + Duration::from_secs(90)));
+        assert!(m.due(&one, t0 + Duration::from_secs(122)));
+        // A child that only talks (no tool) starts the clock silently.
+        let mut m = MilestoneTracker::new(Duration::from_secs(60));
+        let talk = TaskProgress {
+            steps: 1,
+            ..TaskProgress::default()
+        };
+        assert!(!m.due(&talk, t0));
+        assert!(!m.due(&talk, t0 + Duration::from_secs(30)));
+        assert!(m.due(&talk, t0 + Duration::from_secs(61)));
     }
 
     #[test]

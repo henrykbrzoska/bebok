@@ -24,10 +24,12 @@ pub mod exec;
 pub mod fleet_tool;
 pub mod gate;
 pub mod images;
+pub mod model_policy;
 pub mod observe;
 pub mod preset;
 pub mod prompt_env;
 pub mod request;
+pub mod status_rows;
 pub mod supervision_tools;
 pub mod task_tool;
 pub mod turn;
@@ -46,10 +48,12 @@ pub use images::{
     ALLOWED_IMAGE_TYPES, AgentImageInput, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES,
     MAX_IMAGES_PER_PROMPT, model_supports_images, validate_agent_images,
 };
+pub use model_policy::{CheaperMapping, cheaper_sibling, mappings_for, resolve_subagent_model};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
 pub use prompt_env::host_os_note;
 pub use request::{RequestBuilder, build_request, prune_for_budget};
+pub use status_rows::{format_duration, format_tokens};
 pub use supervision_tools::{TaskCancelTool, TaskStatusTool, TaskWaitTool};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};

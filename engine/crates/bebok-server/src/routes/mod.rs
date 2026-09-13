@@ -21,6 +21,7 @@ pub mod fs_browse;
 pub mod git;
 pub mod mcp;
 pub mod meta;
+pub mod processes;
 pub mod projects;
 pub mod providers;
 #[cfg(not(target_os = "android"))]
@@ -51,11 +52,17 @@ pub fn build_api_router() -> Router<AppState> {
             post(session::abort_task),
         )
         .route("/session/{id}/agents", get(agents::list_agents))
+        // F9-10: what `delegation.model_policy` resolves to.
+        .route("/delegation/models", get(agents::delegation_models))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/changes", get(changes::list_changes))
         .route("/session/{id}/changes/diff", get(changes::change_diff))
         .route("/session/{id}/changes/revert", post(changes::revert_change))
+        // F9-14: background processes started by `bash { background: true }`.
+        .route("/session/{id}/processes", get(processes::list_processes))
+        .route("/processes/{id}/log", get(processes::process_log))
+        .route("/processes/{id}/kill", post(processes::kill_process))
         .route("/session/{id}/truncate", post(session::truncate_session))
         .route(
             "/session/{id}/permission/{requestID}",

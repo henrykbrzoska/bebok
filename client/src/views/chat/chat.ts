@@ -32,7 +32,9 @@ import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
+import { ToastHost } from '../../ui/toast/toast-host';
 import { ChatSessionStore } from './chat-session.store';
+import { resolveEffectiveModel } from './effective-model';
 import { MessageRowComponent } from './parts/message-row';
 import { ToolRunRowComponent } from './parts/tool-run-row';
 
@@ -176,6 +178,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     MessageRowComponent,
     ToolRunRowComponent,
     TaskProgressLine,
+    ToastHost,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -218,6 +221,21 @@ export class ChatView implements OnInit, OnDestroy {
   readonly selectedAgent = signal('code');
   readonly availableModels = signal<string[]>([]);
   readonly selectedModel = signal('');
+  /** F9-9: `config.model` (provider-qualified when the engine gives one) as the last fallback. */
+  readonly configDefaultModel = signal<string | null>(null);
+  /**
+   * F9-9: the model a prompt will actually run on - the explicit selection,
+   * else the engine's `effective_model` (never "(default)"). Empty when
+   * nothing is known yet, which hides the toolbar badge.
+   */
+  readonly effectiveModel = computed(() =>
+    resolveEffectiveModel(
+      this.selectedModel(),
+      this.meta(),
+      this.agents(),
+      this.configDefaultModel(),
+    ),
+  );
 
   /** Reasoning/thinking effort for this directory, set in the chat header. */
   readonly thinking = signal('off');
@@ -559,6 +577,14 @@ export class ChatView implements OnInit, OnDestroy {
         }
         this.agents.set(agents);
         this.thinking.set(cfg.config.thinking ?? 'off');
+        const defaultModel = (cfg.config.model ?? '').trim();
+        this.configDefaultModel.set(
+          !defaultModel
+            ? null
+            : defaultModel.includes('/') || !cfg.config.provider
+              ? defaultModel
+              : `${cfg.config.provider}/${defaultModel}`,
+        );
         const models: string[] = [];
         for (const provider of cfg.providers ?? []) {
           // Only show models whose provider has a resolvable API key.

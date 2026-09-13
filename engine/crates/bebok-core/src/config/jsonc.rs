@@ -134,7 +134,14 @@ fn top_level_value_range(raw: &str, key: &str) -> Option<(usize, usize)> {
                         return Some((k, value_end));
                     }
                 }
+                // Resume right after the closing quote: the bottom `i += 1`
+                // used to skip that byte, so a `]`/`}` directly after a
+                // string (`"models": ["a", "b"],`) was never counted and
+                // every later top-level key looked nested -> `with_set`
+                // appended duplicate keys instead of replacing (F9-5: the
+                // project config ended up with 24 `permission` blocks).
                 i = end;
+                continue;
             }
             b'{' | b'[' => depth += 1,
             b'}' | b']' => depth = depth.saturating_sub(1),
@@ -329,6 +336,30 @@ fn append_key(raw: &str, key: &str, new_value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// F9-5 regression: a string value directly followed by `]`/`}` used to
+    /// desync the depth counter, so later top-level keys were appended again
+    /// instead of replaced.
+    #[test]
+    fn with_set_replaces_keys_after_arrays_of_strings() {
+        let raw = r#"{
+  "providers": [{ "name": "zai", "models": ["a", "b"] }],
+  "models": { "code": "x" },
+  "permission": { "rules": [] }
+}"#;
+        let doc = JsoncDocument::parse(raw).unwrap();
+        let out = doc.with_set("permission", &serde_json::json!({ "rules": [1] }));
+        assert_eq!(out.matches("\"permission\"").count(), 1, "{out}");
+        assert_eq!(out.matches("\"models\"").count(), 2, "{out}");
+        let value: serde_json::Value = super::parse(&out).unwrap();
+        assert_eq!(value["permission"]["rules"], serde_json::json!([1]));
+        let out = JsoncDocument::parse(&out)
+            .unwrap()
+            .with_set("models", &serde_json::json!({ "code": "y" }));
+        let value: serde_json::Value = super::parse(&out).unwrap();
+        assert_eq!(value["models"]["code"], "y");
+        assert_eq!(out.matches("\"models\"").count(), 2, "{out}");
+    }
+
     use super::*;
 
     #[test]

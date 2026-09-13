@@ -120,14 +120,24 @@ pub async fn ask_for_permission(
 ) -> ToolOutcome {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let properties = serde_json::json!({
+    // F9-5: say *who* is asking. A sub-agent's ask is answered from the
+    // parent's chat, so the popup needs the child's name and its parent.
+    let meta = ctx.state.meta_snapshot().await;
+    let mut properties = serde_json::json!({
         "requestID": request_id,
         "messageIndex": ctx.assistant_idx,
         "toolName": tool_name,
         "agent": ctx.agent_name,
         "input": input.clone(),
         "pattern": evaluation.pattern.clone(),
+        "suggestedRule": evaluation.suggested_rule.clone(),
     });
+    if let Some(alias) = meta.alias.as_deref() {
+        properties["sessionAlias"] = serde_json::json!(alias);
+    }
+    if let Some((parent, _)) = meta.parent {
+        properties["parentSessionID"] = serde_json::json!(parent.to_string());
+    }
     ctx.state
         .register_permission_request(&request_id, tx, properties.clone())
         .await;
@@ -163,16 +173,22 @@ pub async fn ask_for_permission(
     };
     ctx.state.remember_decision(key, cached).await;
 
-    // `always` persists `ask -> allow` for the matched pattern to the project
-    // config and recompiles the engine's project layer in memory.
-    if answer.always
-        && answer.allow
-        && let Err(e) = ctx.permission.always_allow(&evaluation.pattern)
-    {
-        tracing::error!(
-            "failed to persist always-allow rule for {}: {e}",
-            evaluation.pattern
-        );
+    // `always` persists `ask -> allow` for the TOOL (`tool(*)`, or the
+    // explicit rule that produced the verdict) to the project config and
+    // recompiles the engine's project layer in memory. The engine is shared
+    // by every session of the directory, so running and future sub-agent
+    // sessions are covered too (F9-5: the old code persisted the exact call
+    // string, e.g. `write_file(src/a.ts)`, which never matched the next
+    // write and made "always allow" look broken).
+    let mut persisted_rule: Option<String> = None;
+    if answer.always && answer.allow {
+        match ctx.permission.always_allow(&evaluation.suggested_rule) {
+            Ok(()) => persisted_rule = Some(evaluation.suggested_rule.clone()),
+            Err(e) => tracing::error!(
+                "failed to persist always-allow rule for {}: {e}",
+                evaluation.suggested_rule
+            ),
+        }
     }
 
     ctx.bus.publish(
@@ -190,6 +206,8 @@ pub async fn ask_for_permission(
             "decision": if answer.allow { "allow" } else { "deny" },
             "always": answer.always,
             "allowed": answer.allow,
+            "rule": persisted_rule,
+            "scope": persisted_rule.as_ref().map(|_| "project"),
         })),
     );
 

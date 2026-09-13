@@ -111,6 +111,8 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("task_status", SafetyCategory::Safe),
     ("task_wait", SafetyCategory::Safe),
     ("task_cancel", SafetyCategory::Caution),
+    // F9-14: stops a background process started by `bash { background: true }`.
+    ("bash_kill", SafetyCategory::Caution),
     ("base64", SafetyCategory::Caution),
     ("browser_open", SafetyCategory::Caution),
     ("browser_screenshot", SafetyCategory::Caution),

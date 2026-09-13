@@ -87,6 +87,31 @@
   border-color: var(--accent);
 }
 
+/* F9-9: effective model badge next to the model select ("openai gpt-5.6-luna"). */
+.tb-model-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 260px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11-5);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-model-badge .provider {
+  color: var(--text-faint);
+  text-transform: lowercase;
+}
+
 /* F6-3: context meter (`42k / 200k · 21%`) between the selectors and Abort. */
 .tb-context {
   display: inline-flex;

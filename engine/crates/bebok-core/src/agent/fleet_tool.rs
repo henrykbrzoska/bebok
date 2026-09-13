@@ -620,18 +620,16 @@ async fn run_member(
     };
     let mut agent = instance.resolve_agent(agent_name);
 
-    // Effective model: member override, else `delegation.model`, else preset
-    // override, else `models.<agent>` / global model.
-    let explicit = member.model.trim();
-    let model = if explicit.is_empty() {
-        cfg.delegation
-            .model_override()
-            .map(str::to_string)
-            .or_else(|| agent.model.clone())
-            .unwrap_or_else(|| cfg.model_for(&agent.name))
-    } else {
-        explicit.to_string()
-    };
+    // Effective model (F9-10): member override, else the delegation model
+    // policy applied to the parent's model (`heavy` = the parent's model).
+    let parent_model =
+        crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
+    let model = crate::agent::resolve_subagent_model(
+        bebok_llm::ModelCatalog::global(),
+        &cfg.delegation,
+        &parent_model,
+        Some(member.model.trim()),
+    );
 
     assemble_prompt(instance, &mut agent, cfg);
 

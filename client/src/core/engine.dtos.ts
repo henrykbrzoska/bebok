@@ -33,6 +33,8 @@ export interface TaskLink {
   name: string;
   agent: string;
   childSessionID: string;
+  /** F9-9: effective model of the child turn (`task`/`fleet` structured output). */
+  model?: string;
 }
 
 export interface ToolStateCompleted {
@@ -103,7 +105,24 @@ export interface UsagePart {
   cache_creation_input_tokens?: number | null;
 }
 
-export type Part = TextPart | ThinkingPart | ToolPart | UsagePart | ImagePart;
+/**
+ * F9-7: one progress row appended to the parent's latest assistant message
+ * while a delegated child runs (`task.started` / `task.progress` /
+ * `task.ended`). Display only - never sent to the LLM.
+ */
+export interface StatusPart {
+  type: 'status';
+  /** `task.started` | `task.progress` | `task.ended` (open set). */
+  kind: string;
+  text: string;
+  /** Unix ms. */
+  at: number;
+  taskID?: string;
+  name?: string;
+  childSessionID?: string;
+}
+
+export type Part = TextPart | ThinkingPart | ToolPart | UsagePart | ImagePart | StatusPart;
 
 /** An image attached to a message (engine `Part` union member). */
 export interface ImagePart {
@@ -170,6 +189,14 @@ export interface SessionMeta {
    * client never splits paths to work this out.
    */
   worktree_branch?: string | null;
+  /**
+   * F9-9: engine-attached effective model (`session.model`, else the agent
+   * preset model, else `models.<agent>`, else the config default), e.g.
+   * `openai/gpt-5.6-luna`. Absent on older engines.
+   */
+  effective_model?: string;
+  /** F9-9: the part of `effective_model` before the first `/` (or the config provider). */
+  effective_provider?: string;
 }
 
 /**
@@ -264,6 +291,12 @@ export interface PermissionAsked {
   agent: string;
   input: unknown;
   pattern: string;
+  /** F9-5: alias of the asking session (sub-agent name); absent for a main session. */
+  sessionAlias?: string;
+  /** F9-5: set when the asking session is a child (sub-agent). */
+  parentSessionID?: string;
+  /** F9-5: the rule "Always allow" will write, e.g. `write_file(*)`. */
+  suggestedRule?: string;
 }
 
 export interface PermissionResolved {
@@ -275,6 +308,10 @@ export interface PermissionResolved {
   decision: string;
   always: boolean;
   allowed: boolean;
+  /** F9-5: the rule written when `always: true` was applied. */
+  rule?: string;
+  /** F9-5: `"project"` when `always: true` was applied. */
+  scope?: string;
 }
 
 /** Active sub-task spawned by the orchestrator (emitted via `task.started`). */
@@ -457,8 +494,30 @@ export type DelegationMode = 'off' | 'auto' | 'always';
 export interface DelegationConfig {
   mode: DelegationMode;
   max_concurrent: number;
-  /** Optional model override for every sub-agent (`provider/model`). */
+  /** Legacy optional model override for every sub-agent (`provider/model`); == explicit policy. */
   model?: string | null;
+  /**
+   * F9-10: `"inherit"` | `"cheaper"` (default) | `"<provider/model>"` (explicit).
+   * Absent on older engines (treat as `cheaper` unless `model` is set).
+   */
+  model_policy?: string;
+}
+
+/** F9-10: one row of `GET /delegation/models` `mappings`. */
+export interface DelegationModelMapping {
+  provider: string;
+  model: string;
+  /** Cheaper sibling from the catalog; `null` = none (falls back to inherit). */
+  cheaper: string | null;
+}
+
+/** F9-10: `GET /delegation/models?directory=`. */
+export interface DelegationModelsResponse {
+  policy: string;
+  parent_model: string;
+  /** The model a sub-agent would get right now. */
+  resolved: string;
+  mappings: DelegationModelMapping[];
 }
 
 /** Parallel-agents fleet config (`fleet` section of the config). */
@@ -852,6 +911,12 @@ export interface ChangeEntry {
   baseline: ChangeBaseline;
   /** Whether the file currently exists on disk. */
   exists: boolean;
+  /** F9-6: session that made the change (the main session or a descendant). */
+  sessionID?: string;
+  /** F9-6: label - the child's alias, or the session agent name for the main session (e.g. `main`). */
+  agent?: string;
+  /** F9-6: the change was made by a child (sub-agent) session. */
+  isChild?: boolean;
 }
 
 export interface ChangesResponse {
@@ -965,4 +1030,66 @@ export interface StatsQuery {
   /** Epoch ms or ISO date. */
   from?: number | string | null;
   to?: number | string | null;
+}
+
+// ---------------------------------------------------------------------------
+// F9-14: background process registry (`bash background:true` / `bash_kill`)
+// ---------------------------------------------------------------------------
+
+/**
+ * One registry row as serialised by the engine (snake_case struct fields) plus
+ * the per-request decorations of `GET /session/{id}/processes` (`agent`, and
+ * `port`/`url` when detected in the log).
+ */
+export interface ProcessInfo {
+  /** uuid */
+  id: string;
+  /** camelCase alias some payloads carry; `session_id` is the canonical field. */
+  sessionID?: string;
+  session_id: string;
+  command: string;
+  cwd: string;
+  pid: number;
+  /** Unix ms. */
+  started_at: number;
+  status: 'running' | 'exited';
+  exit_code?: number | null;
+  /** Unix ms, set once exited. */
+  ended_at?: number | null;
+  /** Absolute path of `<root>/.bebok/run/<id>.log`. */
+  log_path: string;
+  /** Child alias or the owning session's agent name. */
+  agent: string;
+  /** First `http://localhost:<port>` / `127.0.0.1:<port>` / "port <n>" seen in the log. */
+  port?: number;
+  url?: string;
+}
+
+/** `GET /session/{id}/processes` (includes descendant sessions). */
+export interface SessionProcessesResponse {
+  processes: ProcessInfo[];
+}
+
+/** `GET /processes/{id}/log?tail=<bytes>`. */
+export interface ProcessLogResponse {
+  id: string;
+  log: string;
+  /** Total size of the log file in bytes (before the tail cut). */
+  size: number;
+}
+
+/** `process.output` event properties (coalesced, at most ~3/s per process). */
+export interface ProcessOutputEvent {
+  id: string;
+  sessionID: string;
+  chunk: string;
+  /** Unix ms. */
+  at: number;
+}
+
+/** `process.exited` event properties. */
+export interface ProcessExitedEvent {
+  id: string;
+  sessionID: string;
+  code: number | null;
 }

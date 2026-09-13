@@ -8,6 +8,11 @@
  * `<app-diff-overlay>` with the real unified diff; a revert from the overlay
  * re-lists. The list refreshes whenever the turn settles and, while a turn is
  * running, on each transcript update (debounced).
+ *
+ * F9-6: the engine list now includes the changes of descendant (sub-agent)
+ * sessions; rows are grouped under a small header per agent (label + count,
+ * main session first) and the overlay is told which session's tracker to
+ * diff/revert against.
  */
 
 import {
@@ -28,6 +33,44 @@ import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 import { DiffOverlay } from '../../diff-overlay/diff-overlay';
 
 const REFRESH_DEBOUNCE_MS = 400;
+
+/** F9-6: one agent's rows in the panel (`main` first, then children in spawn order). */
+export interface ChangeGroup {
+  /** `sessionID` of the rows (`''` for rows from an engine without the field). */
+  sessionID: string;
+  /** Agent label: the child's alias, or the main session's agent name. */
+  label: string;
+  isChild: boolean;
+  rows: ChangeEntry[];
+}
+
+/**
+ * Group the engine list by owning session, keeping the engine order (main
+ * session first, then children in spawn order; paths sorted within). Rows
+ * lacking the F9-6 fields all land in one unlabeled group.
+ */
+export function groupChanges(changes: readonly ChangeEntry[]): ChangeGroup[] {
+  const groups: ChangeGroup[] = [];
+  const byKey = new Map<string, ChangeGroup>();
+  for (const row of changes) {
+    const key = row.sessionID ?? '';
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        sessionID: key,
+        label: row.agent ?? '',
+        isChild: row.isChild === true,
+        rows: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.rows.push(row);
+  }
+  // Main session first even if the engine sent children ahead of it.
+  groups.sort((a, b) => Number(a.isChild) - Number(b.isChild));
+  return groups;
+}
 
 @Component({
   selector: 'app-changes-panel',
@@ -58,24 +101,38 @@ const REFRESH_DEBOUNCE_MS = 400;
           <div class="none">{{ loading() ? t('changes.loading') : t('changes.none') }}</div>
         } @else {
           <ul class="files">
-            @for (file of changes(); track file.path) {
-              <li>
-                <button
-                  type="button"
-                  class="file"
-                  [class.deleted]="!file.exists"
-                  (click)="open(file)"
-                  [title]="file.path"
-                  data-testid="change-row"
+            @for (group of groups(); track group.sessionID) {
+              @if (showGroupHeaders()) {
+                <li
+                  class="group-head"
+                  [class.child]="group.isChild"
+                  data-testid="change-group"
+                  [attr.data-session]="group.sessionID"
                 >
-                  <span class="file-path"
-                    ><span class="file-dir">{{ dirOf(file.path) }}</span
-                    ><span class="file-name">{{ nameOf(file.path) }}</span></span
+                  <span class="group-label">{{ groupLabel(group) }}</span>
+                  <span class="group-count">{{ group.rows.length }}</span>
+                </li>
+              }
+              @for (file of group.rows; track file.path) {
+                <li>
+                  <button
+                    type="button"
+                    class="file"
+                    [class.deleted]="!file.exists"
+                    (click)="open(file)"
+                    [title]="rowTitle(file)"
+                    data-testid="change-row"
+                    [attr.data-session]="file.sessionID ?? null"
                   >
-                  <span class="plus">+{{ file.added }}</span>
-                  <span class="minus">-{{ file.removed }}</span>
-                </button>
-              </li>
+                    <span class="file-path"
+                      ><span class="file-dir">{{ dirOf(file.path) }}</span
+                      ><span class="file-name">{{ nameOf(file.path) }}</span></span
+                    >
+                    <span class="plus">+{{ file.added }}</span>
+                    <span class="minus">-{{ file.removed }}</span>
+                  </button>
+                </li>
+              }
             }
           </ul>
         }
@@ -85,6 +142,7 @@ const REFRESH_DEBOUNCE_MS = 400;
         <app-diff-overlay
           [sessionId]="sessionId()!"
           [path]="path"
+          [session]="openSession()"
           [directory]="directory()"
           (closed)="openPath.set(null)"
           (reverted)="refresh()"
@@ -154,6 +212,38 @@ const REFRESH_DEBOUNCE_MS = 400;
         display: flex;
         flex-direction: column;
         gap: 1px;
+      }
+
+      /* F9-6: per-agent group header ("main 3", "api-orders 2"). */
+      .group-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-6);
+        padding: var(--space-6) var(--space-10) 2px;
+        font-size: var(--fs-label);
+        text-transform: uppercase;
+        letter-spacing: var(--label-tracking);
+        color: var(--text-faint);
+      }
+
+      .group-head.child .group-label {
+        color: var(--accent);
+        text-transform: none;
+        letter-spacing: 0;
+        font-family: var(--font-mono);
+      }
+
+      .group-label {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .group-count {
+        flex: none;
+        font-family: var(--font-mono);
       }
 
       .file {
@@ -232,6 +322,13 @@ export class ChangesPanel {
   readonly error = signal<string | null>(null);
   /** Path currently shown in the diff overlay (null = closed). */
   readonly openPath = signal<string | null>(null);
+  /** F9-6: session that owns the change shown in the overlay (undefined = let the engine search). */
+  readonly openSession = signal<string | undefined>(undefined);
+
+  /** F9-6: rows grouped by owning session/agent, main first. */
+  readonly groups = computed(() => groupChanges(this.changes()));
+  /** Headers only earn their space once a child session contributed a change. */
+  readonly showGroupHeaders = computed(() => this.groups().some((g) => g.isChild));
 
   private loadedFor: string | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
@@ -282,7 +379,23 @@ export class ChangesPanel {
   }
 
   open(file: ChangeEntry): void {
+    this.openSession.set(file.sessionID || undefined);
     this.openPath.set(file.path);
+  }
+
+  /** "main" for the main session, the alias for a child. */
+  groupLabel(group: ChangeGroup): string {
+    if (group.label) {
+      return group.label;
+    }
+    return group.isChild ? group.sessionID.slice(0, 8) : this.t('changes.agentMain');
+  }
+
+  /** Row tooltip: the path, plus the agent that changed it when known. */
+  rowTitle(file: ChangeEntry): string {
+    return file.agent
+      ? `${file.path} · ${this.t('changes.byAgent', { agent: file.agent })}`
+      : file.path;
   }
 
   /** Tool writes land mid-turn: re-list on transcript updates, debounced. */

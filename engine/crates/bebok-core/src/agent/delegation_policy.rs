@@ -60,11 +60,38 @@ pub fn delegation_policy_note(cfg: &DelegationConfig) -> Option<String> {
          finish that part yourself.\n\
          - Sequential dependencies (B needs A's output) are spawned after A returns, not \
          guessed.\n\
+         - Narrate as you go (the user watches this chat, not the sub-agents): write ONE short \
+         line of plain text before every new phase — when you delegate (\"Delegating: \
+         api-orders (endpoint + tests), frontend-orders (page + nav), docs\"), before you \
+         integrate, before you verify, before you fix something — and a 1-2 line summary right \
+         after each sub-agent completes (what it changed, what it verified, anything open). No \
+         filler, no restating the brief; a line per phase is enough.\n\
+         - Verify claims: a sub-agent's report is a claim, not a fact. Before integrating, \
+         re-check what matters yourself — run the build/tests it says it ran, `fetch` the \
+         endpoint it says it added, open the page it says it changed — and only then tell the \
+         user it is done. If the check fails, fix it (or re-spawn with a sharper brief); never \
+         summarise a feature as implemented while something it needs is broken.\n\
          {model_line}\
+         {heavy_line}\
          Do not delegate trivial single-file edits or lookups you can do in one or two tool \
          calls yourself.",
         mode = cfg.mode.as_str(),
+        heavy_line = heavy_model_line(cfg),
     ))
+}
+
+/// F9-10: how to ask for the parent's (heavier) model for one sub-task
+/// under the `cheaper` policy; empty for the other policies.
+fn heavy_model_line(cfg: &DelegationConfig) -> String {
+    match cfg.effective_model_policy() {
+        crate::config::DelegationModelPolicy::Cheaper => "- Sub-agents run on a cheaper sibling \
+of your model by default (policy `cheaper`). For a HEAVY part — a large refactor across many \
+files, architecture/design decisions, debugging a failure that spans several files or layers, \
+anything where a weaker model would likely get lost — pass `model: \"heavy\"` in that `task` \
+call to give it your own model. Keep routine edits, tests, docs and research on the default.\n"
+            .to_string(),
+        _ => String::new(),
+    }
 }
 
 const AUTO_TRIGGER: &str = "Delegate (rather than doing everything inline) whenever ANY of these \
@@ -87,8 +114,11 @@ pub fn subagent_note() -> &'static str {
     "You are a SUB-AGENT working on one delegated part of a larger task. Do exactly the brief \
      you were given, stay within the files/areas it assigns to you, do not delegate further \
      (do the work directly, including any workspace inspection you need), and finish with a \
-     concise report: what you changed (files), how you verified it, and anything the \
-     coordinating agent still needs to do."
+     concise report that starts with `Status: PASS`, `Status: PASS WITH NOTES` or \
+     `Status: FAIL`, then: what you changed (files), how you verified it (commands you actually \
+     ran and their result — never claim a build or test you did not run), and anything the \
+     coordinating agent still needs to do. With FAIL say what does not work and what you tried; \
+     do not describe unfinished work as done."
 }
 
 #[cfg(test)]
@@ -100,6 +130,7 @@ mod tests {
             mode,
             max_concurrent: 3,
             model: None,
+            model_policy: crate::config::DelegationModelPolicy::Cheaper,
         }
     }
 
@@ -167,6 +198,26 @@ mod tests {
                 .unwrap()
                 .contains("At most 1 sub-agents")
         );
+    }
+
+    /// F9-7b / F9-10: narration per phase, verifying children's claims,
+    /// and the `heavy` escape hatch under the `cheaper` policy only.
+    #[test]
+    fn narration_claim_checks_and_heavy_hint() {
+        let note = delegation_policy_note(&cfg(DelegationMode::Auto)).unwrap();
+        assert!(note.contains("Narrate as you go"), "{note}");
+        assert!(note.contains("before every new phase"), "{note}");
+        assert!(note.contains("after each sub-agent completes"), "{note}");
+        assert!(note.contains("claim, not a fact"), "{note}");
+        assert!(note.contains("`model: \"heavy\"`"), "{note}");
+        assert!(note.contains("policy `cheaper`"), "{note}");
+        let mut c = cfg(DelegationMode::Auto);
+        c.model_policy = crate::config::DelegationModelPolicy::Inherit;
+        let note = delegation_policy_note(&c).unwrap();
+        assert!(!note.contains("`model: \"heavy\"`"), "{note}");
+        let n = subagent_note();
+        assert!(n.contains("`Status: PASS`") && n.contains("`Status: FAIL`"));
+        assert!(n.contains("never claim a build or test you did not run"));
     }
 
     #[test]

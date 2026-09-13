@@ -124,7 +124,7 @@ impl Tool for TaskTool {
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model override for the sub-agent (e.g. provider/model-id). Overrides the agent-type default model."
+                    "description": "Optional model for the sub-agent: \"heavy\" = your own (parent) model for a demanding part (large refactor, architecture, multi-file debugging); or an explicit provider/model-id. Omit for the configured delegation.model_policy (default: a cheaper sibling of your model)."
                 },
                 "name": {
                     "type": "string",
@@ -206,18 +206,28 @@ impl Tool for TaskTool {
         let mut agent = instance.resolve_agent(&agent_name);
         let cfg = instance.config_snapshot();
 
-        // Effective model: explicit task arg, else the `delegation.model`
-        // override, else preset override, else `models.<agent>` / global.
-        let explicit_model = args
-            .model
-            .as_deref()
-            .map(str::trim)
-            .filter(|m| !m.is_empty());
-        let model = explicit_model
-            .map(str::to_string)
-            .or_else(|| cfg.delegation.model_override().map(str::to_string))
-            .or_else(|| agent.model.clone())
-            .unwrap_or_else(|| cfg.model_for(&agent.name));
+        // Fresh child session for the sub-agent (isolated transcript).
+        let parent = match store.open_session(parent_uuid).await {
+            Ok(p) => p,
+            Err(_) => {
+                return ToolOutput::new("task: parent session not found", "task");
+            }
+        };
+
+        // F9-10: the sub-agent model follows `delegation.model_policy`
+        // applied to the PARENT's effective model (`model: "heavy"` lifts a
+        // sub-task back onto it; any other explicit `model` wins outright).
+        let parent_model = crate::store::parent_model_for_delegation(
+            &parent.meta_snapshot().await,
+            &instance,
+            &cfg,
+        );
+        let model = crate::agent::resolve_subagent_model(
+            bebok_llm::ModelCatalog::global(),
+            &cfg.delegation,
+            &parent_model,
+            args.model.as_deref(),
+        );
 
         // Ground the sub-agent in AGENTS.md + enabled skills (same as the
         // server's prompt assembly, minus the parent-only context notes).
@@ -230,14 +240,6 @@ impl Tool for TaskTool {
                     format!("task: cannot build provider for '{model}': {e}"),
                     "task",
                 );
-            }
-        };
-
-        // Fresh child session for the sub-agent (isolated transcript).
-        let parent = match store.open_session(parent_uuid).await {
-            Ok(p) => p,
-            Err(_) => {
-                return ToolOutput::new("task: parent session not found", "task");
             }
         };
 
@@ -295,6 +297,7 @@ impl Tool for TaskTool {
                 "taskID": task_id,
                 "name": name,
                 "agent": agent_name,
+                "model": model,
                 "childSessionID": child_session_id,
                 "background": true,
                 "status": status,
@@ -331,6 +334,7 @@ impl Tool for TaskTool {
             "taskID": task_id,
             "name": name,
             "agent": agent_name,
+            "model": model,
             "childSessionID": child_session_id,
             "tokens": { "input": outcome.input_tokens, "output": outcome.output_tokens },
         });

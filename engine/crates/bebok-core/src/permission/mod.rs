@@ -21,7 +21,7 @@ pub mod store;
 
 pub use engine::{
     CachedDecision, CompiledLayer, DecisionKey, Evaluation, PermissionAnswer, PermissionEngine,
-    ResolveOutcome, Verdict, browser_auto_allowed, is_mutating,
+    ResolveOutcome, Verdict, browser_auto_allowed, is_mutating, tool_rule,
 };
 pub use matcher::{call_arg_text, call_string};
 pub use rule::{Action, Rule, parse_rules};

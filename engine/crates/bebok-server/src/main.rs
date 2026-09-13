@@ -51,5 +51,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let spec = cli::parse_cli(&std::env::args().skip(1).collect::<Vec<_>>())?;
-    server::serve(spec).await
+    let result = server::serve(spec).await;
+    // F9-14: last-resort sweep (runtime-free) so a serve error or an early
+    // return never leaves a background process behind.
+    let swept = bebok_tools::processes::ProcessRegistry::global().kill_all_blocking();
+    if swept > 0 {
+        tracing::warn!("swept {swept} background process(es) still running at exit");
+    }
+    result
 }

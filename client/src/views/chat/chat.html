@@ -22,6 +22,14 @@
         </select>
       </label>
     }
+    @if (effectiveModel().id) {
+      <span
+        class="tb-model-badge"
+        data-testid="effective-model"
+        [title]="t('chat.effectiveModel') + ': ' + effectiveModel().id"
+        [attr.aria-label]="t('chat.effectiveModel') + ': ' + effectiveModel().id"
+      >@if (effectiveModel().provider) {<span class="provider">{{ effectiveModel().provider }}</span> }{{ effectiveModel().model }}</span>
+    }
     <label class="tb-field">
       <span class="tb-label">{{ t('settings.thinking') }}</span>
       <select class="tb-select" [ngModel]="thinking()" (ngModelChange)="onThinkingChange($event)">
@@ -96,6 +104,7 @@
                     [rowId]="'msg-'+row.message.id"
                     [message]="row.message"
                     [taskLinks]="taskLinks()"
+                    [sessionModel]="effectiveModel().id"
                     [rollbackEnabled]="true"
                     (rollback)="rollbackTo($event)"
                   />
@@ -307,4 +316,5 @@
       </footer>
     </div>
   </div>
+  <app-toast-host />
 </div>

@@ -61,7 +61,7 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
             <span class="who">{{ name() }}</span>
             <span class="preset">{{ agent() }}</span>
             @if (model()) {
-              <span class="model">{{ model() }}</span>
+              <span class="model" [title]="t('agents.model') + ': ' + model()" data-testid="transcript-model">{{ model() }}</span>
             }
             <span class="status" [attr.data-status]="status()">
               @if (status() === 'running') {
@@ -172,10 +172,15 @@ const STATUS_LABEL: Record<AgentStatus, MessageKey> = {
         color: var(--accent);
       }
 
+      /* F9-9: small muted model badge in the header. */
       .model {
         font-family: var(--font-mono);
-        font-size: var(--fs-11);
+        font-size: 10px;
         color: var(--text-faint);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0 6px;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
