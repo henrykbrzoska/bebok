@@ -15,6 +15,7 @@ import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterOutlet } from '@an
 
 import { CustomCssService } from '../core/custom-css.service';
 import { EngineClient } from '../core/engine-client.service';
+import { EngineTargetStore } from '../core/engine-target.store';
 import { EventsStore } from '../core/events.store';
 import { FormFactor } from '../core/form-factor';
 import { ToolSafetyStore } from '../core/tool-safety.store';
@@ -33,6 +34,7 @@ export class App implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly customCss = inject(CustomCssService);
   private readonly toolSafety = inject(ToolSafetyStore);
+  private readonly targets = inject(EngineTargetStore);
 
   /**
    * WP-M2 (F10-8): phone form factor -> `MobileShell` instead of `AppShell`.
@@ -61,7 +63,9 @@ export class App implements OnInit, OnDestroy {
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => {
-      if (ev.type === 'config.changed') {
+      // F10-31: both re-syncs hit `GET /config` / `GET /tools/safety`, which
+      // a paired desktop's remote scope 403s - nothing to re-sync there.
+      if (ev.type === 'config.changed' && !this.targets.remoteScope()) {
         void this.customCss.resync();
         // F7-7: a saved tool_safety override (or an MCP toggle) changes the
         // category list the transcript colours historical calls with.
@@ -78,7 +82,7 @@ export class App implements OnInit, OnDestroy {
     try {
       const url = new URL(this.router.url, 'http://localhost');
       const dir = url.searchParams.get('directory') ?? this.engine.readLastDirectory();
-      if (!dir || dir === this.lastCssDirectory) {
+      if (!dir || dir === this.lastCssDirectory || this.targets.remoteScope()) {
         return;
       }
       this.lastCssDirectory = dir;

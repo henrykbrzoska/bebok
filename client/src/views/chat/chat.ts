@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { EngineTargetStore } from '../../core/engine-target.store';
 import { EngineWorkTracker } from '../../core/engine-launcher';
 import {
   ActiveTask,
@@ -189,6 +190,8 @@ function persistDrafts(drafts: Record<string, string>): void {
 export class ChatView implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly toolSafety = inject(ToolSafetyStore);
+  /** F10-31: skip the Local-only routes when the engine is a paired desktop (remote scope). */
+  private readonly targets = inject(EngineTargetStore);
   /** WP-DELEGATION: live progress of the children listed in the active-tasks block. */
   readonly liveTasks = inject(TaskProgressStore);
   private readonly events = inject(EventsStore);
@@ -562,7 +565,14 @@ export class ChatView implements OnInit, OnDestroy {
       this.running.set(meta.running === true || this.activity.isRunning(sessionID));
       this.directory.set(meta.directory);
       // F7-7: the tool safety map colours historical tool calls' dots.
-      void this.toolSafety.ensure(meta.directory);
+      // F10-31: `GET /tools/safety` and `GET /config` are Local-only routes;
+      // a paired desktop (remote scope) answers 403, so skip them there -
+      // the dots stay uncoloured and the switchers fall back to the
+      // session's own model/agent, which is all the phone shows anyway.
+      const remoteScope = this.targets.remoteScope();
+      if (!remoteScope) {
+        void this.toolSafety.ensure(meta.directory);
+      }
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
       // Restore this session's draft (per-session input, survives tab switches).
@@ -578,12 +588,18 @@ export class ChatView implements OnInit, OnDestroy {
       try {
         const [agents, cfg] = await Promise.all([
           this.engine.listAgents(meta.directory),
-          this.engine.getConfig(meta.directory),
+          remoteScope ? null : this.engine.getConfig(meta.directory),
         ]);
         if (seq !== this.loadSeq || sessionID !== this.sessionID()) {
           return;
         }
         this.agents.set(agents);
+        if (cfg === null) {
+          this.thinking.set('off');
+          this.configDefaultModel.set(null);
+          this.availableModels.set([]);
+          return;
+        }
         this.thinking.set(cfg.config.thinking ?? 'off');
         const defaultModel = (cfg.config.model ?? '').trim();
         this.configDefaultModel.set(

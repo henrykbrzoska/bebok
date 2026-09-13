@@ -4,9 +4,20 @@
  *
  * A streaming `fetch` reader gives us the one-way event channel. The store
  * fans events out to subscribers, which filter by `directory` and `sessionID`.
- * On every (re)connect a `reconnectVersion` bump lets active views re-sync
- * their transcript so events that fell into a reconnect gap are not lost.
+ * On every fresh connect a `reconnectVersion` bump lets active views re-sync
+ * their transcript so events that fell into a gap are not lost.
  * No polling anywhere.
+ *
+ * F10-30 (WP-M1 contract, F10-4): every frame carries `id: <seq>`. A
+ * reconnect against the *same* engine sends `Last-Event-ID: <seq>` and the
+ * engine replays what was missed, so the views keep their state and no full
+ * refresh is needed; when the gap is older than the engine's ring buffer (or
+ * the engine restarted) the stream starts with `event: resync` (empty data),
+ * which bumps `reconnectVersion` like a fresh connect. A remote-scoped stream
+ * ends with `event: revoked` when the desktop removed this device: the store
+ * parks itself in `unauthorized` (the same state a 401 produces) so
+ * `RemoteStore` runs its "device removed" flow immediately instead of after
+ * the next reconnect's 401.
  */
 
 import { Injectable, effect, inject, signal, untracked } from '@angular/core';
@@ -28,14 +39,61 @@ const RECONNECT_DELAY_MS = 1500;
 
 type Listener = (event: EngineEvent) => void;
 
+/** One parsed SSE block (`id:` / `event:` / `data:` lines; comments skipped). */
+export interface SseFrame {
+  id: string | null;
+  event: string | null;
+  data: string | null;
+}
+
+/** Parse one SSE block per the spec's line grammar (`\r\n` already normalised). */
+export function parseSseBlock(block: string): SseFrame {
+  const frame: SseFrame = { id: null, event: null, data: null };
+  for (const line of block.split('\n')) {
+    if (line === '' || line.startsWith(':')) {
+      continue;
+    }
+    const colon = line.indexOf(':');
+    const field = colon < 0 ? line : line.slice(0, colon);
+    let value = colon < 0 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) {
+      value = value.slice(1);
+    }
+    switch (field) {
+      case 'data':
+        frame.data = frame.data === null ? value : `${frame.data}\n${value}`;
+        break;
+      case 'event':
+        frame.event = value;
+        break;
+      case 'id':
+        // The spec ignores ids containing NUL; the engine's are plain seqs.
+        if (!value.includes(String.fromCharCode(0))) {
+          frame.id = value;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return frame;
+}
+
 @Injectable({ providedIn: 'root' })
 export class EventsStore {
   private readonly engine = inject(ENGINE_API);
   private readonly targets = inject(EngineTargetStore);
 
   readonly state = signal<SseState>('idle');
-  /** Bumped every time the SSE stream is (re)established. */
+  /**
+   * Bumped whenever open views must re-sync from the engine: a fresh stream
+   * (first connect, target switch, reconnect without a resumable id) or an
+   * `event: resync` from the engine. A reconnect that resumed with
+   * `Last-Event-ID` does *not* bump it - the replayed events fill the gap.
+   */
   readonly reconnectVersion = signal(0);
+  /** Bumped when the engine ended a stream with `event: revoked` (F10-30). */
+  readonly revokedVersion = signal(0);
 
   private listeners = new Set<Listener>();
   private started = false;
@@ -52,6 +110,17 @@ export class EventsStore {
    * the fresh loop (two streams against two targets otherwise).
    */
   private generation = 0;
+  /**
+   * Last `id:` seen, together with the engine it came from (`target|baseUrl`
+   * - a sidecar/embedded engine that restarted on a new port must not be
+   * resumed with the old engine's seq). Cleared by `restart()`.
+   */
+  private lastEventId: string | null = null;
+  private lastEventIdSource: string | null = null;
+  /** Set by `event: revoked`; read by `run()` once the aborted read unwinds. */
+  private revoked = false;
+  /** Retry back-off between stream attempts; specs shorten it. */
+  reconnectDelayMs = RECONNECT_DELAY_MS;
 
   constructor() {
     // F10-7: `EngineClient.switchTarget()` changes the active target; the
@@ -97,9 +166,17 @@ export class EventsStore {
   restart(): void {
     this.stop();
     this.started = false;
-    // A new target address: past success says nothing about the new one.
+    // A new target address: past success says nothing about the new one,
+    // and its event seqs mean nothing there either.
     this.everLive = false;
+    this.lastEventId = null;
+    this.lastEventIdSource = null;
     this.start();
+  }
+
+  /** The `Last-Event-ID` a reconnect would send right now (specs/diagnostics). */
+  resumeId(): string | null {
+    return this.lastEventId;
   }
 
   private async run(): Promise<void> {
@@ -113,7 +190,7 @@ export class EventsStore {
         } catch (err) {
           // Never reached the engine at all -> surface an error, keep retrying.
           this.state.set(this.everLive ? 'reconnecting' : 'error');
-          await this.sleep(RECONNECT_DELAY_MS);
+          await this.sleep(this.reconnectDelayMs);
           continue;
         }
       }
@@ -121,12 +198,21 @@ export class EventsStore {
       const controller = new AbortController();
       this.controller = controller;
       this.streamTarget = this.targets.activeId();
+      this.revoked = false;
       this.state.set('connecting');
+
+      // F10-30: resume only against the engine the id came from.
+      const source = `${this.streamTarget ?? ''}|${connection.baseUrl}`;
+      const resumeId = this.lastEventIdSource === source ? this.lastEventId : null;
+      const headers: Record<string, string> = { Accept: 'text/event-stream' };
+      if (resumeId !== null) {
+        headers['Last-Event-ID'] = resumeId;
+      }
 
       try {
         const res = await authFetch(`${connection.baseUrl}/event`, {
           method: 'GET',
-          headers: { Accept: 'text/event-stream' },
+          headers,
           signal: controller.signal,
         });
         if (res.status === 401) {
@@ -143,15 +229,22 @@ export class EventsStore {
 
         this.state.set('live');
         this.everLive = true;
+        this.lastEventIdSource = source;
         if (this.streamTarget !== null) {
           this.targets.markOk(this.streamTarget);
         }
-        this.reconnectVersion.update((v) => v + 1);
+        if (resumeId === null) {
+          // Fresh stream: nothing was replayed, views must re-sync.
+          this.reconnectVersion.update((v) => v + 1);
+        }
         await this.readStream(res.body, controller.signal);
 
         // Stream ended cleanly (server restarted/closed) -> reconnect.
       } catch (err) {
         if (this.stopped || controller.signal.aborted) {
+          if (this.revoked && !this.stopped) {
+            this.parkRevoked();
+          }
           break;
         }
         this.state.set(this.everLive ? 'reconnecting' : 'error');
@@ -161,13 +254,32 @@ export class EventsStore {
         }
       }
 
+      if (this.revoked && !this.stopped) {
+        // The stream ended after `event: revoked` without an abort race.
+        this.parkRevoked();
+        break;
+      }
       if (!this.stopped && gen === this.generation) {
-        await this.sleep(RECONNECT_DELAY_MS);
+        await this.sleep(this.reconnectDelayMs);
       }
     }
     if (gen === this.generation) {
       this.running = false;
     }
+  }
+
+  /**
+   * `event: revoked`: the device token is dead. Park exactly like a 401 so
+   * `RemoteStore`'s revocation effect (and `switchAndResume`) take over; the
+   * old engine's seq is useless from here on.
+   */
+  private parkRevoked(): void {
+    this.revoked = false;
+    this.lastEventId = null;
+    this.lastEventIdSource = null;
+    this.state.set('unauthorized');
+    this.started = false;
+    this.revokedVersion.update((v) => v + 1);
   }
 
   private async readStream(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<void> {
@@ -189,6 +301,9 @@ export class EventsStore {
           const block = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
           this.dispatch(block);
+          if (this.revoked) {
+            return;
+          }
         }
       }
     } finally {
@@ -196,24 +311,36 @@ export class EventsStore {
     }
   }
 
-  /** Parse one SSE block (empty `data:` lines are ignored, `:` comments too). */
+  /**
+   * Handle one SSE block: remember `id:`, act on the engine's named events
+   * (`resync`, `revoked`), fan out unnamed `data:` frames as engine events.
+   */
   private dispatch(block: string): void {
-    let data: string | null = null;
-    for (const line of block.split('\n')) {
-      if (line.startsWith(':')) {
-        continue;
-      }
-      if (line.startsWith('data:')) {
-        const value = line.slice(5).trimStart();
-        data = data === null ? value : `${data}\n${value}`;
-      }
+    const frame = parseSseBlock(block);
+    if (frame.id !== null) {
+      this.lastEventId = frame.id;
     }
-    if (data === null || data === '') {
+    if (frame.event === 'resync') {
+      // The gap is older than the engine's buffer (or the engine restarted):
+      // the views must refresh fully, exactly like after a fresh connect.
+      this.reconnectVersion.update((v) => v + 1);
+      return;
+    }
+    if (frame.event === 'revoked') {
+      this.revoked = true;
+      this.controller?.abort();
+      return;
+    }
+    if (frame.event !== null && frame.event !== 'message') {
+      // Unknown named event from a newer engine: ignore, never mis-parse.
+      return;
+    }
+    if (frame.data === null || frame.data === '') {
       return;
     }
     let event: EngineEvent;
     try {
-      event = JSON.parse(data) as EngineEvent;
+      event = JSON.parse(frame.data) as EngineEvent;
     } catch {
       return;
     }

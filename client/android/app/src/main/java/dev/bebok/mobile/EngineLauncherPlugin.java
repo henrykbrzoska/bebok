@@ -3,7 +3,6 @@ package dev.bebok.mobile;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
-import android.content.res.AssetManager;
 import android.os.Build;
 import android.util.Log;
 import com.getcapacitor.JSObject;
@@ -14,11 +13,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -28,14 +25,24 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Launches the embedded bebok-server engine (bundled per-ABI in
- * assets/bin/&lt;abi&gt;/, F10-9) on Android. The engine binds 127.0.0.1 with a
- * random port and prints `BEBOK_READY http://host:port` on stdout; we capture
- * that and hand the URL back to the webview so it can talk to the local
- * engine (same as the desktop sidecar, but in-process within the app).
+ * Launches the embedded bebok-server engine on Android. The engine binds
+ * 127.0.0.1 with a random port and prints `BEBOK_READY http://host:port` on
+ * stdout; we capture that and hand the URL back to the webview so it can talk
+ * to the local engine (same as the desktop sidecar, but in-process within the
+ * app).
  *
- * The bundled shell (mksh) is extracted next to the engine and its path is set
- * via `BEBOK_SHELL`, so the engine's `bash` tool and (if enabled) PTY work.
+ * F10-29 (supersedes F10-9's assets/bin/&lt;abi&gt;/ layout): the engine is
+ * packaged as the "native library" {@code lib/<abi>/libbebok_server.so}
+ * (jniLibs, legacy packaging) and executed straight from
+ * {@link ApplicationInfo#nativeLibraryDir}. Android 10+ denies exec on files
+ * an untrusted app wrote itself (W^X: copying the asset into {@code files/bin}
+ * failed with {@code error=13, Permission denied} on Android 16), while the
+ * installer-extracted native-library directory stays executable. The ABI is
+ * picked by the installer, so nothing is copied or resolved at runtime.
+ *
+ * The bundled shell (mksh, {@code libmksh.so}) sits next to the engine and its
+ * path is set via `BEBOK_SHELL`, so the engine's `bash` tool and (if enabled)
+ * PTY work when it was built.
  *
  * F10-10 adds a reference-counted foreground service for the duration of a
  * turn ({@link #beginWork}/{@link #endWork}) and an idle auto-stop timer that
@@ -56,6 +63,9 @@ public class EngineLauncherPlugin extends Plugin {
 
     private static final String TAG = "BebokEngine";
     private static final String READY_PREFIX = "BEBOK_READY ";
+    /** F10-29: engine + shell file names inside {@code ApplicationInfo.nativeLibraryDir}. */
+    static final String SERVER_LIB = "libbebok_server.so";
+    static final String SHELL_LIB = "libmksh.so";
     private static final long IDLE_CHECK_PERIOD_SECONDS = 60;
     /** Env vars JS may set on the engine - debuggable builds only. */
     static final Set<String> DEBUG_ENV_ALLOWLIST = Set.of("BEBOK_PROVIDER_MOCK");
@@ -235,29 +245,27 @@ public class EngineLauncherPlugin extends Plugin {
 
     private String launch(Map<String, String> extraEnv) throws Exception {
         Context ctx = getContext();
-        File binDir = new File(ctx.getFilesDir(), "bin");
-        if (!binDir.exists() && !binDir.mkdirs()) {
-            throw new Exception("failed to create bin dir");
-        }
+        File workDir = ctx.getFilesDir();
 
-        String abi = resolveAbi(ctx);
-        String assetPrefix = "bin/" + abi + "/";
-
-        File server = extract(ctx, assetPrefix + "bebok-server", new File(binDir, "bebok-server"));
-        File shell = extractOptional(ctx, assetPrefix + "mksh", new File(binDir, "mksh"));
-        if (!server.setExecutable(true)) {
-            throw new Exception("failed to chmod +x bebok-server");
+        File server = resolveNativeBinary(ctx, SERVER_LIB);
+        if (server == null) {
+            throw new Exception(
+                    "embedded engine not installed: " + SERVER_LIB + " missing from "
+                            + nativeLibraryDir(ctx)
+                            + " (device ABIs " + String.join(", ", Build.SUPPORTED_ABIS)
+                            + "; was the APK built with scripts/bundle-android.sh?)");
         }
-        if (shell != null && !shell.setExecutable(true)) {
-            throw new Exception("failed to chmod +x mksh");
-        }
+        // mksh is best-effort (bundle-android.sh may skip it on a Windows host).
+        File shell = resolveNativeBinary(ctx, SHELL_LIB);
+        Log.i(TAG, "launching " + server.getAbsolutePath()
+                + (shell != null ? " with shell " + shell.getAbsolutePath() : " (no bundled shell)"));
 
         ProcessBuilder pb = new ProcessBuilder(server.getAbsolutePath(), "--port", "0");
-        pb.directory(binDir);
+        pb.directory(workDir);
         if (shell != null) {
             pb.environment().put("BEBOK_SHELL", shell.getAbsolutePath());
         }
-        pb.environment().put("HOME", ctx.getFilesDir().getAbsolutePath());
+        pb.environment().put("HOME", workDir.getAbsolutePath());
         pb.environment().put("TERM", "xterm-256color");
         pb.environment().putAll(extraEnv);
         pb.redirectErrorStream(false);
@@ -312,72 +320,38 @@ public class EngineLauncherPlugin extends Plugin {
             killProcess();
             throw new Exception("engine did not announce BEBOK_READY");
         }
+        // Without the `?token=` query: logcat must never carry the launch token.
+        Log.i(TAG, "BEBOK_READY " + urlHolder[0].replaceAll("\\?.*$", ""));
         return urlHolder[0];
     }
 
+    /** {@code ApplicationInfo.nativeLibraryDir}: where the installer extracted lib/&lt;abi&gt;/lib*.so (F10-29). */
+    static String nativeLibraryDir(Context ctx) {
+        return ctx.getApplicationInfo().nativeLibraryDir;
+    }
+
     /**
-     * Picks the bundled ABI directory matching this device (F10-9). Fails
-     * with a clear message when the APK does not bundle any ABI the device
-     * supports (e.g. an x86 32-bit device, or an x86_64-only debug build
-     * installed on an arm64 device).
+     * F10-29: the engine (and mksh) are packaged as {@code lib/<abi>/lib*.so}
+     * and extracted by the installer into {@link ApplicationInfo#nativeLibraryDir}
+     * ({@code useLegacyPackaging} in build.gradle). That directory is the only
+     * place an untrusted app may exec a file from on Android 10+ - copying the
+     * binary into {@code files/} (the pre-F10-29 approach) fails with
+     * {@code error=13, Permission denied} (W^X). The ABI was already chosen by
+     * the installer, so there is nothing to resolve here beyond existence.
+     *
+     * @return the binary, or {@code null} when it is not installed.
      */
-    private String resolveAbi(Context ctx) throws Exception {
-        Set<String> bundled = listBundledAbis(ctx);
-        String abi = AbiAssetResolver.resolve(Build.SUPPORTED_ABIS, bundled);
-        if (abi == null) {
-            throw new Exception(
-                    "no bundled engine ABI matches this device (device supports "
-                            + String.join(", ", Build.SUPPORTED_ABIS)
-                            + "; APK bundles "
-                            + String.join(", ", bundled)
-                            + ")");
-        }
-        return abi;
-    }
-
-    private Set<String> listBundledAbis(Context ctx) {
-        Set<String> abis = new HashSet<>();
-        try {
-            String[] entries = ctx.getAssets().list("bin");
-            if (entries != null) {
-                for (String entry : entries) {
-                    // Only directories (an ABI name) count; a flat legacy
-                    // `bin/bebok-server` layout is not supported post F10-9.
-                    String[] children = ctx.getAssets().list("bin/" + entry);
-                    if (children != null && children.length > 0) {
-                        abis.add(entry);
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return abis;
-    }
-
-    /** Copy an asset to the files dir once (idempotent). */
-    private File extract(Context ctx, String assetPath, File dest) throws Exception {
-        if (dest.exists() && dest.length() > 0) {
-            return dest;
-        }
-        AssetManager am = ctx.getAssets();
-        try (InputStream in = am.open(assetPath);
-             FileOutputStream out = new FileOutputStream(dest)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-        }
-        return dest;
-    }
-
-    /** Like {@link #extract}, but returns null instead of throwing when the asset is absent (mksh is best-effort). */
-    private File extractOptional(Context ctx, String assetPath, File dest) {
-        try {
-            return extract(ctx, assetPath, dest);
-        } catch (Exception e) {
+    static File resolveNativeBinary(Context ctx, String libName) {
+        File lib = new File(nativeLibraryDir(ctx), libName);
+        if (!lib.isFile() || lib.length() == 0) {
             return null;
         }
+        if (!lib.canExecute() && !lib.setExecutable(true)) {
+            // The installer marks extracted libs 0755; log, but still try to
+            // exec - canExecute() is only advisory here.
+            Log.w(TAG, libName + " is not marked executable in " + lib.getParent());
+        }
+        return lib;
     }
 
     private void killProcess() {

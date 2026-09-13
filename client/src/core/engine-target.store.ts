@@ -128,6 +128,18 @@ export class EngineTargetStore {
    */
   readonly platformError = signal<string | null>(null);
 
+  /**
+   * F10-31: a paired `desktop` target talks to the engine's *remote*
+   * listener with a device token whose scope (WP-M1 `remote/scope.rs`) 403s
+   * everything a phone does not need to follow a session - `GET /config`,
+   * `GET /tools/safety`, `fs/*`, ... Views consult this before issuing such
+   * calls, so the desktop's engine log is not filled with
+   * `remote scope denied` every time the phone opens a session. `remote-url`
+   * targets (an engine address typed in) use the engine's own launch token
+   * and keep the full local scope.
+   */
+  readonly remoteScope = computed(() => this.active()?.kind === 'desktop');
+
   /** Resolves once persisted targets (and their tokens) are back in memory. */
   readonly ready: Promise<void>;
 

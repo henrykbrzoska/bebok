@@ -555,6 +555,10 @@ jobs:
           set -euo pipefail
           apk=$(find client/android/app/build/outputs/apk/release -name '*.apk' | head -1)
           [ -n "$apk" ] || { echo "::error::no APK produced"; exit 1; }
+          # F10-29: the engine ships as lib/arm64-v8a/libbebok_server.so
+          # (extracted native lib = exec-allowed on Android 10+).
+          unzip -l "$apk" | grep -q " lib/arm64-v8a/libbebok_server.so$" \
+            || { echo "::error::lib/arm64-v8a/libbebok_server.so missing from $apk"; exit 1; }
           out="release-out"
           mkdir -p "$out"
           dest="$out/bebok-$VERSION-android-arm64.apk"

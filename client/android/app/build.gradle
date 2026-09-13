@@ -34,6 +34,32 @@ def hasCustomSigning = project.hasProperty('bebok.keystore') &&
     project.hasProperty('bebok.keyAlias') &&
     project.hasProperty('bebok.keyPassword')
 
+// ---------------------------------------------------------------------------
+// F10-29: the embedded engine ships as a "native library"
+// (src/main/jniLibs/<abi>/libbebok_server.so, produced by
+// scripts/bundle-android.sh) because Android 10+ refuses to exec a file the
+// app copied into its own data dir (W^X for untrusted_app). The installer
+// extracts lib/<abi>/lib*.so into ApplicationInfo.nativeLibraryDir, which is
+// exec-allowed, and EngineLauncherPlugin runs the engine from there. That
+// needs (a) legacy packaging - uncompressed + extracted, not mmap'd from the
+// APK (`useLegacyPackaging` = `android:extractNativeLibs="true"`) and (b) the
+// APK limited to the ABIs the engine was actually built for, so the
+// installer never picks an ABI (say, armeabi-v7a from a plugin's AAR) that
+// has no engine. No jniLibs at all (bundle script not run) -> no filter, the
+// APK builds without the engine and the app still works in Remote mode.
+// ---------------------------------------------------------------------------
+def engineLibName = 'libbebok_server.so'
+def jniLibsDir = file('src/main/jniLibs')
+def bundledEngineAbis = jniLibsDir.isDirectory()
+    ? jniLibsDir.listFiles().findAll { it.isDirectory() && new File(it, engineLibName).isFile() }*.name.sort()
+    : []
+if (bundledEngineAbis.isEmpty()) {
+    logger.warn("bebok: no engine under ${jniLibsDir} - run client/scripts/bundle-android.sh first; " +
+        "this APK will not be able to run the embedded engine (Remote mode only)")
+} else {
+    logger.lifecycle("bebok: embedded engine bundled for ABIs ${bundledEngineAbis}")
+}
+
 android {
     namespace "dev.bebok.mobile"
     compileSdk rootProject.ext.compileSdkVersion
@@ -48,6 +74,20 @@ android {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+        if (!bundledEngineAbis.isEmpty()) {
+            // F10-29: only ship ABIs that carry the engine (see above).
+            ndk {
+                abiFilters.addAll(bundledEngineAbis)
+            }
+        }
+    }
+    packaging {
+        jniLibs {
+            // F10-29: extract lib/<abi>/*.so at install time (sets
+            // android:extractNativeLibs="true" in the merged manifest) so the
+            // engine exists as a real, exec-allowed file in nativeLibraryDir.
+            useLegacyPackaging = true
         }
     }
     signingConfigs {

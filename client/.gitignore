@@ -42,9 +42,11 @@ __screenshots__/
 .DS_Store
 Thumbs.db
 
-# ---- Android: multi-ABI engine bundle (F10-9), built by bundle-android.sh -
-#      never commit the cross-compiled bebok-server/mksh binaries.
+# ---- Android: multi-ABI engine bundle (F10-9/F10-29), built by bundle-android.sh -
+#      never commit the cross-compiled engine/mksh binaries (jniLibs/<abi>/lib*.so;
+#      assets/bin/ is the pre-F10-29 location, still ignored so a stale copy never lands).
 android/app/src/main/assets/bin/
+android/app/src/main/jniLibs/
 
 # ---- Android: keystores and Google service config (never commit secrets) --
 android/**/*.jks
