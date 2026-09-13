@@ -132,6 +132,14 @@ for ABI in $ABIS; do
   export CXX_"${TARGET//-/_}"="$CLANGXX"
   export AR_"${TARGET//-/_}"="$AR"
   export "CARGO_TARGET_${TARGET_UPPER}_LINKER"="$CLANG"
+  # 16 KB page-size compatibility (Android 15+; Play requires it for apps
+  # targeting SDK 35 from Nov 2025): align the ELF LOAD segments to 16 KiB
+  # so the binary runs on 16 KB kernels. The S25 Ultra / Android 16 flags a
+  # debuggable APK with 4 KiB-aligned segments in a system dialog on first
+  # launch ("incompatible with 16 KB mode: lib/arm64-v8a/libbebok_server.so").
+  # A non-debuggable build is silently run in compatibility mode instead.
+  # Verify with: llvm-readelf -l libbebok_server.so | grep LOAD  ->  0x4000.
+  export "CARGO_TARGET_${TARGET_UPPER}_RUSTFLAGS"="-C link-arg=-Wl,-z,max-page-size=16384"
   ( cd "$ENGINE_DIR" && cargo build --release --target "$TARGET" -p bebok-server )
 
   "$STRIP" -o "$ABI_LIB_DIR/$SERVER_LIB" \
