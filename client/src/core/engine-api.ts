@@ -47,6 +47,7 @@ import type {
   McpStatus,
   Message,
   ModelsResponse,
+  PairWithDesktopResponse,
   PendingPermissionSnapshot,
   PermissionResponse,
   ProcessInfo,
@@ -157,6 +158,21 @@ export interface EngineRestApi {
     decision: PermissionDecisionInput,
   ): Promise<PermissionResponse>;
   pendingPermissions(directory: string): Promise<PendingPermissionSnapshot[]>;
+
+  // WP-M6 (F10-23): phone-side pairing with a desktop engine
+  /**
+   * `POST /remote/pair` on `endpoint` (a clean base URL of the desktop's
+   * remote listener, not the active target): long-polls up to 90 s for the
+   * desktop's confirmation and resolves with the per-device token. Rejects
+   * with `PairError` (`core/remote/pair-protocol.ts`) carrying the engine's
+   * error code.
+   */
+  pairWithDesktop(
+    endpoint: string,
+    code: string,
+    deviceName: string,
+    extra?: { model?: string; platform?: string; signal?: AbortSignal },
+  ): Promise<PairWithDesktopResponse>;
 
   // agents, MCP, config
   listAgents(directory: string): Promise<AgentInfo[]>;

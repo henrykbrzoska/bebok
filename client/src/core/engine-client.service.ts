@@ -42,6 +42,7 @@ import {
   Message,
   MessageListResponse,
   ModelsResponse,
+  PairWithDesktopResponse,
   PermissionResponse,
   PendingPermissionSnapshot,
   ProjectEntry,
@@ -75,6 +76,7 @@ import {
   RemotePairStart,
   RemoteStatus,
 } from './engine.dtos';
+import { pairWithDesktop } from './remote/pair-protocol';
 import {
   EmbeddedEngineError,
   EngineConnection,
@@ -534,6 +536,20 @@ export class EngineClient implements EngineApi {
       'GET',
       `/permission?directory=${encodeURIComponent(directory)}`,
     ).then((response) => response.asks);
+  }
+
+  /**
+   * WP-M6 (F10-23): `POST /remote/pair` against a desktop's remote listener.
+   * Unauthenticated and addressed at `endpoint` rather than the active
+   * target, so it bypasses `request()`; see `core/remote/pair-protocol.ts`.
+   */
+  pairWithDesktop(
+    endpoint: string,
+    code: string,
+    deviceName: string,
+    extra: { model?: string; platform?: string; signal?: AbortSignal } = {},
+  ): Promise<PairWithDesktopResponse> {
+    return pairWithDesktop(endpoint, code, deviceName, extra);
   }
 
   /** Absolute URL of the global SSE stream (used by `EventsStore`). */
