@@ -69,6 +69,11 @@ import {
   BrowserActionResult,
   BrowserFrame,
   BrowserState,
+  RemoteApiError,
+  RemoteDevice,
+  RemoteDevicesResponse,
+  RemotePairStart,
+  RemoteStatus,
 } from './engine.dtos';
 import {
   EmbeddedEngineError,
@@ -826,6 +831,55 @@ export class EngineClient implements EngineApi {
   }
 
   // ---------------------------------------------------------------------------
+  // WP-M4 (F10-13): remote pairing - plain REST calls against this same
+  // engine's local listener; WP-M1 already exposes `/remote/*` on the router
+  // Tauri talks to, so there is no second transport or new crypto here.
+  // ---------------------------------------------------------------------------
+
+  getRemoteStatus(): Promise<RemoteStatus> {
+    return this.remoteRequest<RemoteStatus>('GET', '/remote/status');
+  }
+
+  enableRemote(): Promise<RemoteStatus> {
+    return this.remoteRequest<RemoteStatus>('POST', '/remote/enable');
+  }
+
+  disableRemote(): Promise<RemoteStatus> {
+    return this.remoteRequest<RemoteStatus>('POST', '/remote/disable');
+  }
+
+  startPairing(): Promise<RemotePairStart> {
+    return this.remoteRequest<RemotePairStart>('POST', '/remote/pair/start');
+  }
+
+  confirmPairing(pairId: string): Promise<RemoteDevice> {
+    return this.remoteRequest<RemoteDevice>(
+      'POST',
+      `/remote/pair/confirm/${encodeURIComponent(pairId)}`,
+    );
+  }
+
+  rejectPairing(pairId: string): Promise<{ ok: boolean }> {
+    return this.remoteRequest<{ ok: boolean }>(
+      'POST',
+      `/remote/pair/reject/${encodeURIComponent(pairId)}`,
+    );
+  }
+
+  listDevices(): Promise<RemoteDevice[]> {
+    return this.remoteRequest<RemoteDevicesResponse>('GET', '/remote/devices').then(
+      (d) => d.devices ?? [],
+    );
+  }
+
+  revokeDevice(id: string): Promise<{ ok: boolean }> {
+    return this.remoteRequest<{ ok: boolean }>(
+      'DELETE',
+      `/remote/devices/${encodeURIComponent(id)}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // helpers
   // ---------------------------------------------------------------------------
 
@@ -852,6 +906,41 @@ export class EngineClient implements EngineApi {
         /* keep status only */
       }
       throw new Error(`engine ${method} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
+    }
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
+  }
+
+  /**
+   * Like `request()`, but on a non-2xx response parses the engine's
+   * `{ error, message }` body into a `RemoteApiError` with a stable `.code`
+   * - the Remote panel branches on codes (`remote_disabled`,
+   * `pair_not_requested`, `pair_rejected`, ...) rather than status text.
+   */
+  private async remoteRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const conn = this.requireConnection();
+    const init: RequestInit = { method, signal: this.inflight.signal };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+    const res = await authFetch(`${conn.baseUrl}${path}`, init);
+    if (!res.ok) {
+      let code = 'unknown';
+      let message = `engine ${method} ${path} -> ${res.status}`;
+      try {
+        const parsed = (await res.json()) as { error?: string; message?: string };
+        if (parsed.error) {
+          code = parsed.error;
+        }
+        if (parsed.message) {
+          message = parsed.message;
+        }
+      } catch {
+        /* keep the generic message */
+      }
+      throw new RemoteApiError(code, message, res.status);
     }
     if (res.status === 204) {
       return undefined as T;

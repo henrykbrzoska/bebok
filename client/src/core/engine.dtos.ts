@@ -1093,3 +1093,90 @@ export interface ProcessExitedEvent {
   sessionID: string;
   code: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// WP-M4 (F10-13/14/15): remote pairing - `/remote/*` on this same engine's
+// local listener (WP-M1). Shapes mirror `remote/routes.rs` and
+// `remote/devices.rs` `Device::public()` 1:1.
+// ---------------------------------------------------------------------------
+
+/** `GET /remote/status` response, and the `remote.status` bus event payload. */
+export interface RemoteStatus {
+  enabled: boolean;
+  listening: boolean;
+  /** `http://100.x.y.z:8790` per bound Tailscale/LAN address; empty when not listening. */
+  endpoints: string[];
+  /** Devices seen within the last 30s or holding an open SSE stream. */
+  devicesOnline: number;
+  /** Total paired (non-revoked) device count. */
+  devices: number;
+  engineName: string;
+  fingerprint: string;
+  port: number;
+  allowLan: boolean;
+}
+
+/** One paired device, as returned by `/remote/devices` and pairing confirm. */
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  /** Unix ms. */
+  createdAt: number;
+  /** Unix ms. */
+  lastSeen: number;
+  lastIp: string;
+  revoked: boolean;
+  model: string;
+  platform: string;
+}
+
+/** `GET /remote/devices` response. */
+export interface RemoteDevicesResponse {
+  devices: RemoteDevice[];
+}
+
+/** `POST /remote/pair/start` response - the desktop side of the QR/code. */
+export interface RemotePairStart {
+  pairId: string;
+  code: string;
+  /** Unix ms. */
+  expiresAt: number;
+  endpoints: string[];
+  engineName: string;
+  fingerprint: string;
+}
+
+/** `remote.pair.request` bus event payload - a phone presented a code. */
+export interface RemotePairRequestEvent {
+  pairId: string;
+  deviceName: string;
+  model: string;
+  platform: string;
+  ip: string;
+  /** Unix ms. */
+  expiresAt: number;
+}
+
+/** `remote.device.changed` bus event payload. */
+export interface RemoteDeviceChangedEvent {
+  deviceId: string;
+  change: 'created' | 'removed' | 'seen';
+}
+
+/**
+ * Thrown by `EngineClient`'s remote-pairing methods instead of the generic
+ * `Error` `request()` throws, so the Remote panel can branch on a stable
+ * engine error code (`remote_disabled`, `pair_not_requested`, ...) rather
+ * than parsing status text. `code` is `"unknown"` when the engine's error
+ * body could not be parsed at all (network failure, non-JSON 5xx, etc).
+ */
+export class RemoteApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'RemoteApiError';
+  }
+}

@@ -1,0 +1,164 @@
+<div class="tab-head">
+  <h2>{{ t('remote.title') }}</h2>
+  <p>{{ t('remote.hint') }}</p>
+</div>
+
+@if (store.loading() && !store.status()) {
+  <p class="empty">{{ t('remote.loading') }}</p>
+} @else {
+  @if (store.error()) {
+    <div class="inline-error">{{ store.error() }}</div>
+  }
+
+  <div class="card">
+    <label class="enabled-check">
+      <input
+        type="checkbox"
+        [checked]="store.enabled()"
+        [disabled]="toggleBusy()"
+        (change)="toggleEnabled()"
+      />
+      <span class="check-label">{{ t('remote.enableToggle') }}</span>
+      <span class="dot" [class.ok]="store.status()?.listening" [class.idle]="!store.status()?.listening"></span>
+      <span class="small muted">{{ t(store.status()?.listening ? 'remote.statusListening' : 'remote.statusOff') }}</span>
+    </label>
+
+    @if (store.enabled()) {
+      <div class="grid-2 remote-info">
+        <div>
+          <span class="micro-label">{{ t('remote.engineName') }}</span>
+          <span class="mono">{{ store.status()?.engineName }}</span>
+        </div>
+        <div>
+          <span class="micro-label">{{ t('remote.fingerprint') }}</span>
+          <span class="mono">{{ store.status()?.fingerprint }}</span>
+        </div>
+      </div>
+
+      <div class="endpoints">
+        <span class="micro-label">{{ t('remote.endpointsTitle') }}</span>
+        @if (hasEligibleInterface()) {
+          <ul class="endpoint-list">
+            @for (endpoint of store.status()?.endpoints ?? []; track endpoint) {
+              <li class="mono small">{{ endpoint }}</li>
+            }
+          </ul>
+        } @else if (!allowLanEffective()) {
+          <p class="empty">{{ t('remote.noEligibleInterface') }}</p>
+        } @else {
+          <p class="small muted">{{ t('remote.lanOnlyNote') }}</p>
+        }
+      </div>
+
+      <label class="enabled-check">
+        <input
+          type="checkbox"
+          [checked]="allowLanEffective()"
+          [disabled]="allowLanBusy()"
+          (change)="setAllowLan(!allowLanEffective())"
+        />
+        <span class="check-label">{{ t('remote.allowLan') }}</span>
+      </label>
+      @if (allowLanEffective()) {
+        <div class="note">{{ t('remote.allowLanWarning') }}</div>
+      }
+      @if (allowLanPendingRestart()) {
+        <div class="note">
+          {{ t('remote.appliesNextEnable') }}
+          <button type="button" class="link-btn" (click)="reapplyNow()" [disabled]="toggleBusy()">
+            {{ t('remote.reapplyNow') }}
+          </button>
+        </div>
+      }
+    }
+  </div>
+
+  @if (store.enabled()) {
+    <div class="card">
+      <h3>{{ t('remote.pairDevice') }}</h3>
+
+      @if (!pairStart()) {
+        <button type="button" class="primary" (click)="startPairing()" [disabled]="pairBusy()">
+          @if (pairBusy()) {
+            <span class="spinner" aria-hidden="true"></span>{{ t('remote.pairStarting') }}
+          } @else {
+            {{ t('remote.pairDevice') }}
+          }
+        </button>
+        @if (pairError()) {
+          <div class="inline-error">{{ pairError() }}</div>
+        }
+      } @else {
+        <div class="pair-panel">
+          @if (qrSvg(); as svg) {
+            <div class="qr-card" [innerHTML]="svg"></div>
+          }
+          <div class="pair-details">
+            <span class="micro-label">{{ t('remote.pairCodeLabel') }}</span>
+            <span class="pair-code mono" data-testid="pair-code">{{ pairStart()!.code }}</span>
+            @if (!pairCodeExpired()) {
+              <span class="small muted">{{ t('remote.pairExpiresIn', { seconds: secondsLeft() }) }}</span>
+            } @else {
+              <span class="small muted">{{ t('remote.pairExpired') }}</span>
+            }
+            <button type="button" (click)="dismissPairStart()">{{ t('remote.reject') }}</button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+
+  @if (store.pairRequest(); as request) {
+    <div class="backdrop">
+      <div class="card pair-request-card">
+        <h3>{{ t('remote.pairRequestTitle', { device: request.deviceName, ip: request.ip }) }}</h3>
+        <p class="card-sub">{{ t('remote.pairRequestSub', { model: request.model || '?', platform: request.platform || '?' }) }}</p>
+        @if (pairRequestError()) {
+          <div class="inline-error">{{ pairRequestError() }}</div>
+        }
+        <div class="actions spread">
+          <button type="button" (click)="rejectPairRequest()" [disabled]="pairRequestBusy()">
+            {{ t('remote.reject') }}
+          </button>
+          <button type="button" class="primary" (click)="confirmPairRequest()" [disabled]="pairRequestBusy()">
+            {{ t('remote.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="card">
+    <h3>{{ t('remote.devicesTitle') }}</h3>
+    @if (store.devices().length === 0) {
+      <p class="empty">{{ t('remote.noDevices') }}</p>
+    } @else {
+      <ul class="server-list">
+        @for (device of store.devices(); track device.id) {
+          <li class="server-row">
+            <div class="server-main">
+              <span class="server-name">{{ device.name }}</span>
+              <span class="server-status small muted">{{ deviceSubtitle(device) }} &middot; {{ lastSeenLabel(device) }}</span>
+            </div>
+            <button
+              type="button"
+              class="revoke-btn"
+              [class.armed]="revokeArmedId() === device.id"
+              [disabled]="revokeBusy() === device.id"
+              (click)="armOrRevoke(device)"
+              (blur)="cancelRevoke()"
+            >
+              @if (revokeBusy() === device.id) {
+                <span class="spinner" aria-hidden="true"></span>
+              } @else if (revokeArmedId() === device.id) {
+                {{ t('remote.revokeConfirmYes') }}
+              } @else {
+                {{ t('remote.revoke') }}
+              }
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+}

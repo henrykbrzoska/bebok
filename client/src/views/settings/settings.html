@@ -6,8 +6,8 @@
         type="button"
         role="tab"
         class="rail-tab"
-        [class.active]="store.tab() === tab"
-        [attr.aria-selected]="store.tab() === tab"
+        [class.active]="!showRemote() && store.tab() === tab"
+        [attr.aria-selected]="!showRemote() && store.tab() === tab"
         (click)="select(tab)"
       >{{ t(tabLabel(tab)) }}@if (tab === 'permissions' && toolSafety.uncategorizedCount() > 0) {
           <span
@@ -17,6 +17,15 @@
           >{{ toolSafety.uncategorizedCount() }}</span>
         }</button>
     }
+    <button
+      type="button"
+      role="tab"
+      class="rail-tab"
+      data-testid="settings-tab-remote"
+      [class.active]="showRemote()"
+      [attr.aria-selected]="showRemote()"
+      (click)="selectRemote()"
+    >{{ t('settings.tab.remote') }}</button>
     <span class="rail-dir mono" [attr.title]="store.directory()">{{ store.directory() }}</span>
   </nav>
 
@@ -31,27 +40,31 @@
         <div class="saved-banner">{{ store.saved() }}</div>
       }
 
-      @switch (store.tab()) {
-        @case ('providers') {
-          <app-settings-providers />
-        }
-        @case ('agents') {
-          <app-settings-agents />
-        }
-        @case ('mcp') {
-          <app-settings-mcp />
-        }
-        @case ('skills') {
-          <app-settings-skills />
-        }
-        @case ('permissions') {
-          <app-settings-permissions />
-        }
-        @case ('appearance') {
-          <app-settings-appearance />
-        }
-        @case ('rawJson') {
-          <app-settings-raw-json />
+      @if (showRemote()) {
+        <app-settings-remote />
+      } @else {
+        @switch (store.tab()) {
+          @case ('providers') {
+            <app-settings-providers />
+          }
+          @case ('agents') {
+            <app-settings-agents />
+          }
+          @case ('mcp') {
+            <app-settings-mcp />
+          }
+          @case ('skills') {
+            <app-settings-skills />
+          }
+          @case ('permissions') {
+            <app-settings-permissions />
+          }
+          @case ('appearance') {
+            <app-settings-appearance />
+          }
+          @case ('rawJson') {
+            <app-settings-raw-json />
+          }
         }
       }
     }
