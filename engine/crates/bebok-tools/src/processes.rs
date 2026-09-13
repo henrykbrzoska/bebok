@@ -15,8 +15,10 @@
 //!   since the last poll and publishes them as [`ProcessEvent::Output`] chunks
 //!   (at most [`MAX_CHUNK_BYTES`] each), stopping ~1 s after the exit.
 //!
-//! Killing is always tree-wide: `taskkill /T /F` on Windows, `SIGTERM` to the
-//! process group (then `SIGKILL` after [`TERM_GRACE`]) elsewhere.
+//! Killing is always tree-wide: `taskkill /T /F` on Windows, `killpg` with
+//! `SIGTERM` to the child's own process group (then `SIGKILL` once
+//! [`TERM_GRACE`] runs out) elsewhere — direct syscalls, never a shelled-out
+//! `kill -<pid>` (see the `unix` module for why).
 //! [`ProcessRegistry::kill_all_blocking`] is the runtime-free variant for a
 //! shutdown path that may run after the tokio runtime is gone.
 
@@ -39,6 +41,9 @@ const TAIL_POLLS_AFTER_EXIT: u32 = 3;
 /// How long a `SIGTERM`-ed process group gets before `SIGKILL` (Unix).
 #[cfg(not(windows))]
 const TERM_GRACE: Duration = Duration::from_secs(2);
+/// Poll period while waiting for a signalled group to go away.
+#[cfg(not(windows))]
+const KILL_POLL: Duration = Duration::from_millis(50);
 /// How long `kill` waits for the waiter to record the exit.
 const KILL_WAIT: Duration = Duration::from_secs(5);
 /// Broadcast capacity for [`ProcessEvent`]s.
@@ -487,38 +492,18 @@ async fn kill_tree(pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = signal_group(pid, "-TERM").status().await;
-        tokio::time::sleep(TERM_GRACE).await;
-        if pid_alive(pid) {
-            let _ = signal_group(pid, "-KILL").status().await;
+        if !unix::signal_group(pid, libc::SIGTERM) {
+            return;
+        }
+        let deadline = tokio::time::Instant::now() + TERM_GRACE;
+        while unix::group_alive(pid) {
+            if tokio::time::Instant::now() >= deadline {
+                unix::signal_group(pid, libc::SIGKILL);
+                return;
+            }
+            tokio::time::sleep(KILL_POLL).await;
         }
     }
-}
-
-#[cfg(not(windows))]
-fn signal_group(pid: u32, signal: &str) -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("kill");
-    cmd.arg(signal)
-        .arg(format!("-{pid}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    cmd
-}
-
-#[cfg(not(windows))]
-fn pid_alive(pid: u32) -> bool {
-    // `kill -0` succeeds while the process exists (zombies included; the
-    // waiter reaps ours, so a lingering zombie only costs one extra SIGKILL).
-    std::process::Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 /// Kill the process tree rooted at `pid` without a tokio runtime.
@@ -536,22 +521,66 @@ fn kill_tree_blocking(pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = std::process::Command::new("kill")
-            .arg("-TERM")
-            .arg(format!("-{pid}"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        std::thread::sleep(TERM_GRACE);
-        if pid_alive(pid) {
-            let _ = std::process::Command::new("kill")
-                .arg("-KILL")
-                .arg(format!("-{pid}"))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+        if !unix::signal_group(pid, libc::SIGTERM) {
+            return;
+        }
+        let deadline = std::time::Instant::now() + TERM_GRACE;
+        loop {
+            // No waiter task may be left to reap the leader, and a zombie
+            // still counts as a group member: reap it here so an exited
+            // tree is seen as gone instead of costing the whole grace.
+            unix::reap(pid);
+            if !unix::group_alive(pid) {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                unix::signal_group(pid, libc::SIGKILL);
+                return;
+            }
+            std::thread::sleep(KILL_POLL);
+        }
+    }
+}
+
+/// Direct `killpg(2)` / `waitpid(2)` wrappers.
+///
+/// Signals are sent straight through libc rather than through a `kill`
+/// binary: procps-ng's `kill -TERM -<pid>` parses a multi-digit negative pid
+/// as the option `-<first digit>` and ends up doing `kill(-<digit>)` — for a
+/// pid starting with `1` that is `kill(-1)`, i.e. *every* process the user
+/// may signal, which is how a test once SIGTERM-ed the whole CI job.
+#[cfg(not(windows))]
+mod unix {
+    /// The pid as a group id, or `None` when it could never be one of ours
+    /// (`0` would be the engine's own group, `1` init's; never signal those).
+    fn pgid(pid: u32) -> Option<libc::pid_t> {
+        (pid > 1).then(|| libc::pid_t::try_from(pid).ok()).flatten()
+    }
+
+    /// `killpg(pid, signal)`. `false` when the group does not exist (any
+    /// more) or `pid` is not a valid group id.
+    pub(super) fn signal_group(pid: u32, signal: libc::c_int) -> bool {
+        let Some(pgid) = pgid(pid) else {
+            return false;
+        };
+        // SAFETY: plain syscall on a positive, validated group id.
+        unsafe { libc::killpg(pgid, signal) == 0 }
+    }
+
+    /// Whether any member of the group (zombies included) still exists.
+    pub(super) fn group_alive(pid: u32) -> bool {
+        signal_group(pid, 0)
+    }
+
+    /// Non-blocking reap of the group leader (the shell) if it has exited and
+    /// nobody else collected it yet. Harmless when the waiter task already did.
+    pub(super) fn reap(pid: u32) {
+        if let Some(pid) = pgid(pid) {
+            let mut status: libc::c_int = 0;
+            // SAFETY: `status` is a valid out-pointer; WNOHANG never blocks.
+            unsafe {
+                libc::waitpid(pid, &mut status, libc::WNOHANG);
+            }
         }
     }
 }
@@ -679,6 +708,7 @@ mod tests {
         let killed = registry.kill_session("sess-a").await;
         assert_eq!(killed.len(), 1);
         assert_eq!(killed[0].id, a.id);
+        wait_exited(&a.id).await;
         assert!(!registry.get(&a.id).unwrap().is_running());
         assert!(registry.get(&b.id).unwrap().is_running());
         registry.kill(&b.id).await.unwrap();

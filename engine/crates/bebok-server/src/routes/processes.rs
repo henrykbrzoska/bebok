@@ -662,6 +662,9 @@ mod tests {
             .unwrap();
         assert!(registry.get(&long.id).unwrap().is_running());
         fx.state.store.delete_session(main.id()).await.unwrap();
+        // The kill is awaited by `delete_session`, but the waiter task that
+        // records the exit may still be a poll behind on a slow runner.
+        wait_exited(&long.id).await;
         assert!(!registry.get(&long.id).unwrap().is_running());
     }
 
