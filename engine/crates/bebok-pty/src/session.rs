@@ -135,7 +135,7 @@ impl PtySession {
     ///
     /// - Windows: the Job Object (primary, kills the whole tree) then the
     ///   `taskkill /T` fallback.
-    /// - Unix: `kill(-pgid, SIGKILL)` (the child is a session leader).
+    /// - Unix: `killpg(pgid, SIGKILL)` (the child is a session leader).
     pub fn kill(&self) -> Result<(), PtyError> {
         // Windows: terminate the Job Object first - this kills every process in
         // the tree regardless of depth, which `taskkill` / direct `kill` cannot
@@ -306,15 +306,24 @@ fn writer_loop(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>
 /// Kill an entire process tree.
 ///
 /// - Unix: the PTY child is a session leader (portable-pty runs `setsid`), so
-///   its process-group id equals its pid; `kill(-pgid, SIGKILL)` terminates the
+///   its process-group id equals its pid; `killpg(pgid, SIGKILL)` terminates the
 ///   whole group.
 /// - Windows: `taskkill /T /F` walks the child tree. This is the fallback when
 ///   the Job Object could not be assigned; the primary tree-kill is the Job
 ///   Object terminated in [`PtySession::kill`].
 fn kill_process_tree(pid: u32) {
     #[cfg(unix)]
-    unsafe {
-        libc::kill(-(pid as i32), libc::SIGKILL);
+    {
+        // Never `kill(0)` / `kill(-1)`: pgid 0 is our own group and -1 is
+        // every process the user owns.
+        if let Ok(pgid) = libc::pid_t::try_from(pid)
+            && pgid > 1
+        {
+            // SAFETY: plain syscall on a positive, validated group id.
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
     }
 
     #[cfg(windows)]
