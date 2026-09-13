@@ -74,8 +74,8 @@ jobs:
           set -euo pipefail
           pkg_version=$(node -p "require('./client/package.json').version")
           tauri_version=$(node -p "require('./client/src-tauri/tauri.conf.json').version")
-          cargo_version=$(awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' engine/Cargo.toml)
-          shell_version=$(awk '/^\[package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' client/src-tauri/Cargo.toml)
+          cargo_version=$(awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" \r]/,"",$3); print $3; exit}' engine/Cargo.toml)
+          shell_version=$(awk '/^\[package\]/{f=1;next} /^\[/{f=0} f && /^version *=/{gsub(/[" \r]/,"",$3); print $3; exit}' client/src-tauri/Cargo.toml)
 
           echo "client/package.json           : $pkg_version"
           echo "client/src-tauri/tauri.conf.json: $tauri_version"
@@ -218,8 +218,8 @@ jobs:
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-          $pwd = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
+          $pfxPassword = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pfxPassword
           Remove-Item $pfx -Force
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
@@ -293,19 +293,22 @@ jobs:
           if [ -n "${WIN_SIGN_THUMBPRINT:-}" ]; then
             cfg=$(node -e 'const c=JSON.parse(process.argv[1]); c.bundle=c.bundle||{}; c.bundle.windows={certificateThumbprint:process.argv[2],digestAlgorithm:"sha256",timestampUrl:"http://timestamp.digicert.com"}; console.log(JSON.stringify(c))' "$cfg" "$WIN_SIGN_THUMBPRINT")
           fi
-          echo "config=$cfg" >> "$GITHUB_OUTPUT"
+          # Passed as a file: quoted JSON does not survive the npx.cmd shim on Windows.
+          echo "$cfg" > client/tauri-release-override.json
+          echo "override=$([ "$cfg" != "{}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "tauri config override: $cfg"
 
       - name: Tauri build (${{ matrix.bundles }})
         working-directory: client
         shell: bash
         env:
-          TAURI_CONFIG_OVERRIDE: ${{ steps.tauricfg.outputs.config }}
+          BUNDLES: ${{ matrix.bundles }}
+          USE_OVERRIDE: ${{ steps.tauricfg.outputs.override }}
         run: |
           set -euo pipefail
-          args=(build --ci --target "$TARGET" --bundles "${{ matrix.bundles }}")
-          if [ "$TAURI_CONFIG_OVERRIDE" != "{}" ]; then
-            args+=(--config "$TAURI_CONFIG_OVERRIDE")
+          args=(build --ci --target "$TARGET" --bundles "$BUNDLES")
+          if [ "$USE_OVERRIDE" = "true" ]; then
+            args+=(--config tauri-release-override.json)
           fi
           npx tauri "${args[@]}"
 
@@ -489,7 +492,6 @@ jobs:
           draft: ${{ needs.preflight.outputs.draft == 'true' }}
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
           generate_release_notes: true
-          append_body: true
           body_path: release-footer.md
           fail_on_unmatched_files: true
           files: |
