@@ -10,7 +10,9 @@
  * out of scope for this change - keep working unchanged.
  */
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+
+import { UiPrefsStore } from './ui-prefs.store';
 
 /**
  * F6-10: one explicit "jump to this file in Preview" request. A plain nonce
@@ -49,6 +51,8 @@ export class ExplorerSelectionStore {
    *  once `ExplorerView` has consumed it. */
   readonly openRequest = signal<ExplorerOpenRequest | null>(null);
 
+  private readonly prefs = inject(UiPrefsStore);
+
   private previewNonce = 0;
   private openNonce = 0;
 
@@ -62,12 +66,18 @@ export class ExplorerSelectionStore {
   }
 
   /** Select `path` and ask the Preview panel to navigate to it (F2-13's mini
-   *  Explorer and the full-screen Explorer view both call this from their
-   *  "Open in preview" action). */
+   *  Explorer, the full-screen Explorer view and a `docs/x.md` chip in chat
+   *  text all call this from their "Open in preview" action).
+   *
+   *  F9-3: this is the single place that also *shows* the panel - the drawer
+   *  is opened if closed, the Preview pill turned on, the section expanded
+   *  and scrolled into view (`UiPrefsStore.revealRightDrawerPanel`), so no
+   *  caller has to repeat that dance. */
   openInPreview(directory: string, path: string): void {
     this.select(directory, path);
     this.previewNonce += 1;
     this.previewRequest.set({ directory, path, nonce: this.previewNonce });
+    this.prefs.revealRightDrawerPanel('preview');
   }
 
   /** Select `path` and ask the full-screen Explorer to open it (F7-3): the

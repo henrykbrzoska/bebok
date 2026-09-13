@@ -93,3 +93,32 @@
     display: none;
   }
 }
+
+/* --- F9-12: sub-agent breadcrumb ---------------------------------------- */
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+
+.crumb-parent:hover {
+  text-decoration-color: var(--accent);
+}
+
+.crumb-subagent {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  margin: 0 2px;
+}

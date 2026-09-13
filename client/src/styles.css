@@ -120,6 +120,13 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  /* F9-1: the document itself never scrolls. The shell is a fixed 100vh
+   * three-zone layout; only the sidebar session list, the chat thread, the
+   * right drawer and each panel body are scroll containers. Anything that
+   * would otherwise grow the document (an absolutely positioned box anchored
+   * to the initial containing block, an oversized fixed-height view) is
+   * clipped here instead of pushing the topbar off-screen. */
+  overflow: hidden;
 }
 
 body {

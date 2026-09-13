@@ -7,7 +7,7 @@
 
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 
 import { EngineClient } from '../../../core/engine-client.service';
 import { AgentEntry, EngineEvent, SessionMeta } from '../../../core/engine.dtos';
@@ -159,6 +159,38 @@ describe('AgentsPanel (F6-13)', () => {
     expect(overlay).toBeTruthy();
     expect(engine.messages).toHaveBeenCalledWith('child-1');
     expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
+  });
+
+  // -- F9-4 ------------------------------------------------------------------
+
+  it('F9-4: the whole card is the transcript trigger (keyboard: Enter on the focused card)', async () => {
+    await settle();
+    const [card] = rows();
+    expect(card.getAttribute('data-testid')).toBe('agent-card');
+    expect(card.getAttribute('aria-label')).toContain('fix-ci');
+    card.focus();
+    card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    card.click(); // a native <button> maps Enter/Space to click
+    await settle();
+    expect(fixture.nativeElement.querySelector('[data-testid="agent-transcript"]')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.view-hint')?.textContent).toContain(
+      'View transcript',
+    );
+  });
+
+  it('F9-4: "Open session" navigates to the child chat and never opens the overlay', async () => {
+    await settle();
+    const router = TestBed.inject(Router);
+    const navigate = spyOn(router, 'navigate').and.resolveTo(true);
+    const open = fixture.nativeElement.querySelector(
+      '[data-testid="agent-open-session"]',
+    ) as HTMLButtonElement;
+    expect(open).toBeTruthy();
+    expect(open.textContent).toContain('Open session');
+    open.click();
+    await settle();
+    expect(navigate).toHaveBeenCalledWith(['/chat', 'child-1']);
+    expect(fixture.nativeElement.querySelector('[data-testid="agent-transcript"]')).toBeNull();
   });
 
   it('shows the empty state when nothing was delegated', async () => {

@@ -15,7 +15,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 
-import { UiPrefsStore } from '../../core/ui-prefs.store';
+import { UiPrefsStore, type RightDrawerPanelId } from '../../core/ui-prefs.store';
 
 export type Screen =
   | 'start'
@@ -55,6 +55,9 @@ export class ShellStore {
   readonly rightDrawerOpen = this.prefs.rightDrawerOpen;
   readonly rightDrawerPanels = this.prefs.rightDrawerPanels;
   readonly rightDrawerWidth = this.prefs.rightDrawerWidth;
+  /** F9-2: per-panel collapsed state + the latest programmatic reveal. */
+  readonly rightDrawerCollapsed = this.prefs.rightDrawerCollapsed;
+  readonly rightDrawerReveal = this.prefs.rightDrawerReveal;
 
   /** Command palette (ephemeral, never persisted). */
   readonly commandPaletteOpen = signal(false);
@@ -102,14 +105,22 @@ export class ShellStore {
     this.prefs.toggleRightDrawer();
   }
 
-  toggleRightDrawerPanel(
-    panel: 'session' | 'explorer' | 'terminal' | 'agents' | 'changes' | 'preview' | 'browser',
-  ): void {
+  toggleRightDrawerPanel(panel: RightDrawerPanelId): void {
     this.prefs.toggleRightDrawerPanel(panel);
   }
 
   setRightDrawerWidth(px: number): void {
     this.prefs.setRightDrawerWidth(px);
+  }
+
+  /** F9-2: collapse/expand a stacked section (header stays visible). */
+  toggleRightDrawerPanelCollapsed(panel: RightDrawerPanelId): void {
+    this.prefs.toggleRightDrawerPanelCollapsed(panel);
+  }
+
+  /** F9-2/F9-3: open the drawer + panel, expand it and scroll it into view. */
+  revealRightDrawerPanel(panel: RightDrawerPanelId, openDrawer = true): void {
+    this.prefs.revealRightDrawerPanel(panel, openDrawer);
   }
 
   /** Walk to the deepest activated route and read its `data.screen`. */
