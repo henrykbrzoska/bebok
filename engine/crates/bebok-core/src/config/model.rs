@@ -137,19 +137,71 @@ pub const DEFAULT_DELEGATION_MAX_CONCURRENT: usize = 3;
 /// Hard ceiling for `delegation.max_concurrent` (guards against typos).
 pub const MAX_DELEGATION_MAX_CONCURRENT: usize = 16;
 
+/// F9-10: `delegation.model_policy` — which model sub-agents run on.
+/// Serialised as a plain string: `"inherit"`, `"cheaper"` or an explicit
+/// `provider/model` id.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DelegationModelPolicy {
+    /// The parent's model.
+    Inherit,
+    /// A lighter sibling of the parent's model (same provider, via the model
+    /// catalog); inherit when there is none.
+    #[default]
+    Cheaper,
+    /// Always this model.
+    Explicit(String),
+}
+
+impl DelegationModelPolicy {
+    /// Parse the config string (`inherit` / `cheaper` / anything else = an
+    /// explicit model id; empty = the default `cheaper`).
+    pub fn parse(s: &str) -> Self {
+        let t = s.trim();
+        match t.to_ascii_lowercase().as_str() {
+            "" | "cheaper" => DelegationModelPolicy::Cheaper,
+            "inherit" => DelegationModelPolicy::Inherit,
+            _ => DelegationModelPolicy::Explicit(t.to_string()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            DelegationModelPolicy::Inherit => "inherit",
+            DelegationModelPolicy::Cheaper => "cheaper",
+            DelegationModelPolicy::Explicit(m) => m.as_str(),
+        }
+    }
+}
+
+impl Serialize for DelegationModelPolicy {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for DelegationModelPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(DelegationModelPolicy::parse(&s))
+    }
+}
+
 /// WP-DELEGATION (F8-2): `delegation` config section. Global config with a
 /// per-key project override (a project that sets only `mode` keeps the global
-/// `max_concurrent` / `model`).
+/// `max_concurrent` / `model_policy`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DelegationConfig {
     pub mode: DelegationMode,
     /// Upper bound on concurrently *running* children; extra ones queue.
     pub max_concurrent: usize,
-    /// Optional model override for every sub-agent (`provider/model`).
-    /// `None`/empty = each sub-agent's own preset / per-agent default.
+    /// Legacy (pre F9-10) explicit model override for every sub-agent
+    /// (`provider/model`). Still honoured: a non-empty value with no
+    /// `model_policy` means `Explicit(model)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// F9-10: `inherit` | `cheaper` (default) | explicit `provider/model`.
+    pub model_policy: DelegationModelPolicy,
 }
 
 impl Default for DelegationConfig {
@@ -158,6 +210,7 @@ impl Default for DelegationConfig {
             mode: DelegationMode::Auto,
             max_concurrent: DEFAULT_DELEGATION_MAX_CONCURRENT,
             model: None,
+            model_policy: DelegationModelPolicy::Cheaper,
         }
     }
 }
@@ -168,12 +221,28 @@ impl DelegationConfig {
         self.max_concurrent.clamp(1, MAX_DELEGATION_MAX_CONCURRENT)
     }
 
-    /// The sub-agent model override, if a non-empty one is configured.
-    pub fn model_override(&self) -> Option<&str> {
-        self.model
-            .as_deref()
-            .map(str::trim)
-            .filter(|m| !m.is_empty())
+    /// The explicit sub-agent model, if the effective policy names one
+    /// (legacy `model` key or an explicit `model_policy`).
+    pub fn model_override(&self) -> Option<String> {
+        match self.effective_model_policy() {
+            DelegationModelPolicy::Explicit(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// The policy in force: `model_policy`, except that a legacy non-empty
+    /// `model` with the default policy means "explicit that model".
+    pub fn effective_model_policy(&self) -> DelegationModelPolicy {
+        if self.model_policy == DelegationModelPolicy::Cheaper
+            && let Some(m) = self
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+        {
+            return DelegationModelPolicy::Explicit(m.to_string());
+        }
+        self.model_policy.clone()
     }
 }
 

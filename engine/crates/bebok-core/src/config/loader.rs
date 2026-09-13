@@ -156,6 +156,18 @@ pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
             .filter(|m| !m.is_empty())
             .map(str::to_string);
     }
+    // F9-10: `model_policy` (also `modelPolicy`); an explicit policy string
+    // also clears the legacy `model` so the two never disagree.
+    if let Some(policy) = obj
+        .get("model_policy")
+        .or_else(|| obj.get("modelPolicy"))
+        .and_then(|x| x.as_str())
+    {
+        cfg.model_policy = super::model::DelegationModelPolicy::parse(policy);
+        if !policy.trim().is_empty() {
+            cfg.model = None;
+        }
+    }
 }
 
 fn apply_ui(ui: &mut UiConfig, v: &Value) {
@@ -516,6 +528,61 @@ mod tests {
         assert_eq!(cfg.delegation.mode, DelegationMode::Always);
         assert!(cfg.delegation.model.is_none());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// F9-10: `model_policy` parses, defaults to `cheaper`, a legacy `model`
+    /// alone means explicit, and an explicit policy clears the legacy key.
+    #[test]
+    fn delegation_model_policy_layers() {
+        use super::super::model::DelegationModelPolicy;
+        let cfg = ResolvedConfig::default();
+        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Cheaper);
+        assert_eq!(
+            cfg.delegation.effective_model_policy(),
+            DelegationModelPolicy::Cheaper
+        );
+
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "model": "openai/gpt-4o" } }),
+        );
+        assert_eq!(
+            cfg.delegation.effective_model_policy(),
+            DelegationModelPolicy::Explicit("openai/gpt-4o".into())
+        );
+        assert_eq!(
+            cfg.delegation.model_override().as_deref(),
+            Some("openai/gpt-4o")
+        );
+
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "model_policy": "inherit" } }),
+        );
+        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Inherit);
+        assert!(
+            cfg.delegation.model.is_none(),
+            "explicit policy clears legacy model"
+        );
+        assert_eq!(cfg.delegation.model_override(), None);
+
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "modelPolicy": "zai/glm-5.3-flash" } }),
+        );
+        assert_eq!(
+            cfg.delegation.effective_model_policy(),
+            DelegationModelPolicy::Explicit("zai/glm-5.3-flash".into())
+        );
+        // Serialised as a plain string for the client.
+        let json = serde_json::to_value(&cfg.delegation).unwrap();
+        assert_eq!(json["model_policy"], "zai/glm-5.3-flash");
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "delegation": { "model_policy": "cheaper" } }),
+        );
+        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Cheaper);
     }
 
     #[test]

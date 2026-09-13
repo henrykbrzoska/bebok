@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -75,6 +75,54 @@ pub struct AgentEntry {
     /// WP-DELEGATION: spawned with `background: true`.
     #[serde(default)]
     pub background: bool,
+}
+
+/// `?directory=` query of `GET /delegation/models`.
+#[derive(Debug, serde::Deserialize)]
+pub struct DelegationModelsQuery {
+    pub directory: String,
+}
+
+/// F9-10: `GET /delegation/models?directory=` -> `{ policy, parent_model,
+/// resolved, mappings: [{ provider, model, cheaper }] }` — what the
+/// `delegation.model_policy` gives a sub-agent right now, plus the cheaper
+/// sibling of the directory's default model, of every `models.<agent>`
+/// entry, of each configured provider's models (first three) and of a
+/// representative per known provider, so Settings can show the mapping.
+pub async fn delegation_models(
+    State(state): State<AppState>,
+    Query(q): Query<DelegationModelsQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let cfg = instance.config_snapshot();
+    let catalog = bebok_llm::ModelCatalog::global();
+    let parent_model = cfg.model.clone();
+    let resolved =
+        bebok_core::agent::resolve_subagent_model(catalog, &cfg.delegation, &parent_model, None);
+    let mut models: Vec<String> = vec![parent_model.clone()];
+    if let Some(map) = cfg.models.as_object() {
+        models.extend(map.values().filter_map(|v| v.as_str().map(str::to_string)));
+    }
+    for spec in cfg.resolved_providers() {
+        for m in spec.models.iter().take(3) {
+            if m.contains('/') {
+                models.push(m.clone());
+            } else {
+                models.push(format!("{}/{m}", spec.name));
+            }
+        }
+    }
+    let mappings = bebok_core::agent::mappings_for(catalog, &models);
+    Ok(Json(serde_json::json!({
+        "policy": cfg.delegation.effective_model_policy().as_str(),
+        "parent_model": parent_model,
+        "resolved": resolved,
+        "mappings": mappings,
+    })))
 }
 
 /// `GET /session/{id}/agents` -> `{ agents: [...] }`, running first, then by
