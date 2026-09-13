@@ -10,6 +10,11 @@
  * file selected and its content loaded (`ExplorerSelectionStore.openInExplorer`
  * + a navigation to `/explorer`, consumed once by `ExplorerView`). The drawer
  * itself is otherwise unchanged - it still just tracks the selection.
+ *
+ * F9-3: every file row also carries a small "Open in preview" action (shown
+ * on hover/focus) that points the drawer's Preview panel at the file without
+ * leaving the chat - `ExplorerSelectionStore.openInPreview` opens, expands
+ * and scrolls the Preview section into view.
  */
 
 import {
@@ -73,11 +78,10 @@ const UNC_PREFIX = '\\\\?\\';
         } @else {
           <ul class="tree">
             @for (node of rows(); track node.path) {
-              <li>
+              <li class="item" [class.selected]="!node.is_dir && selected() === node.path">
                 <button
                   type="button"
                   class="row"
-                  [class.selected]="!node.is_dir && selected() === node.path"
                   [style.padding-left.px]="8 + node.depth * 12"
                   (click)="activate(node)"
                   [title]="node.path"
@@ -88,6 +92,21 @@ const UNC_PREFIX = '\\\\?\\';
                   }}</span>
                   <span class="name" [class.dir]="node.is_dir">{{ node.name }}</span>
                 </button>
+                @if (!node.is_dir) {
+                  <button
+                    type="button"
+                    class="preview-btn"
+                    (click)="preview(node)"
+                    [title]="t('explorer.openInPreview')"
+                    [attr.aria-label]="t('explorer.openInPreview') + ': ' + node.path"
+                    data-testid="explorer-panel-preview"
+                  >
+                    <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                }
               </li>
             }
           </ul>
@@ -154,13 +173,30 @@ const UNC_PREFIX = '\\\\?\\';
         overflow-y: auto;
       }
 
+      .item {
+        display: flex;
+        align-items: stretch;
+        min-width: 0;
+        border: 1px solid transparent;
+      }
+
+      .item:hover,
+      .item:focus-within {
+        background: var(--surface-2);
+      }
+
+      .item.selected {
+        background: var(--surface-3);
+        border-color: var(--border-strong);
+      }
+
       .row {
         display: flex;
         align-items: center;
         gap: 5px;
-        width: 100%;
+        flex: 1 1 auto;
         padding: 2px var(--space-8);
-        border: 1px solid transparent;
+        border: none;
         border-radius: 0;
         background: transparent;
         text-align: left;
@@ -170,14 +206,37 @@ const UNC_PREFIX = '\\\\?\\';
         min-width: 0;
       }
 
-      .row:hover {
-        background: var(--surface-2);
+      .row:hover:not(:disabled) {
+        background: transparent;
       }
 
-      .row.selected {
-        background: var(--surface-3);
-        border-color: var(--border-strong);
+      .item.selected .row {
         color: var(--text);
+      }
+
+      /* F9-3: per-file "open in preview" - visible on hover/keyboard focus. */
+      .preview-btn {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 var(--space-8);
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-faint);
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .item:hover .preview-btn,
+      .item:focus-within .preview-btn,
+      .preview-btn:focus-visible {
+        opacity: 1;
+      }
+
+      .preview-btn:hover:not(:disabled) {
+        background: transparent;
+        color: var(--accent);
       }
 
       .glyph {
@@ -249,6 +308,15 @@ export class ExplorerPanel {
         void this.loadRoot(dir);
       }
     });
+  }
+
+  /** F9-3: point the drawer's Preview panel at this file (stays in chat). */
+  preview(node: FsNode): void {
+    const dir = this.directory();
+    if (!dir || node.is_dir) {
+      return;
+    }
+    this.selection.openInPreview(dir, node.path);
   }
 
   /** Folders expand/collapse (lazy-loading children); files open the
