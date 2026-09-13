@@ -44,6 +44,8 @@
     "@angular/forms": "^20.3.0",
     "@angular/platform-browser": "^20.3.0",
     "@angular/router": "^20.3.0",
+    "@capacitor-community/speech-recognition": "^7.0.1",
+    "@capacitor/camera": "^7.0.5",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@xterm/addon-fit": "^0.11.0",

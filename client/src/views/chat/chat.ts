@@ -36,6 +36,7 @@ import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line
 import { ToastHost } from '../../ui/toast/toast-host';
 import { ChatSessionStore } from './chat-session.store';
 import { resolveEffectiveModel } from './effective-model';
+import { ComposerCapture } from './parts/composer-capture';
 import { MessageRowComponent } from './parts/message-row';
 import { ToolRunRowComponent } from './parts/tool-run-row';
 
@@ -180,6 +181,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     ToolRunRowComponent,
     TaskProgressLine,
     ToastHost,
+    ComposerCapture,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
@@ -200,6 +202,9 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly work = inject(EngineWorkTracker);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /** WP-M5 (F10-17): the Capacitor shell gets native capture controls. */
+  readonly isCapacitor = this.engine.isCapacitor;
 
   /**
    * Active session id, driven by the route (`/chat/:sessionID`). A signal (not
@@ -1224,6 +1229,17 @@ export class ChatView implements OnInit, OnDestroy {
       this.micSupported.set(false);
       this.dictating.set(false);
     }
+  }
+
+  /** WP-M5 (F10-17): native dictation result - appended, never sent. */
+  appendToDraft(text: string): void {
+    const clean = text.trim();
+    if (!clean) {
+      return;
+    }
+    const next = this.draft() ? `${this.draft()} ${clean}` : clean;
+    this.draft.set(next);
+    this.saveDraft(next);
   }
 
   describe(err: unknown): string {
