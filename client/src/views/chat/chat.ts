@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { EngineWorkTracker } from '../../core/engine-launcher';
 import {
   ActiveTask,
   AgentInfo,
@@ -195,6 +196,8 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
   private readonly sessionStore = inject(ChatSessionStore);
+  /** WP-M5 (F10-21): foreground-service bookkeeping on the phone (no-op elsewhere). */
+  private readonly work = inject(EngineWorkTracker);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -946,6 +949,9 @@ export class ChatView implements OnInit, OnDestroy {
     const head = this.queue()[0];
     this.sending.set(true);
     this.error.set(null);
+    // F10-21: raise the foreground service for the turn; released when the
+    // engine reports the session idle (or right below on a failed POST).
+    this.work.begin(sessionID);
     try {
       await this.engine.prompt(
         sessionID,
@@ -969,6 +975,7 @@ export class ChatView implements OnInit, OnDestroy {
       } else {
         this.error.set(message);
         this.queue.update((q) => q.slice(1));
+        this.work.end(sessionID);
       }
     } finally {
       if (sessionID === this.sessionID()) {
@@ -992,6 +999,7 @@ export class ChatView implements OnInit, OnDestroy {
       return;
     }
     this.running.set(false);
+    this.work.end(sessionID);
     await this.drainQueue();
   }
 
@@ -1138,6 +1146,7 @@ export class ChatView implements OnInit, OnDestroy {
     const sessionID = this.sessionID();
     this.running.set(false);
     this.error.set(null);
+    this.work.end(sessionID);
     try {
       await this.engine.abort(sessionID);
     } catch (err) {
