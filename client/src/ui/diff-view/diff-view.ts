@@ -3,7 +3,7 @@ import { Component, computed, inject, input } from '@angular/core';
 import { I18nService } from '../../i18n/i18n.service';
 import { protectUrls } from '../../core/linkify';
 import { CodeHighlightService } from '../code-highlight/code-highlight.service';
-import { DiffViewStore } from './diff-view.store';
+import { DiffViewMode, DiffViewStore } from './diff-view.store';
 
 type LineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx';
 
@@ -65,6 +65,7 @@ interface SplitRow {
           }
           <span class="stat add">+{{ added() }}</span>
           <span class="stat del">-{{ removed() }}</span>
+          @if (!forceMode()) {
           <div class="modes" role="group" [attr.aria-label]="t('diff.mode')">
             <button
               type="button"
@@ -81,6 +82,7 @@ interface SplitRow {
               (click)="store.setMode('split')"
             >{{ t('diff.split') }}</button>
           </div>
+          }
         </div>
 
         @if (mode() === 'split') {
@@ -241,8 +243,13 @@ export class DiffViewComponent {
   readonly text = input<string>('');
   /** Optional file path shown in the diff header. */
   readonly fileLabel = input<string>('');
+  /**
+   * WP-M6 (F10-26): pin the layout (the phone renders unified only - a split
+   * view has no room at 390 px). Null follows the user's stored preference.
+   */
+  readonly forceMode = input<DiffViewMode | null>(null);
 
-  readonly mode = this.store.mode;
+  readonly mode = computed<DiffViewMode>(() => this.forceMode() ?? this.store.mode());
 
   /** Line classification only (no highlighting yet - see `segments`). */
   private readonly rawLines = computed<Pick<DiffLine, 'cls' | 'text'>[] | null>(() => {

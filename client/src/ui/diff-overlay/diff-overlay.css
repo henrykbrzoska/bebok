@@ -126,3 +126,25 @@
   color: var(--danger);
   overflow-wrap: anywhere;
 }
+
+/* WP-M6 (F10-26): phone - the card is the screen. */
+.card.mobile {
+  width: 100%;
+  max-width: 100%;
+  height: 100dvh;
+  border-radius: 0;
+  border: 0;
+}
+
+.backdrop:has(.card.mobile) {
+  padding: 0;
+}
+
+.card.mobile .head {
+  padding: calc(var(--space-8) + env(safe-area-inset-top, 0px)) var(--space-12) var(--space-8);
+}
+
+.card.mobile .close {
+  min-width: 44px;
+  min-height: 44px;
+}

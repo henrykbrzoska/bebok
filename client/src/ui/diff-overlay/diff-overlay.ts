@@ -59,6 +59,12 @@ export class DiffOverlay {
   readonly session = input<string | undefined>(undefined);
   /** Absolute project root (for "Open in Explorer"). */
   readonly directory = input<string | null>(null);
+  /**
+   * WP-M6 (F10-26): phone layout - full-screen card, unified diff only, no
+   * "Revert" (not allow-listed for the remote scope) and no "Open in
+   * Explorer" (no explorer on the phone).
+   */
+  readonly mobile = input(false);
 
   readonly closed = output<void>();
   /** Fires after a successful revert (the panel re-lists). */
