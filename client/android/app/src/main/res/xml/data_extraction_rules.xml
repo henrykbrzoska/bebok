@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- F10-10: session transcripts and the engine config/state live under
+     filesDir - never let Android's cloud backup or device-to-device
+     transfer copy them off the device (allowBackup="false" already stops
+     the legacy full-data backup; this is the API 31+ auto-backup config
+     referenced by android:dataExtractionRules). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>
