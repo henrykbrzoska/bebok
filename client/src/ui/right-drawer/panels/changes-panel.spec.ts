@@ -13,7 +13,7 @@ import { ChangeEntry, SessionMeta } from '../../../core/engine.dtos';
 import { EventsStore } from '../../../core/events.store';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 import { DiffOverlay } from '../../diff-overlay/diff-overlay';
-import { ChangesPanel } from './changes-panel';
+import { ChangesPanel, groupChanges } from './changes-panel';
 
 const META: SessionMeta = {
   id: 's1',
@@ -28,6 +28,32 @@ const CHANGES: ChangeEntry[] = [
   { path: 'src/a.ts', added: 3, removed: 1, baseline: 'git', exists: true },
   { path: 'docs/new.md', added: 12, removed: 0, baseline: 'snapshot', exists: true },
 ];
+
+/** F9-6: the aggregated list (main session first, then children in spawn order). */
+const AGGREGATED: ChangeEntry[] = [
+  { path: 'src/a.ts', added: 3, removed: 1, baseline: 'git', exists: true, sessionID: 's1', agent: 'main', isChild: false },
+  { path: 'api/orders.ts', added: 5, removed: 0, baseline: 'git', exists: true, sessionID: 'c1', agent: 'api-orders', isChild: true },
+  { path: 'api/schema.ts', added: 1, removed: 1, baseline: 'git', exists: true, sessionID: 'c1', agent: 'api-orders', isChild: true },
+  { path: 'web/app.ts', added: 2, removed: 2, baseline: 'snapshot', exists: true, sessionID: 'c2', agent: 'frontend', isChild: true },
+];
+
+describe('groupChanges (F9-6)', () => {
+  it('groups rows by owning session, main first, keeping spawn order', () => {
+    const groups = groupChanges([AGGREGATED[1], AGGREGATED[0], AGGREGATED[2], AGGREGATED[3]]);
+    expect(groups.map((g) => [g.label, g.isChild, g.rows.length])).toEqual([
+      ['main', false, 1],
+      ['api-orders', true, 2],
+      ['frontend', true, 1],
+    ]);
+  });
+
+  it('puts rows from an engine without the F9-6 fields into one unlabeled group', () => {
+    const groups = groupChanges(CHANGES);
+    expect(groups.length).toBe(1);
+    expect(groups[0]).toEqual(jasmine.objectContaining({ sessionID: '', label: '', isChild: false }));
+    expect(groups[0].rows.length).toBe(2);
+  });
+});
 
 describe('ChangesPanel (F6-9)', () => {
   let fixture: ComponentFixture<ChangesPanel>;
@@ -117,7 +143,53 @@ describe('ChangesPanel (F6-9)', () => {
     const el = fixture.nativeElement as HTMLElement;
     expect(fixture.componentInstance.openPath()).toBe('src/a.ts');
     expect(el.querySelector('app-diff-overlay')).not.toBeNull();
-    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'src/a.ts');
+    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'src/a.ts', undefined);
+  });
+
+  it('F9-6: lists rows without headers when only the main session changed files', async () => {
+    session.meta.set(META);
+    await settle();
+    expect((fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="change-group"]').length).toBe(0);
+    expect(rows().length).toBe(2);
+  });
+
+  it('F9-6: groups rows under per-agent headers once a sub-agent contributed, main first', async () => {
+    engine.sessionChanges.and.resolveTo(AGGREGATED);
+    session.meta.set(META);
+    await settle();
+    const el = fixture.nativeElement as HTMLElement;
+    const heads = Array.from(el.querySelectorAll('[data-testid="change-group"]'));
+    expect(
+      heads.map((h) => [
+        h.querySelector('.group-label')!.textContent!.trim(),
+        h.querySelector('.group-count')!.textContent!.trim(),
+      ]),
+    ).toEqual([
+      ['main', '1'],
+      ['api-orders', '2'],
+      ['frontend', '1'],
+    ]);
+    expect(heads[0].classList.contains('child')).toBeFalse();
+    expect(heads[1].classList.contains('child')).toBeTrue();
+    // Existing row look is kept: path split + counts, tagged with the owning session.
+    const list = rows();
+    expect(list.length).toBe(4);
+    expect(list[1].getAttribute('data-session')).toBe('c1');
+    expect(list[1].querySelector('.file-name')?.textContent).toBe('orders.ts');
+    expect(list[1].textContent).toContain('+5');
+    expect(list[1].getAttribute('title')).toContain('api-orders');
+    expect(el.textContent).toContain('Tracked files: 4');
+  });
+
+  it('F9-6: opens the overlay for the owning session and forwards it to the diff call', async () => {
+    engine.sessionChanges.and.resolveTo(AGGREGATED);
+    session.meta.set(META);
+    await settle();
+    rows()[2].click();
+    await settle();
+    expect(fixture.componentInstance.openPath()).toBe('api/schema.ts');
+    expect(fixture.componentInstance.openSession()).toBe('c1');
+    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'api/schema.ts', 'c1');
   });
 
   it('re-lists when the turn settles', async () => {

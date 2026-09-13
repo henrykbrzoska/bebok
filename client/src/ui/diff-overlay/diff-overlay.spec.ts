@@ -19,6 +19,7 @@ import { DiffOverlay } from './diff-overlay';
       [sessionId]="sessionId()"
       [path]="path()"
       [directory]="directory()"
+      [session]="session()"
       (closed)="closed = closed + 1"
       (reverted)="reverted.push($event)"
     />
@@ -28,6 +29,7 @@ class Host {
   readonly sessionId = signal('s1');
   readonly path = signal('src/a.ts');
   readonly directory = signal<string | null>('/p');
+  readonly session = signal<string | undefined>(undefined);
   closed = 0;
   reverted: string[] = [];
 }
@@ -86,10 +88,20 @@ describe('DiffOverlay (F6-9)', () => {
 
   it('fetches and renders the unified diff with the baseline badge', async () => {
     await settle();
-    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'src/a.ts');
+    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'src/a.ts', undefined);
     expect(el().querySelector('app-diff-view')).not.toBeNull();
     expect(el().textContent).toContain('vs git HEAD');
     expect(el().textContent).toContain('src/a.ts');
+  });
+
+  it('F9-6: forwards the owning session to the diff and revert calls', async () => {
+    await settle();
+    fixture.componentInstance.session.set('child-1');
+    await settle();
+    expect(engine.sessionChangeDiff).toHaveBeenCalledWith('s1', 'src/a.ts', 'child-1');
+    button('revert-file').click();
+    await settle();
+    expect(engine.revertSessionChange).toHaveBeenCalledWith('s1', 'src/a.ts', 'child-1');
   });
 
   it('reverts only after confirmation, then reports and closes', async () => {
@@ -104,7 +116,7 @@ describe('DiffOverlay (F6-9)', () => {
     confirmSpy.and.returnValue(true);
     button('revert-file').click();
     await settle();
-    expect(engine.revertSessionChange).toHaveBeenCalledWith('s1', 'src/a.ts');
+    expect(engine.revertSessionChange).toHaveBeenCalledWith('s1', 'src/a.ts', undefined);
     expect(fixture.componentInstance.reverted).toEqual(['src/a.ts']);
     expect(fixture.componentInstance.closed).toBe(1);
   });

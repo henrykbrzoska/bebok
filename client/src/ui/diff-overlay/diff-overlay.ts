@@ -51,6 +51,12 @@ export class DiffOverlay {
   readonly sessionId = input.required<string>();
   /** Project-relative path of the tracked file. */
   readonly path = input.required<string>();
+  /**
+   * F9-6: the (descendant) session whose tracker holds the change; forwarded
+   * as `?session=` / body `session`. Omitted, the engine searches main then
+   * children.
+   */
+  readonly session = input<string | undefined>(undefined);
   /** Absolute project root (for "Open in Explorer"). */
   readonly directory = input<string | null>(null);
 
@@ -68,7 +74,8 @@ export class DiffOverlay {
     effect(() => {
       const id = this.sessionId();
       const path = this.path();
-      void this.load(id, path);
+      const session = this.session();
+      void this.load(id, path, session);
     });
   }
 
@@ -96,7 +103,11 @@ export class DiffOverlay {
     this.reverting.set(true);
     this.error.set(null);
     try {
-      const result = await this.engine.revertSessionChange(this.sessionId(), this.path());
+      const result = await this.engine.revertSessionChange(
+        this.sessionId(),
+        this.path(),
+        this.session(),
+      );
       this.reverted.emit(result.path);
       this.close();
     } catch (err) {
@@ -106,13 +117,13 @@ export class DiffOverlay {
     }
   }
 
-  private async load(id: string, path: string): Promise<void> {
+  private async load(id: string, path: string, session: string | undefined): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
     this.diff.set(null);
     try {
-      const res = await this.engine.sessionChangeDiff(id, path);
-      if (this.sessionId() !== id || this.path() !== path) {
+      const res = await this.engine.sessionChangeDiff(id, path, session);
+      if (this.sessionId() !== id || this.path() !== path || this.session() !== session) {
         return;
       }
       this.diff.set(res.diff);

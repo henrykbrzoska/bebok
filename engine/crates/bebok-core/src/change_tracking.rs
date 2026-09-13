@@ -76,6 +76,26 @@ pub struct ChangeEntry {
     pub baseline: BaselineKind,
     /// Whether the file currently exists on disk.
     pub exists: bool,
+    /// F9-6: the session whose tracker recorded this change (the parent's
+    /// listing aggregates its sub-agent sessions). Filled by the route.
+    #[serde(rename = "sessionID")]
+    pub session_id: String,
+    /// F9-6: label of the agent that made the change (`main` for the
+    /// listed session itself, the child's alias for a sub-agent).
+    pub agent: String,
+    /// F9-6: true when the change came from a descendant session.
+    #[serde(rename = "isChild")]
+    pub is_child: bool,
+}
+
+impl ChangeEntry {
+    /// Tag an entry with its originating session (F9-6).
+    pub fn tagged(mut self, session_id: &str, agent: &str, is_child: bool) -> Self {
+        self.session_id = session_id.to_string();
+        self.agent = agent.to_string();
+        self.is_child = is_child;
+        self
+    }
 }
 
 /// `GET /session/{id}/changes/diff` result.
@@ -183,9 +203,25 @@ impl Tracker {
                     removed,
                     baseline: baseline.kind(),
                     exists: current.is_some(),
+                    session_id: String::new(),
+                    agent: String::new(),
+                    is_child: false,
                 }
             })
             .collect()
+    }
+
+    /// Number of tracked paths (cheap: index only, no diffing). Used for the
+    /// "N files changed" status rows (F9-7).
+    pub fn tracked_count(&self) -> usize {
+        self.read_index().entries.len()
+    }
+
+    /// Whether `input` is a tracked path of this session.
+    pub fn tracks(&self, input: &str) -> bool {
+        normalize_rel(input)
+            .map(|rel| self.read_index().entries.iter().any(|e| e.path == rel))
+            .unwrap_or(false)
     }
 
     /// Unified diff of one tracked path against its baseline.
