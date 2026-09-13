@@ -849,6 +849,7 @@ export const en = {
   'mobile.onboarding.addressHint': 'Type the address of a running engine (browser / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'The engine rejected the token (401).',
+  'mobile.onboarding.continueConnected': 'Keep using the connected engine',
   'mobile.home.noEngineTitle': 'No engine connected',
   'mobile.home.noEngineStarting': 'Starting the embedded engine…',
   'mobile.home.noEngineHint': 'Set up a local engine, pair with a desktop or enter an address.',

@@ -841,6 +841,7 @@ export const uk: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': 'Введіть адресу запущеного рушія (браузер / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'Рушій відхилив токен (401).',
+  'mobile.onboarding.continueConnected': 'Продовжити з підключеним рушієм',
   'mobile.home.noEngineTitle': 'Рушій не підключено',
   'mobile.home.noEngineStarting': 'Запуск вбудованого рушія…',
   'mobile.home.noEngineHint': 'Налаштуйте локальний рушій, пов’яжіть із комп’ютером або введіть адресу.',

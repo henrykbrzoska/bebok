@@ -97,6 +97,16 @@ export function normalizeEngineAddress(raw: string): string {
         <div class="ob-error" role="alert" data-testid="onboarding-platform-error">
           <strong>{{ t('mobile.onboarding.embeddedFailedTitle') }}</strong>
           <span>{{ err }}</span>
+          @if (connected()) {
+            <button
+              type="button"
+              class="ob-link"
+              (click)="continueConnected()"
+              data-testid="onboarding-continue"
+            >
+              {{ t('mobile.onboarding.continueConnected') }}
+            </button>
+          }
         </div>
       }
 
@@ -284,6 +294,16 @@ export function normalizeEngineAddress(raw: string): string {
         cursor: default;
       }
 
+      .ob-link {
+        align-self: flex-start;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        cursor: pointer;
+      }
+
       .ob-error {
         display: flex;
         flex-direction: column;
@@ -342,6 +362,18 @@ export class OnboardingView {
     } finally {
       this.busy.set(null);
     }
+  }
+
+  /**
+   * The embedded engine failed but `connect()` fell back to the previously
+   * active paired desktop: let the user keep that instead of retrying.
+   */
+  continueConnected(): void {
+    if (!this.connected()) {
+      return;
+    }
+    this.targets.platformError.set(null);
+    this.done.emit();
   }
 
   /** Pair with desktop: WP-M6's screen owns the flow. */

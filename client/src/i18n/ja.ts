@@ -840,6 +840,7 @@ export const ja: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': '実行中のエンジンのアドレスを入力します（ブラウザ / LAN）。',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'エンジンがトークンを拒否しました (401)。',
+  'mobile.onboarding.continueConnected': '接続中のエンジンを使い続ける',
   'mobile.home.noEngineTitle': 'エンジンが接続されていません',
   'mobile.home.noEngineStarting': '内蔵エンジンを起動しています…',
   'mobile.home.noEngineHint': 'ローカルエンジンを設定するか、デスクトップとペアリングするか、アドレスを入力してください。',

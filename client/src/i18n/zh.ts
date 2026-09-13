@@ -840,6 +840,7 @@ export const zh: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': '输入正在运行的引擎地址（浏览器 / 局域网）。',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': '引擎拒绝了令牌（401）。',
+  'mobile.onboarding.continueConnected': '继续使用已连接的引擎',
   'mobile.home.noEngineTitle': '未连接引擎',
   'mobile.home.noEngineStarting': '正在启动内置引擎…',
   'mobile.home.noEngineHint': '设置本地引擎、与电脑配对或输入地址。',

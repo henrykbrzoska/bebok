@@ -841,6 +841,7 @@ export const pl: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': 'Wpisz adres działającego silnika (przeglądarka / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'Silnik odrzucił token (401).',
+  'mobile.onboarding.continueConnected': 'Używaj dalej połączonego silnika',
   'mobile.home.noEngineTitle': 'Brak połączonego silnika',
   'mobile.home.noEngineStarting': 'Uruchamianie wbudowanego silnika…',
   'mobile.home.noEngineHint': 'Skonfiguruj lokalny silnik, sparuj z komputerem albo podaj adres.',

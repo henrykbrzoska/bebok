@@ -841,6 +841,7 @@ export const it: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': 'Digita l’indirizzo di un motore in esecuzione (browser / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'Il motore ha rifiutato il token (401).',
+  'mobile.onboarding.continueConnected': 'Continua con il motore connesso',
   'mobile.home.noEngineTitle': 'Nessun motore connesso',
   'mobile.home.noEngineStarting': 'Avvio del motore integrato…',
   'mobile.home.noEngineHint': 'Configura un motore locale, associa un computer o inserisci un indirizzo.',

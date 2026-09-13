@@ -841,6 +841,7 @@ export const de: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': 'Adresse einer laufenden Engine eingeben (Browser / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'Die Engine hat das Token abgelehnt (401).',
+  'mobile.onboarding.continueConnected': 'Verbundene Engine weiter verwenden',
   'mobile.home.noEngineTitle': 'Keine Engine verbunden',
   'mobile.home.noEngineStarting': 'Eingebettete Engine wird gestartet…',
   'mobile.home.noEngineHint': 'Lokale Engine einrichten, mit einem Desktop koppeln oder eine Adresse eingeben.',

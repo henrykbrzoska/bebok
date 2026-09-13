@@ -840,6 +840,7 @@ export const ko: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': '실행 중인 엔진의 주소를 입력하세요 (브라우저 / LAN).',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': '엔진이 토큰을 거부했습니다 (401).',
+  'mobile.onboarding.continueConnected': '연결된 엔진 계속 사용',
   'mobile.home.noEngineTitle': '연결된 엔진 없음',
   'mobile.home.noEngineStarting': '내장 엔진 시작 중…',
   'mobile.home.noEngineHint': '로컬 엔진을 설정하거나 데스크톱과 페어링하거나 주소를 입력하세요.',

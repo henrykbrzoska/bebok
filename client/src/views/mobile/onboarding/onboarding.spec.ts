@@ -149,6 +149,19 @@ describe('OnboardingView (F10-16)', () => {
     expect(el('onboarding-platform-error')).toBeNull();
   });
 
+  it('offers to continue with the fallback engine when the embedded one failed', async () => {
+    targets.platformError.set('embedded engine unavailable: x');
+    fixture.detectChanges();
+    expect(el('onboarding-continue')).toBeNull();
+    engine.connected.set(true); // connect() fell back to a paired desktop
+    fixture.detectChanges();
+    el<HTMLButtonElement>('onboarding-continue')!.click();
+    await settle();
+    expect(targets.platformError()).toBeNull();
+    expect(done).toBe(1);
+    expect(engine.connect).not.toHaveBeenCalled();
+  });
+
   it('"Pair with desktop" hands over to the Remote tab', async () => {
     el<HTMLButtonElement>('onboarding-pair')!.click();
     await settle();

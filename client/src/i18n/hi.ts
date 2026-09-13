@@ -840,6 +840,7 @@ export const hi: Record<MessageKey, string> = {
   'mobile.onboarding.addressHint': 'चल रहे इंजन का पता लिखें (ब्राउज़र / LAN)।',
   'mobile.onboarding.addressPlaceholder': 'http://192.168.1.10:8790',
   'mobile.onboarding.unauthorized': 'इंजन ने टोकन अस्वीकार कर दिया (401)।',
+  'mobile.onboarding.continueConnected': 'जुड़े हुए इंजन का उपयोग जारी रखें',
   'mobile.home.noEngineTitle': 'कोई इंजन जुड़ा नहीं',
   'mobile.home.noEngineStarting': 'अंतर्निहित इंजन शुरू हो रहा है…',
   'mobile.home.noEngineHint': 'स्थानीय इंजन सेट करें, डेस्कटॉप से जोड़ें या पता दर्ज करें।',
