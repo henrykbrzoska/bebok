@@ -53,7 +53,7 @@ describe('renderMarkdownView', () => {
   it('marks a relative link for click interception, leaves absolute links alone', () => {
     const html = renderMarkdownView('[see](./other.md) and [site](https://example.com)');
     expect(html).toContain('<a href="./other.md" class="relative-link">see</a>');
-    expect(html).toContain('<a href="https://example.com" target="_blank" rel="noreferrer">site</a>');
+    expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener noreferrer">site</a>');
   });
 
   it('renders bullet and numbered lists', () => {
@@ -69,5 +69,34 @@ describe('renderMarkdownView', () => {
     const html = renderMarkdownView('<script>alert(1)</script>');
     expect(html).not.toContain('<script>');
     expect(html).toContain('&lt;script&gt;');
+  });
+
+  describe('F9-11 bare URL linkification', () => {
+    it('linkifies a bare URL in prose, excluding trailing punctuation', () => {
+      const html = renderMarkdownView('See https://example.com for details.');
+      expect(html).toBe(
+        '<p>See <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a> for details.</p>',
+      );
+    });
+
+    it('does not double-wrap a URL already in markdown link syntax', () => {
+      const html = renderMarkdownView('[site](https://example.com)');
+      expect((html.match(/<a /g) ?? []).length).toBe(1);
+    });
+
+    it('linkifies a bare URL inside a table cell', () => {
+      const html = renderMarkdownView(['| Link |', '| --- |', '| https://example.com |'].join('\n'));
+      expect(html).toContain(
+        '<td><a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a></td>',
+      );
+    });
+
+    it('keeps a Wikipedia-style URL with a balanced trailing paren intact', () => {
+      const html = renderMarkdownView('See https://en.wikipedia.org/wiki/Foo_(bar) for background.');
+      expect(html).toContain(
+        '<a href="https://en.wikipedia.org/wiki/Foo_(bar)" target="_blank" rel="noopener noreferrer">' +
+          'https://en.wikipedia.org/wiki/Foo_(bar)</a>',
+      );
+    });
   });
 });

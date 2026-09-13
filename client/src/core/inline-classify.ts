@@ -20,6 +20,8 @@
  * separate render path (`ui/code-highlight`) and are not touched here.
  */
 
+import { LINK_REL } from './linkify';
+
 export type InlineKind =
   | 'path'
   | 'url'
@@ -328,7 +330,7 @@ export function renderClassifiedInlineCode(escaped: string, options: ClassifiedI
     }
 
     case 'url':
-      return `<a href="${escaped}" target="_blank" rel="noreferrer" class="ic ic-url">${escaped}</a>`;
+      return `<a href="${escaped}" target="_blank" rel="${LINK_REL}" class="ic ic-url">${escaped}</a>`;
 
     case 'route':
       return `<code class="ic ic-route">${escaped}</code>`;

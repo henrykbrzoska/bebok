@@ -233,4 +233,33 @@ describe('ToolPartComponent default state (F6-1b)', () => {
     expect(dot.classList.contains('ring-failed')).toBeTrue();
     expect(dot.classList.contains('safety-dangerous')).toBeTrue();
   });
+
+  it('F9-11: linkifies a bare URL in the error panel (plain text, no markdown)', async () => {
+    setPart({
+      ...FAILED,
+      state: { state: 'error', input: { command: 'curl' }, error: 'failed: see https://example.com/logs.' },
+    });
+    head().click();
+    await fixture.whenStable();
+    const errorPanel = fixture.nativeElement.querySelector('.panel.error code') as HTMLElement;
+    const link = errorPanel.querySelector('a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('https://example.com/logs');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    // The trailing period stays out of the link, and raw HTML in the error
+    // message is escaped rather than rendered.
+    expect(errorPanel.textContent).toBe('failed: see https://example.com/logs.');
+  });
+
+  it('F9-11: escapes raw HTML in the error panel instead of rendering it', async () => {
+    setPart({
+      ...FAILED,
+      state: { state: 'error', input: { command: 'curl' }, error: 'boom <script>alert(1)</script>' },
+    });
+    head().click();
+    await fixture.whenStable();
+    const errorPanel = fixture.nativeElement.querySelector('.panel.error code') as HTMLElement;
+    expect(errorPanel.querySelector('script')).toBeNull();
+    expect(errorPanel.textContent).toBe('boom <script>alert(1)</script>');
+  });
 });

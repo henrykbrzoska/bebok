@@ -44,7 +44,7 @@ describe('renderMarkdown', () => {
   it('keeps bold, links and bare .md paths working on escaped text', () => {
     const html = renderMarkdown('**bold** [site](https://example.com/?a=1&b=2) see docs/plan.md');
     expect(html).toContain('<strong>bold</strong>');
-    expect(html).toContain('<a href="https://example.com/?a=1&amp;b=2" target="_blank" rel="noreferrer">site</a>');
+    expect(html).toContain('<a href="https://example.com/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">site</a>');
     expect(html).toContain('<a href="docs/plan.md" class="preview-link">docs/plan.md</a>');
   });
 
@@ -118,6 +118,57 @@ describe('renderMarkdown', () => {
       const html = renderMarkdown('`<script>alert(1)</script>`');
       expect(html).not.toContain('<script>');
       expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
+  });
+
+  describe('F9-11 bare URL linkification', () => {
+    it('linkifies a bare URL in prose with target=_blank and the shared rel', () => {
+      const html = renderMarkdown('See https://example.com for details.');
+      expect(html).toBe(
+        '<p>See <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a> for details.</p>',
+      );
+    });
+
+    it('excludes trailing punctuation from bare URLs', () => {
+      const html = renderMarkdown('Visit https://example.com/page, then https://example.org.');
+      expect(html).toContain(
+        '<a href="https://example.com/page" target="_blank" rel="noopener noreferrer">https://example.com/page</a>,',
+      );
+      expect(html).toContain(
+        '<a href="https://example.org" target="_blank" rel="noopener noreferrer">https://example.org</a>.',
+      );
+    });
+
+    it('linkifies a bare URL inside a list item', () => {
+      const html = renderMarkdown('- see https://example.com');
+      expect(html).toBe(
+        '<ul><li>see <a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a></li></ul>',
+      );
+    });
+
+    it('linkifies a bare URL inside bold text', () => {
+      const html = renderMarkdown('**https://example.com is important**');
+      expect(html).toBe(
+        '<p><strong><a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a> is important</strong></p>',
+      );
+    });
+
+    it('does not double-wrap a URL already in markdown link syntax', () => {
+      const html = renderMarkdown('[site](https://example.com)');
+      expect((html.match(/<a /g) ?? []).length).toBe(1);
+    });
+
+    it('does not double-wrap a URL already turned into the `url` inline chip', () => {
+      const html = renderMarkdown('`https://example.com`');
+      expect((html.match(/<a /g) ?? []).length).toBe(1);
+      expect(html).toContain('class="ic ic-url"');
+    });
+
+    it('linkifies a localhost URL', () => {
+      const html = renderMarkdown('running at http://localhost:4200');
+      expect(html).toContain(
+        '<a href="http://localhost:4200" target="_blank" rel="noopener noreferrer">http://localhost:4200</a>',
+      );
     });
   });
 });
