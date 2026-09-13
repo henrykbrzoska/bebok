@@ -32,6 +32,8 @@ fn parse_uuid(s: &str) -> uuid::Uuid {
     uuid::Uuid::parse_str(s).unwrap_or_else(|_| uuid::Uuid::nil())
 }
 
+// `ToolOutput` is the tool-result envelope; the Err path is rare.
+#[allow(clippy::result_large_err)]
 async fn open_parent(
     store: &Weak<InstanceStore>,
     ctx: &ToolCtx,

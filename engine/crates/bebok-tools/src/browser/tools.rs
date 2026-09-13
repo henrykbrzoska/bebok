@@ -54,6 +54,9 @@ pub(super) fn state_json(url: &str, title: &str) -> Value {
 }
 
 /// Run `fut` under the call timeout and the turn's abort token.
+// `ToolOutput` is the tool-result envelope; the Err path is rare and boxing it
+// would ripple through every browser tool.
+#[allow(clippy::result_large_err)]
 pub(super) async fn bounded<T, F>(ctx: &ToolCtx, title: &str, fut: F) -> Result<T, ToolOutput>
 where
     F: std::future::Future<Output = Result<T, String>>,
