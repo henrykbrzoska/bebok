@@ -571,15 +571,20 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            path,
-            crate::git::worktrees_dir(&project)
-                .join("bebok")
-                .join("session-abc")
-        );
         assert!(
             path.join(".git").exists(),
             "a real worktree has a .git link file"
+        );
+        // CI's Windows TEMP may use an 8.3 path (RUNNER~1) while the store
+        // canonicalizes the root (runneradmin): compare canonical forms.
+        assert_eq!(
+            std::fs::canonicalize(&path).unwrap(),
+            std::fs::canonicalize(
+                crate::git::worktrees_dir(&project)
+                    .join("bebok")
+                    .join("session-abc")
+            )
+            .unwrap()
         );
         assert_eq!(session.directory(), crate::util::normalize_path(&path));
         let info = crate::git::worktree_info(std::path::Path::new(session.directory())).unwrap();

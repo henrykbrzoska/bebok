@@ -339,7 +339,18 @@ pub fn normalize_rel(input: &str) -> Result<String, String> {
     if parts.is_empty() {
         return Err("path escapes project root".into());
     }
+    // A Windows drive spelling (`C:\x`, `C:x`) is only a `Prefix` component
+    // on Windows; elsewhere it parses as a plain `C:` directory, so reject it
+    // explicitly to keep the rule identical on every platform.
+    if is_drive_component(&parts[0]) {
+        return Err("path escapes project root".into());
+    }
     Ok(parts.join("/"))
+}
+
+fn is_drive_component(part: &str) -> bool {
+    let bytes = part.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// Render the unified diff for one path, or `None` when nothing changed.
@@ -477,7 +488,7 @@ mod tests {
     fn normalizes_and_rejects_paths() {
         assert_eq!(normalize_rel("./src\\a.rs").unwrap(), "src/a.rs");
         assert_eq!(normalize_rel("a/./b.txt").unwrap(), "a/b.txt");
-        for bad in ["", ".", "../x", "/abs", r"C:\x", "a/../../b"] {
+        for bad in ["", ".", "../x", "/abs", r"C:\x", "C:/x", "c:x", "a/../../b"] {
             assert!(normalize_rel(bad).is_err(), "{bad}");
         }
     }
