@@ -68,37 +68,23 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
         );
     }
     s.push_str(
-        "- Dev servers: start them with `bash` in the background with output redirected to a log \
-         file, then poll the log (or `fetch` the URL) until the server prints its ready line. \
-         Windows: `start \"dev\" /B cmd /C \"npm run dev > .bebok-dev.log 2>&1\"`; macOS/Linux: \
-         `nohup npm run dev > .bebok-dev.log 2>&1 &`. Never run a server in the foreground: the \
-         `bash` call would block until its timeout. Before starting one, check whether the \
-         project's port already answers (`fetch` http://localhost:<port>/) and that the response \
-         really is this project; reuse it only then.\n",
+        "- Dev servers: start them with `bash` and `background: true` — the call returns at once \
+         with an `id`, the `pid` and a log path under `.bebok/run/`; read the log with `tail` / \
+         `read_file` (or `fetch` the URL) until the server prints its ready line, and stop it \
+         later with `bash_kill` (id). Never run a server in the foreground and never use \
+         `start /B`, `nohup` or `&` tricks: a foreground `bash` call blocks until its timeout. \
+         Before starting one, check whether the project's port already answers (`fetch` \
+         http://localhost:<port>/) and that the response really is this project; reuse it only \
+         then, otherwise start your own on a free port.\n\
+         - A frontend usually depends on more than one server: check for a dev-server proxy \
+         (`proxy.conf.json`, `proxy.conf.js`, `vite.config` `server.proxy`, `devServer.proxy`, \
+         `apps/<app>/project.json` serve options, an `API_URL`/`apiBase` in `environment*.ts` or \
+         `.env`) and start EVERY target the page calls (api, backend, mock server, database \
+         container) before you open the page. A page stuck on a spinner / \"loading\" state with \
+         its API down is a FAILED verification, not a note for the user.\n",
     );
     match mode {
-        FrontendVerify::Auto => s.push_str(
-            "- Policy (frontend verification: auto) — MANDATORY: whenever you modify frontend/web \
-             code (components, templates, styles, routes, client-side state) you must look at the \
-             result in the browser before you answer. A passing build, lint or unit test is NOT \
-             verification of frontend work; only opening the page is. The user must never have to \
-             check your frontend work by hand, and \"it builds\" is not an acceptable final state. \
-             Do this, in order, without asking:\n\
-             1. Find the dev server: work out the project's serve command and port (package.json \
-             scripts, project.json, README), `fetch` that URL and confirm the response is THIS app \
-             (title/markup) — another project may be using the port, in which case start your own \
-             server on a free port. If nothing answers, start it with `bash` in the background as \
-             described above and poll its log until it prints the ready line / URL.\n\
-             2. `browser_open` the affected route (e.g. http://localhost:<port>/inventory).\n\
-             3. `browser_wait` for the element or text you changed, then `browser_screenshot`.\n\
-             4. `browser_console` with level=\"error\"; fix anything your change caused and \
-             re-verify (at most 2 more rounds).\n\
-             5. Confirm in the screenshot — and with `browser_find` / `browser_get_text` for exact \
-             values — that the specific change is visible.\n\
-             6. End your final answer with exactly one line: `Verification: opened <url>, saw \
-             <what>, console <clean | N errors>` — or `Verification: not possible because <reason>` \
-             if the browser or dev server truly could not be used.\n",
-        ),
+        FrontendVerify::Auto => s.push_str(AUTO_POLICY),
         FrontendVerify::Ask => s.push_str(
             "- Policy (frontend verification: ask): after modifying frontend/web code, ask the user \
              once whether you should verify the change in the browser (start/reuse the dev server, \
@@ -109,6 +95,52 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
     }
     s.trim_end().to_string()
 }
+
+/// The `auto` policy (F8-1, deepened in F9-8): every dependency started,
+/// data loaded, the feature exercised, the API checked separately, failures
+/// fixed and re-verified, and an explicit acceptance gate on the final
+/// answer.
+pub const AUTO_POLICY: &str = "- Policy (frontend verification: auto) — MANDATORY: whenever you modify frontend/web \
+code (components, templates, styles, routes, client-side state) you must look at the result in \
+the browser AND use it before you answer. A passing build, lint or unit test is NOT verification \
+of frontend work; opening the route and seeing it load is only the start. The user must never \
+have to check your frontend work by hand, and \"it builds\" or \"the page is still loading\" are \
+not acceptable final states. Do this, in order, without asking:\n\
+1. Map the dependencies: work out the frontend serve command and port (package.json scripts, \
+project.json, README) AND every server the page talks to (dev-server proxy config, API base \
+URL, environment files). For each, `fetch` its URL and confirm the response is THIS project \
+(title/markup/JSON shape) — another project may be using the port, in which case start your own \
+on a free port. Start whatever does not answer with `bash` `background: true` (api first, then \
+the frontend) and read the logs until each prints its ready line / URL.\n\
+2. Verify the API on its own: `fetch` (or `bash` curl) the endpoint(s) the feature uses and check \
+the JSON (status 200, expected fields, expected number of rows). If the API is wrong, fix it \
+before touching the browser.\n\
+3. `browser_open` the affected route, then `browser_wait` for the DATA, not the route: the table \
+rows / list items / the text you changed (e.g. selector `table tbody tr` or the first row's \
+text), with a timeout that gives the API time to answer. A spinner, skeleton or \"loading\" text \
+still visible after the wait is a failure: read `browser_console` (level=\"error\"), read the \
+server logs, find the cause (wrong proxy target, api not started, CORS, 404 route, exception), \
+fix it, and re-verify.\n\
+4. INTERACT with what you built: use `browser_find` to locate the new nav link, filter, sort \
+control, search box, button or form and exercise each one with `browser_click` / `browser_type` \
+(navigate to the page via its nav link, apply a filter and check the row count changes, sort a \
+column and check the order, type a search term and check the results). `browser_screenshot` \
+AFTER each interaction and `browser_console` (level=\"error\") after each step. Confirm exact \
+values with `browser_get_text` / `browser_find` where a screenshot is ambiguous.\n\
+5. Anything that does not work is yours to fix: change the code, rebuild if needed, and re-run \
+steps 2-4 (at most 2 more rounds). Only report a failure you could not fix after that, saying \
+precisely what you tried.\n\
+6. Acceptance gate — the task is NOT done while verification found a functional failure. Your \
+final answer MUST start with one line `Status: PASS`, `Status: PASS WITH NOTES` or \
+`Status: FAIL`. With FAIL, list what does not work and what you tried, and do NOT describe the \
+feature as implemented/delivered. It MUST also contain one line `Verification: opened <url>, \
+did <interactions>, saw <what, with counts/values>, console <clean | N errors>` backed by a \
+screenshot taken AFTER the interactions — or `Verification: not possible because <reason>` \
+(which is a FAIL) if the browser or a required server truly could not be used.\n\
+7. If sub-agents did the work: a sub-agent's \"done\" is a claim, not a fact. Before integrating \
+and before your final answer, re-check each report against reality yourself — run the build / \
+tests the child says it ran, `fetch` the endpoint it says it added, open the page it says it \
+changed and perform steps 2-6 on the combined result.\n";
 
 #[cfg(test)]
 mod tests {
@@ -156,6 +188,36 @@ mod tests {
         assert!(text.contains("Verification: opened <url>"));
         assert!(text.contains("without asking"));
         assert!(!text.contains("ask the user once"));
+    }
+
+    /// F9-8: the deepened policy — dependencies, data wait, interaction,
+    /// API check, fix loop, acceptance gate, sub-agent claims.
+    #[test]
+    fn auto_mode_requires_depth_and_an_acceptance_gate() {
+        let text = render(FrontendVerify::Auto, true);
+        for needle in [
+            "proxy",
+            "every server",
+            "`background: true`",
+            "`bash_kill`",
+            "Verify the API on its own",
+            "`browser_wait` for the DATA",
+            "\"loading\" text",
+            "INTERACT",
+            "`browser_find`",
+            "`browser_click` / `browser_type`",
+            "AFTER each interaction",
+            "Acceptance gate",
+            "`Status: PASS`",
+            "`Status: FAIL`",
+            "do NOT describe the feature as implemented",
+            "claim, not a fact",
+        ] {
+            assert!(text.contains(needle), "missing {needle:?}");
+        }
+        // The old "just start /B it" recipe is gone.
+        assert!(!text.contains("start \"dev\" /B"));
+        assert!(!text.contains("nohup npm run dev"));
     }
 
     #[test]
