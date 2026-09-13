@@ -75,6 +75,28 @@ pub enum Part {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cache_creation_input_tokens: Option<u64>,
     },
+    /// F9-7: a deterministic, token-free status row the engine appends to
+    /// the parent transcript while sub-agents run (`task.started`,
+    /// `task.progress` milestones, `task.ended`). Rendered by the client as
+    /// a compact system-style line; never sent to the model
+    /// (`agent::request` ignores it) and never counted as assistant text.
+    Status {
+        /// `task.started` | `task.progress` | `task.ended` | free-form.
+        kind: String,
+        text: String,
+        /// Unix ms.
+        at: i64,
+        #[serde(rename = "taskID", default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(
+            rename = "childSessionID",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        child_session_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
