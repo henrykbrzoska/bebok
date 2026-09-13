@@ -351,7 +351,9 @@ export class RemoteTab {
           }
         }
         invite ??= pending ? this.deepLinks.consume() : null;
-        if (invite) {
+        if (invite || raw) {
+          // `?pair=<bebok://…>` carries an invite; a bare `?pair=1` (WP-M5's
+          // onboarding "Pair with desktop") just opens the pairing screen.
           this.invite.set(invite);
           this.pairing.set(true);
           if (raw) {
