@@ -34,9 +34,17 @@ let bridgePromise: Promise<SecureStorePlugin> | null = null;
 
 /** The native plugin proxy, registered on first use (lazy `@capacitor/core`). */
 export function secureStore(): Promise<SecureStorePlugin> {
-  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) =>
-    registerPlugin<SecureStorePlugin>('SecureStore'),
-  );
+  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) => {
+    const plugin = registerPlugin<SecureStorePlugin>('SecureStore');
+    // Same pitfall as `engine-launcher.ts`: the Capacitor proxy is a
+    // thenable (it answers `then` with a native method wrapper), so a promise
+    // resolved with it never settles. Return plain bindings instead.
+    return {
+      get: (options) => plugin.get(options),
+      set: (options) => plugin.set(options),
+      remove: (options) => plugin.remove(options),
+    };
+  });
   return bridgePromise;
 }
 

@@ -14,6 +14,7 @@ import {
   SecureStorePlugin,
   SecureStoreTargetSecrets,
   isCapacitorRuntime,
+  secureStore,
 } from './secure-store';
 
 function fakePlugin(): SecureStorePlugin & { data: Map<string, string> } {
@@ -76,5 +77,35 @@ describe('SecureStoreTargetSecrets (F10-20)', () => {
     expect(isCapacitorRuntime()).toBeFalse();
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
     expect(TestBed.inject(TARGET_SECRETS)).toBeInstanceOf(LocalStorageTargetSecrets);
+  });
+});
+
+describe('secureStore() bridge (Capacitor proxy is a thenable)', () => {
+  // Importing `@capacitor/core` installs `window.Capacitor`, which would flip
+  // `isCapacitorRuntime()` for every later spec - restore the browser state.
+  const hadCapacitor = 'Capacitor' in window;
+  afterAll(() => {
+    if (!hadCapacitor) {
+      delete (window as unknown as Record<string, unknown>)['Capacitor'];
+    }
+  });
+
+  // Same regression as the engine launcher: the promise must settle even
+  // though the Capacitor proxy answers `then`. On the web platform the
+  // native call rejects with "not implemented on web"; a hang times out.
+  it('settles (rejects on the web platform) instead of hanging', async () => {
+    const plugin = await Promise.race([
+      secureStore(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+    ]);
+    expect(plugin).withContext('secureStore() never resolved').not.toBeNull();
+    const outcome = await Promise.race([
+      plugin!.get({ key: 'x' }).then(
+        () => 'resolved',
+        (err: unknown) => `rejected: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    expect(outcome).toContain('not implemented');
   });
 });

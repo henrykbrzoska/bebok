@@ -88,9 +88,20 @@ let bridgePromise: Promise<EngineLauncherPlugin> | null = null;
  * `EngineWorkTracker`) adds nothing to the browser/desktop bundle.
  */
 function bridge(): Promise<EngineLauncherPlugin> {
-  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) =>
-    registerPlugin<EngineLauncherPlugin>('EngineLauncher'),
-  );
+  bridgePromise ??= import('@capacitor/core').then(({ registerPlugin }) => {
+    const plugin = registerPlugin<EngineLauncherPlugin>('EngineLauncher');
+    // Never resolve a promise with the Capacitor proxy itself: it answers
+    // every property, `then` included, so the promise would adopt it as a
+    // thenable, call the (non-existent) native `then` method and never
+    // settle - "Chat locally" then hangs on "Starting the engine…" without
+    // a single native call (seen on the S25 Ultra). Hand back plain bindings.
+    return {
+      start: (options) => plugin.start(options),
+      stop: () => plugin.stop(),
+      beginWork: (options) => plugin.beginWork(options),
+      endWork: () => plugin.endWork(),
+    };
+  });
   return bridgePromise;
 }
 
