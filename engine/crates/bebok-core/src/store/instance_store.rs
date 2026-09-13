@@ -365,6 +365,39 @@ impl InstanceStore {
             .ok_or_else(|| CoreError::SessionNotFound(id.to_string()))
     }
 
+    /// F9-6: every session spawned (directly or transitively) by `id`, in
+    /// creation order, breadth-first: `task`/`fleet` children first, then
+    /// their children. Walks persisted `parent` links, so finished children
+    /// are included. Bounded (depth 16) against corrupt cycles.
+    pub async fn descendant_sessions(&self, id: Uuid) -> Vec<crate::session::Session> {
+        let Ok(root) = self.session_meta(id).await else {
+            return Vec::new();
+        };
+        let mut all = self.list_sessions(&root.directory).await;
+        all.sort_by_key(|s| s.created_at);
+        let mut out: Vec<crate::session::Session> = Vec::new();
+        let mut frontier = vec![id];
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(id);
+        for _ in 0..16 {
+            if frontier.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for s in &all {
+                if let Some((parent, _)) = s.parent
+                    && frontier.contains(&parent)
+                    && seen.insert(s.id)
+                {
+                    next.push(s.id);
+                    out.push(s.clone());
+                }
+            }
+            frontier = next;
+        }
+        out
+    }
+
     /// Return unresolved permission requests for all live sessions in a directory,
     /// including delegated child sessions whose asks appear in the parent UI.
     pub async fn pending_permissions(&self, directory: &str) -> Vec<serde_json::Value> {
@@ -386,6 +419,59 @@ impl InstanceStore {
             }
         }
         asks
+    }
+
+    /// F9-5: after an "always allow" answer wrote `rule`, answer every other
+    /// pending ask in the directory that the new rule now covers (a sibling
+    /// sub-agent waiting on the same tool must not prompt again). Returns the
+    /// number of asks resolved. `except` is the request that was answered by
+    /// hand and is skipped.
+    pub async fn resolve_pending_matching(
+        &self,
+        directory: &str,
+        rule: &str,
+        except: &str,
+    ) -> usize {
+        let normalized = normalize_path(Path::new(directory));
+        let sessions: Vec<Arc<SessionState>> = self
+            .sessions
+            .read()
+            .await
+            .values()
+            .filter(|session| session.directory() == normalized)
+            .cloned()
+            .collect();
+        let mut resolved = 0;
+        for session in sessions {
+            for ask in session.pending_permission_requests().await {
+                let Some(request_id) = ask.get("requestID").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if request_id == except {
+                    continue;
+                }
+                let tool = ask.get("toolName").and_then(|v| v.as_str()).unwrap_or("");
+                let input = ask.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                let call = crate::permission::call_string(tool, &input);
+                if !PermissionEngine::rule_matches(rule, &call) {
+                    continue;
+                }
+                if session
+                    .resolve_permission_request(
+                        request_id,
+                        crate::permission::PermissionAnswer {
+                            allow: true,
+                            always: false,
+                        },
+                    )
+                    .await
+                    == crate::permission::ResolveOutcome::Resolved
+                {
+                    resolved += 1;
+                }
+            }
+        }
+        resolved
     }
 }
 
@@ -584,6 +670,106 @@ mod tests {
                 .await
                 .is_empty()
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// F9-5 integration: the parent answers "always allow this tool" for a
+    /// `write_file` ask -> the project rule is `write_file(*)`, the shared
+    /// permission engine auto-allows the child's *next* write to a different
+    /// path, and a sibling child's ask already pending for the same tool is
+    /// settled without another prompt.
+    #[tokio::test]
+    async fn always_allow_on_parent_auto_allows_child_requests() {
+        use crate::permission::Verdict;
+        let base = std::env::temp_dir().join(format!("bebok-always-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_str().unwrap();
+        let parent = store.create_session(dir, "code", None).await.unwrap();
+        let child_a = store
+            .create_subagent_session(&parent, "code", None, Some("api-orders"))
+            .await
+            .unwrap();
+        let child_b = store
+            .create_subagent_session(&parent, "code", None, Some("frontend"))
+            .await
+            .unwrap();
+        let instance = store.get_or_create_instance(dir).await.unwrap();
+        let engine = instance.permission.clone();
+
+        // Child A asks for one path: default `Ask`, suggested rule is the TOOL.
+        let first = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "apps/api/src/orders.ts", "content": "x" }),
+            false,
+        );
+        assert_eq!(first.verdict, Verdict::Ask);
+        assert_eq!(first.pattern, "write_file(apps/api/src/orders.ts)");
+        assert_eq!(first.suggested_rule, "write_file(*)");
+
+        // Child B is already waiting on its own write_file ask.
+        let (sender_b, receiver_b) = tokio::sync::oneshot::channel();
+        child_b
+            .register_permission_request(
+                "ask-b",
+                sender_b,
+                serde_json::json!({
+                    "requestID": "ask-b",
+                    "toolName": "write_file",
+                    "input": { "path": "apps/frontend/src/app.ts", "content": "y" },
+                    "suggestedRule": "write_file(*)",
+                }),
+            )
+            .await;
+        // ...and so is a bash ask that the write_file rule must NOT cover.
+        let (sender_c, mut receiver_c) = tokio::sync::oneshot::channel();
+        child_b
+            .register_permission_request(
+                "ask-c",
+                sender_c,
+                serde_json::json!({
+                    "requestID": "ask-c",
+                    "toolName": "bash",
+                    "input": { "command": "npm test" },
+                    "suggestedRule": "bash(*)",
+                }),
+            )
+            .await;
+
+        // The user clicks "Always allow this tool" on child A's ask (what the
+        // gate does with the answer) ...
+        engine.always_allow(&first.suggested_rule).unwrap();
+        // ... and the route settles the siblings the new rule covers.
+        let settled = store
+            .resolve_pending_matching(dir, &first.suggested_rule, "ask-a")
+            .await;
+        assert_eq!(settled, 1);
+        let answer = receiver_b.await.unwrap();
+        assert!(answer.allow && !answer.always);
+        assert!(receiver_c.try_recv().is_err(), "bash ask stays pending");
+
+        // Every later write_file in ANY session of the directory is allowed
+        // (child A's next path, the parent's own edit) without a prompt.
+        for (session, path) in [
+            (&child_a, "apps/api/src/orders.spec.ts"),
+            (&parent, "README.md"),
+        ] {
+            let _ = session;
+            let eval = engine.evaluate(
+                None,
+                "write_file",
+                &serde_json::json!({ "path": path, "content": "z" }),
+                false,
+            );
+            assert_eq!(eval.verdict, Verdict::Allow, "{path}");
+            assert_eq!(eval.pattern, "write_file(*)");
+        }
+        // The rule is persisted at project level, not per path.
+        let cfg = std::fs::read_to_string(project.join(".bebok").join("config.json")).unwrap();
+        assert!(cfg.contains("write_file(*)"), "{cfg}");
+        assert!(!cfg.contains("orders.ts"), "{cfg}");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

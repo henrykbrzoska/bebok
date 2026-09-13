@@ -23,6 +23,7 @@ import {
   CreateSessionResponse,
   CreateSessionResult,
   DebugLogResponse,
+  DelegationModelsResponse,
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
@@ -40,11 +41,14 @@ import {
   ProjectGitInfo,
   ProjectPatch,
   ProjectsListResponse,
+  ProcessInfo,
+  ProcessLogResponse,
   PromptBody,
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
   RevertChangeResponse,
+  SessionProcessesResponse,
   RemoveWorktreeResponse,
   SessionAgentsResponse,
   SessionListResponse,
@@ -299,20 +303,27 @@ export class EngineClient {
     );
   }
 
-  /** `GET /session/{id}/changes/diff?path=` -> unified diff against the baseline. */
-  sessionChangeDiff(id: string, path: string): Promise<ChangeDiffResponse> {
+  /**
+   * `GET /session/{id}/changes/diff?path=[&session=]` -> unified diff against
+   * the baseline. F9-6: `session` picks the (descendant) session whose
+   * tracker holds the path; omitted, the engine searches main then children.
+   */
+  sessionChangeDiff(id: string, path: string, session?: string): Promise<ChangeDiffResponse> {
+    const query =
+      `path=${encodeURIComponent(path)}` +
+      (session ? `&session=${encodeURIComponent(session)}` : '');
     return this.request<ChangeDiffResponse>(
       'GET',
-      `/session/${encodeURIComponent(id)}/changes/diff?path=${encodeURIComponent(path)}`,
+      `/session/${encodeURIComponent(id)}/changes/diff?${query}`,
     );
   }
 
   /** `POST /session/{id}/changes/revert` -> restore the baseline (bytes or absence). */
-  revertSessionChange(id: string, path: string): Promise<RevertChangeResponse> {
+  revertSessionChange(id: string, path: string, session?: string): Promise<RevertChangeResponse> {
     return this.request<RevertChangeResponse>(
       'POST',
       `/session/${encodeURIComponent(id)}/changes/revert`,
-      { path },
+      session ? { path, session } : { path },
     );
   }
 
@@ -457,6 +468,14 @@ export class EngineClient {
       (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '') +
       (opts?.replace ? '&replace=true' : '');
     return this.request<ConfigResponse>('PUT', `/config?${query}`, delta);
+  }
+
+  /** F9-10: `GET /delegation/models?directory=` -> the sub-agent model policy resolved right now. */
+  delegationModels(directory: string): Promise<DelegationModelsResponse> {
+    return this.request<DelegationModelsResponse>(
+      'GET',
+      `/delegation/models?directory=${encodeURIComponent(directory)}`,
+    );
   }
 
   /** F7-7: every tool the engine knows with its safety category. */
@@ -666,6 +685,32 @@ export class EngineClient {
     const ticket = await this.getTicket(ptyId);
     const wsBase = conn.baseUrl.replace(/^http/, 'ws');
     return `${wsBase}/pty/${encodeURIComponent(ptyId)}/connect?ticket=${encodeURIComponent(ticket)}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // F9-14: background process registry
+  // ---------------------------------------------------------------------------
+
+  /** `GET /session/{id}/processes` -> processes of the session and its descendants. */
+  sessionProcesses(sessionId: string): Promise<ProcessInfo[]> {
+    return this.request<SessionProcessesResponse>(
+      'GET',
+      `/session/${encodeURIComponent(sessionId)}/processes`,
+    ).then((d) => d.processes ?? []);
+  }
+
+  /** `GET /processes/{id}/log?tail=<bytes>` -> the (tail of the) log file. */
+  processLog(id: string, tail?: number): Promise<ProcessLogResponse> {
+    const query = tail !== undefined ? `?tail=${encodeURIComponent(String(tail))}` : '';
+    return this.request<ProcessLogResponse>(
+      'GET',
+      `/processes/${encodeURIComponent(id)}/log${query}`,
+    );
+  }
+
+  /** `POST /processes/{id}/kill` -> the process row after the kill (whole tree). */
+  killProcess(id: string): Promise<ProcessInfo> {
+    return this.request<ProcessInfo>('POST', `/processes/${encodeURIComponent(id)}/kill`);
   }
 
   // ---------------------------------------------------------------------------

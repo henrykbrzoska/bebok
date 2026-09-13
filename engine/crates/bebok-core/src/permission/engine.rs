@@ -34,6 +34,12 @@ pub struct Evaluation {
     /// the canonical call string when the default `Ask` applies. Used as the
     /// session decision-cache key and as the basis for `always allow` rules.
     pub pattern: String,
+    /// F9-5: the rule an "always allow" answer persists. When an explicit
+    /// rule produced the verdict this is that rule's (already generic)
+    /// pattern; when the *default* `Ask` applied it is the tool-level glob
+    /// `tool(*)` — never the exact call string, which would only ever match
+    /// the one path/command that was asked about.
+    pub suggested_rule: String,
 }
 
 /// Answer a user gives for one `permission.asked` request.
@@ -236,6 +242,7 @@ impl PermissionEngine {
         if self.yolo.load(Ordering::Relaxed) {
             return Evaluation {
                 verdict: Verdict::Allow,
+                suggested_rule: tool_rule(tool),
                 pattern: call,
             };
         }
@@ -249,6 +256,7 @@ impl PermissionEngine {
                     {
                         return Evaluation {
                             verdict: Verdict::Deny,
+                            suggested_rule: denied_pattern.clone(),
                             pattern: denied_pattern,
                         };
                     }
@@ -256,18 +264,21 @@ impl PermissionEngine {
             }
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
         if let Some((pattern, action)) = self.project.read().unwrap().compiled.first_match(&call) {
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
         if let Some((pattern, action)) = self.global.read().unwrap().compiled.first_match(&call) {
             return Evaluation {
                 verdict: verdict(action),
+                suggested_rule: pattern.clone(),
                 pattern,
             };
         }
@@ -289,12 +300,23 @@ impl PermissionEngine {
         };
         Evaluation {
             verdict,
+            suggested_rule: tool_rule(tool),
             pattern: call,
         }
     }
 
+    /// Whether `call` (a canonical `tool(args)` string) matches `rule`.
+    pub fn rule_matches(rule: &str, call: &str) -> bool {
+        build_glob(rule)
+            .ok()
+            .map(|g| g.compile_matcher().is_match(call))
+            .unwrap_or(false)
+    }
+
     /// Persist `ask → allow` for `pattern` to the project config and update the
-    /// in-memory project layer (no restart needed).
+    /// in-memory project layer (no restart needed). The engine is shared by
+    /// every session of the directory (parent and sub-agent sessions alike),
+    /// so the rule applies to all of them at once.
     pub fn always_allow(&self, pattern: &str) -> Result<()> {
         let rule = Rule {
             pattern: pattern.to_string(),
@@ -313,6 +335,12 @@ impl PermissionEngine {
 /// `evaluate`'s default arm) because they can reach local network services.
 pub fn is_mutating(tool: &str, read_only: bool) -> bool {
     !read_only || tool == "fetch" || tool.starts_with("browser_")
+}
+
+/// The tool-level allow rule "always allow this tool" writes (F9-5):
+/// `write_file(*)`, `bash(*)`, `mcp__github__*`-style names stay as given.
+pub fn tool_rule(tool: &str) -> String {
+    format!("{tool}(*)")
 }
 
 /// The `browser_*` tools whose default becomes `Allow` under
@@ -760,6 +788,58 @@ mod tests {
                 .unwrap()
                 .contains("bash(pwd)")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F9-5: a default `Ask` suggests the tool-level rule, an explicit rule
+    /// suggests itself, and persisting the suggestion makes every later call
+    /// of that tool pass (the old per-call pattern only matched one path).
+    #[test]
+    fn suggested_rule_is_tool_level_and_sticks_for_other_paths() {
+        let dir = tmp_dir("suggested");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        let a = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "src/a.ts" }),
+            false,
+        );
+        assert_eq!(a.verdict, Verdict::Ask);
+        assert_eq!(a.suggested_rule, "write_file(*)");
+        engine.always_allow(&a.suggested_rule).unwrap();
+        let b = engine.evaluate(
+            None,
+            "write_file",
+            &serde_json::json!({ "path": "src/b.ts" }),
+            false,
+        );
+        assert_eq!(b.verdict, Verdict::Allow);
+        // Another tool is not covered.
+        let c = engine.evaluate(None, "bash", &serde_json::json!({ "command": "ls" }), false);
+        assert_eq!(c.verdict, Verdict::Ask);
+        assert_eq!(c.suggested_rule, "bash(*)");
+
+        // An explicit `ask` rule suggests its own (generic) pattern.
+        let project = dir.join(".bebok/config.json");
+        std::fs::write(
+            &project,
+            r#"{ "permission": { "rules": [ { "pattern": "bash(git *)", "action": "ask" } ] } }"#,
+        )
+        .unwrap();
+        engine.reload();
+        let d = engine.evaluate(
+            None,
+            "bash",
+            &serde_json::json!({ "command": "git push" }),
+            false,
+        );
+        assert_eq!(d.verdict, Verdict::Ask);
+        assert_eq!(d.suggested_rule, "bash(git *)");
+        assert!(PermissionEngine::rule_matches(
+            "write_file(*)",
+            "write_file(x/y.ts)"
+        ));
+        assert!(!PermissionEngine::rule_matches("write_file(*)", "bash(ls)"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

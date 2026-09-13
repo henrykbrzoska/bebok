@@ -189,11 +189,9 @@ pub async fn list_sessions(
     };
     let sessions = state.store.list_sessions(&directory).await;
     // Default model for sessions that never ran a turn and carry no override.
-    let default_model = state
-        .store
-        .get_or_create_instance(&directory)
-        .await
-        .ok()
+    let instance = state.store.get_or_create_instance(&directory).await.ok();
+    let default_model = instance
+        .as_ref()
         .and_then(|instance| instance.config.read().ok().map(|cfg| cfg.model.clone()));
     let sessions: Vec<serde_json::Value> = sessions
         .iter()
@@ -201,6 +199,9 @@ pub async fn list_sessions(
             let mut value = serde_json::to_value(session).unwrap_or_default();
             attach_context_window(&mut value, session, default_model.as_deref());
             attach_worktree(&mut value, session);
+            if let Some(instance) = instance.as_ref() {
+                attach_effective_model(&mut value, session, instance);
+            }
             value
         })
         .collect();
@@ -222,6 +223,25 @@ pub fn attach_context_window(
         .or(session.model.as_deref())
         .or(default_model);
     value["context_window"] = serde_json::json!(bebok_core::context::context_window_for(model));
+}
+
+/// F9-9: add `effective_model` / `effective_provider` — the model id the
+/// session runs on when nothing overrides it per prompt (session override,
+/// else the agent preset's model, else `models.<agent>` / the default), so
+/// the client never shows "(default)" where a real id is known.
+pub fn attach_effective_model(
+    value: &mut serde_json::Value,
+    session: &bebok_core::session::Session,
+    instance: &bebok_core::Instance,
+) {
+    let cfg = instance.config_snapshot();
+    let model = bebok_core::store::effective_model(session, instance, &cfg);
+    let provider = model
+        .split_once('/')
+        .map(|(p, _)| p.to_string())
+        .unwrap_or_else(|| cfg.provider.clone());
+    value["effective_model"] = serde_json::json!(model);
+    value["effective_provider"] = serde_json::json!(provider);
 }
 
 /// WP-GIT: add `worktree_branch` (the branch name, or `null`) when the
@@ -250,6 +270,13 @@ pub async fn get_session(
     let default_model = session.config_snapshot().model_for(&snapshot.agent);
     attach_context_window(&mut meta, &snapshot, Some(&default_model));
     attach_worktree(&mut meta, &snapshot);
+    if let Ok(instance) = state
+        .store
+        .get_or_create_instance(session.directory())
+        .await
+    {
+        attach_effective_model(&mut meta, &snapshot, &instance);
+    }
     Ok(Json(meta))
 }
 
@@ -400,6 +427,17 @@ pub async fn permission_decision(
         .await
         .map_err(|e| err_response(&e))?;
 
+    // F9-5: the rule an `always` answer writes (`tool(*)` for a default ask),
+    // read before the request is consumed so sibling asks can be settled.
+    let suggested_rule = session
+        .pending_permission_request(&request_id)
+        .await
+        .and_then(|p| {
+            p.get("suggestedRule")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
     let outcome = session
         .resolve_permission_request(
             &request_id,
@@ -411,12 +449,30 @@ pub async fn permission_decision(
         .await;
 
     match outcome {
-        ResolveOutcome::Resolved => Ok(Json(serde_json::json!({
-            "sessionID": id.to_string(),
-            "requestID": request_id,
-            "decision": if allow { "allow" } else { "deny" },
-            "resolved": true,
-        }))),
+        ResolveOutcome::Resolved => {
+            // An always-allow rule covers every session of the directory at
+            // once (shared permission engine); asks already waiting in
+            // sibling sub-agent sessions for the same tool are answered here
+            // so nobody is prompted for a rule that now exists.
+            let mut also_resolved = 0;
+            if body.always
+                && allow
+                && let Some(rule) = suggested_rule.as_deref()
+            {
+                also_resolved = state
+                    .store
+                    .resolve_pending_matching(session.directory(), rule, &request_id)
+                    .await;
+            }
+            Ok(Json(serde_json::json!({
+                "sessionID": id.to_string(),
+                "requestID": request_id,
+                "decision": if allow { "allow" } else { "deny" },
+                "resolved": true,
+                "rule": if body.always && allow { suggested_rule } else { None },
+                "alsoResolved": also_resolved,
+            })))
+        }
         ResolveOutcome::NotFound => Err(ApiError::not_found(format!(
             "no pending permission request {request_id}"
         ))
@@ -612,6 +668,55 @@ mod tests {
         let mut value = serde_json::json!({});
         attach_worktree(&mut value, &plain);
         assert!(value["worktree_branch"].is_null());
+    }
+
+    /// F9-9: "(default)" resolves to a real model id: the session override,
+    /// else the agent preset's model, else `models.<agent>`, else the config
+    /// default; the provider is the id's prefix.
+    #[tokio::test]
+    async fn attach_effective_model_resolves_default_to_a_real_id() {
+        let base = std::env::temp_dir().join(format!("bebok-effmodel-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "model": "openai/gpt-5.6-luna", "models": { "ask": "zai/glm-5.3-flash" } }"#,
+        )
+        .unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_string_lossy().to_string();
+        let instance = store.get_or_create_instance(&dir).await.unwrap();
+
+        // No override anywhere: the config default.
+        let plain = bebok_core::session::Session::new(dir.clone(), "code");
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &plain, &instance);
+        assert_eq!(value["effective_model"], "openai/gpt-5.6-luna");
+        assert_eq!(value["effective_provider"], "openai");
+
+        // Per-agent config model.
+        let ask = bebok_core::session::Session::new(dir.clone(), "ask");
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &ask, &instance);
+        assert_eq!(value["effective_model"], "zai/glm-5.3-flash");
+        assert_eq!(value["effective_provider"], "zai");
+
+        // Session override wins.
+        let mut picked = bebok_core::session::Session::new(dir.clone(), "ask");
+        picked.model = Some("anthropic/claude-sonnet-5".into());
+        let mut value = serde_json::json!({});
+        attach_effective_model(&mut value, &picked, &instance);
+        assert_eq!(value["effective_model"], "anthropic/claude-sonnet-5");
+        assert_eq!(value["effective_provider"], "anthropic");
+
+        // Listed sessions carry the fields too.
+        let session = store.create_session(&dir, "code", None).await.unwrap();
+        let listed = store.list_sessions(&dir).await;
+        assert_eq!(listed[0].id, session.id());
+        let mut value = serde_json::to_value(&listed[0]).unwrap();
+        attach_effective_model(&mut value, &listed[0], &instance);
+        assert_eq!(value["effective_model"], "openai/gpt-5.6-luna");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
