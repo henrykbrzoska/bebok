@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.5.0 — 2026-09-13
+
+Rounds 2–4 after 1.4.1: 28 work packages merged on top of `13cf422`.
+QA before release: engine 550 tests / 0 failures, client 576 / 0,
+`cargo fmt` + `cargo clippy -D warnings` clean.
+
+### Chat
+- Every tool call is collapsed by default into a one-line row (status, tool, argument preview, COMPLETED/FAILED/RUNNING) with three-level expand (group → call → arguments/output); thinking blocks collapsed; "Expand tool calls by default" preference.
+- Consecutive assistant turns that contain only tool calls are merged into one group with a single header and summed In/Out usage.
+- Long transcripts render the last 60 messages with "Load earlier messages"; the scroll minimap is gone; scroll-to-bottom waits for the transcript to actually render.
+- Context meter in the session toolbar and Session panel (tokens sent vs. the model window from the catalog); "Compact now" (toolbar + palette); automatic compaction at 85 % with a server-side marker message and before/after counts; cost shows "—" when pricing is unknown.
+- Safety-level dots on tool calls, colour-coded by category, with a legend.
+- Typed inline code chips (paths, commands, identifiers) in assistant text.
+- Syntax highlighting via highlight.js shared by chat, Preview, Explorer and the diff view.
+- Bare URLs are clickable in chat, Preview and tool output; ATX headings render; model text is HTML-escaped.
+- The effective model is shown everywhere (session, sub-agents, tool rows).
+
+### Panels
+- **Changes**: files modified by tools in the session, unified/split diff against git HEAD or a first-write snapshot, "Open in Explorer", confirmed revert; aggregates sub-agent sessions tagged by agent, with diff/revert reaching the child tracker. Replaces the heuristic FILES CHANGED list.
+- **Preview**: Markdown renderer with file-name header, toolbar (file picker, Explorer, refresh, pin), empty state and modified-on-disk notice; file paths and `.md` links in assistant text / tool output open in it; per-file "Open in preview" in the drawer Explorer.
+- **Agents**: live sub-agent list (`GET /session/{id}/agents`, refreshed on `task.*` SSE) with a read-only streaming transcript overlay; the whole card opens the transcript, "Open session" as secondary action; nested sub-agent sessions with a parent breadcrumb.
+- **Browser**: latest screenshot and URL from the browser tools, "Open in window".
+- **Processes**: background `bash` processes with log tailing and kill-tree.
+- Right drawer: one scroller, sticky collapsible panel headers, 320 px default width, reveal requests from links; clicking a drawer Explorer file opens the full-screen Explorer; sidebar icon rail.
+
+### Agents & verification
+- Sub-agent delegation mode with supervision: `delegation.mode` / `max_concurrent` / `model_policy` (`inherit` | `cheaper` (default, catalog-based cheaper-sibling mapping) | explicit), background tasks with `task_status` / `task_wait` / `task_cancel`, per-session concurrency gate, throttled `task.progress` events, Delegation block in Settings > Agents; sub-agents get no delegation tools under a policy.
+- Token-free progress rows in the parent transcript plus a narration policy; live progress on completed background task rows and the active-tasks block.
+- Autonomous frontend verification policy (`verify.frontend`, "Frontend verification" card in Settings > Agents): start every dependency on its own non-default port, wait for readiness, screenshot the loaded page before interacting, check the API, fix and re-verify, strict FAIL conditions and an acceptance gate.
+- `bash` gains `background: true` with a process registry, readiness waits (`ready_port` / `ready_text` / `ready_timeout`) and `bash_kill` without prompts.
+- "Always allow this tool" persists a tool-level project rule that sticks for parent and sub-agent sessions.
+
+### Projects & git
+- Project groups in the registry (`PATCH /projects/{id}` with `group`) and a grouped, collapsible project switcher; PATCH allowed through the engine CORS layer.
+- Git awareness: `GET /projects/{id}/git` (repo, branch, remote, GitHub, dirty count) backed by a git CLI module in `bebok-core`.
+- Worktree-backed sessions: new-session dialog (agent / model / "Run in a git worktree") creating a branch under `.bebok/worktrees/` (gitignored), branch badge in the sidebar, worktree removal offered on delete (`DELETE /session` reports `is_worktree`).
+
+### Browser tools
+- `browser_open` / `screenshot` / `click` / `type` / `get_text` / `eval` / `console` / `wait` / `find` driving an installed Chrome/Edge/Chromium through CDP (`chromiumoxide`); screenshots reach the model as image parts; the browser is closed with the session.
+- Display modes headed / viewer / drawer, a viewer window with a live frame stream and viewer API, HiDPI-correct captures, "Browser display" setting.
+- `browser_*` defaults to Ask even when read-only; `browser_console` / `wait` / `find` are classified safe and auto-allowed under the verification policy.
+
+### Stats
+- `GET /stats`: session-digest scan with filtered aggregation and an event-invalidated cache.
+- Stats screen: sortable tables, CSS daily chart, projects grouped by normalised directory, sidebar and palette entries; refreshes on the end-of-turn `session.updated` event.
+
+### Settings / Safety
+- Explicit tool safety categories exposed by `GET /tools/safety`, "Tool safety" settings with category colours and legend.
+- Settings > Agents: Delegation and Frontend verification cards.
+- Reconnect prompt when the engine token is rejected (401); token handling for the new endpoints.
+
+### About page
+- "What is Bebok?" page with the Silesian legend.
+
+### Scripts / CI
+- Tag-triggered multi-OS release workflow (`.github/workflows/release.yml`): preflight version check across all four manifests, linux-x64 / windows-x64 / macos-arm64 / macos-x64 matrix, standalone `bebok-server` binaries, portable archives, merged `SHA256SUMS.txt`, optional Authenticode / GPG / Tauri-updater signing gated on secrets, refusal to overwrite a published release from `workflow_dispatch`; runbook in `scripts/release.md`.
+- `npm run version:bump -- x.y.z` edits every manifest and lockfile; `npm run full-build-dev` / `full-build-app` / `doctor` cross-platform orchestration in `scripts/bebok.mjs`; client adopts `?engine=<url>` bootstrap on first load.
+
+### Fixes
+- JSONC writer: `with_set` replaced nothing after an array of strings and appended duplicate top-level keys.
+- Preview link interception broken by the innerHTML sanitizer stripping `data-*`; `browser_open` accepted `https:///path`; tool-run row lost its manual expand state while streaming; Agents panel double-fetched on mount.
+- Page-level overflow from the status-dot hidden label; session toolbar fields overlapping at narrow widths; Stats daily chart collapsing and tables clipping their last column; Changes panel rows keep the basename visible.
+- Slash-separated Explorer paths and reveal of the opened file in the tree; Chrome launch switches passed with a double `--` prefix; chromiumoxide per-event WS deserialisation warnings silenced.
+- Reasoning no longer re-sent with tools to models that reject it; vendored models.dev snapshot extended with current-generation models.
+- Tests: server test apps use an isolated data dir (they leaked sessions into `%APPDATA%\bebok`); browser round-trip test uses a free ephemeral port.
+
+Known limitations: the Linux, macOS arm64/x64 legs and the MSI bundle of the
+release workflow had never run in CI before this release; macOS builds are
+unsigned (Gatekeeper warns), Windows binaries are unsigned (SmartScreen
+warns). New i18n keys in the 11 non-English locales are machine translations.
+
+
 ## 1.4.1 — 2026-09-12
 
 - Lista sesji natychmiast pokazuje aktualny tytuł i użycie tokenów; przełączenie projektu czyści poprzednie sesje i odrzuca spóźnione odpowiedzi.
