@@ -70,6 +70,13 @@ public class EngineLauncherPlugin extends Plugin {
     /** Env vars JS may set on the engine - debuggable builds only. */
     static final Set<String> DEBUG_ENV_ALLOWLIST = Set.of("BEBOK_PROVIDER_MOCK");
     static final String MOCK_SYSPROP = "debug.bebok.provider_mock";
+    /**
+     * Debuggable builds only: `adb shell setprop debug.bebok.idle_ms 90000`
+     * shortens the idle auto-stop threshold so the behaviour can be verified
+     * on a device without waiting the full ten minutes. Read once in
+     * {@link #load()}; ignored (and never read) in a non-debuggable build.
+     */
+    static final String IDLE_SYSPROP = "debug.bebok.idle_ms";
 
     private Process process;
     private volatile String baseUrl;
@@ -80,11 +87,26 @@ public class EngineLauncherPlugin extends Plugin {
 
     private ScheduledExecutorService idleExecutor;
     private ScheduledFuture<?> idleTask;
+    private long idleThresholdMillis = IdleAutoStopPolicy.DEFAULT_IDLE_THRESHOLD_MILLIS;
 
     @Override
     public void load() {
         super.load();
         EngineForegroundService.setStopCallback(this::stopFromNotification);
+        if (isDebuggable(getContext())) {
+            String prop = readSystemProperty(IDLE_SYSPROP);
+            if (!prop.isEmpty()) {
+                try {
+                    long ms = Long.parseLong(prop);
+                    if (ms > 0) {
+                        idleThresholdMillis = ms;
+                        Log.w(TAG, "debug idle auto-stop threshold: " + ms + " ms");
+                    }
+                } catch (NumberFormatException ignored) {
+                    Log.w(TAG, "ignoring " + IDLE_SYSPROP + "=" + prop + " (not a number)");
+                }
+            }
+        }
         idleExecutor = Executors.newSingleThreadScheduledExecutor();
         idleTask = idleExecutor.scheduleWithFixedDelay(
                 this::checkIdle, IDLE_CHECK_PERIOD_SECONDS, IDLE_CHECK_PERIOD_SECONDS, TimeUnit.SECONDS);
@@ -170,13 +192,15 @@ public class EngineLauncherPlugin extends Plugin {
         if (baseUrl == null) {
             return;
         }
+        long now = System.currentTimeMillis();
+        boolean workActive = workCounter.isActive();
         boolean stop = IdleAutoStopPolicy.shouldStop(
-                lastActivityMillis,
-                System.currentTimeMillis(),
-                appInForeground,
-                workCounter.isActive(),
-                IdleAutoStopPolicy.DEFAULT_IDLE_THRESHOLD_MILLIS);
+                lastActivityMillis, now, appInForeground, workActive, idleThresholdMillis);
+        Log.d(TAG, "idle check: idle " + (now - lastActivityMillis) / 1000 + " s, foreground="
+                + appInForeground + ", work=" + workActive + ", stop=" + stop);
         if (stop) {
+            Log.i(TAG, "idle auto-stop: engine idle for " + (now - lastActivityMillis) / 1000
+                    + " s in the background - stopping it");
             killProcess();
         }
     }
