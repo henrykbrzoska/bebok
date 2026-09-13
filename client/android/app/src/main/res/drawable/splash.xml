@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-existing gap fixed in passing (WP-M3): `styles.xml`'s
+  `AppTheme.NoActionBarLaunch` (the launch theme, parent Theme.SplashScreen)
+  references `@drawable/splash`, but no such resource was ever committed -
+  `./gradlew assembleRelease` fails resource linking on a clean checkout
+  regardless of anything in this package, before it can even get to
+  packaging. A flat brand-colour background (matching
+  `ic_launcher_background`, #26A69A) unblocks the build; a real splash
+  asset/animation is a product decision for WP-M5 (mobile onboarding) to
+  replace.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#26A69A" />
+</shape>

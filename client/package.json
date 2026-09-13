@@ -18,7 +18,10 @@
     "tauri:rebuild": "node scripts/rebuild-tauri.mjs",
     "cap:sync": "ng build && cap sync",
     "cap:android": "cap add android",
-    "cap:ios": "cap add ios"
+    "cap:ios": "cap add ios",
+    "android:bundle": "bash scripts/bundle-android.sh",
+    "android:sync": "ng build && cap sync android",
+    "android:maestro": "maestro test maestro/smoke.yaml"
   },
   "prettier": {
     "printWidth": 100,

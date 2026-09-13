@@ -87,6 +87,24 @@ jobs:
             exit 1
           fi
 
+          # F10-11: android/app/build.gradle derives versionName from
+          # client/package.json at configuration time rather than declaring
+          # its own literal (see the file for why - one source of truth for
+          # the release version). It is therefore always in sync *by
+          # construction*, but that construction lives in a file this
+          # preflight does not otherwise read - guard against someone
+          # replacing the dynamic read with a hard-coded string later.
+          gradle_file=client/android/app/build.gradle
+          if ! grep -q "packageJson.version as String" "$gradle_file"; then
+            echo "::error::$gradle_file no longer derives versionName from client/package.json (F10-11) - restore the packageJson.version read or update this check."
+            exit 1
+          fi
+          if grep -Eq '^\s*versionName\s+"[0-9]' "$gradle_file"; then
+            echo "::error::$gradle_file hard-codes versionName - it must derive from client/package.json (F10-11)."
+            exit 1
+          fi
+          echo "client/android/app/build.gradle: derives from package.json (ok)"
+
           if [ "$EVENT_NAME" = "push" ]; then
             tag="$REF_NAME"
             draft=false
@@ -415,11 +433,150 @@ jobs:
           Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $tp } | Remove-Item -Force
 
   # --------------------------------------------------------------------------
+  # WP-M3 (F10-11): Android APK, arm64-v8a only for release (2-ABI builds are
+  # for the CI emulator only - see android.yml and the WP-M3 report for the
+  # size measurement behind that call).
+  # --------------------------------------------------------------------------
+  android:
+    name: android (arm64-v8a)
+    needs: preflight
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Java (Temurin 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Android NDK (r27c)
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Shares the cache populated by android.yml's PR builds.
+          shared-key: android-aarch64-linux-android,x86_64-linux-android
+          workspaces: |
+            engine -> target
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Bundle engine (arm64-v8a)
+        working-directory: client
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          BEBOK_ANDROID_ABIS: 'arm64-v8a'
+        run: bash scripts/bundle-android.sh
+
+      - name: ng build
+        working-directory: client
+        run: npx ng build
+
+      - name: cap sync android
+        working-directory: client
+        run: npx cap sync android
+
+      - name: Decode signing keystore (optional)
+        id: sign
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          ks="$RUNNER_TEMP/bebok-release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ks"
+          echo "keystore=$ks" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Signing skipped
+        if: steps.sign.outputs.signed != 'true'
+        shell: bash
+        run: echo "::notice title=Android signing skipped::ANDROID_KEYSTORE_BASE64/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD not all set - the release APK will be debug-signed (-debugkey suffix)."
+
+      - name: gradlew assembleRelease
+        working-directory: client/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${{ steps.sign.outputs.signed }}" = "true" ]; then
+            args+=(
+              "-Pbebok.keystore=${{ steps.sign.outputs.keystore }}"
+              "-Pbebok.keystorePassword=${{ env.ANDROID_KEYSTORE_PASSWORD }}"
+              "-Pbebok.keyAlias=${{ env.ANDROID_KEY_ALIAS }}"
+              "-Pbebok.keyPassword=${{ env.ANDROID_KEY_PASSWORD }}"
+            )
+          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease "${args[@]}"
+
+      - name: Remove decoded keystore
+        if: always() && steps.sign.outputs.signed == 'true'
+        shell: bash
+        run: rm -f "${{ steps.sign.outputs.keystore }}"
+
+      - name: Collect + checksum APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find client/android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          [ -n "$apk" ] || { echo "::error::no APK produced"; exit 1; }
+          out="release-out"
+          mkdir -p "$out"
+          dest="$out/bebok-$VERSION-android-arm64.apk"
+          cp "$apk" "$dest"
+          ( cd "$out" && sha256sum -- "$(basename "$dest")" > SHA256SUMS-android-arm64.txt )
+          ls -la "$out"
+          cat "$out/SHA256SUMS-android-arm64.txt"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bebok-${{ env.VERSION }}-android-arm64
+          path: release-out/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # --------------------------------------------------------------------------
   # Merge checksums and create/update the GitHub Release.
   # --------------------------------------------------------------------------
   release:
     name: release (${{ needs.preflight.outputs.tag }})
-    needs: [preflight, build]
+    needs: [preflight, build, android]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -427,6 +584,7 @@ jobs:
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+      ANDROID_SIGNED: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -492,6 +650,7 @@ jobs:
             echo "| macOS Apple silicon | \`bebok_${VERSION}_aarch64.dmg\` / \`bebok_${VERSION}_aarch64.app.tar.gz\` |"
             echo "| macOS Intel | \`bebok_${VERSION}_x64.dmg\` / \`bebok_${VERSION}_x64.app.tar.gz\` |"
             echo "| Headless engine (browser mode) | \`bebok-server-${VERSION}-<platform>[.exe]\` |"
+            echo "| Android (arm64) | \`bebok-${VERSION}-android-arm64.apk\` |"
             echo
             echo "Verify downloads against \`SHA256SUMS.txt\`."
             if [ -f artifacts/SHA256SUMS.txt.asc ]; then
@@ -503,6 +662,10 @@ jobs:
             fi
             echo
             echo "> macOS builds are not signed or notarized: Gatekeeper will block the first launch - right-click the app -> *Open*, or run \`xattr -dr com.apple.quarantine /Applications/bebok.app\`."
+            if [ "$ANDROID_SIGNED" != "true" ]; then
+              echo
+              echo "> The Android APK is debug-signed (no release keystore configured): Play Protect will warn on install, and it cannot be upgraded in place by a build that later switches to a release keystore - uninstall the old debug-signed build first."
+            fi
           } > release-footer.md
           cat release-footer.md
 

@@ -41,3 +41,15 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# ---- Android: multi-ABI engine bundle (F10-9), built by bundle-android.sh -
+#      never commit the cross-compiled bebok-server/mksh binaries.
+android/app/src/main/assets/bin/
+
+# ---- Android: keystores and Google service config (never commit secrets) --
+android/**/*.jks
+android/**/*.keystore
+android/app/google-services.json
+
+# ---- Android: local NDK toolchain symlinks used by bundle-android.sh ------
+.ndk-bin-*/

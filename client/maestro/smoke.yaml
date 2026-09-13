@@ -1,0 +1,23 @@
+# F10-12: minimal Android smoke flow - launches the app, waits for the
+# embedded engine to come up (F10-9/F10-10), and asserts the connection
+# status reads "engine live" (client/src/i18n/en.ts `status.live`).
+#
+# Run locally:  npm run android:maestro   (from client/, against a running
+#               emulator or device with the app already installed)
+# Run in CI:    .github/workflows/android.yml `emulator-smoke` job.
+#
+# Selectors are text-based (assertVisible on the WebView's accessibility
+# text), not resource ids: Capacitor's WebView content does not expose
+# Android view ids for DOM elements. See README.md for details and where the
+# failure screenshot lands.
+appId: dev.bebok.mobile
+---
+- launchApp
+- waitForAnimationToEnd
+# The embedded engine (F10-9) needs a few seconds on first boot (extracting
+# the per-ABI binaries to filesDir + starting bebok-server); poll rather than
+# assert immediately.
+- assertVisible:
+    text: "engine live"
+    timeout: 30000
+- takeScreenshot: WP-M3-smoke

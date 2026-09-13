@@ -4,4 +4,10 @@
     <string name="title_activity_main">Bebok</string>
     <string name="package_name">dev.bebok.mobile</string>
     <string name="custom_url_scheme">dev.bebok.mobile</string>
+
+    <!-- F10-10: engine-work foreground service notification -->
+    <string name="engine_work_notification_channel">Bebok engine activity</string>
+    <string name="engine_work_notification_title">Bebok</string>
+    <string name="engine_work_notification_text">Bebok is working…</string>
+    <string name="engine_work_notification_stop">Stop</string>
 </resources>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  F10-10: scope cleartext (http://) traffic instead of the blanket
+  `usesCleartextTraffic` the app effectively had before (no manifest
+  attribute + targetSdk 35 would otherwise default to cleartext-off, but the
+  embedded engine on 127.0.0.1 is exempt from the platform's cleartext block
+  as loopback traffic - this file makes that exemption explicit and adds the
+  Android-emulator host alias used in local dev/CI).
+
+  Base policy: cleartext is DENIED by default, so a request to any public
+  host over http:// is blocked (verified by the Maestro/manual check in the
+  WP-M3 report).
+
+  KNOWN LIMITATION (see WP-M3 report, "open issues"): Android's static
+  Network Security Config has no CIDR/range syntax - <domain> entries are
+  exact hostname/IP-literal matches only (this is a documented AOSP
+  limitation, not an oversight here). The design in PLAN-1.6-MOBILE.md #2
+  asks for "127.0.0.1, private RFC1918 ranges and 100.64.0.0/10 (Tailscale)"
+  to be allowed; only the literal, statically-known addresses this package
+  actually exercises are listed below. Remote mode (WP-M1/M4/M6) reaches
+  arbitrary LAN/tailnet IPs chosen at pairing time, which this file cannot
+  allow-list ahead of time - the actual enforcement point for "is this host
+  in a private/tailnet range" has to be a runtime check in the pairing flow
+  (client/src, out of this package's scope), with this NSC's job reduced to
+  "never allow cleartext to the open internet by default".
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- The embedded engine (F10-9/F10-10), always loopback. -->
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+        <!-- Android emulator's alias for the host machine's loopback -
+             used by the CI emulator-smoke job and local dev to reach a
+             desktop engine started with `remote.allow_lan` (see
+             PLAN-1.6-MOBILE.md section 8). -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
