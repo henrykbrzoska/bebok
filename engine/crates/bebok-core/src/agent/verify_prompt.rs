@@ -134,7 +134,8 @@ rows / list items / the text you changed (e.g. selector `table tbody tr` or the 
 text), with a timeout that gives the API time to answer. A spinner, skeleton or \"loading\" text \
 still visible after the wait is a failure: read `browser_console` (level=\"error\"), read the \
 server logs, find the cause (wrong proxy target, api not started, CORS, 404 route, exception), \
-fix it, and re-verify.\n\
+fix it, and re-verify. Once the data is there, `browser_screenshot` the loaded page (the \
+full, unfiltered state) before you interact.\n\
 4. INTERACT with what you built: use `browser_find` to locate the new nav link, filter, sort \
 control, search box, button or form and exercise each one with `browser_click` / `browser_type` \
 (navigate to the page via its nav link, apply a filter and check the row count changes, sort a \
@@ -231,6 +232,7 @@ mod tests {
             "`browser_find`",
             "`browser_click` / `browser_type`",
             "AFTER each interaction",
+            "before you interact",
             "Acceptance gate",
             "`Status: PASS`",
             "`Status: FAIL`",
