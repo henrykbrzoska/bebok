@@ -42,6 +42,13 @@ impl Tool for BashKill {
         })
     }
 
+    /// Stopping a process the agent itself started through the registry is
+    /// not a new side effect on the project: it must not cost a permission
+    /// prompt (the e2e run asked seven times for it).
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, _ctx: ToolCtx, args: Value) -> ToolOutput {
         let registry = ProcessRegistry::global();
         let id = args.get("id").and_then(Value::as_str).map(str::trim);

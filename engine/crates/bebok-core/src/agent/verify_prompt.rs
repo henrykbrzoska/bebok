@@ -106,12 +106,20 @@ the browser AND use it before you answer. A passing build, lint or unit test is 
 of frontend work; opening the route and seeing it load is only the start. The user must never \
 have to check your frontend work by hand, and \"it builds\" or \"the page is still loading\" are \
 not acceptable final states. Do this, in order, without asking:\n\
-1. Map the dependencies: work out the frontend serve command and port (package.json scripts, \
+1. Map the dependencies: work out the frontend serve command (package.json scripts, \
 project.json, README) AND every server the page talks to (dev-server proxy config, API base \
-URL, environment files). For each, `fetch` its URL and confirm the response is THIS project \
-(title/markup/JSON shape) — another project may be using the port, in which case start your own \
-on a free port. Start whatever does not answer with `bash` `background: true` (api first, then \
-the frontend) and read the logs until each prints its ready line / URL.\n\
+URL, environment files). Start the servers YOURSELF with `bash` `background: true` (api first, \
+then the frontend). Frontend: ALWAYS pass an explicit, non-default port (pick one in \
+4310-4390 that `fetch` reports as connection-refused first, e.g. `--port 4317`); never open the \
+project's default port (4200/5173/3000...) unless the log of a server YOU started in this task \
+says it listens there — a port that already answers belongs to another app (a different \
+`<title>` in the `fetch` response is proof) and testing against it is a FAIL. API/backend: \
+it must run on the port the frontend proxy targets; if that port is held by a foreign process, \
+report that as a FAIL instead of testing a stranger's server. Readiness: read the server's own \
+log (`tail`) every 5-10 s for up to 3 minutes — a first `nx serve`/webpack/vite build can take \
+60-120 s — until it prints its ready line / URL; do not kill and restart a server that is still \
+compiling. If the log shows the port is in use or a crash, fix that (other port, missing \
+dependency, build error) and start it again.\n\
 2. Verify the API on its own: `fetch` (or `bash` curl) the endpoint(s) the feature uses and check \
 the JSON (status 200, expected fields, expected number of rows). If the API is wrong, fix it \
 before touching the browser.\n\
@@ -132,11 +140,17 @@ steps 2-4 (at most 2 more rounds). Only report a failure you could not fix after
 precisely what you tried.\n\
 6. Acceptance gate — the task is NOT done while verification found a functional failure. Your \
 final answer MUST start with one line `Status: PASS`, `Status: PASS WITH NOTES` or \
-`Status: FAIL`. With FAIL, list what does not work and what you tried, and do NOT describe the \
-feature as implemented/delivered. It MUST also contain one line `Verification: opened <url>, \
-did <interactions>, saw <what, with counts/values>, console <clean | N errors>` backed by a \
-screenshot taken AFTER the interactions — or `Verification: not possible because <reason>` \
-(which is a FAIL) if the browser or a required server truly could not be used.\n\
+`Status: FAIL`. PASS requires that you completed steps 1-5 on the real page: the data loaded, \
+every new control was exercised, and a `browser_screenshot` AFTER the interactions shows the \
+result. PASS WITH NOTES is PASS plus non-functional remarks only (a warning, a follow-up idea). \
+ANY of the following is `Status: FAIL`, whatever else works: no post-interaction screenshot; a \
+`browser_wait` that timed out; a page or port you could not reach; a wrong app on the port; a \
+step you skipped or could not run; a failing build/test you did not fix. With FAIL, list what \
+does not work and what you tried, and do NOT describe the feature as implemented/delivered. \
+The answer MUST also contain one line `Verification: opened <url>, did <interactions>, saw \
+<what, with counts/values>, console <clean | N errors>` — or `Verification: not possible \
+because <reason>` (which is a FAIL) if the browser or a required server truly could not be \
+used after you tried to fix it.\n\
 7. If sub-agents did the work: a sub-agent's \"done\" is a claim, not a fact. Before integrating \
 and before your final answer, re-check each report against reality yourself — run the build / \
 tests the child says it ran, `fetch` the endpoint it says it added, open the page it says it \
@@ -200,6 +214,9 @@ mod tests {
             "every server",
             "`background: true`",
             "`bash_kill`",
+            "non-default port",
+            "do not kill and restart",
+            "ANY of the following is `Status: FAIL`",
             "Verify the API on its own",
             "`browser_wait` for the DATA",
             "\"loading\" text",
