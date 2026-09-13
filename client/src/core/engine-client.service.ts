@@ -3,11 +3,18 @@
  *
  * GUI only renders and sends input; every state change lives in the engine.
  * This service is a thin typed wrapper over `fetch`.
+ *
+ * WP-M2: the class is the HTTP implementation of `EngineApi` (F10-6) and can
+ * be re-pointed at another engine at runtime through `switchTarget()` (F10-7)
+ * - the phone talks to its embedded engine or to a paired desktop with the
+ * same code, only base URL and token change.
  */
 
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 
 import { authFetch, onEngineUnauthorized } from './auth.interceptor';
+import type { EngineApi, PermissionDecisionInput } from './engine-api';
+import { EngineTarget, EngineTargetStore } from './engine-target.store';
 import {
   AbortResponse,
   AbortTaskResponse,
@@ -63,15 +70,32 @@ import {
   BrowserFrame,
   BrowserState,
 } from './engine.dtos';
-import type { EngineApi, PermissionDecisionInput } from './engine-api';
-import { EngineConnection, TransportStrategy } from './transport.strategy';
+import {
+  EmbeddedEngineError,
+  EngineConnection,
+  ResolvedTarget,
+  TransportStrategy,
+} from './transport.strategy';
 
 export type { PermissionDecisionInput } from './engine-api';
 
-/** WP-M2 (F10-6): the HTTP implementation of the `EngineApi` contract. */
+/** Fixed ids of the platform-resolved targets (one per platform kind). */
+export const PLATFORM_TARGET_ID = {
+  sidecar: 'sidecar',
+  embedded: 'embedded',
+  'remote-url': 'remote-url:default',
+} as const;
+
 @Injectable({ providedIn: 'root' })
 export class EngineClient implements EngineApi {
   private readonly transport = new TransportStrategy();
+  private readonly targets = inject(EngineTargetStore);
+  /**
+   * F10-7: aborts every request still in flight against the previous target
+   * when `switchTarget()` runs, so a slow reply from engine A can never land
+   * in a view that already shows engine B.
+   */
+  private inflight = new AbortController();
 
   /** The resolved engine connection (null until `connect()` succeeds). */
   readonly connection = signal<EngineConnection | null>(null);
@@ -104,15 +128,86 @@ export class EngineClient implements EngineApi {
     return this.transport.isCapacitor;
   }
 
-  /** Resolve (and cache) the engine connection for the current platform. */
+  /**
+   * Resolve (and cache) the engine connection for the current platform, and
+   * register it as the platform's default target (F10-7). The resolution
+   * itself is unchanged: Tauri sidecar / Capacitor embedded / saved remote
+   * URL. What changed: a Capacitor shell whose embedded engine fails no longer
+   * silently falls back to the saved URL - the failure is exposed through
+   * `EngineTargetStore.platformError`, and only a previously *active*
+   * persisted target (a paired desktop) is used instead.
+   */
   async connect(): Promise<EngineConnection> {
     const existing = this.connection();
     if (existing) {
       return existing;
     }
-    const conn = await this.transport.connect();
+    let resolved: ResolvedTarget;
+    try {
+      resolved = await this.transport.resolveDefaultTarget();
+      this.targets.platformError.set(null);
+    } catch (err) {
+      if (err instanceof EmbeddedEngineError) {
+        this.targets.platformError.set(err.message);
+        await this.targets.ready;
+        const fallback = this.targets.active();
+        if (fallback && fallback.kind === 'desktop') {
+          return this.applyTarget(fallback);
+        }
+      }
+      throw err;
+    }
+    const target = this.targets.upsert({
+      id: PLATFORM_TARGET_ID[resolved.kind],
+      kind: resolved.kind,
+      label: platformLabel(resolved.kind, resolved.connection.baseUrl),
+      baseUrl: resolved.connection.baseUrl,
+      token: resolved.token,
+      ephemeral: true,
+    });
+    // The platform default wins on launch (the sidecar/embedded engine is the
+    // one the shell just started); a persisted choice is restored explicitly
+    // by the mobile shell when the user picked a desktop last time.
+    this.targets.setActive(target.id);
+    this.connection.set(resolved.connection);
+    return resolved.connection;
+  }
+
+  /**
+   * F10-7: make `id` the active engine. Installs its token (the single
+   * `adopt()` path), sets `connection`, clears `unauthorized` and aborts the
+   * requests still running against the previous target. `EventsStore`
+   * observes `EngineTargetStore.activeId` and restarts its stream, bumping
+   * `reconnectVersion` so open views `refreshFull`.
+   */
+  async switchTarget(id: string): Promise<EngineTarget> {
+    const target = this.targets.byId(id);
+    if (!target) {
+      throw new Error(`unknown engine target: ${id}`);
+    }
+    const token = target.token ?? (await this.targets.tokenFor(id));
+    const resolved = { ...target, token };
+    this.applyTarget(resolved);
+    return resolved;
+  }
+
+  private applyTarget(target: EngineTarget): EngineConnection {
+    this.inflight.abort();
+    this.inflight = new AbortController();
+    const conn = this.transport.adopt(
+      target.kind === 'sidecar' ? 'tauri' : 'http',
+      target.baseUrl,
+      target.token,
+    );
     this.connection.set(conn);
+    this.unauthorized.set(false);
+    this.targets.setActive(target.id);
     return conn;
+  }
+
+  /** Targets known to this client (platform default + persisted ones). */
+  get targetStore(): EngineTargetStore {
+    return this.targets;
   }
 
   /**
@@ -121,7 +216,21 @@ export class EngineClient implements EngineApi {
    * `adoptRemote` stores it and returns the connection with a clean base URL.
    */
   reconfigure(conn: EngineConnection): void {
-    this.connection.set(this.transport.adoptRemote(conn));
+    const adopted = this.transport.adoptRemote(conn);
+    this.connection.set(adopted);
+    // Keep the platform `remote-url` target in step with the typed address so
+    // the target list (mobile overflow sheet) never shows a stale URL.
+    const id = PLATFORM_TARGET_ID['remote-url'];
+    if (this.targets.byId(id)) {
+      this.targets.upsert({
+        id,
+        kind: 'remote-url',
+        label: platformLabel('remote-url', adopted.baseUrl),
+        baseUrl: adopted.baseUrl,
+        token: this.transport.readRemoteToken(),
+        ephemeral: true,
+      });
+    }
   }
 
   /**
@@ -146,6 +255,10 @@ export class EngineClient implements EngineApi {
     await this.ping();
     if (this.unauthorized()) {
       throw new Error('engine rejected the token (401)');
+    }
+    const active = this.targets.activeId();
+    if (active) {
+      this.targets.markOk(active);
     }
   }
 
@@ -726,7 +839,7 @@ export class EngineClient implements EngineApi {
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const conn = this.requireConnection();
-    const init: RequestInit = { method };
+    const init: RequestInit = { method, signal: this.inflight.signal };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
@@ -744,5 +857,17 @@ export class EngineClient implements EngineApi {
       return undefined as T;
     }
     return (await res.json()) as T;
+  }
+}
+
+/** Default label of a platform-resolved target (the UI may re-label later). */
+function platformLabel(kind: EngineTarget['kind'], baseUrl: string): string {
+  switch (kind) {
+    case 'sidecar':
+      return 'Desktop engine';
+    case 'embedded':
+      return 'This device';
+    default:
+      return baseUrl;
   }
 }

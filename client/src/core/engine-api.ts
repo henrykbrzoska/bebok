@@ -19,6 +19,7 @@
 import { InjectionToken, Signal, WritableSignal, inject } from '@angular/core';
 
 import { EngineClient } from './engine-client.service';
+import type { EngineTarget } from './engine-target.store';
 import type {
   AbortResponse,
   AbortTaskResponse,
@@ -88,6 +89,11 @@ export interface EngineConnectionApi {
   reconfigure(conn: EngineConnection): void;
   reconnect(rawUrl?: string): Promise<void>;
   ping(): Promise<void>;
+  /**
+   * F10-7: re-point every REST call and the SSE stream at a registered
+   * target (see `EngineTargetStore`) without a page reload.
+   */
+  switchTarget(id: string): Promise<EngineTarget>;
 
   pickDirectory(title: string): Promise<string | null>;
   pickFile(title: string): Promise<string | null>;
