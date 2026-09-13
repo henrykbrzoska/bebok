@@ -10,7 +10,7 @@
  * selection. Everything else lives in `SettingsStore`, which it provides.
  */
 
-import { Component, OnInit, effect, inject } from '@angular/core';
+import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
@@ -29,6 +29,7 @@ import { SkillsTab } from './skills-tab';
 import { PermissionsTab } from './permissions-tab';
 import { AppearanceTab } from './appearance-tab';
 import { RawJsonTab } from './raw-json-tab';
+import { RemoteTab } from './remote/remote-tab';
 
 /** Query-param aliases accepted for `?tab=` (the command palette uses these). */
 const TAB_ALIASES: Record<string, SettingsTab> = {
@@ -54,6 +55,7 @@ const TAB_ALIASES: Record<string, SettingsTab> = {
     PermissionsTab,
     AppearanceTab,
     RawJsonTab,
+    RemoteTab,
   ],
   providers: [SettingsStore],
   templateUrl: './settings.html',
@@ -71,6 +73,14 @@ export class SettingsView implements OnInit {
   readonly toolSafety = inject(ToolSafetyStore);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly tabs = SETTINGS_TABS;
+
+  /**
+   * WP-M4 (F10-13): the Remote rail entry is not one of `SettingsStore`'s
+   * `SETTINGS_TABS` (that store is outside this package's scope) - it is a
+   * sibling boolean kept here instead, so opening it just hides the regular
+   * tab switch rather than needing a new `SettingsTab` variant.
+   */
+  readonly showRemote = signal(false);
 
   /** Tab requested through `?tab=` (command palette deep links). */
   private readonly requestedTab = toSignal(
@@ -107,13 +117,23 @@ export class SettingsView implements OnInit {
   }
 
   select(tab: SettingsTab): void {
+    this.showRemote.set(false);
     this.store.setTab(tab);
+  }
+
+  selectRemote(): void {
+    this.showRemote.set(true);
   }
 
   private applyRequestedTab(): void {
     const raw = (this.requestedTab() ?? '').toLowerCase();
+    if (raw === 'remote') {
+      this.showRemote.set(true);
+      return;
+    }
     const tab = TAB_ALIASES[raw];
     if (tab) {
+      this.showRemote.set(false);
       this.store.tab.set(tab);
     }
   }

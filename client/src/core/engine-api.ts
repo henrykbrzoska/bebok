@@ -64,6 +64,9 @@ import type {
   StatsResponse,
   ToolSafetyResponse,
   WorktreeSpec,
+  RemoteStatus,
+  RemoteDevice,
+  RemotePairStart,
 } from './engine.dtos';
 import type { EngineConnection, PlatformKind } from './transport.strategy';
 
@@ -211,6 +214,18 @@ export interface EngineRestApi {
   sessionProcesses(sessionId: string): Promise<ProcessInfo[]>;
   processLog(id: string, tail?: number): Promise<ProcessLogResponse>;
   killProcess(id: string): Promise<ProcessInfo>;
+
+  // remote pairing (WP-M4 / F10-13): `/remote/*` on this same engine's local
+  // listener (WP-M1) - Settings -> Remote turns the second listener on/off
+  // and manages paired devices; no new transport.
+  getRemoteStatus(): Promise<RemoteStatus>;
+  enableRemote(): Promise<RemoteStatus>;
+  disableRemote(): Promise<RemoteStatus>;
+  startPairing(): Promise<RemotePairStart>;
+  confirmPairing(pairId: string): Promise<RemoteDevice>;
+  rejectPairing(pairId: string): Promise<{ ok: boolean }>;
+  listDevices(): Promise<RemoteDevice[]>;
+  revokeDevice(id: string): Promise<{ ok: boolean }>;
 }
 
 /** The complete engine contract the client code depends on. */

@@ -7,11 +7,44 @@ import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
-import { SessionMeta } from '../../core/engine.dtos';
+import { EngineEvent, RemoteDevice, SessionMeta } from '../../core/engine.dtos';
+import { EventsStore } from '../../core/events.store';
+import { RemoteDesktopStore } from '../../core/remote-desktop.store';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
+import { ToastStore } from '../toast/toast.store';
 import { Topbar } from './topbar';
+
+function device(id: string, name: string): RemoteDevice {
+  return {
+    id,
+    name,
+    createdAt: 0,
+    lastSeen: 0,
+    lastIp: '',
+    revoked: false,
+    model: '',
+    platform: '',
+  };
+}
+
+/** A no-op `RemoteDesktopStore`/`EventsStore` double so unrelated Topbar
+ *  specs never trigger a real engine fetch or SSE connection (F10-14/15). */
+function remoteFakes(overrides: { enabled?: boolean; devicesOnline?: number; devices?: RemoteDevice[] } = {}) {
+  const remote = {
+    enabled: signal(overrides.enabled ?? false),
+    devicesOnline: signal(overrides.devicesOnline ?? 0),
+    devices: signal(overrides.devices ?? []),
+    status: { set: () => undefined },
+    ensure: jasmine.createSpy('ensure').and.resolveTo(undefined),
+  };
+  const events = {
+    start: () => undefined,
+    onEvent: jasmine.createSpy('onEvent').and.returnValue(() => undefined),
+  };
+  return { remote, events };
+}
 
 function session(overrides: Partial<SessionMeta>): SessionMeta {
   const now = Date.now();
@@ -52,6 +85,8 @@ describe('Topbar (F9-12 sub-agent breadcrumb)', () => {
           },
         },
         { provide: ProjectSessionsStore, useValue: { sessions } },
+        { provide: RemoteDesktopStore, useValue: remoteFakes().remote },
+        { provide: EventsStore, useValue: remoteFakes().events },
       ],
     });
     chat = TestBed.inject(ChatSessionStore);
@@ -96,5 +131,107 @@ describe('Topbar (F9-12 sub-agent breadcrumb)', () => {
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('[data-testid="crumb-parent"]'),
     ).toBeNull();
+  });
+});
+
+/** WP-M4 (F10-14): "Remote · N" pill, hidden when Remote is off. */
+describe('Topbar remote pill (F10-14)', () => {
+  let fixture: ComponentFixture<Topbar>;
+
+  function build(overrides: Parameters<typeof remoteFakes>[0]): ReturnType<typeof remoteFakes> {
+    const fakes = remoteFakes(overrides);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [Topbar],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        {
+          provide: ShellStore,
+          useValue: {
+            isChat: signal(false),
+            currentSessionId: signal(null),
+            activeScreen: signal('settings'),
+            rightDrawerOpen: signal(false),
+            toggleRightDrawer: () => undefined,
+          },
+        },
+        { provide: ProjectSessionsStore, useValue: { sessions: signal([]) } },
+        { provide: RemoteDesktopStore, useValue: fakes.remote },
+        { provide: EventsStore, useValue: fakes.events },
+      ],
+    });
+    fixture = TestBed.createComponent(Topbar);
+    fixture.detectChanges();
+    return fakes;
+  }
+
+  function pill(): HTMLElement | null {
+    return (fixture.nativeElement as HTMLElement).querySelector('[data-testid="topbar-remote-pill"]');
+  }
+
+  afterEach(() => fixture?.destroy());
+
+  it('is hidden while Remote is disabled', () => {
+    build({ enabled: false });
+    expect(pill()).toBeNull();
+  });
+
+  it('shows the online device count and updates live', () => {
+    const fakes = build({ enabled: true, devicesOnline: 2, devices: [device('a', 'Pixel'), device('b', 'iPhone')] });
+    expect(pill()?.textContent?.trim()).toContain('2');
+    expect(pill()?.getAttribute('title')).toContain('Pixel');
+    expect(pill()?.getAttribute('title')).toContain('iPhone');
+
+    fakes.remote.devicesOnline.set(3);
+    fixture.detectChanges();
+    expect(pill()?.textContent?.trim()).toContain('3');
+  });
+
+  it('ensures the shared store once on mount, so the pill is live without opening Settings', () => {
+    const fakes = build({ enabled: true });
+    expect(fakes.remote.ensure).toHaveBeenCalledTimes(1);
+  });
+
+  it('toasts a generic "Allowed from device" on permission.resolved while a device is online', async () => {
+    let listener: ((event: EngineEvent) => void) | null = null;
+    const fakes = remoteFakes({ enabled: true, devicesOnline: 1 });
+    fakes.events.onEvent.and.callFake((fn: (event: EngineEvent) => void) => {
+      listener = fn;
+      return () => undefined;
+    });
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [Topbar],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        {
+          provide: ShellStore,
+          useValue: {
+            isChat: signal(false),
+            currentSessionId: signal(null),
+            activeScreen: signal('settings'),
+            rightDrawerOpen: signal(false),
+            toggleRightDrawer: () => undefined,
+          },
+        },
+        { provide: ProjectSessionsStore, useValue: { sessions: signal([]) } },
+        { provide: RemoteDesktopStore, useValue: fakes.remote },
+        { provide: EventsStore, useValue: fakes.events },
+      ],
+    });
+    fixture = TestBed.createComponent(Topbar);
+    fixture.detectChanges();
+
+    listener!({
+      type: 'permission.resolved',
+      directory: '',
+      sessionID: 's1',
+      properties: { allowed: true },
+    });
+
+    const toast = TestBed.inject(ToastStore);
+    expect(toast.toasts().length).toBe(1);
   });
 });

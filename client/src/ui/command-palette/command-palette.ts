@@ -21,10 +21,12 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { RemoteDesktopStore } from '../../core/remote-desktop.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
+import { ToastStore } from '../toast/toast.store';
 
 type ActionId =
   | 'newSession'
@@ -37,7 +39,8 @@ type ActionId =
   | 'settingsMcp'
   | 'settingsSkills'
   | 'settingsAgents'
-  | 'settingsProviders';
+  | 'settingsProviders'
+  | 'toggleRemote';
 
 interface PaletteAction {
   id: ActionId;
@@ -52,7 +55,8 @@ interface PaletteAction {
     | 'palette.settingsMcp'
     | 'palette.settingsSkills'
     | 'palette.settingsAgents'
-    | 'palette.settingsProviders';
+    | 'palette.settingsProviders'
+    | 'palette.toggleRemote';
   hint?: string;
 }
 
@@ -68,6 +72,8 @@ const ACTIONS: PaletteAction[] = [
   { id: 'settingsSkills', labelKey: 'palette.settingsSkills' },
   { id: 'settingsAgents', labelKey: 'palette.settingsAgents' },
   { id: 'settingsProviders', labelKey: 'palette.settingsProviders' },
+  // WP-M4 (F10-14): toggle Remote access without navigating to Settings.
+  { id: 'toggleRemote', labelKey: 'palette.toggleRemote' },
 ];
 
 @Component({
@@ -88,6 +94,9 @@ export class CommandPalette {
   private readonly i18n = inject(I18nService);
   /** F6-4: "Compact now" needs the session currently open in the chat view. */
   private readonly session = inject(ChatSessionStore);
+  /** WP-M4 (F10-14): shared with the topbar pill and the Remote panel (F10-15). */
+  private readonly remote = inject(RemoteDesktopStore);
+  private readonly toast = inject(ToastStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
   readonly open = this.shell.commandPaletteOpen;
@@ -182,6 +191,27 @@ export class CommandPalette {
       case 'settingsProviders':
         await this.goSettings('providers', directory);
         return;
+      case 'toggleRemote':
+        await this.toggleRemote();
+        return;
+    }
+  }
+
+  /** F10-14: enable/disable Remote directly, no navigation, result as a toast. */
+  private async toggleRemote(): Promise<void> {
+    await this.remote.ensure();
+    const wasEnabled = this.remote.enabled();
+    try {
+      const status = wasEnabled ? await this.engine.disableRemote() : await this.engine.enableRemote();
+      this.remote.status.set(status);
+      this.toast.show(this.t(wasEnabled ? 'remote.toastDisabled' : 'remote.toastEnabled'), {
+        kind: 'success',
+      });
+    } catch (err) {
+      this.toast.show(
+        this.t('remote.errorGeneric', { message: err instanceof Error ? err.message : String(err) }),
+        { kind: 'danger' },
+      );
     }
   }
 

@@ -17,11 +17,14 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 
 import { SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
+import { EventsStore } from '../../core/events.store';
+import { RemoteDesktopStore } from '../../core/remote-desktop.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { NavIcon } from '../sidebar/nav-icon';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
+import { ToastStore } from '../toast/toast.store';
 
 /** Breadcrumb tail for a sub-agent chat (F9-12). */
 export interface SubAgentCrumb {
@@ -42,11 +45,42 @@ export class Topbar {
   private readonly i18n = inject(I18nService);
   private readonly chat = inject(ChatSessionStore);
   private readonly project = inject(ProjectSessionsStore);
+  /** WP-M4 (F10-14/15): the same single store the Remote panel renders from. */
+  readonly remote = inject(RemoteDesktopStore);
+  private readonly events = inject(EventsStore);
+  private readonly toast = inject(ToastStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly isChat = this.shell.isChat;
   readonly sessionId = this.shell.currentSessionId;
+
+  /** F10-14: names of the currently paired devices, for the pill's tooltip. */
+  readonly remoteTooltip = computed(() => {
+    const names = this.remote.devices().map((d) => d.name);
+    return names.length > 0
+      ? this.t('topbar.remoteTooltipDevices', { names: names.join(', ') })
+      : this.t('topbar.remoteTooltipEmpty');
+  });
+
+  constructor() {
+    // F10-15: idempotent - the first of {Topbar, Remote panel, palette} to run
+    // wins the one fetch; every mounted surface then reads the same signals.
+    void this.remote.ensure();
+    // F10-14: WP-M1 does not tag who resolved a permission request, so this
+    // degrades to a generic toast whenever a request is allowed while at
+    // least one phone is paired and online - it will also fire for a
+    // desktop-resolved decision made while a phone happens to be connected.
+    this.events.onEvent((event) => {
+      if (event.type !== 'permission.resolved') {
+        return;
+      }
+      const allowed = (event.properties as { allowed?: boolean } | undefined)?.allowed;
+      if (allowed && this.remote.devicesOnline() > 0) {
+        this.toast.show(this.t('remote.toastPermissionAllowed'), { kind: 'info' });
+      }
+    });
+  }
 
   /**
    * F9-12: "<parent> ↳ <child>" data when the open chat is a delegated
