@@ -5,7 +5,7 @@
   [attr.aria-label]="t('changes.diffTitle', { path: path() })"
   (click)="close()"
 >
-  <div class="card" (click)="$event.stopPropagation()">
+  <div class="card" [class.mobile]="mobile()" (click)="$event.stopPropagation()" [attr.data-mobile]="mobile() ? 'true' : null">
     <header class="head">
       <div class="title">
         <span class="path" [title]="path()">{{ path() }}</span>
@@ -16,24 +16,26 @@
         }
       </div>
       <div class="actions">
-        <button
-          type="button"
-          class="action"
-          (click)="openInExplorer()"
-          [disabled]="!directory()"
-          data-testid="open-explorer"
-        >
-          {{ t('changes.openInExplorer') }}
-        </button>
-        <button
-          type="button"
-          class="action danger"
-          (click)="revert()"
-          [disabled]="reverting() || loading()"
-          data-testid="revert-file"
-        >
-          {{ reverting() ? t('changes.reverting') : t('changes.revert') }}
-        </button>
+        @if (!mobile()) {
+          <button
+            type="button"
+            class="action"
+            (click)="openInExplorer()"
+            [disabled]="!directory()"
+            data-testid="open-explorer"
+          >
+            {{ t('changes.openInExplorer') }}
+          </button>
+          <button
+            type="button"
+            class="action danger"
+            (click)="revert()"
+            [disabled]="reverting() || loading()"
+            data-testid="revert-file"
+          >
+            {{ reverting() ? t('changes.reverting') : t('changes.revert') }}
+          </button>
+        }
         <button
           type="button"
           class="close"
@@ -54,7 +56,7 @@
       } @else if (diff() === '') {
         <div class="empty">{{ t('changes.noDiff') }}</div>
       } @else if (diff(); as text) {
-        <app-diff-view [text]="text" [fileLabel]="path()" />
+        <app-diff-view [text]="text" [fileLabel]="path()" [forceMode]="mobile() ? 'unified' : null" />
       }
     </div>
   </div>

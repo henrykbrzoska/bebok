@@ -15,6 +15,17 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
     cleartext: true, // allow http:// to a LAN engine
   },
+  android: {
+    // WP-M6 (F10-28): the app is served from `https://localhost`, so a fetch
+    // to the paired desktop's `http://100.x.y.z:8790` is *mixed content* for
+    // the WebView and would be blocked regardless of the network-security
+    // config (loopback is exempt, which is why the embedded engine never
+    // needed this). `MIXED_CONTENT_ALWAYS_ALLOW` is scoped by the same
+    // client-side address checks as cleartext (see
+    // `res/xml/network_security_config.xml` for the decision and the 1.7
+    // TLS upgrade path that removes the need for it).
+    allowMixedContent: true,
+  },
 };
 
 export default config;

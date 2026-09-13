@@ -1,20 +1,27 @@
 /**
- * Changes tab (WP-M2 / F10-8 placeholder). WP-M6 replaces the body with the
- * real screen; keep this file the only one it edits for this tab.
+ * Changes tab (WP-M6 / F10-26): the session's tracked file changes, full
+ * screen, read-only.
+ *
+ * Reuses the right-drawer `ChangesPanel` in its `mobile` mode: the diff
+ * overlay fills the screen, renders unified only, and offers neither
+ * "Revert" (`POST …/changes/revert` is not allow-listed for the remote
+ * scope) nor "Open in Explorer" (no explorer on the phone). The session
+ * comes from `MobileSessionHost` (last opened / picked).
  */
 
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 
-import { I18nService } from '../../../i18n/i18n.service';
+import { ChangesPanel } from '../../right-drawer/panels/changes-panel';
+import { MobileSessionHost } from '../../../views/mobile/remote-sessions/session-host';
 
 @Component({
   selector: 'app-changes-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [MobileSessionHost, ChangesPanel],
   template: `
-    <section class="m-empty" data-testid="changes-tab-empty">
-      <h2>{{ t('mobile.changes.emptyTitle') }}</h2>
-      <p>{{ t('mobile.changes.emptyHint') }}</p>
-    </section>
+    <app-mobile-session-host data-testid="changes-tab">
+      <app-changes-panel [mobile]="true" />
+    </app-mobile-session-host>
   `,
   styles: [
     `
@@ -25,30 +32,11 @@ import { I18nService } from '../../../i18n/i18n.service';
         min-height: 0;
       }
 
-      .m-empty {
-        flex: 1 1 auto;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-8);
-        padding: var(--space-24);
-        text-align: center;
-      }
-
-      .m-empty h2 {
-        margin: 0;
-        font-size: var(--fs-16);
-      }
-
-      .m-empty p {
-        margin: 0;
-        color: var(--text-muted);
+      app-changes-panel {
+        display: block;
+        font-size: var(--fs-13);
       }
     `,
   ],
 })
-export class ChangesTab {
-  private readonly i18n = inject(I18nService);
-  readonly t = this.i18n.t.bind(this.i18n);
-}
+export class ChangesTab {}

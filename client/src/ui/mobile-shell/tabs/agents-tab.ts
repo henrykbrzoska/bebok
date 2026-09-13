@@ -1,20 +1,58 @@
 /**
- * Agents tab (WP-M2 / F10-8 placeholder). WP-M6 replaces the body with the
- * real screen; keep this file the only one it edits for this tab.
+ * Agents tab (WP-M6 / F10-26): sub-agents of the session plus its
+ * background processes, read-only, behind a two-way segmented control.
+ *
+ * `AgentsPanel` is the desktop's drawer panel unchanged (its transcript
+ * overlay already fits a phone); `MobileProcesses` is the phone's list +
+ * log replacement for the desktop Terminal panel (no kill, no PTY). Both
+ * read the session `MobileSessionHost` publishes.
  */
 
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 
 import { I18nService } from '../../../i18n/i18n.service';
+import { MobileProcesses } from '../../../views/mobile/remote-sessions/processes-list';
+import { MobileSessionHost } from '../../../views/mobile/remote-sessions/session-host';
+import { AgentsPanel } from '../../right-drawer/panels/agents-panel';
+
+export type AgentsSegment = 'agents' | 'processes';
 
 @Component({
   selector: 'app-agents-tab',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [MobileSessionHost, AgentsPanel, MobileProcesses],
   template: `
-    <section class="m-empty" data-testid="agents-tab-empty">
-      <h2>{{ t('mobile.agents.emptyTitle') }}</h2>
-      <p>{{ t('mobile.agents.emptyHint') }}</p>
-    </section>
+    <app-mobile-session-host data-testid="agents-tab">
+      <div class="segments" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          class="segment"
+          [class.on]="segment() === 'agents'"
+          [attr.aria-selected]="segment() === 'agents'"
+          (click)="segment.set('agents')"
+          data-testid="agents-segment-agents"
+        >
+          {{ t('mobile.tab.agents') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="segment"
+          [class.on]="segment() === 'processes'"
+          [attr.aria-selected]="segment() === 'processes'"
+          (click)="segment.set('processes')"
+          data-testid="agents-segment-processes"
+        >
+          {{ t('mobile.processes.title') }}
+        </button>
+      </div>
+      @if (segment() === 'agents') {
+        <app-agents-panel />
+      } @else {
+        <app-mobile-processes />
+      }
+    </app-mobile-session-host>
   `,
   styles: [
     `
@@ -25,25 +63,34 @@ import { I18nService } from '../../../i18n/i18n.service';
         min-height: 0;
       }
 
-      .m-empty {
-        flex: 1 1 auto;
+      .segments {
+        flex: none;
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-8);
-        padding: var(--space-24);
-        text-align: center;
+        gap: var(--space-6);
+        padding: var(--space-8) var(--space-12);
+        border-bottom: 1px solid var(--border);
       }
 
-      .m-empty h2 {
-        margin: 0;
-        font-size: var(--fs-16);
-      }
-
-      .m-empty p {
-        margin: 0;
+      .segment {
+        flex: 1 1 0;
+        min-height: 36px;
+        border: 1px solid var(--border-strong);
+        border-radius: 999px;
+        background: transparent;
         color: var(--text-muted);
+        font: inherit;
+        font-size: var(--fs-12-5);
+        cursor: pointer;
+      }
+
+      .segment.on {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      app-agents-panel {
+        display: block;
+        font-size: var(--fs-13);
       }
     `,
   ],
@@ -51,4 +98,5 @@ import { I18nService } from '../../../i18n/i18n.service';
 export class AgentsTab {
   private readonly i18n = inject(I18nService);
   readonly t = this.i18n.t.bind(this.i18n);
+  readonly segment = signal<AgentsSegment>('agents');
 }

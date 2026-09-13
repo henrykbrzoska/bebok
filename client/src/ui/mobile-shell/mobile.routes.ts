@@ -16,6 +16,7 @@
 
 import { Routes } from '@angular/router';
 
+import { installPairDeepLinks } from '../../core/remote/deep-link';
 import { AboutView } from '../../views/about/about';
 import { SettingsLiteView } from '../../views/mobile/settings-lite/settings-lite';
 import { StatsView } from '../../views/stats/stats';
@@ -25,7 +26,7 @@ import { ChatTab } from './tabs/chat-tab';
 import { MoreTab } from './tabs/more-tab';
 import { RemoteTab } from './tabs/remote-tab';
 
-export const MOBILE_ROUTES: Routes = [
+const MOBILE_TAB_ROUTES: Routes = [
   { path: '', redirectTo: 'chat', pathMatch: 'full' },
   { path: 'chat', component: ChatTab, data: { screen: 'start', tab: 'chat' } },
   { path: 'chat/:sessionID', component: ChatTab, data: { screen: 'chat', tab: 'chat' } },
@@ -44,4 +45,14 @@ export const MOBILE_ROUTES: Routes = [
   },
   { path: 'more/about', component: AboutView, data: { screen: 'about', tab: 'more' } },
   { path: '**', redirectTo: 'chat' },
+];
+
+export const MOBILE_ROUTES: Routes = [
+  {
+    // WP-M6 (F10-22): hook the `bebok://pair` deep link on the first `/m/**`
+    // activation (cold start lands on Chat, the link must still be seen).
+    path: '',
+    canActivateChild: [installPairDeepLinks],
+    children: MOBILE_TAB_ROUTES,
+  },
 ];

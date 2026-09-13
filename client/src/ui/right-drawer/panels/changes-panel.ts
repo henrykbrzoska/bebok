@@ -22,6 +22,7 @@ import {
   computed,
   effect,
   inject,
+  input,
   signal,
 } from '@angular/core';
 
@@ -144,6 +145,7 @@ export function groupChanges(changes: readonly ChangeEntry[]): ChangeGroup[] {
           [path]="path"
           [session]="openSession()"
           [directory]="directory()"
+          [mobile]="mobile()"
           (closed)="openPath.set(null)"
           (reverted)="refresh()"
         />
@@ -314,6 +316,12 @@ export class ChangesPanel {
   private readonly session = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
+
+  /**
+   * WP-M6 (F10-26): phone layout - the diff overlay goes full screen, unified
+   * only, without the revert / explorer actions the remote scope cannot use.
+   */
+  readonly mobile = input(false);
 
   readonly sessionId = computed(() => this.session.meta()?.id ?? null);
   readonly directory = computed(() => this.session.directory());
