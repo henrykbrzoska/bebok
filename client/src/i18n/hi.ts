@@ -314,6 +314,12 @@ export const hi: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'उत्पन्न हो रहा है…',
+  'settings.fleetGenerated': '{count} फ़्लीट सदस्य उत्पन्न हुए - समीक्षा करें और सहेजें।',
+  'settings.fleetFallbackWarning': 'इंजन फ़्लीट बनाने के लिए LLM का उपयोग नहीं कर सका - इसके बजाय एक डिफ़ॉल्ट सदस्य सूची सुझाई गई।',
+  'settings.fleetNeedProviders': 'फ़्लीट बनाने के लिए API कुंजी वाला कम से कम एक प्रोवाइडर जोड़ें।',
   'settings.thinking': 'सोच',
   'settings.thinkingHint':
     'मॉडल से अनुरोधित तर्क प्रयास। उच्च स्तर अधिक गहराई से तर्क करते हैं लेकिन अधिक टोकन और विलंबता का उपयोग करते हैं। केवल उन्हीं मॉडलों पर प्रभावी जो इसका समर्थन करते हैं।',

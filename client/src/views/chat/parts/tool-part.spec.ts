@@ -3,9 +3,12 @@
  *
  * Every call - regardless of `toolIndex`, regardless of state - starts
  * collapsed; the only thing that opens a call by default is the "Expand tool
- * calls by default" preference, which opens every call at once. The header is
- * a real `<button>` with `aria-expanded`, so keyboard activation (Enter/Space)
- * is native.
+ * calls by default" preference, which opens every call at once. The header bar
+ * is a non-interactive `<div class="tool-head">` holding two sibling controls:
+ * a link (for delegation calls with a known child session) and a real
+ * `<button class="head-toggle">` with `aria-expanded` that owns the empty
+ * space and chevron - so clicking the bar's empty space or chevron toggles
+ * the call, while the link navigates to the sub-agent session.
  */
 
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -56,12 +59,57 @@ const FAILED: Part = {
   state: { state: 'error', input: { command: 'exit 1' }, error: 'boom' },
 };
 
+const TASK_COMPLETED: Part = {
+  type: 'tool',
+  id: 'tool-task-1',
+  name: 'task',
+  state: {
+    state: 'completed',
+    input: { agent: 'code', name: 'auth-audit' },
+    output: 'done',
+    title: 'task',
+    structured: { taskID: 't1', name: 'auth-audit', agent: 'code', childSessionID: 'child-1' },
+  },
+};
+
+const TASK_NO_CHILD: Part = {
+  type: 'tool',
+  id: 'tool-task-2',
+  name: 'task',
+  state: {
+    state: 'completed',
+    input: { agent: 'ask', name: 'research-x' },
+    output: 'done',
+    title: 'task',
+    structured: { taskID: 't2', name: 'research-x', agent: 'ask', childSessionID: '' },
+  },
+};
+
+const FLEET_COMPLETED: Part = {
+  type: 'tool',
+  id: 'tool-fleet-1',
+  name: 'fleet',
+  state: {
+    state: 'completed',
+    input: { agent: 'ask' },
+    output: 'done',
+    title: 'fleet',
+    structured: { taskID: 'f1', name: 'fleet-child', agent: 'ask', childSessionID: 'fleet-child-1' },
+  },
+};
+
 describe('ToolPartComponent default state (F6-1b)', () => {
   let fixture: ComponentFixture<ToolPartComponent>;
   let prefs: UiPrefsStore;
 
-  function head(): HTMLButtonElement {
+  /** The bar container — now a DIV, not a button. */
+  function head(): HTMLElement {
     return fixture.nativeElement.querySelector('.tool-head');
+  }
+
+  /** The real toggle button inside the bar. */
+  function toggle(): HTMLButtonElement {
+    return fixture.nativeElement.querySelector('.head-toggle');
   }
 
   function setPart(part: Part): void {
@@ -87,13 +135,13 @@ describe('ToolPartComponent default state (F6-1b)', () => {
   it('starts every call collapsed when the preference is off, including toolIndex 0 (no "first call" exception)', async () => {
     fixture.componentRef.setInput('toolIndex', 0);
     await fixture.whenStable();
-    expect(head().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
     expect(head().classList.contains('collapsed')).toBeTrue();
     expect(fixture.nativeElement.querySelector('.tool-details')).toBeNull();
 
     fixture.componentRef.setInput('toolIndex', 3);
     await fixture.whenStable();
-    expect(head().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
     expect(head().classList.contains('collapsed')).toBeTrue();
     expect(fixture.nativeElement.querySelector('.tool-details')).toBeNull();
   });
@@ -102,71 +150,71 @@ describe('ToolPartComponent default state (F6-1b)', () => {
     prefs.setExpandToolCallsByDefault(true);
     fixture.componentRef.setInput('toolIndex', 5);
     await fixture.whenStable();
-    expect(head().getAttribute('aria-expanded')).toBe('true');
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('toggles through the header button (native Enter/Space activation)', async () => {
+  it('toggles through the head-toggle button (native Enter/Space activation)', async () => {
     fixture.componentRef.setInput('toolIndex', 2);
     await fixture.whenStable();
-    expect(head().tagName).toBe('BUTTON');
-    expect(head().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().tagName).toBe('BUTTON');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
 
-    head().click();
+    toggle().click();
     await fixture.whenStable();
-    expect(head().getAttribute('aria-expanded')).toBe('true');
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
     expect(fixture.nativeElement.querySelector('.tool-details')).not.toBeNull();
 
-    head().click();
+    toggle().click();
     await fixture.whenStable();
-    expect(head().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
   });
 
   it('shows the state label as RUNNING/COMPLETED/FAILED (uppercased by CSS)', async () => {
     setPart(READ);
     await fixture.whenStable();
-    expect(head().querySelector('.state-label')!.textContent!.trim()).toBe('completed');
+    expect(toggle().querySelector('.state-label')!.textContent!.trim()).toBe('completed');
 
     setPart(FETCH_RUNNING);
     await fixture.whenStable();
-    expect(head().querySelector('.state-label')!.textContent!.trim()).toBe('running');
+    expect(toggle().querySelector('.state-label')!.textContent!.trim()).toBe('running');
 
     setPart(FAILED);
     await fixture.whenStable();
-    expect(head().querySelector('.state-label')!.textContent!.trim()).toBe('failed');
+    expect(toggle().querySelector('.state-label')!.textContent!.trim()).toBe('failed');
   });
 
   it('previews the shell command for bash', async () => {
     setPart(BASH);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).toContain('npm test -- --watch=false');
+    expect(toggle().querySelector('.tool-args')!.textContent).toContain('npm test -- --watch=false');
   });
 
   it('previews the path for a file tool', async () => {
     setPart(READ);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).toContain('src/main.ts');
+    expect(toggle().querySelector('.tool-args')!.textContent).toContain('src/main.ts');
   });
 
   it('previews the url for fetch', async () => {
     setPart(FETCH_RUNNING);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).toContain('https://example.com/data.json');
+    expect(toggle().querySelector('.tool-args')!.textContent).toContain('https://example.com/data.json');
   });
 
   it('falls back to the first string argument for other tools', async () => {
     setPart(OTHER);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).toContain('TODO');
+    expect(toggle().querySelector('.tool-args')!.textContent).toContain('TODO');
   });
 
   it('appends the output size to a completed call, but not to a running one', async () => {
     setPart(READ);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).toContain('· 8 B');
+    expect(toggle().querySelector('.tool-args')!.textContent).toContain('· 8 B');
 
     setPart(FETCH_RUNNING);
     await fixture.whenStable();
-    expect(head().querySelector('.tool-args')!.textContent).not.toContain('·');
+    expect(toggle().querySelector('.tool-args')!.textContent).not.toContain('·');
   });
 
   it('F7-7: colours the header dot by the stamped safety category, not the run state', async () => {
@@ -239,7 +287,7 @@ describe('ToolPartComponent default state (F6-1b)', () => {
       ...FAILED,
       state: { state: 'error', input: { command: 'curl' }, error: 'failed: see https://example.com/logs.' },
     });
-    head().click();
+    toggle().click();
     await fixture.whenStable();
     const errorPanel = fixture.nativeElement.querySelector('.panel.error code') as HTMLElement;
     const link = errorPanel.querySelector('a') as HTMLAnchorElement;
@@ -256,10 +304,130 @@ describe('ToolPartComponent default state (F6-1b)', () => {
       ...FAILED,
       state: { state: 'error', input: { command: 'curl' }, error: 'boom <script>alert(1)</script>' },
     });
-    head().click();
+    toggle().click();
     await fixture.whenStable();
     const errorPanel = fixture.nativeElement.querySelector('.panel.error code') as HTMLElement;
     expect(errorPanel.querySelector('script')).toBeNull();
     expect(errorPanel.textContent).toBe('boom <script>alert(1)</script>');
+  });
+});
+
+describe('ToolPartComponent delegation bar (task link + empty-space toggle)', () => {
+  let fixture: ComponentFixture<ToolPartComponent>;
+  let prefs: UiPrefsStore;
+
+  function head(): HTMLElement {
+    return fixture.nativeElement.querySelector('.tool-head');
+  }
+
+  function toggle(): HTMLButtonElement {
+    return fixture.nativeElement.querySelector('.head-toggle');
+  }
+
+  function setPart(part: Part): void {
+    fixture.componentRef.setInput('part', part);
+  }
+
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [ToolPartComponent],
+      providers: [provideZonelessChangeDetection(), provideRouter([])],
+    });
+    prefs = TestBed.inject(UiPrefsStore);
+    prefs.setExpandToolCallsByDefault(false);
+    fixture = TestBed.createComponent(ToolPartComponent);
+  });
+
+  afterEach(() => {
+    prefs.setExpandToolCallsByDefault(false);
+  });
+
+  it('task call with known child id: renders a head-target link with correct href and title, sibling of toggle', async () => {
+    setPart(TASK_COMPLETED);
+    fixture.componentRef.setInput('taskLinks', new Map([['auth-audit', 'child-1']]));
+    await fixture.whenStable();
+
+    const link = head().querySelector('a.head-target') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/chat/child-1');
+    expect(link.getAttribute('title')).toBe('Open sub-agent session');
+    expect(link.textContent).toContain('auth-audit');
+    // The link contains the label cluster (dot + tool-name + delegation badge).
+    expect(link.querySelector('.dot')).not.toBeNull();
+    expect(link.querySelector('.tool-name')!.textContent!.trim()).toBe('task');
+    expect(link.querySelector('.badge.delegation')).not.toBeNull();
+
+    // The toggle button is a sibling of the link, not nested inside it.
+    const children = [...head().children];
+    const linkIdx = children.indexOf(link);
+    const toggleBtn = toggle();
+    const toggleIdx = children.indexOf(toggleBtn);
+    expect(linkIdx).not.toBe(-1);
+    expect(toggleIdx).not.toBe(-1);
+    expect(linkIdx).not.toBe(toggleIdx);
+
+    // No .task-row exists anywhere.
+    expect(fixture.nativeElement.querySelector('.task-row')).toBeNull();
+  });
+
+  it('task call with no known child id: no link, but a muted target-name label and toggle still works', async () => {
+    setPart(TASK_NO_CHILD);
+    await fixture.whenStable();
+
+    // No navigational link.
+    expect(head().querySelector('a.head-target')).toBeNull();
+
+    // A muted label shows the task name.
+    const muted = head().querySelector('.target-name.muted') as HTMLElement;
+    expect(muted).not.toBeNull();
+    expect(muted.textContent!.trim()).toBe('research-x');
+
+    // The toggle button is still present with the label cluster.
+    expect(toggle()).not.toBeNull();
+    expect(toggle().querySelector('.tool-name')!.textContent!.trim()).toBe('task');
+    expect(toggle().querySelector('.badge.delegation')).not.toBeNull();
+
+    // Clicking the toggle expands the call.
+    toggle().click();
+    await fixture.whenStable();
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(fixture.nativeElement.querySelector('.tool-details')).not.toBeNull();
+
+    // No .task-row exists anywhere.
+    expect(fixture.nativeElement.querySelector('.task-row')).toBeNull();
+  });
+
+  it('fleet call: no head-target link (fleet fans out to many children)', async () => {
+    setPart(FLEET_COMPLETED);
+    await fixture.whenStable();
+
+    expect(head().querySelector('a.head-target')).toBeNull();
+    // No muted target-name either (fleet is not a task).
+    expect(head().querySelector('.target-name')).toBeNull();
+  });
+
+  it('empty space inside the toggle button collapses/expands the call', async () => {
+    setPart(READ);
+    await fixture.whenStable();
+
+    const space = toggle().querySelector('.head-space') as HTMLSpanElement;
+    expect(space).not.toBeNull();
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(head().classList.contains('collapsed')).toBeTrue();
+
+    // Click the empty space — the click bubbles to the toggle button.
+    space.click();
+    await fixture.whenStable();
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(head().classList.contains('collapsed')).toBeFalse();
+    expect(fixture.nativeElement.querySelector('.tool-details')).not.toBeNull();
+
+    // Click again to collapse.
+    space.click();
+    await fixture.whenStable();
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(head().classList.contains('collapsed')).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.tool-details')).toBeNull();
   });
 });

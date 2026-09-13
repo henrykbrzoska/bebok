@@ -315,6 +315,12 @@ export const pl: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Generowanie…',
+  'settings.fleetGenerated': 'Wygenerowano {count} członków floty — sprawdź listę i zapisz.',
+  'settings.fleetFallbackWarning': 'Silnik nie mógł użyć LLM do wygenerowania floty — zaproponowano domyślną listę członków.',
+  'settings.fleetNeedProviders': 'Dodaj co najmniej jednego providera z kluczem API, aby wygenerować flotę.',
   'settings.thinking': 'Myślenie',
   'settings.thinkingHint':
     'Poziom wysiłku rozumowania żądany od modelu. Wyższe poziomy rozumują głębiej, ale zużywają więcej tokenów i zwiększają opóźnienie. Działa tylko na modelach, które to obsługują.',

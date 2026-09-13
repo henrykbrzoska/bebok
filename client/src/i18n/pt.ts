@@ -315,6 +315,12 @@ export const pt: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Gerando…',
+  'settings.fleetGenerated': '{count} membros da frota gerados - revise e salve.',
+  'settings.fleetFallbackWarning': 'O motor não conseguiu usar o LLM para gerar a frota - foi proposta uma lista de membros padrão.',
+  'settings.fleetNeedProviders': 'Adicione pelo menos um provedor com chave de API para gerar uma frota.',
   'settings.thinking': 'Raciocínio',
   'settings.thinkingHint':
     'Esforço de raciocínio solicitado ao modelo. Níveis mais altos raciocinam com mais profundidade, mas consomem mais tokens e latência. Só tem efeito em modelos que o suportam.',

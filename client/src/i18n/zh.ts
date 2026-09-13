@@ -314,6 +314,12 @@ export const zh: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': '正在生成…',
+  'settings.fleetGenerated': '已生成 {count} 个编队成员，请检查并保存。',
+  'settings.fleetFallbackWarning': '引擎无法使用 LLM 生成编队，已改为提供默认成员列表。',
+  'settings.fleetNeedProviders': '请至少添加一个带 API 密钥的提供商以生成编队。',
   'settings.thinking': '思考',
   'settings.thinkingHint':
     '要求模型的推理程度。级别越高，推理越深入，但会消耗更多 token 并增加延迟。仅在支持该功能的模型上生效。',

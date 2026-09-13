@@ -315,6 +315,12 @@ export const fr: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Génération…',
+  'settings.fleetGenerated': '{count} membres de flotte générés - vérifiez et enregistrez.',
+  'settings.fleetFallbackWarning': 'Le moteur n’a pas pu utiliser le LLM pour générer la flotte - une liste de membres par défaut a été proposée.',
+  'settings.fleetNeedProviders': 'Ajoutez au moins un fournisseur avec une clé API pour générer une flotte.',
   'settings.thinking': 'Réflexion',
   'settings.thinkingHint':
     'Niveau de raisonnement demandé au modèle. Les niveaux supérieurs raisonnent plus en profondeur, mais consomment plus de jetons et de latence. Efficace uniquement sur les modèles qui le prennent en charge.',

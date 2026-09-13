@@ -52,8 +52,7 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Extensions the panel can show (text via `/fs/file`; images are binary and
- *  not readable through that endpoint, so they are not offered). */
+/** Text extensions the panel can show via `/fs/file` (plain content). */
 export const PREVIEWABLE_EXTENSIONS: readonly string[] = [
   'md',
   'markdown',
@@ -71,12 +70,33 @@ export const PREVIEWABLE_EXTENSIONS: readonly string[] = [
   'log',
 ];
 
+/** Binary image extensions renderable through the preview panel. */
+export const IMAGE_EXTENSIONS: readonly string[] = [
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'svg',
+  'ico',
+  'bmp',
+];
+
 export function isPreviewablePath(path: string): boolean {
   const dot = path.lastIndexOf('.');
   if (dot < 0) {
     return false;
   }
-  return PREVIEWABLE_EXTENSIONS.includes(path.slice(dot + 1).toLowerCase());
+  const ext = path.slice(dot + 1).toLowerCase();
+  return PREVIEWABLE_EXTENSIONS.includes(ext) || IMAGE_EXTENSIONS.includes(ext);
+}
+
+export function isImagePath(path: string): boolean {
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) {
+    return false;
+  }
+  return IMAGE_EXTENSIONS.includes(path.slice(dot + 1).toLowerCase());
 }
 
 /** Directories never worth walking for the picker even when not gitignored. */
@@ -126,6 +146,10 @@ export class PreviewPanel {
   private readonly historyIndex = signal(-1);
 
   readonly content = signal('');
+  /** Raw base64 image data (when an image file is loaded). */
+  readonly imageData = signal<string | null>(null);
+  /** MIME type of the loaded image (e.g. "image/png"). */
+  readonly imageMime = signal<string | null>(null);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -162,6 +186,15 @@ export class PreviewPanel {
   readonly isMarkdown = computed(() => {
     const p = this.currentPath();
     return !!p && /\.(md|markdown)$/i.test(p);
+  });
+  readonly isImagePreview = computed(() => this.imageData() !== null);
+  readonly imageUrl = computed(() => {
+    const data = this.imageData();
+    const mime = this.imageMime();
+    if (!data || !mime) {
+      return '';
+    }
+    return `data:${mime};base64,${data}`;
   });
   /** Directory the picker/explorer actions apply to: the previewed file's,
    *  else the project the chat is bound to. */
@@ -408,12 +441,23 @@ export class PreviewPanel {
     this.error.set(null);
     this.modified.set(false);
     try {
-      const res = await this.engine.fsFile(directory, path);
-      this.content.set(res.content);
+      if (isImagePath(path)) {
+        const res = await this.engine.fsFileBinary(directory, path);
+        this.imageData.set(res.content);
+        this.imageMime.set(res.media_type ?? 'image/png');
+        this.content.set('');
+      } else {
+        const res = await this.engine.fsFile(directory, path);
+        this.content.set(res.content);
+        this.imageData.set(null);
+        this.imageMime.set(null);
+      }
     } catch (err) {
       // Graceful degrade (F6-10 acceptance): a missing or unreadable target
       // shows a clear message instead of crashing the panel.
       this.content.set('');
+      this.imageData.set(null);
+      this.imageMime.set(null);
       this.error.set(describe(err));
     } finally {
       this.loading.set(false);
@@ -433,9 +477,16 @@ export class PreviewPanel {
       return; // collapsed panel / hidden drawer / background tab: do not poll
     }
     try {
-      const res = await this.engine.fsFile(dir, path);
-      if (this.currentPath() === path && res.content !== this.content()) {
-        this.modified.set(true);
+      if (isImagePath(path)) {
+        const res = await this.engine.fsFileBinary(dir, path);
+        if (this.currentPath() === path && res.content !== this.imageData()) {
+          this.modified.set(true);
+        }
+      } else {
+        const res = await this.engine.fsFile(dir, path);
+        if (this.currentPath() === path && res.content !== this.content()) {
+          this.modified.set(true);
+        }
       }
     } catch {
       /* transient read error: the next tick retries */

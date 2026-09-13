@@ -27,6 +27,7 @@ import {
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
+  FleetGenResponse,
   FsBrowseResponse,
   FsFileResponse,
   FsTreeResponse,
@@ -478,6 +479,22 @@ export class EngineClient {
     );
   }
 
+  /**
+   * `POST /fleet/generate?directory=` -> the engine proposes fleet members
+   * (name/agent/model) from the configured providers. Every field of `opts` is
+   * optional; an empty provider pool is answered with 400 by the engine.
+   */
+  generateFleet(
+    directory: string,
+    opts?: { minPerType?: number; types?: string[] },
+  ): Promise<FleetGenResponse> {
+    return this.request<FleetGenResponse>(
+      'POST',
+      `/fleet/generate?directory=${encodeURIComponent(directory)}`,
+      opts ?? {},
+    );
+  }
+
   /** F7-7: every tool the engine knows with its safety category. */
   getToolSafety(directory: string): Promise<ToolSafetyResponse> {
     return this.request<ToolSafetyResponse>(
@@ -525,6 +542,13 @@ export class EngineClient {
     return this.request<FsFileResponse>(
       'GET',
       `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  fsFileBinary(directory: string, path: string): Promise<FsFileResponse> {
+    return this.request<FsFileResponse>(
+      'GET',
+      `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}&binary=true`,
     );
   }
 

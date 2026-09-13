@@ -111,6 +111,10 @@ export class SettingsStore {
   /** Parallel-agents fleet: enabled flag + editable member list. */
   readonly fleetEnabled = signal(false);
   readonly fleetMembers = signal<FleetMember[]>([]);
+  /** True while `POST /fleet/generate` is in flight. */
+  readonly generatingFleet = signal(false);
+  /** Non-fatal note from the last generation (engine fell back to a default list). */
+  readonly fleetNotice = signal<string | null>(null);
 
   // --- permissions ---------------------------------------------------------
 
@@ -398,6 +402,7 @@ export class SettingsStore {
     this.saving.set(true);
     this.error.set(null);
     this.saved.set(null);
+    this.fleetNotice.set(null);
     try {
       const members = this.fleetMembers()
         .map((m) => ({
@@ -415,6 +420,50 @@ export class SettingsStore {
       this.error.set(this.describe(err));
     } finally {
       this.saving.set(false);
+    }
+  }
+
+  /**
+   * Ask the engine to propose fleet members from the configured providers
+   * (`POST /fleet/generate`). The reply only fills the editable list and flips
+   * the enable flag - nothing is persisted here, the user still presses Save
+   * (`PUT /config`) like before.
+   *
+   * One provider with a resolvable key is enough (the engine answers 400 on an
+   * empty pool); the pre-check below just avoids a pointless round-trip.
+   */
+  async generateFleet(): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.saving() || this.generatingFleet()) {
+      return;
+    }
+
+    this.error.set(null);
+    this.saved.set(null);
+    this.fleetNotice.set(null);
+
+    if (!this.providers().some((p) => p.has_key)) {
+      this.error.set(this.i18n.t('settings.fleetNeedProviders'));
+      return;
+    }
+
+    this.generatingFleet.set(true);
+    try {
+      const res = await this.engine.generateFleet(dir, {
+        minPerType: 3,
+        types: ['code', 'ask', 'plan', 'debug'],
+      });
+      this.fleetMembers.set(res.members);
+      this.fleetEnabled.set(true);
+      this.saved.set(this.i18n.t('settings.fleetGenerated', { count: res.members.length }));
+      if (res.fallback || res.warning) {
+        const warning = this.i18n.t('settings.fleetFallbackWarning');
+        this.fleetNotice.set(res.warning ? `${warning} ${res.warning}` : warning);
+      }
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.generatingFleet.set(false);
     }
   }
 

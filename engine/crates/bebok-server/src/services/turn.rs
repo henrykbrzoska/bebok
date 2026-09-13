@@ -317,8 +317,12 @@ fn assemble_prompt(
 
     // WP-DELEGATION (F8-2): the delegation policy section (`delegation.mode`),
     // main-thread sessions only; the text lives in
-    // `bebok_core::agent::delegation_policy`.
-    if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation) {
+    // `bebok_core::agent::delegation_policy`, and the `Fleet:` paragraph is
+    // rendered from the *resolved config* so the model sees the members this
+    // project actually has (or that the fleet is off) rather than a generic
+    // description it would have to guess names from.
+    let fleet = bebok_core::agent::FleetContext::from_config(cfg, &agent.name);
+    if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation, &fleet) {
         agent.prompt = format!("{}\n\n{policy}", agent.prompt);
     }
 }
@@ -418,5 +422,51 @@ mod tests {
             bebok_core::session::Part::Image { media_type, data, .. }
             if media_type == "image/png" && data == PNG_1X1
         ));
+    }
+
+    /// The `Fleet:` roster the main agent sees is rendered from the *resolved
+    /// config*, not from the static preset text (which cannot know the member
+    /// labels), and an agent that does not carry the `fleet` tool never sees
+    /// the section at all. This is the `assemble_prompt` wiring guard.
+    #[tokio::test]
+    async fn assembled_prompt_carries_the_configured_fleet_roster() {
+        let base = std::env::temp_dir().join(format!("bebok-fleet-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{
+                 "delegation": { "mode": "auto" },
+                 "fleet": { "enabled": true, "members": [
+                     { "name": "ask-openai-gpt-4.1-nano", "agent": "ask", "model": "openai/gpt-4.1-nano" },
+                     { "name": "code-zai-glm-5.3-flash", "agent": "code", "model": "zai/glm-5.3-flash" }
+                 ]}
+               }"#,
+        )
+        .unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_string_lossy().to_string();
+        let instance = store.get_or_create_instance(&dir).await.unwrap();
+        let cfg = instance.config_snapshot();
+
+        let mut orchestrator = bebok_core::agent::Agent::orchestrator();
+        assemble_prompt(&instance, &mut orchestrator, &cfg);
+        let prompt = orchestrator.prompt.clone();
+        assert!(prompt.contains("## Delegation policy (mode: auto)"), "{prompt}");
+        assert!(prompt.contains("Fleet: enabled here with"), "{prompt}");
+        assert!(
+            prompt.contains("- `ask-openai-gpt-4.1-nano` - agent `ask`, model `openai/gpt-4.1-nano`"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("- `code-zai-glm-5.3-flash`"), "{prompt}");
+        // The spawn bullet only offers the fleet route when it can run.
+        assert!(prompt.contains("see the `Fleet:` line below"), "{prompt}");
+
+        // `code` is a main-thread agent as well, but it has no `fleet` tool.
+        let mut code = bebok_core::agent::Agent::code();
+        assemble_prompt(&instance, &mut code, &cfg);
+        assert!(!code.prompt.contains("fleet"), "{}", code.prompt);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

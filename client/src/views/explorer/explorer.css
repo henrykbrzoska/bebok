@@ -286,6 +286,25 @@
   padding: var(--space-12);
 }
 
+/* Image preview: fit within the pane without cropping. */
+.image-preview-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12);
+  background: var(--surface-2);
+}
+
+.image-preview {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-control-sm);
+}
+
 .placeholder {
   flex: 1 1 auto;
   display: flex;

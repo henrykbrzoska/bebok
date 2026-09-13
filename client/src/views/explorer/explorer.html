@@ -84,6 +84,10 @@
               (closed)="htmlPreview.set(null)"
             />
           </div>
+        } @else if (isImageSelection()) {
+          <div class="image-preview-wrap">
+            <img [src]="imageUrl()" [alt]="selectedName() ?? ''" class="image-preview" />
+          </div>
         } @else if (isMarkdownSelection()) {
           <div class="file-body markdown">
             @for (row of markdownRows(); track $index) {

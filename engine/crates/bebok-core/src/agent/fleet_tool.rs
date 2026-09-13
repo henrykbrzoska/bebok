@@ -319,10 +319,14 @@ impl Tool for FleetTool {
         "Run one prompt across the configured parallel-fleet members concurrently; each member \
          works in an isolated context and returns only its final answer, combined into per-member \
          sections. Members are fixed and user-named — this tool cannot create members or target \
-         arbitrary presets or counts. Optional `names` selects by exact member name; optional \
-         `agents` selects by agent preset type, case-insensitive (e.g. {\"agents\":[\"ask\"]} runs \
-         only ask members); both intersect (AND). WARNING: omitting both filters runs EVERY \
-         configured member — never do that when the user asked for a specific type or count. \
+         arbitrary presets or counts. The members configured in this project are listed in the \
+         `Fleet:` line of your delegation policy: copy labels from there for `names`, or filter \
+         by `agents`. Optional `names` selects by exact member name; optional `agents` selects by \
+         agent preset type, case-insensitive (e.g. {\"agents\":[\"ask\"]} runs \
+         only ask members); both intersect (AND). An unknown label is an error \
+         (`fleet: unknown member(s)`), so never invent one. WARNING: omitting both filters runs \
+         EVERY configured member — never do that when the user asked for a specific type or \
+         count. \
          If the filtered selection is bigger than the count the user asked for, use N parallel \
          `task` calls with agent=<type> instead. Heterogeneous mode: pass `tasks` with per-task \
          prompts for independent tasks, e.g. {\"tasks\": [{\"prompt\": \"research auth\", \
@@ -330,8 +334,8 @@ impl Tool for FleetTool {
          is {prompt (required), agent?, name?, member?, images?} and runs concurrently in its own \
          isolated session; `task.member` must match a configured member name. Use fleet when \
          the user explicitly requests parallel execution or when running many independent tasks \
-         concurrently is clearly beneficial and fleet members are available. For most delegation, \
-         prefer `task` calls. Returns member names; report which ran."
+         concurrently is clearly beneficial and the fleet is configured as described above. For \
+         most delegation, prefer `task` calls. Returns member names; report which ran."
     }
 
     fn parameters_schema(&self) -> Value {

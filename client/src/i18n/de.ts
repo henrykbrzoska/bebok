@@ -315,6 +315,12 @@ export const de: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Wird generiert…',
+  'settings.fleetGenerated': '{count} Flotten-Mitglieder generiert - prüfen und speichern.',
+  'settings.fleetFallbackWarning': 'Die Engine konnte das LLM nicht zum Generieren der Flotte nutzen - stattdessen wurde eine Standardliste vorgeschlagen.',
+  'settings.fleetNeedProviders': 'Füge mindestens einen Provider mit API-Schlüssel hinzu, um eine Flotte zu generieren.',
   'settings.thinking': 'Denken',
   'settings.thinkingHint':
     'Vom Modell angeforderter Denkaufwand. Höhere Stufen denken gründlicher nach, verbrauchen aber mehr Tokens und Latenz. Nur bei Modellen wirksam, die dies unterstützen.',

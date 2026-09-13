@@ -314,6 +314,12 @@ export const ja: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': '生成中…',
+  'settings.fleetGenerated': 'フリートメンバーを {count} 件生成しました。確認して保存してください。',
+  'settings.fleetFallbackWarning': 'エンジンはフリート生成に LLM を利用できませんでした。代わりに既定のメンバー一覧を提案しました。',
+  'settings.fleetNeedProviders': 'フリートを生成するには、API キーを持つプロバイダーを 1 つ以上追加してください。',
   'settings.thinking': '思考',
   'settings.thinkingHint':
     'モデルに要求する思考の深さです。高いレベルほど深く推論しますが、より多くのトークンとレイテンシーを消費します。対応しているモデルでのみ有効です。',

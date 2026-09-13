@@ -1,5 +1,6 @@
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
 
 import { escapeAndLinkify } from '../../../core/linkify';
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
@@ -25,67 +26,88 @@ import { safetyLegend } from './safety-legend';
 /**
  * Tool-call block (F2-6 / F2-9).
  *
- * Bordered card whose header is one clickable row: status dot (success /
- * accent / danger by outcome) + monospace tool name + truncated monospace
- * args + state label + chevron. Expanding reveals the arguments and the
- * result body on a `--bg` panel.
+ * Bordered card whose header is a flex bar. The bar is a single clickable
+ * `div.tool-head` — clicking anywhere on it (args preview, state label,
+ * head-space, chevron) collapses/expands the details panel.
  *
- * F6-1b: every tool call - single or grouped, first in the turn or not -
- * starts collapsed. The only way a call starts open is the "Expand tool
- * calls by default" preference (`UiPrefsStore.expandToolCallsByDefault`),
- * which opens every call at once. A collapsed call is a single ~28px line:
- * status dot + mono tool name + truncated key-argument preview + state label
- * (RUNNING/COMPLETED/FAILED, uppercased by CSS) + chevron. No duration is
- * shown: the engine's `ToolState` carries `started_at` only while running and
- * no end timestamp once completed, so there is nothing truthful to display;
- * a completed call's output size is appended to the preview instead.
+ * **Delegation calls** (`task`) with a resolved child session: each span
+ * inside the label cluster (safety dot, tool name, delegation badge) and
+ * the task name are individual `<a>` links to the child session. Clicking
+ * them navigates but does NOT toggle the panel (stopPropagation).
+ *
+ * When `childLink()` is absent (non-task calls or unresolved children)
+ * all label-cluster elements are plain `<span>`s and the task name is a
+ * muted `<span>`, matching the previous non-interactive layout.
+ *
+ * The right portion is always a `<button class="head-toggle">` that owns
+ * the args preview, state label, flexible empty space (`.head-space`),
+ * and the chevron.
+ *
+ * F6-1b: every tool call starts collapsed unless the "Expand tool calls
+ * by default" preference is on. A collapsed call is a single ~28px line.
  */
 @Component({
   selector: 'app-tool-part',
-  imports: [DiffViewComponent, RouterLink, TaskProgressLine],
+  imports: [DiffViewComponent, RouterLink, NgTemplateOutlet, TaskProgressLine],
   template: `
     <div class="tool" [class.failed]="kind() === 'error'">
-      <button
-        type="button"
+      <div
         class="tool-head"
         [class.collapsed]="!detailsOpen()"
         (click)="detailsOpen.set(!detailsOpen())"
-        [attr.aria-expanded]="detailsOpen()"
-        [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
       >
-        <span
-          class="dot safety-{{ safety() }}"
-          [class.pulse]="kind() === 'running'"
-          [class.ring-failed]="kind() === 'error'"
-          [title]="safetyTitle()"
-          [attr.data-safety]="safety()"
-          aria-hidden="true"
-        ></span>
-        <span class="tool-name">{{ name() }}</span>
-        @if (isTask()) {
-          <span class="badge delegation">{{ t('tool.delegation') }}</span>
-        }
-        <span class="tool-args">{{ summary() }}{{ sizeSuffix() }}</span>
-        <span class="state-label state-{{ kind() }}">{{ stateLabel() }}</span>
-        <span class="chevron" aria-hidden="true">{{ detailsOpen() ? '▾' : '▸' }}</span>
-      </button>
-
-      @if (isTask()) {
-        <div class="task-row">
-          @if (taskLink()) {
+        @if (childLink()) {
+          <a
+            class="dot safety-{{ safety() }} label-link"
+            [class.pulse]="kind() === 'running'"
+            [class.ring-failed]="kind() === 'error'"
+            [title]="safetyTitle()"
+            [attr.data-safety]="safety()"
+            [routerLink]="['/chat', childLink()!]"
+            (click)="$event.stopPropagation()"
+            tabindex="-1"
+            aria-hidden="true"
+          ></a>
+          <a
+            class="tool-name label-link text-link"
+            [routerLink]="['/chat', childLink()!]"
+            [title]="t('tool.openSubagent')"
+            (click)="$event.stopPropagation()"
+          >{{ name() }}</a>
+          @if (isTask()) {
             <a
-              class="task-target"
-              [routerLink]="['/chat', taskLink()!]"
+              class="badge delegation label-link"
+              [routerLink]="['/chat', childLink()!]"
               [title]="t('tool.openSubagent')"
-            >{{ taskName() }}</a>
-          } @else {
-            <span class="task-target muted">{{ taskName() }}</span>
+              (click)="$event.stopPropagation()"
+            >{{ t('tool.delegation') }}</a>
           }
-        </div>
-      }
+          <a
+            class="target-name label-link text-link"
+            [routerLink]="['/chat', childLink()!]"
+            [title]="t('tool.openSubagent')"
+            (click)="$event.stopPropagation()"
+          >{{ taskName() }}</a>
+        } @else {
+          <ng-container *ngTemplateOutlet="labelCluster"></ng-container>
+          @if (isTask()) {
+            <span class="target-name muted">{{ taskName() }}</span>
+          }
+        }
+        <button
+          type="button"
+          class="head-toggle"
+          (click)="$event.stopPropagation(); detailsOpen.set(!detailsOpen())"
+          [attr.aria-expanded]="detailsOpen()"
+          [title]="detailsOpen() ? t('tool.collapseCall') : t('tool.expandCall')"
+        >
+          <span class="tool-args">{{ summary() }}{{ sizeSuffix() }}</span>
+          <span class="state-label state-{{ kind() }}">{{ stateLabel() }}</span>
+          <span class="head-space" aria-hidden="true"></span>
+          <span class="chevron" aria-hidden="true">{{ detailsOpen() ? '▾' : '▸' }}</span>
+        </button>
+      </div>
 
-      <!-- WP-DELEGATION: live one-line progress of the child(ren) while the
-           delegation call is still running (fed by task.progress events). -->
       @for (live of liveChildren(); track live.taskID) {
         <div class="progress-row" data-testid="task-progress-row">
           @if (!isTask()) {
@@ -125,6 +147,21 @@ import { safetyLegend } from './safety-legend';
         </div>
       }
     </div>
+
+    <ng-template #labelCluster>
+      <span
+        class="dot safety-{{ safety() }}"
+        [class.pulse]="kind() === 'running'"
+        [class.ring-failed]="kind() === 'error'"
+        [title]="safetyTitle()"
+        [attr.data-safety]="safety()"
+        aria-hidden="true"
+      ></span>
+      <span class="tool-name">{{ name() }}</span>
+      @if (isTask()) {
+        <span class="badge delegation">{{ t('tool.delegation') }}</span>
+      }
+    </ng-template>
   `,
   styles: `
     .tool {
@@ -151,13 +188,10 @@ import { safetyLegend } from './safety-legend';
       align-items: center;
       gap: var(--space-8);
       width: 100%;
-      background: none;
-      border: none;
       border-radius: 0;
       padding: var(--space-8) var(--space-12);
-      cursor: pointer;
-      text-align: left;
       min-width: 0;
+      cursor: pointer;
     }
     .tool-head:hover {
       background: var(--surface-2);
@@ -167,6 +201,45 @@ import { safetyLegend } from './safety-legend';
       padding-top: 5px;
       padding-bottom: 5px;
       min-height: 28px;
+    }
+
+    /* Individual label elements when they are links to a child session. */
+    .label-link {
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+    }
+    .text-link:hover {
+      text-decoration: underline;
+    }
+
+    .target-name {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11-5);
+      font-weight: 600;
+      color: var(--accent);
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .target-name.muted {
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .head-toggle {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--space-8);
+      background: none;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
     }
 
     /* F7-7: the dot's fill is the tool's explicit safety category
@@ -212,7 +285,7 @@ import { safetyLegend } from './safety-legend';
     }
 
     .tool-args {
-      flex: 1 1 auto;
+      flex: 0 1 auto;
       min-width: 0;
       font-family: var(--font-mono);
       font-size: var(--fs-11-5);
@@ -239,6 +312,12 @@ import { safetyLegend } from './safety-legend';
       color: var(--danger);
     }
 
+    .head-space {
+      flex: 1 1 auto;
+      min-width: 24px;
+      align-self: stretch;
+    }
+
     .chevron {
       flex: none;
       font-size: 10px;
@@ -254,24 +333,6 @@ import { safetyLegend } from './safety-legend';
       border-radius: 20px;
       border: 1px solid var(--accent);
       color: var(--accent);
-    }
-
-    .task-row {
-      padding: 0 var(--space-12) var(--space-8);
-      font-size: var(--fs-12);
-    }
-    .task-target {
-      font-family: var(--font-mono);
-      font-size: var(--fs-11-5);
-      font-weight: 600;
-      color: var(--accent);
-      text-decoration: none;
-    }
-    a.task-target:hover {
-      text-decoration: underline;
-    }
-    .muted {
-      color: var(--text-muted);
     }
 
     .progress-row {
@@ -438,6 +499,12 @@ export class ToolPartComponent {
     const name = this.taskName();
     return this.taskLinks().get(name) ?? null;
   });
+
+  /**
+   * The child link for the bar's navigational affordance. Only non-null
+   * for `task` calls (not `fleet`) with a resolved child session id.
+   */
+  readonly childLink = computed<string | null>(() => (this.isTask() ? this.taskLink() : null));
 
   /** `path` argument, shown as the diff block's title when present. */
   readonly filePath = computed(() => {

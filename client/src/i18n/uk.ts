@@ -315,6 +315,12 @@ export const uk: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Генерація…',
+  'settings.fleetGenerated': 'Згенеровано {count} учасників флоту — перегляньте та збережіть.',
+  'settings.fleetFallbackWarning': 'Рушій не зміг скористатися LLM для генерації флоту — натомість запропоновано типовий список учасників.',
+  'settings.fleetNeedProviders': 'Додайте щонайменше одного провайдера з ключем API, щоб згенерувати флот.',
   'settings.thinking': 'Міркування',
   'settings.thinkingHint':
     'Рівень міркування, який запитується в моделі. Вищі рівні міркують глибше, але використовують більше токенів і затримки. Діє лише на моделях, які це підтримують.',

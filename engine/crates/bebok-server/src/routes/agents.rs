@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::response::IntoResponse;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -77,7 +78,7 @@ pub struct AgentEntry {
     pub background: bool,
 }
 
-/// `?directory=` query of `GET /delegation/models`.
+/// `?directory=` query of `GET /delegation/models` and `POST /fleet/generate`.
 #[derive(Debug, serde::Deserialize)]
 pub struct DelegationModelsQuery {
     pub directory: String,
@@ -123,6 +124,38 @@ pub async fn delegation_models(
         "resolved": resolved,
         "mappings": mappings,
     })))
+}
+
+/// `POST /fleet/generate?directory=` — ask a cheap configured LLM to plan a
+/// fleet of sub-agents (min. 3 members per type: code/ask/plan/debug), picking
+/// models from the configured provider pool with a bias against expensive
+/// ones. A deterministic cheapest-first fallback fills any gap (or the whole
+/// fleet when the LLM call fails), so the response always satisfies the
+/// minimum — `fallback: true` + `warning` say which path was taken.
+///
+/// Body (all optional): `{ "minPerType": 3, "types": ["code","ask","plan","debug"] }`.
+pub async fn generate_fleet(
+    State(state): State<AppState>,
+    Query(q): Query<DelegationModelsQuery>,
+    body: Option<Json<serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let opts: bebok_core::fleet_gen::FleetGenOptions = match body {
+        Some(Json(v)) => serde_json::from_value(v).map_err(|e| {
+            crate::error::ApiError::bad_request(format!("invalid fleet options: {e}"))
+                .into_response()
+        })?,
+        None => serde_json::from_value(serde_json::json!({})).expect("empty options are valid"),
+    };
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let cfg = instance.config_snapshot();
+    let result = bebok_core::fleet_gen::generate_fleet(&cfg, opts)
+        .await
+        .map_err(|e| err_response(&e))?;
+    Ok(Json(serde_json::to_value(&result).expect("FleetGenResult serializes")))
 }
 
 /// `GET /session/{id}/agents` -> `{ agents: [...] }`, running first, then by
@@ -472,6 +505,61 @@ mod tests {
         )
         .await;
         assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        server.abort();
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[tokio::test]
+    async fn fleet_generate_responds_with_valid_shape() {
+        let (address, server, base) = serve().await;
+        let auth = crate::auth::token();
+        let dir = base.join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let directory = dir.to_string_lossy().replace('\\', "%5C").replace(':', "%3A").replace('/', "%2F");
+        let body = "{}";
+        let response = raw(
+            address,
+            &format!(
+                "POST /fleet/generate?directory={directory} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+        .await;
+        // Either 400 (no providers/keys in this environment) or 200 with a
+        // valid FleetGenResult — but never a hang and never HTML/garbage.
+        if response.starts_with("HTTP/1.1 200") {
+            let json_start = response.find('{').expect("JSON body");
+            let parsed: serde_json::Value =
+                serde_json::from_str(&response[json_start..]).expect("valid JSON");
+            let members = parsed["members"].as_array().expect("members array");
+            assert!(members.len() >= 12, "min 3 per type x 4 types: {parsed}");
+            assert!(parsed.get("generationModel").is_some(), "{parsed}");
+            assert!(parsed.get("fallback").is_some(), "{parsed}");
+        } else {
+            assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        }
+        server.abort();
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[tokio::test]
+    async fn fleet_generate_rejects_orchestrator_type() {
+        let (address, server, base) = serve().await;
+        let auth = crate::auth::token();
+        let dir = base.join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let directory = dir.to_string_lossy().replace('\\', "%5C").replace(':', "%3A").replace('/', "%2F");
+        let body = r#"{"types":["code","orchestrator"]}"#;
+        let response = raw(
+            address,
+            &format!(
+                "POST /fleet/generate?directory={directory} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert!(response.contains("orchestrator") || response.contains("invalid agent type"), "{response}");
         server.abort();
         let _ = std::fs::remove_dir_all(base);
     }

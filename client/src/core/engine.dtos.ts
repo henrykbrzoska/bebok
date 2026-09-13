@@ -487,6 +487,19 @@ export interface FleetMember {
   model: string;
 }
 
+/**
+ * `POST /fleet/generate?directory=` - fleet members proposed by the engine from
+ * the configured providers. `fallback` is set when the LLM call was not usable
+ * and the engine produced a deterministic list instead; `warning` carries the
+ * provider error (or `null` when the generation went through the LLM).
+ */
+export interface FleetGenResponse {
+  members: FleetMember[];
+  generationModel: string;
+  fallback: boolean;
+  warning: string | null;
+}
+
 /** WP-DELEGATION (F8-2): `delegation.mode`. */
 export type DelegationMode = 'off' | 'auto' | 'always';
 
@@ -718,6 +731,10 @@ export interface FsTreeResponse {
 export interface FsFileResponse {
   path: string;
   content: string;
+  /** Present when `?binary=true` – the file was read as raw bytes. */
+  binary?: boolean;
+  /** MIME type detected from the file extension (only when `binary: true`). */
+  media_type?: string;
 }
 
 export interface ModelsResponse {

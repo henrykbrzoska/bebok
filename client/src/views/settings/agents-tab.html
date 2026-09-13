@@ -68,6 +68,30 @@
         <div class="card">
           <h3>{{ t('settings.fleetTitle') }}</h3>
           <p class="card-sub">{{ t('settings.fleetHint') }}</p>
+
+          <div class="actions">
+            <button
+              type="button"
+              (click)="store.generateFleet()"
+              [disabled]="store.saving() || store.generatingFleet()"
+            >
+              @if (store.generatingFleet()) {
+                <span class="spinner" aria-hidden="true"></span>{{ t('settings.fleetGenerating') }}
+              } @else {
+                {{ t('settings.fleetGenerate') }}
+              }
+            </button>
+            <span class="small faint">{{ t('settings.fleetGenerateHint') }}</span>
+          </div>
+
+          @if (store.error()) {
+            <p class="inline-error">{{ store.error() }}</p>
+          }
+
+          @if (store.fleetNotice()) {
+            <p class="note">{{ store.fleetNotice() }}</p>
+          }
+
           <label class="check">
             <input
               type="checkbox"

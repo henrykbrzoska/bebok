@@ -266,6 +266,12 @@ export const en = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': 'Generating…',
+  'settings.fleetGenerated': 'Generated {count} fleet members - review the list and save.',
+  'settings.fleetFallbackWarning': 'The engine could not use the LLM to generate the fleet - a default member list was proposed instead.',
+  'settings.fleetNeedProviders': 'Add at least one provider with an API key to generate a fleet.',
   'settings.thinking': 'Thinking',
   'settings.thinkingHint':
     'Reasoning effort requested from the model. Higher levels reason more deeply but use more tokens and latency. Only effective on models that support it.',

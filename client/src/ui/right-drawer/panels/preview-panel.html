@@ -155,6 +155,10 @@
     <div class="empty">{{ t('preview.loading') }}</div>
   } @else if (error()) {
     <div class="error">{{ t('preview.cannotPreview', { path: currentPath() }) }}</div>
+  } @else if (isImagePreview()) {
+    <div class="preview-image">
+      <img [src]="imageUrl()" [alt]="currentPath()" data-testid="preview-image" />
+    </div>
   } @else if (isMarkdown()) {
     <div class="body">
       <app-markdown-view

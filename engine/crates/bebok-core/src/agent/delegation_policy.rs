@@ -13,11 +13,128 @@
 //! `task_cancel`, `fleet`), the triggers that must lead to decomposition, and
 //! the supervision loop the main thread has to run. `off` yields no text at all
 //! - the tools stay available, the model just is not pushed to use them.
+//!
+//! [`FleetContext`] keeps the `fleet` part honest. The roster lives in the
+//! project/global config, so the static preset text could only describe it
+//! generically and the model had no way of learning the real member labels -
+//! the first `fleet` call then failed with `fleet: unknown member(s)`. The
+//! section now states the *current* fleet: the configured members, or that the
+//! fleet is disabled/unconfigured, or nothing at all when the agent does not
+//! even carry the tool.
 
-use crate::config::{DelegationConfig, DelegationMode};
+use crate::config::{DelegationConfig, DelegationMode, ResolvedConfig};
+
+/// The only preset that carries the `fleet` tool: `agent/request.rs` withholds
+/// the fan-out tool from every other agent (and from every sub-agent). The
+/// prompt section follows the same rule — for any other agent the tool is not
+/// in the list, so the text must not name it.
+pub const FLEET_AGENT: &str = "orchestrator";
+
+/// How many member rows the `Fleet:` line lists before it summarises the rest.
+pub const MAX_FLEET_ROSTER: usize = 20;
+
+/// One configured fleet member as the prompt shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FleetMemberInfo {
+    pub name: String,
+    pub agent: String,
+    pub model: String,
+}
+
+/// The fleet as it exists *right now* for the agent the prompt is built for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FleetContext {
+    /// This agent actually has the `fleet` tool ([`FLEET_AGENT`] only).
+    pub tool_available: bool,
+    /// `fleet.enabled` in the resolved config.
+    pub enabled: bool,
+    /// Configured members, in config order.
+    pub members: Vec<FleetMemberInfo>,
+}
+
+impl FleetContext {
+    /// Snapshot of the resolved config, seen from `agent_name`.
+    pub fn from_config(cfg: &ResolvedConfig, agent_name: &str) -> Self {
+        Self {
+            tool_available: agent_name == FLEET_AGENT,
+            enabled: cfg.is_fleet_enabled(),
+            members: cfg
+                .fleet_members()
+                .iter()
+                .map(|m| FleetMemberInfo {
+                    name: m.name.clone(),
+                    agent: m.agent.clone(),
+                    model: m.model.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// `fleet` would actually run something if the model called it now.
+    pub fn is_usable(&self) -> bool {
+        self.tool_available && self.enabled && !self.members.is_empty()
+    }
+
+    /// The `Fleet:` paragraph, or an empty string when this agent has no
+    /// `fleet` tool at all (naming a tool that is not in its list only invites
+    /// a hallucinated call).
+    fn note(&self) -> String {
+        if !self.tool_available {
+            return String::new();
+        }
+        if !self.is_usable() {
+            let why = if !self.enabled {
+                "`fleet.enabled` is false"
+            } else {
+                "`fleet.members` is empty"
+            };
+            return format!(
+                "Fleet: NOT available in this project ({why}), so a `fleet` call would only \
+                 return an error (`fleet: fleet is not enabled ...` / `no members are \
+                 configured`). Delegate with parallel `task` calls instead - never skip the \
+                 work because the fleet is missing.\n"
+            );
+        }
+        let mut note = format!(
+            "Fleet: enabled here with {} configured member(s). `fleet` runs ONLY these labelled \
+             members (it cannot create members, presets or counts), and this roster is \
+             authoritative - it is this project's current config:\n",
+            self.members.len()
+        );
+        for m in self.members.iter().take(MAX_FLEET_ROSTER) {
+            let mut line = format!("- `{}`", m.name);
+            if !m.agent.is_empty() {
+                line.push_str(&format!(" - agent `{}`", m.agent));
+            }
+            if !m.model.is_empty() {
+                line.push_str(&format!(", model `{}`", m.model));
+            }
+            note.push_str(&line);
+            note.push('\n');
+        }
+        if self.members.len() > MAX_FLEET_ROSTER {
+            note.push_str(&format!(
+                "- ... and {} more member(s), same rules\n",
+                self.members.len() - MAX_FLEET_ROSTER
+            ));
+        }
+        note.push_str(
+            "Copy labels from this list into `names` (a label outside it fails with `fleet: \
+             unknown member(s)`); `agents` selects by agent type; `names` + `agents` intersect \
+             (AND). Broadcast `prompt` sends one instruction to every selected member, \
+             heterogeneous `tasks` runs different prompts concurrently - each in its own \
+             isolated session. With both filters omitted EVERY one of the members above runs.\n",
+        );
+        note
+    }
+}
 
 /// Prompt section for the main (user-facing) agent, or `None` in `off` mode.
-pub fn delegation_policy_note(cfg: &DelegationConfig) -> Option<String> {
+///
+/// `fleet` is the live fleet state for the agent being prompted
+/// ([`FleetContext::from_config`]); it only affects the `fleet` sentence and the
+/// trailing `Fleet:` paragraph, never the `task` policy.
+pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> Option<String> {
     let trigger = match cfg.mode {
         DelegationMode::Off => return None,
         DelegationMode::Auto => AUTO_TRIGGER,
@@ -31,6 +148,12 @@ pub fn delegation_policy_note(cfg: &DelegationConfig) -> Option<String> {
         ),
         None => String::new(),
     };
+    // Only offer the fleet as a spawn route when it can actually run.
+    let fleet_alt = if fleet.is_usable() {
+        " (or one `fleet` call with `tasks` - see the `Fleet:` line below)"
+    } else {
+        ""
+    };
     Some(format!(
         "## Delegation policy (mode: {mode})\n\
          You are the MAIN THREAD: you own the conversation with the user, and you supervise \
@@ -41,12 +164,11 @@ pub fn delegation_policy_note(cfg: &DelegationConfig) -> Option<String> {
          OWNS. Two sub-agents must never edit the same file; put shared edits (e.g. one README \
          or one routes file) into a single part or do them yourself after the others finish.\n\
          - Spawn every independent part in ONE assistant turn with parallel `task` calls using \
-         `background: true` (or one `fleet` call with `tasks` when fleet members are \
-         configured). Give each a short kebab-case `name`, the right preset (`code` for edits, \
-         `ask` for research, `plan` for design, `debug` for failures) and a crisp, standalone \
-         brief: goal, exact file ownership, acceptance criteria, what NOT to touch, and the \
-         instruction to finish with a short report of what changed. The sub-agent cannot see \
-         this conversation.\n\
+         `background: true`{fleet_alt}. Give each a short kebab-case `name`, the right preset \
+         (`code` for edits, `ask` for research, `plan` for design, `debug` for failures) and a \
+         crisp, standalone brief: goal, exact file ownership, acceptance criteria, what NOT to \
+         touch, and the instruction to finish with a short report of what changed. The \
+         sub-agent cannot see this conversation.\n\
          - At most {max} sub-agents run at once; extra ones queue automatically, so spawn all \
          parts up front and let the engine schedule them.\n\
          - Supervise: call `task_wait` (mode `all`, or `any` when you can act on partial \
@@ -73,10 +195,12 @@ pub fn delegation_policy_note(cfg: &DelegationConfig) -> Option<String> {
          summarise a feature as implemented while something it needs is broken.\n\
          {model_line}\
          {heavy_line}\
+         {fleet_line}\
          Do not delegate trivial single-file edits or lookups you can do in one or two tool \
          calls yourself.",
         mode = cfg.mode.as_str(),
         heavy_line = heavy_model_line(cfg),
+        fleet_line = fleet.note(),
     ))
 }
 
@@ -134,14 +258,38 @@ mod tests {
         }
     }
 
+    /// Fleet as this project actually configures it: orchestrator + members.
+    fn fleet(members: &[(&str, &str, &str)]) -> FleetContext {
+        FleetContext {
+            tool_available: true,
+            enabled: true,
+            members: members
+                .iter()
+                .map(|(name, agent, model)| FleetMemberInfo {
+                    name: (*name).to_string(),
+                    agent: (*agent).to_string(),
+                    model: (*model).to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    fn note_with(cfg: &DelegationConfig, fleet: &FleetContext) -> String {
+        delegation_policy_note(cfg, fleet).unwrap()
+    }
+
     #[test]
     fn off_mode_has_no_policy_text() {
-        assert!(delegation_policy_note(&cfg(DelegationMode::Off)).is_none());
+        assert!(delegation_policy_note(&cfg(DelegationMode::Off), &FleetContext::default()).is_none());
+        assert!(delegation_policy_note(&cfg(DelegationMode::Off), &fleet(&[("a", "ask", "m")])).is_none());
     }
 
     #[test]
     fn auto_mode_names_the_three_triggers_and_the_tools() {
-        let note = delegation_policy_note(&cfg(DelegationMode::Auto)).unwrap();
+        let note = note_with(
+            &cfg(DelegationMode::Auto),
+            &fleet(&[("ask-zai-glm-flash", "ask", "zai/glm-5.3-flash")]),
+        );
         assert!(
             note.starts_with("## Delegation policy (mode: auto)"),
             "{note}"
@@ -167,9 +315,127 @@ mod tests {
         assert!(note.contains("Otherwise do the work yourself"), "{note}");
     }
 
+    /// The roster is the part the static preset text could not know: the
+    /// prompt must carry the *configured* labels, types and models, and say
+    /// that `names` has to be copied from there.
+    #[test]
+    fn fleet_roster_is_injected_and_authoritative() {
+        let note = note_with(
+            &cfg(DelegationMode::Auto),
+            &fleet(&[
+                ("ask-openai-gpt-4.1-nano", "ask", "openai/gpt-4.1-nano"),
+                ("code-deepseek-v4-flash", "code", "deepseek/deepseek-v4-flash"),
+            ]),
+        );
+        assert!(note.contains("enabled here with 2 configured member(s)"), "{note}");
+        assert!(
+            note.contains("- `ask-openai-gpt-4.1-nano` - agent `ask`, model `openai/gpt-4.1-nano`"),
+            "{note}"
+        );
+        assert!(note.contains("- `code-deepseek-v4-flash`"), "{note}");
+        assert!(note.contains("unknown member(s)"), "{note}");
+        assert!(note.contains("EVERY one of the members above runs"), "{note}");
+        // The spawn bullet only offers `fleet` when it can actually run.
+        assert!(note.contains("see the `Fleet:` line below"), "{note}");
+    }
+
+    #[test]
+    fn fleet_roster_is_capped() {
+        let many: Vec<(String, String, String)> = (0..MAX_FLEET_ROSTER + 3)
+            .map(|i| (format!("m{i}"), "ask".to_string(), format!("p/m{i}")))
+            .collect();
+        let ctx = FleetContext {
+            tool_available: true,
+            enabled: true,
+            members: many
+                .iter()
+                .map(|(name, agent, model)| FleetMemberInfo {
+                    name: name.clone(),
+                    agent: agent.clone(),
+                    model: model.clone(),
+                })
+                .collect(),
+        };
+        let note = note_with(&cfg(DelegationMode::Auto), &ctx);
+        assert!(note.contains("member(s)"), "{note}");
+        assert!(note.contains("and 3 more member(s), same rules"), "{note}");
+        assert!(!note.contains("`m22`"), "{note}");
+    }
+
+    #[test]
+    fn disabled_or_empty_fleet_is_announced_instead_of_advertised() {
+        let disabled = FleetContext {
+            tool_available: true,
+            enabled: false,
+            members: vec![],
+        };
+        let note = note_with(&cfg(DelegationMode::Auto), &disabled);
+        assert!(note.contains("Fleet: NOT available"), "{note}");
+        assert!(note.contains("`fleet.enabled` is false"), "{note}");
+        assert!(note.contains("Use parallel `task` calls instead") || note.contains("Delegate with parallel `task` calls instead"), "{note}");
+        assert!(!note.contains("see the `Fleet:` line below"), "{note}");
+
+        let empty = FleetContext {
+            tool_available: true,
+            enabled: true,
+            members: vec![],
+        };
+        let note = note_with(&cfg(DelegationMode::Auto), &empty);
+        assert!(note.contains("`fleet.members` is empty"), "{note}");
+    }
+
+    /// `fleet` is orchestrator-only (`request.rs` filters the tool out
+    /// everywhere else), so the prompt of any other agent must not mention it.
+    #[test]
+    fn fleet_is_not_named_for_agents_without_the_tool() {
+        let ctx = FleetContext {
+            tool_available: false,
+            enabled: true,
+            members: vec![FleetMemberInfo {
+                name: "ask-a".into(),
+                agent: "ask".into(),
+                model: "p/m".into(),
+            }],
+        };
+        let note = note_with(&cfg(DelegationMode::Auto), &ctx);
+        assert!(!note.contains("fleet"), "no fleet mention expected:\n{note}");
+        assert!(!note.contains("`fleet`"), "{note}");
+        assert!(note.contains("`task`"), "{note}");
+    }
+
+    #[test]
+    fn fleet_context_comes_from_the_resolved_config() {
+        let mut conf = ResolvedConfig::default();
+        conf.fleet.enabled = true;
+        conf.fleet.members.push(crate::config::FleetMember {
+            name: "ask-openai-gpt-4.1-nano".into(),
+            agent: "ask".into(),
+            model: "openai/gpt-4.1-nano".into(),
+        });
+
+        let orchestrator = FleetContext::from_config(&conf, "orchestrator");
+        assert!(orchestrator.tool_available);
+        assert!(orchestrator.is_usable());
+        assert_eq!(orchestrator.members.len(), 1);
+        assert_eq!(orchestrator.members[0].name, "ask-openai-gpt-4.1-nano");
+
+        // Same project, another main-thread agent: no `fleet` tool, no mention.
+        let code = FleetContext::from_config(&conf, "code");
+        assert!(!code.tool_available);
+        assert!(!code.is_usable());
+        assert!(!note_with(&cfg(DelegationMode::Auto), &code).contains("fleet"));
+
+        // Enabled but empty -> announced as unavailable.
+        let mut empty = ResolvedConfig::default();
+        empty.fleet.enabled = true;
+        let ctx = FleetContext::from_config(&empty, "orchestrator");
+        assert!(!ctx.is_usable());
+        assert!(note_with(&cfg(DelegationMode::Auto), &ctx).contains("NOT available"));
+    }
+
     #[test]
     fn always_mode_decomposes_every_non_trivial_task() {
-        let note = delegation_policy_note(&cfg(DelegationMode::Always)).unwrap();
+        let note = note_with(&cfg(DelegationMode::Always), &FleetContext::default());
         assert!(
             note.starts_with("## Delegation policy (mode: always)"),
             "{note}"
@@ -183,19 +449,18 @@ mod tests {
         let mut c = cfg(DelegationMode::Auto);
         c.max_concurrent = 5;
         c.model = Some("openai/gpt-5.6-terra".into());
-        let note = delegation_policy_note(&c).unwrap();
+        let note = note_with(&c, &FleetContext::default());
         assert!(note.contains("At most 5 sub-agents run at once"), "{note}");
         assert!(note.contains("`openai/gpt-5.6-terra`"), "{note}");
 
         // No override -> no model line at all.
-        let note = delegation_policy_note(&cfg(DelegationMode::Auto)).unwrap();
+        let note = note_with(&cfg(DelegationMode::Auto), &FleetContext::default());
         assert!(!note.contains("configured override"), "{note}");
         // Clamped: 0 -> 1.
         let mut c = cfg(DelegationMode::Always);
         c.max_concurrent = 0;
         assert!(
-            delegation_policy_note(&c)
-                .unwrap()
+            note_with(&c, &FleetContext::default())
                 .contains("At most 1 sub-agents")
         );
     }
@@ -204,7 +469,7 @@ mod tests {
     /// and the `heavy` escape hatch under the `cheaper` policy only.
     #[test]
     fn narration_claim_checks_and_heavy_hint() {
-        let note = delegation_policy_note(&cfg(DelegationMode::Auto)).unwrap();
+        let note = note_with(&cfg(DelegationMode::Auto), &FleetContext::default());
         assert!(note.contains("Narrate as you go"), "{note}");
         assert!(note.contains("before every new phase"), "{note}");
         assert!(note.contains("after each sub-agent completes"), "{note}");
@@ -213,7 +478,7 @@ mod tests {
         assert!(note.contains("policy `cheaper`"), "{note}");
         let mut c = cfg(DelegationMode::Auto);
         c.model_policy = crate::config::DelegationModelPolicy::Inherit;
-        let note = delegation_policy_note(&c).unwrap();
+        let note = note_with(&c, &FleetContext::default());
         assert!(!note.contains("`model: \"heavy\"`"), "{note}");
         let n = subagent_note();
         assert!(n.contains("`Status: PASS`") && n.contains("`Status: FAIL`"));

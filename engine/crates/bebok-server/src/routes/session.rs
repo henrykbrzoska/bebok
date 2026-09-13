@@ -351,9 +351,10 @@ pub async fn abort(
 
 /// `POST /session/{id}/task/{taskID}/abort` -> cancel a specific child task.
 ///
-/// When a child task is aborted, the cancellation propagates to the parent's
-/// abort token — the entire orchestrator turn is cancelled so the model can
-/// decide what to do next.
+/// Cancels the child's abort token (stopping the child turn) *and* the
+/// parent's abort token (stopping the orchestrator turn). tokio's
+/// `CancellationToken` only propagates parent→child, so the parent
+/// cancellation must be done explicitly here.
 pub async fn abort_task(
     State(state): State<AppState>,
     Path((id, task_id)): Path<(Uuid, String)>,
@@ -364,19 +365,21 @@ pub async fn abort_task(
         .await
         .map_err(|e| err_response(&e))?;
 
-    // Cancel the child token. This triggers the child's run_turn to break out
-    // and return, which causes the task tool to emit task.ended with
-    // status=aborted. The child's abort token was created as child_token() of
-    // the parent, so cancelling it also marks the parent as cancelled — the
-    // parent turn loop breaks and persists "[Turn aborted by user]".
-    //
-    // However, for the orchestrator to ask the user "what to do next?", we
-    // need the parent turn to *not* be fully dead. The child_token() of the
-    // parent's abort already handles this: when the child is cancelled, the
-    // parent sees is_cancelled() = true and breaks out of its loop. The
-    // services/turn.rs post-turn handler then sets running = false so the
-    // user can send a new prompt.
+    // Cancel the child token first — this triggers the child's run_turn to
+    // break out and return, which causes the task tool to emit task.ended
+    // with status=aborted.
     let cancelled = session.abort_child_task(&task_id).await;
+
+    // Also cancel the parent turn so the orchestrator stops. tokio's
+    // CancellationToken only propagates parent→child (not child→parent),
+    // so we must explicitly cancel the parent token here. This cascades to
+    // all remaining children via the token tree and breaks the parent's
+    // turn loop, persisting "[Turn aborted by user]".
+    if cancelled {
+        if let Some(parent_token) = session.abort_token().await {
+            parent_token.cancel();
+        }
+    }
 
     if cancelled {
         // Emit a descriptive event so the client knows which task was aborted.
@@ -686,6 +689,13 @@ mod tests {
         let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
         let dir = project.to_string_lossy().to_string();
         let instance = store.get_or_create_instance(&dir).await.unwrap();
+        // Isolate from the ambient global config: `config::load` merges the
+        // real `~/.config/bebok/config.json` under the project layer, and its
+        // `models` map merges per key — a global `models.code` survives the
+        // project file above and masks the project default asserted below.
+        // Reload project-only (defaults -> project, no global layer).
+        *instance.config.write().unwrap() =
+            bebok_core::config::load_with_global(&project, None);
 
         // No override anywhere: the config default.
         let plain = bebok_core::session::Session::new(dir.clone(), "code");

@@ -1,50 +1,47 @@
-# What is Bebok?
+# What Is a Bebok?
 
-![A bronze bebok statue in Katowice, standing on a pedestal marked "BEBOK"](/about/bebok-katowice.jpg)
+![Black silhouette of a bebok — a hairy figure with horns, fangs, and claws](/about/bebok.png)
 
-*Photo: "Katowicki Bebok" by [Kyoukaa](https://commons.wikimedia.org/wiki/User:Kyoukaa), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Katowicki_Bebok.jpg).*
+## Who Is the Bebok?
 
-## Who is the bebok?
+The bebok — in Silesia, also known as *bobok* (Greater Poland, Lesser Poland) or *babok* (Kuyavia) — is a phantom that has been keeping children awake along the Vistula and Oder rivers for centuries. It has no single, fixed appearance, because nobody who truly saw it ever felt much like describing the details afterward. Since it lived mostly in the overactive imaginations of frightened *bajtli* (Silesian: *children*), everyone pictured it differently — and rightly so, for the thing that truly lurks in the dark does not wait for our description. Sometimes it was a small, repulsive creature, scraping its claws across the floor. Other times — a massive, shaggy, black figure with hooves clacking in a rhythm no known melody could reproduce, and huge eyes that caught every sliver of light and reflected it back as gold — eyes that saw in three directions at once.
 
-In the folklore of Upper Silesia (Górny Śląsk), the **bebok** — also spelled *bobok*, *babok*, *bobek* or *bobik* in neighbouring regions of Poland — is a shadowy, bogeyman-like being. It has no fixed shape: because it lived only in what frightened children imagined, descriptions vary wildly from a small, rat-like creature to a huge, shaggy, black shape with hooves that click on the floor and eyes set on three sides of its head.
+The bebok kept to the borders of the home and the village. Inside the cottage it hid in the dark cellar — where the shiver races up your spine before you can think why — or in the corner behind the door; outdoors, in the dense forest, the old barn, or the abandoned building, "just beyond the threshold," as one regional source puts it: close enough for the horror to be real, but never quite close enough to see in the waking world. *Ómy* and *starzicy* (Silesian: *grandmothers and grandfathers*) used it as a disciplinary tool — more than one child heard a whispered "Bydź cicho, bo cię bebok weźnie" ("Be quiet, or the bebok will get you") when they refused to go to bed or poked around where they should not have been. Interestingly, the threat also had a practical, safety-oriented dimension: axes, nails, and hammers "were taken by the bebok" — a euphemism for simply keeping them out of children's reach, or, when something turned up missing in the morning, an explanation that saved everyone an argument.
 
-The bebok belonged to the edges of the home and the edges of the village. Indoors, it hid in dark cellars and in the corner right behind the door. Outdoors, it kept to dense forests, old barns and abandoned buildings — "just behind the threshold," as one regional account puts it, close enough to be a credible threat but never quite seen. Parents and grandparents used it as an educational tool: a child who wouldn't behave, wouldn't sleep, or reached for something dangerous was warned that the bebok would come for them. In a nice twist, the threat doubled as real childproofing — axes, nails and hammers were "taken away by the bebok," i.e., put safely out of reach.
+The bebok never received a single, written-down account — there is no canonical version of the legend — which is why it survived primarily in gossip, in whispered bedtime stories, and precisely because of that, it looked slightly different in every village. Because what has no fixed shape cannot be locked inside a tale — and cannot be escaped either.
 
-Because it was never written down as a fixed character — there is no single canonical bebok story — the figure survived mostly through oral tradition, which is exactly why it looks a little different in every telling.
+## The Legend
 
-## A legend
+Almost every Silesian household had its own version of this story, but they all sounded much like the one told by *ómy* Hanka — always in the dark, always softly, always so you could hear the tapping on the other side of the wall.
 
-Every Silesian household seemed to have its own version of this story, but they all rhyme with the one grandmother Hanka used to tell.
+There was a boy who absolutely refused to go to sleep. Every evening he argued, dragged out the moment before the light was switched off, and sneaked out of bed to rummage around the house — under the table, behind the cupboard, in the cellar where the *bulwy* (Silesian: *potatoes*) lay stored. *Ómy* warned him again and again: "Bydź cicho, bo cię bebok weźnie." The boy laughed. He did not believe in shadows. But shadows do not need you to believe in them.
 
-There was once a boy who refused to go to sleep. Every night he argued, stalled, and slipped out of bed to poke around the house — under the table, behind the wardrobe, down in the cellar where the potatoes were kept. His grandmother warned him again and again: "Behave, or the bebok will get you." The boy laughed. He didn't believe in shadows.
+One night he went down to the cellar with a candle, sure he would prove there was nothing to be afraid of. The stairs creaked under him like old ribs. The flame flickered — and went out for a moment, as if someone had blown from behind. Something stirred behind the sacks of *bulwy* — a shape too tall for that cellar, with eyes that caught the candlelight and reflected it as gold. Two clawed hands reached for the candle — not for the boy — and extinguished it between blackened fingers. In the darkness, a voice spoke, like the rustle of dry leaves, or like the breath of someone standing far too close: "Sleep now. The morning is not yours to hold onto."
 
-One night he crept down to the cellar with a candle, certain he'd prove there was nothing to fear. The candle guttered. Something shifted behind the potato sacks — a shape too tall for the room, with eyes that caught the little flame and threw it back gold. Two clawed hands reached for the candle, not for the boy, and pinched it out between blackened fingers. In the dark, a voice like dry leaves said only: "Sleep now. Morning is not yours to keep."
+The boy did not remember how he got back to bed. But from that night on he fell asleep the moment his head touched the pillow — and, strangely, he stopped losing things. Marbles stayed in their box, shoes came in pairs, notebooks remained in his schoolbag. Years later, grown up and skeptical, he concluded that the bebok had not been scaring him at all — it was simply keeping the night's order, quietly tidying the small chaos children leave behind when they should already be asleep. And the clacking of hooves in the dark cellar? Just housekeeping.
 
-The boy did not remember climbing back to bed, but from that night on, he slept the moment his head touched the pillow — and, oddly, he stopped losing things. His marbles stayed in their tin, his shoes stayed in pairs, his homework stayed in his bag. Years later, grown and skeptical, he decided the bebok hadn't been frightening him at all: it had been standing watch, quietly fixing the small chaos children leave behind while they're busy not sleeping.
+And that is the twist that Silesians still smile about today — though the smile is sometimes a nervous one, because everyone remembers the night when the tapping sounded a little too clear. The bebok is less a monster and more a stern but well-meaning night watchman. It startles sloppiness, cleans up what was left in the dark, and seems frightening only to those who have not yet gone to bed. Which, if you think about it, is not a bad job description for something that watches over code at night — catching what breaks so that by morning everything is back where it belongs.
 
-That's the twist Silesians still smile about: the bebok is less a monster than a strict but well-meaning night guard. It scares off carelessness, tidies what's left in the dark, and only ever seems threatening to whoever hasn't gone to bed yet. Which is, if you think about it, a pretty good job description for something that watches over code overnight, too — chasing down what's misbehaving so morning finds everything back in order.
+## Where the Name Came From
 
-## Where the name comes from
+The roots of the word are simple: sound and revulsion — and revulsion, as everyone knows, is often the first symptom of fear. In the Silesian *godce* (Silesian: *speech* or *dialect*), "be" is an exclamation at something ugly or disgusting — the exact same instinctive sound a child makes upon seeing something revolting, before they have time to scream. Doubling it to "be-bok" intensifies the meaning, producing something like "thoroughly, properly ugly." The oldest written trace of these beliefs comes from a seventeenth-century text known as *Peregrynacja dziadowska* ("The Beggars' Pilgrimage") — a title that itself sounds like a prophecy of something waiting in the dark beyond the threshold. In the nineteenth century the ethnographer Oskar Kolberg recorded the bebok as a living regional belief — alongside its cousins: *bobok* (Greater Poland, Lesser Poland) and *babok* (Kuyavia) — as though one demon were not enough and every dialect needed its own.
 
-The word's roots point to something simple: sound and repulsion. In Silesian dialect, *be* is an exclamation for something ugly or repugnant — the same instinctive sound a child makes at something gross. Doubling it into *be-bok* intensifies it, landing on "the properly ugly one." The oldest written trace of the belief goes back to a 17th-century text known as the *Peregrynacja dziadowska* ("beggar's peregrination"), and the 19th-century ethnographer Oskar Kolberg later recorded it as a living regional belief, alongside its cousins *bobok* (Greater Poland, Lesser Poland) and *babok* (Kuyavia).
+## The Bebok Today
 
-## Bebok today
+The bebok never really disappeared. It simply changed shape — from a nighttime boogeyman it became a symbol, and from a symbol, a mascot. But beware: a mascot that remembers the darkness.
 
-![A bronze bebok statue dressed as a detective, holding a magnifying glass](/about/bebok-szerlok.jpg)
+Since July 2021, across Katowice — starting in Nikiszowiec, where the brickwork remembers every whisper — small brown bebok figurines have been appearing, designed by the Katowician artist Grzegorz Chudy and cast by Dariusz Kik and Karolina Piechota.
 
-*Photo: "Katowice bebok Szerlok 2024" by [Gower](https://commons.wikimedia.org/wiki/User:Gower), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Katowice_bebok_Szerlok_2024.jpg).*
+Today more than a hundred of them stand around the city (plus one that wandered all the way to Sopot — as if it had escaped from the rest), each with its own name and personality, often dressed up by residents for holidays. They are compared to Wrocław's dwarfs, and collecting them ("Bebok Hunt") has become a genuine local hobby — though not every collector wants to admit that they search for them a bit too late at night, when the streets empty out and the figurines cast shadows that seem longer than they should. Beyond the sculptures, the bebok lives on in card and mobile games, plush toys, murals, books, and short films — the former basement bogeyman has turned into the city's lovable symbol. But in the evening, when you walk past one of those figurines and it happens to be looking your way — you know it is no coincidence.
 
-The bebok never really left. Since July 2021, small bronze bebok sculptures — designed by Katowice artist Grzegorz Chudy and cast by Dariusz Kik and Karolina Piechota — have been popping up around the city, starting in the Nikiszowiec district. Over a hundred of them now stand across Katowice (plus one visiting Sopot), each with its own name and personality, often dressed up for the seasons by local residents. They're frequently compared to Wrocław's famous dwarf statues, and collecting them ("Łowca Beboków" / "Bebok Hunter") has become a genuine local pastime. Beyond the sculptures, the bebok shows up in card and mobile games, plush toys, murals, books, and short films — a once-scary cellar-dweller turned friendly civic mascot.
+## Why This Application Is Called Bebok
 
-## Why this app is called Bebok
-
-We liked the idea of a creature that skulks around at night, quietly cleaning up the mess so the morning looks better than the evening did. That's the job description for a coding agent, too: it works while you're not watching, and — like the bebok minding the potato cellar — it's there to scare the bugs out from under the bed, not you.
+We liked the idea of something that quietly circles through the night, tidying up the mess so that by morning everything is better than it was the evening before. Something that works when you are not looking — in the dark, at the clatter of keys instead of hooves, with its gaze fixed on code instead of a cellar full of *bulwy*. It is exactly the same job description as for a coding agent — and exactly the same fear that the bebok awakens: not fear of the thing itself, but the fear that by morning something will have changed in the night, something will have been fixed, something will have been cleaned up. And the thing that did it has already vanished — leaving only order and a shadow on the wall that recedes a little too fast.
 
 ## Sources
 
-- [Bebok — Polish Wikipedia](https://pl.wikipedia.org/wiki/Bebok)
-- [Katowice beboks — English Wikipedia](https://en.wikipedia.org/wiki/Katowice_beboks)
-- [Katowickie beboki — Polish Wikipedia](https://pl.wikipedia.org/wiki/Katowickie_beboki)
+- [Bebok — Wikipedia (pl)](https://pl.wikipedia.org/wiki/Bebok)
+- [Katowice beboks — Wikipedia (en)](https://en.wikipedia.org/wiki/Katowice_beboks)
+- [Katowickie beboki — Wikipedia (pl)](https://pl.wikipedia.org/wiki/Katowickie_beboki)
 - [Bebok — górnośląski demon, antryj.pl](https://antryj.pl/obyczaje/bebok)
 - [Bebok hunt: Katowice's Cutest Little Monsters, WannaBeEverywhere](https://www.wannabeeverywhere.com/poland/bebok-hunt/)
-- Images: Wikimedia Commons, CC BY-SA 4.0 (credits below each photo)

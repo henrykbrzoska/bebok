@@ -314,6 +314,12 @@ export const ko: Record<MessageKey, string> = {
   'settings.fleetRemove': 'Remove',
   'settings.fleetSave': 'Save fleet',
   'settings.fleetSaved': 'Parallel fleet saved.',
+  'settings.fleetGenerate': 'Generate fleet',
+  'settings.fleetGenerateHint': 'Create fleet members from your configured providers.',
+  'settings.fleetGenerating': '생성 중…',
+  'settings.fleetGenerated': '플리트 멤버 {count}개를 생성했습니다. 확인 후 저장하세요.',
+  'settings.fleetFallbackWarning': '엔진이 플리트 생성에 LLM을 사용할 수 없어 기본 멤버 목록을 제안했습니다.',
+  'settings.fleetNeedProviders': '플리트를 생성하려면 API 키가 있는 프로바이더를 하나 이상 추가하세요.',
   'settings.thinking': '사고',
   'settings.thinkingHint':
     '모델에 요청하는 추론 수준입니다. 수준이 높을수록 더 깊이 추론하지만 더 많은 토큰과 지연 시간을 사용합니다. 이를 지원하는 모델에서만 적용됩니다.',

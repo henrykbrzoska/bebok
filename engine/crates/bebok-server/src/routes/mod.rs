@@ -54,6 +54,8 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/session/{id}/agents", get(agents::list_agents))
         // F9-10: what `delegation.model_policy` resolves to.
         .route("/delegation/models", get(agents::delegation_models))
+        // Fleet generation via LLM (min 3 members per agent type).
+        .route("/fleet/generate", post(agents::generate_fleet))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/changes", get(changes::list_changes))

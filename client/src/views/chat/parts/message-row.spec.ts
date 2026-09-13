@@ -175,7 +175,7 @@ describe('MessageRowComponent tool groups (F6-1)', () => {
   }
 
   function toolHeads(): HTMLButtonElement[] {
-    return [...root().querySelectorAll<HTMLButtonElement>('.tool-head')];
+    return [...root().querySelectorAll<HTMLButtonElement>('.head-toggle')];
   }
 
   beforeEach(() => {

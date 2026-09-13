@@ -40,7 +40,10 @@ mod tests;
 
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
 pub use delegation::{TaskProgress, summarize_progress};
-pub use delegation_policy::{delegation_policy_note, subagent_note};
+pub use delegation_policy::{
+    FLEET_AGENT, FleetContext, FleetMemberInfo, MAX_FLEET_ROSTER, delegation_policy_note,
+    subagent_note,
+};
 pub use exec::{ToolOutcome, fail_tool};
 pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};

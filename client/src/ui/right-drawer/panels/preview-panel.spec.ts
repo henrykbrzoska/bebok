@@ -11,7 +11,7 @@ import { Router, provideRouter } from '@angular/router';
 
 import { EngineClient } from '../../../core/engine-client.service';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
-import { PreviewPanel, isPreviewablePath } from './preview-panel';
+import { PreviewPanel, isPreviewablePath, isImagePath } from './preview-panel';
 import { ExplorerSelectionStore } from './explorer-selection.store';
 
 describe('PreviewPanel (F6-10)', () => {
@@ -19,6 +19,7 @@ describe('PreviewPanel (F6-10)', () => {
   let panel: PreviewPanel;
   let selection: ExplorerSelectionStore;
   let fsFile: jasmine.Spy;
+  let fsFileBinary: jasmine.Spy;
   let fsTree: jasmine.Spy;
 
   beforeEach(() => {
@@ -34,6 +35,10 @@ describe('PreviewPanel (F6-10)', () => {
     const engine = TestBed.inject(EngineClient);
     fsFile = spyOn(engine, 'fsFile').and.callFake((_directory: string, path: string) =>
       Promise.resolve({ path, content: `content of ${path}` }),
+    );
+    fsFileBinary = spyOn(engine, 'fsFileBinary').and.callFake(
+      (_directory: string, path: string) =>
+        Promise.resolve({ path, content: '', binary: true, media_type: 'application/octet-stream' }),
     );
     fsTree = spyOn(engine, 'fsTree').and.callFake((_directory: string, path?: string) => {
       const tree: Record<string, { name: string; path: string; is_dir: boolean }[]> = {
@@ -238,8 +243,44 @@ describe('PreviewPanel (F6-10)', () => {
     expect(isPreviewablePath('a/b.md')).toBeTrue();
     expect(isPreviewablePath('x.YAML')).toBeTrue();
     expect(isPreviewablePath('index.html')).toBeTrue();
+    expect(isPreviewablePath('logo.png')).toBeTrue();
+    expect(isPreviewablePath('photo.jpg')).toBeTrue();
     expect(isPreviewablePath('main.ts')).toBeFalse();
-    expect(isPreviewablePath('logo.png')).toBeFalse();
     expect(isPreviewablePath('Makefile')).toBeFalse();
+  });
+
+  it('isImagePath identifies image extensions', () => {
+    expect(isImagePath('logo.png')).toBeTrue();
+    expect(isImagePath('photo.JPG')).toBeTrue();
+    expect(isImagePath('icon.svg')).toBeTrue();
+    expect(isImagePath('doc.md')).toBeFalse();
+    expect(isImagePath('data.json')).toBeFalse();
+    expect(isImagePath('Makefile')).toBeFalse();
+  });
+
+  it('loads an image via fsFileBinary and exposes imageUrl', async () => {
+    fsFileBinary.and.callFake(
+      (_directory: string, path: string) =>
+        Promise.resolve({
+          path,
+          content: 'iVBORw0KGgo',
+          binary: true,
+          media_type: 'image/png',
+        }),
+    );
+
+    selection.openInPreview('/proj', 'assets/logo.png');
+    await settle();
+
+    expect(fsFileBinary).toHaveBeenCalledWith('/proj', 'assets/logo.png');
+    expect(panel.isImagePreview()).toBeTrue();
+    expect(panel.imageData()).toBe('iVBORw0KGgo');
+    expect(panel.imageMime()).toBe('image/png');
+    expect(panel.imageUrl()).toBe('data:image/png;base64,iVBORw0KGgo');
+    expect(panel.content()).toBe('');
+
+    const img = fixture.nativeElement.querySelector('[data-testid="preview-image"]');
+    expect(img).toBeTruthy();
+    expect(img.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo');
   });
 });
