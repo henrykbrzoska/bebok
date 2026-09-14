@@ -317,6 +317,23 @@ impl SessionState {
         }
     }
 
+    /// 1.8: toggle the cloud mirror flag; returns `false` when unchanged.
+    pub async fn set_cloud(&self, cloud: bool) -> bool {
+        let session = {
+            let mut meta = self.meta.write().await;
+            if meta.cloud == cloud {
+                return false;
+            }
+            meta.cloud = cloud;
+            meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+        true
+    }
+
     /// Add token usage to session totals and persist metadata.
     pub async fn add_usage(
         &self,

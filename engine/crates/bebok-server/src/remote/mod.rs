@@ -17,6 +17,7 @@
 //! keep compiling unchanged; without the extension only the launch token is
 //! accepted and the `/remote/*` handlers answer 503.
 
+pub mod cloud;
 pub mod devices;
 pub mod fanout;
 pub mod listener;

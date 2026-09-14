@@ -482,6 +482,11 @@ pub struct Session {
     /// F6-12: error text that accompanied `task_status` (if any).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_error: Option<String>,
+    /// 1.8 "cloud chats": mirror this session's meta + message tail to the
+    /// relay after every turn so paired phones can read it while the desktop
+    /// is offline. Off by default; the session list shows a cloud icon.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cloud: bool,
 }
 
 impl Session {
@@ -503,6 +508,7 @@ impl Session {
             share: None,
             task_status: None,
             task_error: None,
+            cloud: false,
         }
     }
 

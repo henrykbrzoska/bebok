@@ -209,6 +209,35 @@ pub async fn relay_reset(
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub struct CloudBody {
+    pub enabled: bool,
+}
+
+/// `POST /session/{id}/cloud` (Local) — `{enabled}`: mirror this session to
+/// the relay (or stop and delete the mirror). Pushes right away.
+pub async fn session_cloud(
+    State(state): State<AppState>,
+    ext: Option<Extension<Arc<RemoteState>>>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+    Json(body): Json<CloudBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let remote = remote(ext)?;
+    let session = state
+        .store
+        .open_session(id)
+        .await
+        .map_err(|e| crate::error::err_response(&e))?;
+    session.set_cloud(body.enabled).await;
+    super::cloud::push(&state.store, &remote, id, !body.enabled).await;
+    let meta = session.meta_snapshot().await;
+    state.store.bus().publish(
+        Event::new("session.updated", &meta.directory, &id.to_string())
+            .with_properties(serde_json::json!({ "cloud": body.enabled })),
+    );
+    Ok(Json(serde_json::json!({ "id": id, "cloud": meta.cloud })))
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub struct RelayBody {
     pub enabled: bool,
     #[serde(default)]

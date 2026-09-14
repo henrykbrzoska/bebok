@@ -153,6 +153,7 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
                 Ok(None) => {}
                 Err(e) => tracing::warn!("remote listener failed to start: {e}"),
             }
+            crate::routes::remote::cloud::spawn_sync(state.store.clone(), remote.clone());
             let publisher = crate::routes::remote::routes::relay_status_publisher(&state, &remote);
             match remote.start_relay(app.clone(), Some(publisher)) {
                 Ok(Some(handle)) => tracing::info!("relay enabled: {}", handle.url),

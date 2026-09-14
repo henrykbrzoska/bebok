@@ -101,6 +101,7 @@ pub const TABLE: &[(&str, &str, Access)] = &[
     ("POST", "/remote/disable", Access::Local),
     ("POST", "/remote/relay", Access::Local),
     ("POST", "/remote/relay/reset", Access::Local),
+    ("POST", "/session/{id}/cloud", Access::Local),
     ("POST", "/remote/pair/start", Access::Local),
     ("POST", "/remote/pair", Access::Open),
     ("POST", "/remote/pair/confirm/{pairId}", Access::Local),
