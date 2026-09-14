@@ -12,11 +12,10 @@
 One run produces every platform bundle, a merged `SHA256SUMS.txt`, the
 updater manifest `latest.json`, and creates or updates the GitHub Release.
 
-The day-to-day process (`npm run release -- X.Y.Z` -> test the draft
--> merge) and what to do when a run fails is in
-[CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing). This file covers
-the mechanics: what the workflow builds, signing, the updater feed, dry runs
-and the local equivalent of one matrix leg.
+The process itself (`npm run release` -> test the draft -> merge) and what to
+do when a run fails is in [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing).
+This file covers the mechanics only: what the workflow builds, signing, the
+updater feed, dry runs and the local equivalent of one matrix leg.
 
 ## What gets built
 
@@ -94,24 +93,6 @@ newer tag via the GitHub API and link to the release page.
 - Pre-releases (`X.Y.Z-1`) are never *Latest* on GitHub, so they are the
   way to test the whole update path end to end on all four platforms before
   a real release.
-
-## Cutting a release
-
-`npm run release -- X.Y.Z` (see [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing)).
-The manual equivalent is: changelog section -> `cd client && npm run
-version:bump -- X.Y.Z` -> commit -> `git tag X.Y.Z` -> `git push origin
-main X.Y.Z`.
-
-`preflight` fails fast if the tag does not equal the version in the
-manifests. A tag push publishes the release immediately (not a draft); a
-version with a numeric `-N` suffix (e.g. `1.5.0-1`) is marked as a
-pre-release. The suffix must be a number: the MSI bundler rejects `-rc.1`
-and the like, so `preflight` does too.
-
-To rebuild a tag (e.g. after a runner hiccup) re-run the failed jobs, or
-delete the release assets and push the tag again; `softprops/action-gh-release`
-updates the existing release and overwrites assets with the same name. Never
-replace assets with local builds.
 
 ## Test run without tagging (`workflow_dispatch`)
 
