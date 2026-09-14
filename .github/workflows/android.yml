@@ -82,7 +82,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: android-${{ env.RUST_TARGETS }}
+          # A comma in the key fails rust-cache validation (it did on 1.6.0).
+          shared-key: android-multi-abi
           workspaces: |
             engine -> target
 

@@ -541,7 +541,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           # Shares the cache populated by android.yml's PR builds.
-          shared-key: android-aarch64-linux-android,x86_64-linux-android
+          shared-key: android-multi-abi
           workspaces: |
             engine -> target
 
