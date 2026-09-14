@@ -235,8 +235,17 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
 - **Branches / merges**: `main` receives PR-only merges (no direct pushes). Work
   packages run in their own git worktree (`git worktree add ../bebok-wt/<name> -b wp/<name>`),
   one branch per package, rebased onto the integration branch before the PR.
-- **Commits**: conventional prefixes (`feat:`, `fix:`, `docs:`, `chore:`, `WP-X:`);
-  **no `Co-Authored-By` trailers**.
+- **Commits**: Conventional Commits - `feat:`, `fix:`, `docs:`, `chore:`,
+  `refactor:`, `test:`, optional scope (`feat(updates): …`), `feat!:` or a
+  `BREAKING CHANGE:` footer for breaking changes. The release script derives
+  the next version and the changelog draft from these prefixes, so a
+  mislabelled commit ships a wrong version number: `feat` = user-visible
+  addition (minor), `fix` = user-visible correction (patch), everything else
+  is invisible to users. Subject in the imperative, no trailing period.
+  **Never add `Co-Authored-By`, `Generated with`, `Signed-off-by` or any
+  other attribution trailer, footer or badge - not in commits, not in PR
+  titles/descriptions, not in code comments, not in the changelog.** The
+  author of a commit is the account that pushes it, full stop.
 - **i18n**: every user-visible string is a key in all 12 dictionaries
   (`client/src/i18n/*.ts`); keys are append-only — never rename or delete;
   a machine translation for the non-English locales is acceptable.
@@ -248,11 +257,21 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   `data-testid` on new interactive elements; specs next to the file.
 - **Secrets**: never commit keys (`.gitignore` covers `.env*`, `.bebok/`); tests
   use isolated data dirs (`InstanceStore::with_data_dir`).
-- **Versioning / release**: `cd client && npm run version:bump -- X.Y.Z` edits
-  all seven manifests and lockfiles; `preflight` in `release.yml` fails if they
-  disagree with the tag. Process: [`CONTRIBUTING.md`](./CONTRIBUTING.md#releasing)
-  (`npm run release -- X.Y.Z` -> draft from the PR -> merge publishes); CI
-  mechanics in [`scripts/release.md`](./scripts/release.md).
+- **Changelog**: every user-visible change adds a bullet under `## Unreleased`
+  in `CHANGELOG.md` in the same PR (grouped `### Features` / `### Fixes` /
+  `### Other` like the existing sections). Those bullets become the update
+  notes users read inside the app, so write them for users, not for
+  reviewers.
+- **Releasing** - an agent never tags, never creates a GitHub Release, never
+  edits `client/package.json` / `tauri.conf.json` / `Cargo.toml` versions by
+  hand and never uploads assets. The only sanctioned path is
+  `npm run release` (readiness check -> version suggested from the commits
+  -> changelog section -> version bump in all seven manifests ->
+  `release/X.Y.Z` PR); CI builds a draft from that PR and the merge tags and
+  publishes it. When asked to "release", run `npm run release:check`, report
+  the blockers, then run `npm run release` and hand the PR link back - do
+  not merge it yourself. Details: [`CONTRIBUTING.md`](./CONTRIBUTING.md#releasing);
+  CI mechanics: [`scripts/release.md`](./scripts/release.md).
 
 ## 7. Gotchas
 

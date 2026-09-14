@@ -308,11 +308,12 @@ At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 
 ## Releasing
 
-`npm run release -- X.Y.Z` opens a `release/X.Y.Z` PR, CI builds a
-draft release from it, merging publishes it and installed desktop apps update
-themselves. Never assemble releases by hand. Details:
-[CONTRIBUTING.md](CONTRIBUTING.md#releasing) / [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md),
-CI internals in [scripts/release.md](scripts/release.md).
+`npm run release` - the script suggests the version from the commits, drafts
+the changelog, opens a `release/X.Y.Z` PR; CI builds a draft release from it;
+merging publishes it and installed desktop apps update themselves. Never
+assemble releases by hand. [CONTRIBUTING.md](CONTRIBUTING.md#releasing)
+([PL](CONTRIBUTING.pl.md)) has the three steps; CI internals are in
+[scripts/release.md](scripts/release.md).
 
 ## Contributing
 
