@@ -13,8 +13,10 @@
 // What "start" does, asking before every step unless --yes:
 //   1. runs the readiness check (git, gh, clean tree, main in sync, CI green,
 //      changelog has entries, signing secret present, no release PR open)
-//   2. picks the version (argument, or a suggestion from client/package.json)
-//   3. turns "## Unreleased" in CHANGELOG.md into "## X.Y.Z — YYYY-MM-DD"
+//   2. picks the version: argument, or the semver suggested by the commits since the
+//      last tag (feat! / BREAKING CHANGE -> major, feat -> minor, anything else -> patch)
+//   3. turns "## Unreleased" in CHANGELOG.md into "## X.Y.Z — YYYY-MM-DD"; when the
+//      section is missing or empty it drafts one from those commits for you to edit
 //   4. runs `npm run version:bump -- X.Y.Z` (seven manifests/lockfiles)
 //   5. commits on release/X.Y.Z, pushes, opens the PR (`--no-pr` prints the command instead)
 
@@ -129,6 +131,62 @@ function unreleasedSection(markdown) {
   return m ? { heading: m[0].split('\n')[0], body: m[1].trim(), full: m[0] } : null;
 }
 
+// ---------------------------------------------------------------------------
+// commits -> semver + changelog draft (Conventional Commits, loosely)
+// ---------------------------------------------------------------------------
+
+const CONVENTIONAL_RE = /^(?<type>[a-z]+)(?:\((?<scope>[^)]*)\))?(?<bang>!)?:\s*(?<subject>.+)$/;
+
+/** Commits on `ref` since `tag` (all of them when there is no tag), merges skipped. */
+function commitsSince(tag, ref) {
+  const range = tag ? `${tag}..${ref}` : ref;
+  const raw = gitTry('log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e', range).stdout;
+  if (!raw) return [];
+  return raw
+    .split('\x1e')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [hash, subject, body = ''] = entry.split('\x1f');
+      const m = subject.match(CONVENTIONAL_RE);
+      const type = m ? m.groups.type : null;
+      const breaking = Boolean(m?.groups.bang) || /^BREAKING[ -]CHANGE:/m.test(body);
+      return { hash: hash.slice(0, 7), subject, type, scope: m?.groups.scope ?? null, text: m ? m.groups.subject : subject, breaking };
+    });
+}
+
+function classify(commits) {
+  const groups = { breaking: [], feat: [], fix: [], other: [] };
+  for (const commit of commits) {
+    if (commit.breaking) groups.breaking.push(commit);
+    else if (commit.type === 'feat') groups.feat.push(commit);
+    else if (commit.type === 'fix' || commit.type === 'perf') groups.fix.push(commit);
+    else groups.other.push(commit);
+  }
+  const part = groups.breaking.length ? 'major' : groups.feat.length ? 'minor' : 'patch';
+  return { groups, part };
+}
+
+function suggestVersion(current, commits) {
+  const { part, groups } = classify(commits);
+  const counts = `${groups.breaking.length} breaking, ${groups.feat.length} feat, ${groups.fix.length} fix, ${groups.other.length} other`;
+  // A hand-made tag may already sit on the computed version (1.6.1 was): skip past it.
+  let version = bump(current, part);
+  while (tagExists(version)) version = bump(version, 'patch');
+  return { version, part, counts };
+}
+
+function changelogDraft(commits) {
+  const { groups } = classify(commits);
+  const line = (commit) => `- ${commit.scope ? `**${commit.scope}**: ` : ''}${commit.text} (${commit.hash})`;
+  const blocks = [];
+  if (groups.breaking.length) blocks.push(['### Breaking changes', ...groups.breaking.map(line)]);
+  if (groups.feat.length) blocks.push(['### Features', ...groups.feat.map(line)]);
+  if (groups.fix.length) blocks.push(['### Fixes', ...groups.fix.map(line)]);
+  if (groups.other.length) blocks.push(['### Other', ...groups.other.map(line)]);
+  return blocks.map((b) => b.join('\n')).join('\n\n');
+}
+
 function isoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -183,13 +241,14 @@ function readiness() {
   const changelog = existsSync(CHANGELOG) ? readFileSync(CHANGELOG, 'utf8') : '';
   const section = unreleasedSection(changelog);
   const entries = section ? section.body.split('\n').filter((l) => /^\s*[-*]/.test(l)).length : 0;
-  add(Boolean(section && section.body), 'CHANGELOG.md has a filled "## Unreleased" section', section ? (section.body ? `${entries} bullet(s)` : 'section is empty') : 'section missing');
+  add(Boolean(section && section.body), 'CHANGELOG.md has a filled "## Unreleased" section', section ? (section.body ? `${entries} bullet(s)` : 'empty - `release` drafts it from the commits') : 'missing - `release` drafts it from the commits', false);
 
   const tag = lastTag();
-  const since = tag ? Number(gitTry('rev-list', '--count', `${tag}..origin/${base}`).stdout || 0) : null;
+  const commits = commitsSince(tag, `origin/${base}`);
   const version = manifestVersion();
-  add(since === null || since > 0, `commits on ${base} since last tag${tag ? ` ${tag}` : ''}`, since === null ? 'no release tag yet' : since ? `${since}` : 'nothing new to release', false);
-  add(true, `manifest version ${version}${tagExists(version) ? ' (released - the next release bumps it)' : ' (not tagged yet)'}`, '', false);
+  add(commits.length > 0, `commits on ${base} since last tag${tag ? ` ${tag}` : ''}`, commits.length ? `${commits.length}` : 'nothing new to release', false);
+  const suggestion = suggestVersion(version, commits);
+  add(true, `manifest version ${version}${tagExists(version) ? ' (released)' : ' (not tagged yet)'} -> suggested next: ${c.bold(suggestion.version)} (${suggestion.part}: ${suggestion.counts})`, '', false);
 
   return items;
 }
@@ -240,10 +299,15 @@ async function start() {
 
   // 2. version
   const currentVersion = manifestVersion();
+  const commits = commitsSince(lastTag(), 'HEAD');
+  const suggestion = suggestVersion(currentVersion, commits);
   let version = words[1] ?? (words[0] && words[0] !== 'start' ? words[0] : null);
   if (!version) {
-    log(`\ncurrent version: ${c.bold(currentVersion)}   patch → ${bump(currentVersion, 'patch')}   minor → ${bump(currentVersion, 'minor')}   major → ${bump(currentVersion, 'major')}`);
-    version = await ask('Release version (X.Y.Z)', bump(currentVersion, 'patch'));
+    log(`\ncurrent version: ${c.bold(currentVersion)}   ${commits.length} commit(s) since the last tag: ${suggestion.counts}`);
+    log(`suggested: ${c.bold(suggestion.version)} (${suggestion.part})   patch → ${bump(currentVersion, 'patch')}   minor → ${bump(currentVersion, 'minor')}   major → ${bump(currentVersion, 'major')}`);
+    version = await ask('Release version (X.Y.Z)', suggestion.version);
+  } else if (version.replace(/^v/, '') !== suggestion.version && commits.length) {
+    warn(`commits since the last tag suggest ${suggestion.version} (${suggestion.part}: ${suggestion.counts}); you chose ${version}`);
   }
   version = version.replace(/^v/, '');
   if (!VERSION_RE.test(version)) fail(`'${version}' is not X.Y.Z (a pre-release suffix must be numeric: X.Y.Z-1)`);
@@ -254,12 +318,22 @@ async function start() {
   ok(`releasing ${c.bold(version)} (from ${currentVersion}) on ${branch}`);
 
   // 3. changelog
-  const changelog = readFileSync(CHANGELOG, 'utf8');
-  const section = unreleasedSection(changelog);
-  if (!section) {
-    fail(`CHANGELOG.md has no "## Unreleased" section. Add one with this release's entries first.`);
+  let changelog = readFileSync(CHANGELOG, 'utf8');
+  let section = unreleasedSection(changelog);
+  if (!section || !section.body) {
+    if (!commits.length) fail('CHANGELOG.md has no "## Unreleased" entries and there are no commits since the last tag');
+    const draft = changelogDraft(commits);
+    log(`\n${c.dim('--- draft from the commits since the last tag ---')}\n${draft}\n${c.dim('---')}`);
+    if (!(await confirm(section ? 'The "## Unreleased" section is empty - fill it with this draft?' : 'CHANGELOG.md has no "## Unreleased" section - add it with this draft?'))) {
+      fail('aborted - write the "## Unreleased" section in CHANGELOG.md and run again');
+    }
+    changelog = section
+      ? changelog.replace(section.heading, `${section.heading}\n\n${draft}\n`)
+      : changelog.replace(/^(# [^\n]*\n)/, `$1\n## Unreleased\n\n${draft}\n`);
+    writeFileSync(CHANGELOG, changelog);
+    section = unreleasedSection(changelog);
+    warn('draft written to CHANGELOG.md - edit it now if you want, then confirm below');
   }
-  if (!section.body) fail('the "## Unreleased" section is empty - write the changelog first');
   log(`\n${c.dim('--- CHANGELOG.md → ## ' + version + ' — ' + isoDate() + ' ---')}\n${section.body}\n${c.dim('---')}`);
   log(c.dim('(these notes become the update notes users see in the app)'));
   if (!(await confirm('Changelog looks right?'))) fail('aborted - edit CHANGELOG.md and run again');

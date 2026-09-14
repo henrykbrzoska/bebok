@@ -10,6 +10,8 @@ contributors and agents: [AGENTS.md](AGENTS.md).
   then `cd client && npm run build && npm test`.
 - New i18n keys go into **all 12** dictionaries in `client/src/i18n/` (`en.ts` is the reference).
 - No `Co-Authored-By` trailers.
+- Commit prefixes: `feat:`, `fix:`, `docs:`, `chore:` (`feat!:` for breaking) - the
+  release script derives the version and a changelog draft from them.
 - Describe your change under `## Unreleased` in `CHANGELOG.md` in the same PR.
 
 ## Releasing
@@ -24,10 +26,13 @@ flowchart LR
 
 0. **`npm run release:check`** - read-only readiness list (tree, CI, changelog,
    signing secret, open release PR). `release` runs it first anyway.
-1. **`npm run release -- X.Y.Z`** - checks the tree and CI, turns
-   `## Unreleased` into `## X.Y.Z — date`, bumps the version everywhere,
-   opens the PR `release/X.Y.Z`. Write the changelog first: it becomes the
-   update notes users see in the app.
+1. **`npm run release`** (version optional) - checks the tree and CI,
+   suggests the version from the commits since the last tag (`feat!` /
+   `BREAKING CHANGE` -> major, `feat` -> minor, else patch), turns
+   `## Unreleased` into `## X.Y.Z — date` - drafting it from the commits
+   when it is empty - bumps the version everywhere and opens the PR
+   `release/X.Y.Z`. The changelog becomes the update notes users see in the
+   app, so use `feat:` / `fix:` commit prefixes and check the draft.
 2. **Test the draft** - CI builds a draft release from the PR (all
    platforms, signed, `latest.json`). Drafts are invisible to users. Install
    it over the previous version and check *Check for updates* in the app.

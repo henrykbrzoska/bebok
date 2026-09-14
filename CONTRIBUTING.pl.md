@@ -10,6 +10,8 @@ kontrybutorów i agentów: [AGENTS.md](AGENTS.md).
   potem `cd client && npm run build && npm test`.
 - Nowe klucze i18n trafiają do **wszystkich 12** słowników w `client/src/i18n/` (`en.ts` jest wzorcem).
 - Bez trailerów `Co-Authored-By`.
+- Prefiksy commitów: `feat:`, `fix:`, `docs:`, `chore:` (`feat!:` dla zmian łamiących) -
+  skrypt releasu wyprowadza z nich wersję i szkic changelogu.
 - Opisz zmianę pod `## Unreleased` w `CHANGELOG.md` w tym samym PR-ze.
 
 ## Wydawanie wersji
@@ -24,10 +26,13 @@ flowchart LR
 
 0. **`npm run release:check`** - lista gotowości, nic nie zmienia (drzewo, CI,
    changelog, sekret podpisu, otwarty release-PR). `release` i tak zaczyna od niej.
-1. **`npm run release -- X.Y.Z`** - sprawdza drzewo i CI, zamienia
-   `## Unreleased` na `## X.Y.Z — data`, podbija wersję we wszystkich
-   manifestach, otwiera PR `release/X.Y.Z`. Changelog napisz wcześniej: to
-   są notatki, które użytkownik zobaczy w aplikacji przy aktualizacji.
+1. **`npm run release`** (wersja opcjonalna) - sprawdza drzewo i CI,
+   proponuje wersję na podstawie commitów od ostatniego taga (`feat!` /
+   `BREAKING CHANGE` -> major, `feat` -> minor, reszta -> patch), zamienia
+   `## Unreleased` na `## X.Y.Z — data` - a gdy sekcja jest pusta, układa ją
+   z commitów - podbija wersję w manifestach i otwiera PR `release/X.Y.Z`.
+   Changelog to notatki, które użytkownik zobaczy w aplikacji, więc używaj
+   prefiksów `feat:` / `fix:` w commitach i przejrzyj szkic.
 2. **Przetestuj draft** - CI buduje z PR-a draft release (wszystkie
    platformy, podpisane, `latest.json`). Drafty są niewidoczne dla
    użytkowników. Zainstaluj go na poprzedniej wersji i sprawdź
