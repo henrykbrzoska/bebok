@@ -3,7 +3,14 @@
 Releases are built by `.github/workflows/release.yml` on every pushed tag
 that looks like `X.Y.Z` or `vX.Y.Z` (existing tags use the bare `1.4.1`
 form). One workflow run produces every platform bundle, a merged
-`SHA256SUMS.txt`, and creates the GitHub Release with auto-generated notes.
+`SHA256SUMS.txt`, the updater manifest `latest.json`, and creates the GitHub
+Release with auto-generated notes.
+
+The step-by-step process (changelog -> version bump -> tag -> watch -> verify)
+and what to do when a run fails is in
+[CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing). This file covers the
+mechanics: what the workflow builds, signing, the updater feed, dry runs and
+the local equivalent of one matrix leg.
 
 ## What gets built
 
@@ -84,33 +91,21 @@ newer tag via the GitHub API and link to the release page.
 
 ## Cutting a release
 
-1. Make sure `main` is green in CI.
-2. Bump the version everywhere (package.json, package-lock.json,
-   tauri.conf.json, both Cargo.toml files and both Cargo.lock files):
+Follow the checklist in [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing):
+changelog section -> `cd client && npm run version:bump -- X.Y.Z` -> commit
+-> `git tag X.Y.Z` -> push -> watch **Actions -> Release** -> verify
+`latest.json` and an in-app update from the previous version.
 
-   ```bash
-   cd client && npm run version:bump -- 1.5.0
-   ```
+`preflight` fails fast if the tag does not equal the version in the
+manifests. A tag push publishes the release immediately (not a draft); a
+version with a numeric `-N` suffix (e.g. `1.5.0-1`) is marked as a
+pre-release. The suffix must be a number: the MSI bundler rejects `-rc.1`
+and the like, so `preflight` does too.
 
-3. Update `CHANGELOG.md`, commit, tag and push:
-
-   ```bash
-   git add -A
-   git commit -m "chore: bump version to 1.5.0"
-   git tag 1.5.0
-   git push origin main 1.5.0
-   ```
-
-4. Watch **Actions -> Release**. `preflight` fails fast if the tag does not
-   equal the version in the manifests. A tag push publishes the release
-   immediately (not a draft); a version with a numeric `-N` suffix (e.g.
-   `1.5.0-1`) is marked as a pre-release. The suffix must be a number: the
-   MSI bundler rejects `-rc.1` and the like, so `preflight` does too.
-5. Optionally edit the generated notes on the Releases page.
-
-To rebuild a tag (e.g. after a runner hiccup) re-run the workflow, or delete
-the release assets and push the tag again; `softprops/action-gh-release`
-updates the existing release and overwrites assets with the same name.
+To rebuild a tag (e.g. after a runner hiccup) re-run the failed jobs, or
+delete the release assets and push the tag again; `softprops/action-gh-release`
+updates the existing release and overwrites assets with the same name. Never
+replace assets with local builds.
 
 ## Test run without tagging (`workflow_dispatch`)
 

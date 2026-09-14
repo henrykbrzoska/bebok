@@ -12,6 +12,7 @@ mode against a manually started engine). All state and logic live in the
 engine — the GUI only renders and sends input.
 
 Read order: [`README.md`](./README.md) (features, quick start, config shape)
+→ [`CONTRIBUTING.md`](./CONTRIBUTING.md) (conventions, release checklist)
 → this file → the code: `engine/crates/bebok-server/src/routes/mod.rs` (the
 single route table), `engine/crates/bebok-core/src/agent/mod.rs`,
 `engine/crates/bebok-core/src/store/mod.rs`, `client/src/app/app.routes.ts`.

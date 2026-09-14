@@ -306,21 +306,25 @@ Copy the tree into a named volume first if `npm ci` over the bind mount is slow.
 At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 `bebok-server` `routes::processes`) fail on Linux; clippy and the client build pass.
 
-Releases: `cd client && npm run version:bump -- X.Y.Z` (edits all seven
-manifests/lockfiles), update `CHANGELOG.md`, commit, `git tag X.Y.Z`, push the tag.
-`.github/workflows/release.yml` builds the four platform legs, merges
-`SHA256SUMS.txt`, composes the updater manifest `latest.json` and publishes the
-GitHub release. The desktop app checks that manifest on start and every 6 h
-(About -> *Check for updates*) and installs signed bundles in place, so
-`TAURI_SIGNING_PRIVATE_KEY` is required; Authenticode and GPG signing stay
-optional. See [scripts/release.md](scripts/release.md).
+## Releasing
+
+Releases are cut by tagging: `CHANGELOG.md` section -> `cd client && npm run
+version:bump -- X.Y.Z` (all seven manifests/lockfiles) -> commit -> `git tag
+X.Y.Z` -> push. `.github/workflows/release.yml` then builds the four platform
+legs, merges `SHA256SUMS.txt`, composes the updater manifest `latest.json` and
+publishes the GitHub Release. Installed desktop apps check that manifest on
+start and every 6 h (topbar version chip -> *Check for updates*) and install
+the signed bundle in place, so releases must **never** be assembled by hand.
+Step-by-step checklist and failure handling: [CONTRIBUTING.md](CONTRIBUTING.md#releasing);
+CI internals, secrets and signing: [scripts/release.md](scripts/release.md).
 
 ## Contributing
 
-There is no CONTRIBUTING file yet. Conventions: PR-only merges to `main`, one
-git worktree per work package, no `Co-Authored-By` trailers, i18n keys added to
-all 12 dictionaries (`client/src/i18n/en.ts` is the reference), `cargo fmt` +
-clippy clean. See [AGENTS.md](AGENTS.md) for the contributor/agent guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md): PR-only merges, one git worktree per
+work package, no `Co-Authored-By` trailers, i18n keys added to all 12
+dictionaries (`client/src/i18n/en.ts` is the reference), `cargo fmt` + clippy
+clean, and the release checklist. [AGENTS.md](AGENTS.md) is the
+contributor/agent orientation guide.
 
 ## License
 
