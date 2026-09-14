@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // release.mjs — guided release for Bebok (Linux / macOS / Windows, Node >= 20, zero deps).
 //
-//   node scripts/release.mjs [X.Y.Z] [--yes] [--no-pr]   start a release
-//   node scripts/release.mjs status [X.Y.Z]              where is the release right now?
+//   npm run release -- [X.Y.Z] [--yes] [--no-pr]   start a release   (node scripts/release.mjs …)
+//   npm run release:status -- [X.Y.Z]              where is the release right now?
 //
 // The whole process is: this script opens a release PR, CI builds a draft
 // release from it (install it, test it), merging the PR publishes the release
@@ -238,7 +238,7 @@ ${c.bold('Next')}
   1. Actions → Release builds a draft "${version}" (~30 min):   gh run watch
   2. Install the draft on a machine with the previous version and check the update path.
   3. Merge the PR → the release is tagged and published automatically.
-  4. Verify:   node scripts/release.mjs status ${version}
+  4. Verify:   npm run release:status -- ${version}
 `);
 }
 

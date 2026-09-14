@@ -12,7 +12,7 @@
 One run produces every platform bundle, a merged `SHA256SUMS.txt`, the
 updater manifest `latest.json`, and creates or updates the GitHub Release.
 
-The day-to-day process (`node scripts/release.mjs X.Y.Z` -> test the draft
+The day-to-day process (`npm run release -- X.Y.Z` -> test the draft
 -> merge) and what to do when a run fails is in
 [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing). This file covers
 the mechanics: what the workflow builds, signing, the updater feed, dry runs
@@ -97,7 +97,7 @@ newer tag via the GitHub API and link to the release page.
 
 ## Cutting a release
 
-`node scripts/release.mjs X.Y.Z` (see [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing)).
+`npm run release -- X.Y.Z` (see [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing)).
 The manual equivalent is: changelog section -> `cd client && npm run
 version:bump -- X.Y.Z` -> commit -> `git tag X.Y.Z` -> `git push origin
 main X.Y.Z`.

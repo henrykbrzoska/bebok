@@ -28,6 +28,7 @@ npm run doctor                     # rustc/cargo, node/npm, tauri cli, OS-level 
 npm run full-build-dev -- --open   # cargo build -p bebok-server (debug) + start it + ng serve
 npm run full-build-app             # cargo build --release --target <triple> + sidecar:copy + tauri build
 npm run engine | npm run client    # one half only
+npm run release -- X.Y.Z           # guided release: changelog + bump + release/X.Y.Z PR (CI does the rest)
 dev.cmd / ./dev.sh [tauri] [flags] # shortcuts for full-build-dev
 ```
 
@@ -249,7 +250,7 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
 - **Versioning / release**: `cd client && npm run version:bump -- X.Y.Z` edits
   all seven manifests and lockfiles; `preflight` in `release.yml` fails if they
   disagree with the tag. Process: [`CONTRIBUTING.md`](./CONTRIBUTING.md#releasing)
-  (`node scripts/release.mjs X.Y.Z` -> draft from the PR -> merge publishes); CI
+  (`npm run release -- X.Y.Z` -> draft from the PR -> merge publishes); CI
   mechanics in [`scripts/release.md`](./scripts/release.md).
 
 ## 7. Gotchas

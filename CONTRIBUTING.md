@@ -16,13 +16,13 @@ contributors and agents: [AGENTS.md](AGENTS.md).
 
 ```mermaid
 flowchart LR
-    A["node scripts/release.mjs X.Y.Z"] --> B["PR release/X.Y.Z"]
+    A["npm run release -- X.Y.Z"] --> B["PR release/X.Y.Z"]
     B -->|CI| C["draft release X.Y.Z"]
     C -->|test, then merge| D["tag + publish (automatic)"]
     D --> E["apps update themselves"]
 ```
 
-1. **`node scripts/release.mjs X.Y.Z`** - checks the tree and CI, turns
+1. **`npm run release -- X.Y.Z`** - checks the tree and CI, turns
    `## Unreleased` into `## X.Y.Z — date`, bumps the version everywhere,
    opens the PR `release/X.Y.Z`. Write the changelog first: it becomes the
    update notes users see in the app.
@@ -30,7 +30,7 @@ flowchart LR
    platforms, signed, `latest.json`). Drafts are invisible to users. Install
    it over the previous version and check *Check for updates* in the app.
 3. **Merge** - CI tags `X.Y.Z` and publishes. Installed apps update at their
-   next start or within 6 h. Check with `node scripts/release.mjs status`.
+   next start or within 6 h. Check with `npm run release:status`.
 
 Never upload or edit release assets by hand - installed apps trust only what
 CI publishes. If a run fails, fix and push on the same `release/X.Y.Z`

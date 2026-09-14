@@ -308,7 +308,7 @@ At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 
 ## Releasing
 
-`node scripts/release.mjs X.Y.Z` opens a `release/X.Y.Z` PR, CI builds a
+`npm run release -- X.Y.Z` opens a `release/X.Y.Z` PR, CI builds a
 draft release from it, merging publishes it and installed desktop apps update
 themselves. Never assemble releases by hand. Details:
 [CONTRIBUTING.md](CONTRIBUTING.md#releasing) / [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md),

@@ -16,13 +16,13 @@ kontrybutorów i agentów: [AGENTS.md](AGENTS.md).
 
 ```mermaid
 flowchart LR
-    A["node scripts/release.mjs X.Y.Z"] --> B["PR release/X.Y.Z"]
+    A["npm run release -- X.Y.Z"] --> B["PR release/X.Y.Z"]
     B -->|CI| C["draft release X.Y.Z"]
     C -->|test, potem merge| D["tag + publikacja (automat)"]
     D --> E["aplikacje same się aktualizują"]
 ```
 
-1. **`node scripts/release.mjs X.Y.Z`** - sprawdza drzewo i CI, zamienia
+1. **`npm run release -- X.Y.Z`** - sprawdza drzewo i CI, zamienia
    `## Unreleased` na `## X.Y.Z — data`, podbija wersję we wszystkich
    manifestach, otwiera PR `release/X.Y.Z`. Changelog napisz wcześniej: to
    są notatki, które użytkownik zobaczy w aplikacji przy aktualizacji.
@@ -32,7 +32,7 @@ flowchart LR
    *Check for updates* w aplikacji.
 3. **Merge** - CI taguje `X.Y.Z` i publikuje. Zainstalowane aplikacje
    aktualizują się przy następnym uruchomieniu lub w ciągu 6 h. Sprawdź
-   przez `node scripts/release.mjs status`.
+   przez `npm run release:status`.
 
 Nigdy nie wgrywaj ani nie edytuj plików release'u ręcznie - zainstalowane
 aplikacje ufają tylko temu, co opublikuje CI. Jeśli run padnie, popraw i

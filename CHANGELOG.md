@@ -19,7 +19,7 @@
 - Release: `scripts/latest-json.mjs` composes `latest.json` in the `release`
   job; `TAURI_SIGNING_PRIVATE_KEY` is now required; macOS updater archives are
   named `bebok_<version>_<arch>.app.tar.gz`.
-- Release process: `node scripts/release.mjs X.Y.Z` opens a `release/X.Y.Z`
+- Release process: `npm run release -- X.Y.Z` opens a `release/X.Y.Z`
   PR (changelog section + version bump); the PR builds a draft release, the
   merge tags and publishes it automatically (`release.yml` now also runs on
   `pull_request` from `release/**` and on `push` to `main`). Pre-release
