@@ -70,7 +70,17 @@ pub fn write_delta_to(path: &Path, delta: &Value) -> Result<(), String> {
 
     for (key, value) in delta_obj {
         let cur = jsonc::JsoncDocument::parse(&out).map_err(|e| e.to_string())?;
-        out = cur.with_set(key, value);
+        // A partial object (`{"remote": {"allow_lan": true}}`) must not drop
+        // the sibling keys already on disk: merge objects key by key.
+        let merged = match (cur.value().get(key), value) {
+            (Some(existing @ Value::Object(_)), Value::Object(_)) => {
+                let mut base = existing.clone();
+                deep_merge(&mut base, value);
+                base
+            }
+            _ => value.clone(),
+        };
+        out = cur.with_set(key, &merged);
     }
 
     if let Some(parent) = path.parent() {
@@ -84,6 +94,24 @@ pub fn write_delta_to(path: &Path, delta: &Value) -> Result<(), String> {
     std::fs::write(&tmp, out).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Recursively merge `delta` into `base`: objects merge per key, everything
+/// else (arrays, scalars, `null`) replaces.
+fn deep_merge(base: &mut Value, delta: &Value) {
+    match (base, delta) {
+        (Value::Object(base), Value::Object(delta)) => {
+            for (k, v) in delta {
+                match base.get_mut(k) {
+                    Some(slot) if slot.is_object() && v.is_object() => deep_merge(slot, v),
+                    _ => {
+                        base.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (base, delta) => *base = delta.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -166,5 +194,39 @@ mod tests {
         assert!(jsonc::parse(&text).is_ok());
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn partial_object_delta_keeps_sibling_keys() {
+        let dir = std::env::temp_dir().join(format!("bebok-cfg-merge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{ "remote": { "enabled": true, "port": 8790, "relay": { "url": "https://r" } } }"#,
+        )
+        .unwrap();
+        write_delta_to(
+            &path,
+            &serde_json::json!({ "remote": { "allow_lan": true } }),
+        )
+        .unwrap();
+        write_delta_to(
+            &path,
+            &serde_json::json!({ "remote": { "relay": { "enabled": true } } }),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["remote"]["enabled"], true);
+        assert_eq!(v["remote"]["port"], 8790);
+        assert_eq!(v["remote"]["allow_lan"], true);
+        assert_eq!(v["remote"]["relay"]["url"], "https://r");
+        assert_eq!(v["remote"]["relay"]["enabled"], true);
+        // Scalars and arrays still replace.
+        write_delta_to(&path, &serde_json::json!({ "remote": "off" })).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["remote"], "off");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
