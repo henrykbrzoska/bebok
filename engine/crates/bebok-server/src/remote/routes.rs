@@ -230,11 +230,11 @@ pub async fn pair_start(
     ext: Option<Extension<Arc<RemoteState>>>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let remote = remote(ext)?;
-    if !remote.is_listening() {
+    if !remote.reachable() {
         return Err(error_json(
             StatusCode::CONFLICT,
             "remote_disabled",
-            "enable remote access first (no remote listener is running)",
+            "enable remote access first (no remote listener and no relay is running)",
         ));
     }
     let started = remote

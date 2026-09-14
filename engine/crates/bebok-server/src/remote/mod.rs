@@ -200,6 +200,17 @@ impl RemoteState {
         }
     }
 
+    pub fn relay_connected(&self) -> bool {
+        self.relay_handle()
+            .map(|h| h.status.connected())
+            .unwrap_or(false)
+    }
+
+    /// A phone can reach this engine somewhere: LAN/tailnet listener or relay.
+    pub fn reachable(&self) -> bool {
+        self.is_listening() || self.relay_connected()
+    }
+
     /// The relay endpoint phones use, when the relay is configured.
     pub fn relay_endpoint(&self) -> Option<String> {
         let cfg = self.config();
