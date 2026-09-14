@@ -31,7 +31,7 @@ import type { EngineTargetKind } from './engine-target.store';
 export type PlatformKind = 'tauri' | 'http';
 
 /** The target kinds a platform resolves on its own (never `desktop`). */
-export type PlatformTargetKind = Exclude<EngineTargetKind, 'desktop'>;
+export type PlatformTargetKind = Exclude<EngineTargetKind, 'desktop' | 'share'>;
 
 export interface EngineConnection {
   kind: PlatformKind;

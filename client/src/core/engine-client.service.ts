@@ -19,6 +19,8 @@ import {
   AbortResponse,
   CloudSessionList,
   CloudSessionSnapshot,
+  SessionShare,
+  SessionShareEntry,
   AbortTaskResponse,
   AgentEntry,
   AgentInfo,
@@ -218,7 +220,7 @@ export class EngineClient implements EngineApi {
    */
   private async pickEndpoint(target: EngineTarget, token: string | null): Promise<string> {
     const endpoints = target.endpoints ?? [];
-    if (target.kind !== 'desktop' || endpoints.length < 2) {
+    if ((target.kind !== 'desktop' && target.kind !== 'share') || endpoints.length < 2) {
       return target.baseUrl;
     }
     const direct = endpoints.filter((e) => !isRelayEndpoint(e));
@@ -306,7 +308,7 @@ export class EngineClient implements EngineApi {
       this.reconfigure({ kind: 'http', baseUrl: normalized });
     } else {
       const active = this.targets.active();
-      if (active && active.kind === 'desktop') {
+      if (active && (active.kind === 'desktop' || active.kind === 'share')) {
         // Network may have changed (home Wi-Fi <-> 5G): re-race the endpoints.
         await this.switchTarget(active.id);
       } else {
@@ -962,6 +964,15 @@ export class EngineClient implements EngineApi {
 
   resetRemoteRelay(): Promise<RemoteStatus> {
     return this.remoteRequest<RemoteStatus>('POST', '/remote/relay/reset');
+  }
+
+  createSessionShare(id: string, label?: string): Promise<SessionShare> {
+    return this.request<SessionShare>('POST', `/session/${id}/share`, { label: label ?? '' });
+  }
+
+  async listSessionShares(id: string): Promise<SessionShareEntry[]> {
+    const res = await this.request<{ shares: SessionShareEntry[] }>('GET', `/session/${id}/share`);
+    return res.shares;
   }
 
   setSessionCloud(id: string, enabled: boolean): Promise<{ id: string; cloud: boolean }> {

@@ -29,7 +29,7 @@ import { Injectable, InjectionToken, computed, inject, signal } from '@angular/c
 
 import { SecureStoreTargetSecrets, isCapacitorRuntime } from './secure-store';
 
-export type EngineTargetKind = 'sidecar' | 'embedded' | 'remote-url' | 'desktop';
+export type EngineTargetKind = 'sidecar' | 'embedded' | 'remote-url' | 'desktop' | 'share';
 
 export interface EngineTarget {
   id: string;
@@ -44,6 +44,8 @@ export interface EngineTarget {
    * re-races the list so the phone roams between home Wi-Fi and 5G.
    */
   endpoints?: string[];
+  /** `share` targets: the one session the token opens (1.8 share links). */
+  sessionId?: string;
   /** Bearer token for this engine, null when it runs with `BEBOK_NO_AUTH=1`. */
   token: string | null;
   /** Last successful request/stream against this target (epoch ms). */
@@ -111,7 +113,10 @@ export const TARGET_SECRETS = new InjectionToken<TargetSecrets>('TARGET_SECRETS'
 
 /** Kinds that survive a reload (the others are re-resolved by the platform). */
 export function isPersistedTarget(target: EngineTarget): boolean {
-  return (target.kind === 'desktop' || target.kind === 'remote-url') && !target.ephemeral;
+  return (
+    (target.kind === 'desktop' || target.kind === 'remote-url' || target.kind === 'share') &&
+    !target.ephemeral
+  );
 }
 
 type StoredTarget = Omit<EngineTarget, 'token' | 'ephemeral'>;
@@ -144,7 +149,12 @@ export class EngineTargetStore {
    * targets (an engine address typed in) use the engine's own launch token
    * and keep the full local scope.
    */
-  readonly remoteScope = computed(() => this.active()?.kind === 'desktop');
+  readonly remoteScope = computed(() => {
+    const kind = this.active()?.kind;
+    return kind === 'desktop' || kind === 'share';
+  });
+  /** 1.8: joined share links, newest first. */
+  readonly shares = computed(() => this.targets().filter((t) => t.kind === 'share'));
 
   /** Resolves once persisted targets (and their tokens) are back in memory. */
   readonly ready: Promise<void>;
@@ -307,7 +317,8 @@ function isStoredTarget(value: unknown): value is StoredTarget {
     typeof v['id'] === 'string' &&
     typeof v['baseUrl'] === 'string' &&
     typeof v['label'] === 'string' &&
-    (v['kind'] === 'desktop' || v['kind'] === 'remote-url') &&
+    (v['kind'] === 'desktop' || v['kind'] === 'remote-url' || v['kind'] === 'share') &&
+    (v['sessionId'] === undefined || typeof v['sessionId'] === 'string') &&
     (v['endpoints'] === undefined ||
       (Array.isArray(v['endpoints']) && v['endpoints'].every((e) => typeof e === 'string')))
   );

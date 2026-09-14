@@ -26,6 +26,8 @@ import { AgentInfo, SessionMeta, isSubAgentSession, parentSessionId } from '../.
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
+import { EngineTargetStore } from '../../core/engine-target.store';
+import { ShareStore } from '../../core/remote/share.store';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
@@ -57,6 +59,26 @@ export class Sidebar {
   readonly project = inject(ProjectSessionsStore);
   readonly tabs = inject(OpenSessionsStore);
   readonly activity = inject(SessionActivityStore);
+  readonly share = inject(ShareStore);
+  private readonly targets = inject(EngineTargetStore);
+
+  // 1.8 share links: paste box under "Shared sessions".
+  readonly joinOpen = signal(false);
+  readonly joinLink = signal('');
+  readonly activeTargetId = computed(() => this.targets.activeId());
+
+  toggleJoin(): void {
+    this.joinOpen.update((v) => !v);
+  }
+
+  async joinShare(event?: Event): Promise<void> {
+    event?.preventDefault();
+    const target = await this.share.join(this.joinLink());
+    if (target) {
+      this.joinLink.set('');
+      this.joinOpen.set(false);
+    }
+  }
   private readonly toolSafety = inject(ToolSafetyStore);
   private readonly newSessionDialog = inject(NewSessionDialogStore);
   private readonly i18n = inject(I18nService);

@@ -24,6 +24,8 @@ import type {
   AbortResponse,
   CloudSessionList,
   CloudSessionSnapshot,
+  SessionShare,
+  SessionShareEntry,
   AbortTaskResponse,
   AgentEntry,
   AgentInfo,
@@ -243,6 +245,9 @@ export interface EngineRestApi {
   setRemoteRelay(enabled: boolean, url: string): Promise<RemoteStatus>;
   /** 1.8: `POST /remote/relay/reset` - new tunnel id + secret (phones re-pair). */
   resetRemoteRelay(): Promise<RemoteStatus>;
+  /** 1.8 share links (desktop only): mint / list the links of a session. */
+  createSessionShare(id: string, label?: string): Promise<SessionShare>;
+  listSessionShares(id: string): Promise<SessionShareEntry[]>;
   /** 1.8 cloud chats: `POST /session/{id}/cloud {enabled}` (desktop only). */
   setSessionCloud(id: string, enabled: boolean): Promise<{ id: string; cloud: boolean }>;
   /**

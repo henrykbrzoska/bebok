@@ -70,6 +70,52 @@
       </span>
     }
 
+    @if (share.activeShare(); as joined) {
+      <span class="tb-shared" data-testid="shared-banner">
+        ⇄ {{ t('chat.sharedWith', { engine: joined.label }) }}
+        <button type="button" class="tb-shared-leave" (click)="share.leave()">
+          {{ t('chat.leaveShare') }}
+        </button>
+      </span>
+    }
+
+    @if (canToggleCloud()) {
+      <button
+        class="tb-share"
+        type="button"
+        data-testid="share-session"
+        [disabled]="shareBusy()"
+        (click)="shareSession()"
+        [title]="t('chat.shareTitle')"
+      >
+        ⇄ {{ t('chat.share') }}
+      </button>
+    }
+
+    @if (shareLink(); as link) {
+      <div
+        class="share-pop"
+        role="dialog"
+        [attr.aria-label]="t('chat.shareDialog')"
+        data-testid="share-dialog"
+      >
+        <p class="share-hint">{{ t('chat.shareHint') }}</p>
+        <textarea
+          class="share-link"
+          readonly
+          rows="3"
+          data-testid="share-link"
+          (focus)="selectAll($event)"
+          >{{ link.url }}</textarea>
+        <div class="share-actions">
+          <button type="button" class="primary" (click)="copyShareLink()">
+            {{ shareCopied() ? t('chat.copied') : t('chat.copyLink') }}
+          </button>
+          <button type="button" (click)="shareLink.set(null)">{{ t('chat.close') }}</button>
+        </div>
+      </div>
+    }
+
     @if (canToggleCloud()) {
       <button
         class="tb-cloud"

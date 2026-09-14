@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { ShareStore } from '../../core/remote/share.store';
 import { EngineTargetStore } from '../../core/engine-target.store';
 import { EngineWorkTracker } from '../../core/engine-launcher';
 import {
@@ -25,6 +26,7 @@ import {
   PromptBody,
   PromptImage,
   SessionMeta,
+  SessionShare,
 } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
@@ -1138,6 +1140,45 @@ export class ChatView implements OnInit, OnDestroy {
    * a fresh forked session and open it. Compaction is fork-based, so the
    * caller navigates to the new id rather than expecting an in-place change.
    */
+  // 1.8 share links: mint a link for this session (desktop scope only).
+  readonly share = inject(ShareStore);
+  readonly shareBusy = signal(false);
+  readonly shareLink = signal<SessionShare | null>(null);
+  readonly shareCopied = signal(false);
+
+  async shareSession(): Promise<void> {
+    const meta = this.meta();
+    if (!meta || this.shareBusy()) {
+      return;
+    }
+    this.shareBusy.set(true);
+    this.shareCopied.set(false);
+    try {
+      this.shareLink.set(await this.engine.createSessionShare(meta.id));
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.shareBusy.set(false);
+    }
+  }
+
+  async copyShareLink(): Promise<void> {
+    const link = this.shareLink();
+    if (!link) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link.url);
+      this.shareCopied.set(true);
+    } catch {
+      /* clipboard blocked - the textarea is selectable */
+    }
+  }
+
+  selectAll(event: FocusEvent): void {
+    (event.target as HTMLTextAreaElement).select();
+  }
+
   /** 1.8 cloud chats: only the desktop (a Local-scope caller) may flip the flag. */
   readonly canToggleCloud = computed(() => !this.targets.remoteScope() && this.meta() !== null);
   readonly cloudBusy = signal(false);

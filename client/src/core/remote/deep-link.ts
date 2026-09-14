@@ -18,6 +18,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { CanActivateChildFn, Router } from '@angular/router';
 
 import { PairInvite, parsePairUrl } from './pair-protocol';
+import { ShareStore } from './share.store';
 
 /** The subset of `@capacitor/app` used here (injectable for specs). */
 export interface AppPluginLike {
@@ -31,6 +32,7 @@ export interface AppPluginLike {
 @Injectable({ providedIn: 'root' })
 export class PairDeepLinks {
   private readonly router = inject(Router);
+  private readonly shares = inject(ShareStore);
 
   /** Invite waiting to be consumed by the pairing screen. */
   readonly pending = signal<PairInvite | null>(null);
@@ -93,6 +95,11 @@ export class PairDeepLinks {
    * the router to the Remote tab. Returns the invite or null.
    */
   handle(url: string): PairInvite | null {
+    // 1.8 share links ride the same scheme: `bebok://share?…` joins directly.
+    if (/^bebok:\/\/share\b/i.test(url.trim())) {
+      void this.shares.join(url);
+      return null;
+    }
     let invite: PairInvite;
     try {
       invite = parsePairUrl(url);

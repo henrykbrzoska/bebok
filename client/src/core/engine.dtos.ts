@@ -1160,6 +1160,24 @@ export interface CloudSessionSnapshot {
   total: number;
 }
 
+/** `POST /session/{id}/share` response: the link and its parts (1.8). */
+export interface SessionShare {
+  shareId: string;
+  sessionId: string;
+  token: string;
+  endpoints: string[];
+  engineName: string;
+  fingerprint: string;
+  url: string;
+}
+
+export interface SessionShareEntry {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeen: number;
+}
+
 export interface RemoteRelayStatus {
   enabled: boolean;
   /** Worker origin, e.g. `https://bebok-relay.example.workers.dev`. */

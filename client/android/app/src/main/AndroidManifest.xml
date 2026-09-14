@@ -36,6 +36,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bebok" android:host="pair" />
+                <!-- 1.8: `bebok://share?...` session share links. -->
+                <data android:scheme="bebok" android:host="share" />
             </intent-filter>
 
         </activity>

@@ -122,6 +122,66 @@
           {{ hasSessions() ? t('sidebar.noMatches') : t('sidebar.noSessions') }}
         </div>
       }
+
+      <!-- 1.8 share links: sessions joined from a bebok://share link. -->
+      <div class="group-label shared-label">
+        <span>{{ t('sidebar.sharedSessions') }}</span>
+        <button
+          type="button"
+          class="shared-join-toggle"
+          (click)="toggleJoin()"
+          [title]="t('sidebar.joinShare')"
+          [attr.aria-expanded]="joinOpen()"
+          data-testid="share-join-toggle"
+        >
+          +
+        </button>
+      </div>
+      @if (joinOpen()) {
+        <form class="shared-join" (submit)="joinShare($event)">
+          <input
+            type="text"
+            class="shared-join-input"
+            [ngModel]="joinLink()"
+            (ngModelChange)="joinLink.set($event)"
+            name="shareLink"
+            [placeholder]="t('sidebar.joinSharePlaceholder')"
+            spellcheck="false"
+            autocomplete="off"
+            data-testid="share-join-input"
+          />
+          <button
+            type="submit"
+            class="shared-join-btn"
+            [disabled]="share.joining() || !joinLink().trim()"
+          >
+            {{ share.joining() ? t('sidebar.joining') : t('sidebar.join') }}
+          </button>
+          @if (share.error(); as message) {
+            <div class="shared-join-error" role="alert">{{ message }}</div>
+          }
+        </form>
+      }
+      @for (item of share.shares(); track item.id) {
+        <button
+          type="button"
+          role="listitem"
+          class="session-row shared-row"
+          [class.active]="item.id === activeTargetId()"
+          (click)="share.open(item.id)"
+          [title]="item.baseUrl"
+          [attr.data-testid]="'shared-' + item.sessionId"
+        >
+          <span class="session-head">
+            <span class="shared-glyph" aria-hidden="true">⇄</span>
+            <span class="session-title">{{ item.label }}</span>
+          </span>
+          <span class="session-meta mono">{{ (item.sessionId ?? '').slice(0, 8) }}</span>
+        </button>
+      }
+      @if (share.shares().length === 0 && !joinOpen()) {
+        <div class="session-empty">{{ t('sidebar.noSharedSessions') }}</div>
+      }
     </div>
 
     <!-- F9-13: icon rail (horizontal in the expanded sidebar). Tooltip: a

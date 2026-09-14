@@ -37,6 +37,7 @@
 /* --- F2-3: slim session toolbar (44px) --- */
 
 .session-toolbar {
+  position: relative;
   flex: 0 0 auto;
   min-height: 44px;
   display: flex;
@@ -742,4 +743,88 @@ button.small {
 .tb-cloud.on {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.tb-share {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: var(--fs-12);
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+}
+
+.tb-share + .tb-cloud,
+.tb-share + .tb-compact {
+  margin-left: 0;
+}
+
+.tb-share:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.tb-shared {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-left: auto;
+  font-size: var(--fs-12);
+  color: var(--accent);
+}
+
+.tb-shared-leave {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-control-sm);
+  padding: 2px 8px;
+  font-size: var(--fs-11-5);
+  cursor: pointer;
+}
+
+.share-pop {
+  position: absolute;
+  top: 44px;
+  right: var(--space-12);
+  z-index: 30;
+  width: min(460px, calc(100vw - 2 * var(--space-12)));
+  padding: var(--space-12);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.share-hint {
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.share-link {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-control);
+  padding: var(--space-6) var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11-5);
+}
+
+.share-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.share-actions button {
+  border-radius: var(--radius-control-sm);
+  padding: 4px 12px;
+  font-size: var(--fs-12);
+  cursor: pointer;
 }
