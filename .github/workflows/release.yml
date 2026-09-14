@@ -564,6 +564,8 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           BEBOK_ANDROID_ABIS: 'arm64-v8a'
+          # See android.yml: the mksh cross-build kills the runner.
+          BEBOK_SKIP_MKSH: '1'
         run: bash scripts/bundle-android.sh
 
       - name: ng build

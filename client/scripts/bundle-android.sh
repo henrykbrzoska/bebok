@@ -152,7 +152,9 @@ $ABI/$SERVER_LIB: $SIZE_HUMAN ($SIZE bytes)"
 
   # mksh (bash tool / terminal) for this ABI - best-effort, same semantics as
   # before: if it fails, the app still works minus the bash tool.
-  if [ -s "$ABI_LIB_DIR/$SHELL_LIB" ]; then
+  if [ -n "${BEBOK_SKIP_MKSH:-}" ]; then
+    echo ">> mksh skipped for $ABI (BEBOK_SKIP_MKSH set - no bash tool on the phone)"
+  elif [ -s "$ABI_LIB_DIR/$SHELL_LIB" ]; then
     echo ">> mksh already bundled for $ABI, skipping"
   else
     echo ">> building mksh for $ABI ($TARGET)"

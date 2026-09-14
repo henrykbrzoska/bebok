@@ -109,6 +109,11 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           BEBOK_ANDROID_ABIS: 'arm64-v8a x86_64'
+          # The mksh cross-build has taken the runner down every time it ran
+          # (1.6.0 and 1.8 runs: "runner received a shutdown signal" right
+          # after "building mksh"); the phone's Remote mode does not need a
+          # shell. Re-enable once the cause is found.
+          BEBOK_SKIP_MKSH: '1'
         run: bash scripts/bundle-android.sh
 
       - name: ng build
