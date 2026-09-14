@@ -121,6 +121,7 @@ pub fn build_api_router() -> Router<AppState> {
         // WP-M1 (F10-3): remote access — pairing, devices, status.
         .route("/remote/enable", post(remote::routes::enable))
         .route("/remote/disable", post(remote::routes::disable))
+        .route("/remote/relay", post(remote::routes::relay))
         .route("/remote/pair/start", post(remote::routes::pair_start))
         .route("/remote/pair", post(remote::routes::pair))
         .route(

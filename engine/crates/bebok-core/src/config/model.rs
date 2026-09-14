@@ -61,14 +61,29 @@ impl Default for RemotePushConfig {
     }
 }
 
+/// 1.8 (relay): the engine dials out to a `bebok-relay` worker (Cloudflare
+/// Workers + Durable Objects, `relay/` in the repo) so paired phones reach it
+/// from anywhere over HTTPS. `secret` is minted by the engine the first time
+/// the relay is enabled and claims the tunnel id on the relay (TOFU);
+/// `url` is the worker origin, e.g. `https://bebok-relay.example.workers.dev`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemoteRelayConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub secret: String,
+}
+
 /// WP-M1 (F10-1): the `remote` section of the **global** config — the
-/// second listener that paired phones reach over Tailscale / LAN.
+/// second listener that paired phones reach over Tailscale / LAN, plus the
+/// 1.8 relay.
 ///
 /// ```jsonc
 /// "remote": {
 ///   "enabled": false, "port": 8790, "allow_lan": false,
 ///   "publish": { "browser_frames": true, "processes": true },
-///   "push": { "provider": "none", "url": "" }
+///   "push": { "provider": "none", "url": "" },
+///   "relay": { "enabled": false, "url": "", "secret": "" }
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +96,7 @@ pub struct RemoteConfig {
     pub allow_lan: bool,
     pub publish: RemotePublishConfig,
     pub push: RemotePushConfig,
+    pub relay: RemoteRelayConfig,
 }
 
 impl Default for RemoteConfig {
@@ -91,6 +107,7 @@ impl Default for RemoteConfig {
             allow_lan: false,
             publish: RemotePublishConfig::default(),
             push: RemotePushConfig::default(),
+            relay: RemoteRelayConfig::default(),
         }
     }
 }
@@ -131,6 +148,17 @@ impl RemoteConfig {
                 self.publish.processes = b;
             }
         }
+        if let Some(relay) = obj.get("relay").and_then(Value::as_object) {
+            if let Some(b) = relay.get("enabled").and_then(Value::as_bool) {
+                self.relay.enabled = b;
+            }
+            if let Some(u) = relay.get("url").and_then(Value::as_str) {
+                self.relay.url = u.trim().trim_end_matches('/').to_string();
+            }
+            if let Some(sec) = relay.get("secret").and_then(Value::as_str) {
+                self.relay.secret = sec.trim().to_string();
+            }
+        }
         if let Some(push) = obj.get("push").and_then(Value::as_object) {
             if let Some(p) = push.get("provider").and_then(Value::as_str) {
                 let p = p.trim().to_ascii_lowercase();
@@ -140,6 +168,11 @@ impl RemoteConfig {
                 self.push.url = u.trim().to_string();
             }
         }
+    }
+
+    /// The relay is usable: enabled with a worker URL.
+    pub fn relay_enabled(&self) -> bool {
+        self.relay.enabled && !self.relay.url.trim().is_empty()
     }
 
     /// True when a push provider other than `none` is configured.

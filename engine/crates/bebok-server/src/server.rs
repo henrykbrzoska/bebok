@@ -153,6 +153,11 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
                 Ok(None) => {}
                 Err(e) => tracing::warn!("remote listener failed to start: {e}"),
             }
+            match remote.start_relay(app.clone()) {
+                Ok(Some(handle)) => tracing::info!("relay enabled: {}", handle.url),
+                Ok(None) => {}
+                Err(e) => tracing::warn!("relay failed to start: {e}"),
+            }
         }
     }
 

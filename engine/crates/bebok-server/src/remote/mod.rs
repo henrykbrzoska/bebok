@@ -8,6 +8,8 @@
 //! - [`pairing`]   — one-time 8-char codes, TTL, attempts, confirmation.
 //! - [`fanout`]    — SSE filter/coalescing for the remote scope.
 //! - [`routes`]    — `/remote/*` handlers.
+//! - [`relay`]     — 1.8: outbound WebSocket to a `bebok-relay` worker so phones
+//!                   reach the engine from anywhere (same scope, same tokens).
 //!
 //! The shared state ([`RemoteState`]) is reached from handlers and the auth
 //! layer through a request extension (`Extension<Arc<RemoteState>>`) added
@@ -19,6 +21,7 @@ pub mod devices;
 pub mod fanout;
 pub mod listener;
 pub mod pairing;
+pub mod relay;
 pub mod routes;
 pub mod scope;
 
@@ -76,6 +79,8 @@ pub struct RemoteState {
     /// Per-install random id; its sha256 prefix is the pairing fingerprint.
     install_id: String,
     engine_name: String,
+    /// The running relay task (1.8), if any.
+    relay: Mutex<Option<relay::RelayHandle>>,
 }
 
 impl RemoteState {
@@ -118,6 +123,7 @@ impl RemoteState {
             app: Mutex::new(None),
             install_id,
             engine_name: engine_name(),
+            relay: Mutex::new(None),
         }
     }
 
@@ -137,17 +143,82 @@ impl RemoteState {
 
     /// Persist `remote.enabled` (and keep the in-memory copy in sync).
     pub fn persist_enabled(&self, enabled: bool) -> Result<(), String> {
-        {
+        self.update_config(|cfg| cfg.enabled = enabled)
+    }
+
+    /// Mutate the in-memory `remote` section and persist the **whole**
+    /// section (`with_set` replaces the top-level value, so a partial delta
+    /// would drop the other keys on disk).
+    pub fn update_config(&self, mutate: impl FnOnce(&mut RemoteConfig)) -> Result<(), String> {
+        let snapshot = {
             let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-            cfg.enabled = enabled;
-        }
+            mutate(&mut cfg);
+            cfg.clone()
+        };
         if let Some(path) = &self.config_path {
-            bebok_core::config::write_delta_to(
-                path,
-                &serde_json::json!({ "remote": { "enabled": enabled } }),
-            )?;
+            let value = serde_json::to_value(&snapshot).map_err(|e| e.to_string())?;
+            bebok_core::config::write_delta_to(path, &serde_json::json!({ "remote": value }))?;
         }
         Ok(())
+    }
+
+    // -- relay (1.8) --------------------------------------------------------
+
+    pub fn relay_handle(&self) -> Option<relay::RelayHandle> {
+        self.relay.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Start the relay task for the current config (no-op when it is
+    /// disabled, has no URL, or is already running against the same URL).
+    /// Mints and persists the tunnel secret on first use.
+    pub fn start_relay(&self, app: axum::Router) -> Result<Option<relay::RelayHandle>, String> {
+        let cfg = self.config();
+        if !cfg.relay_enabled() {
+            return Ok(None);
+        }
+        if let Some(existing) = self.relay_handle() {
+            if existing.url == cfg.relay.url {
+                return Ok(Some(existing));
+            }
+            existing.stop();
+        }
+        let secret = if cfg.relay.secret.is_empty() {
+            let secret = relay::new_secret();
+            self.update_config(|c| c.relay.secret = secret.clone())?;
+            secret
+        } else {
+            cfg.relay.secret.clone()
+        };
+        let handle = relay::start(app, cfg.relay.url.clone(), self.install_id.clone(), secret);
+        *self.relay.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle.clone());
+        Ok(Some(handle))
+    }
+
+    pub fn stop_relay(&self) {
+        if let Some(handle) = self.relay.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            handle.stop();
+        }
+    }
+
+    /// The relay endpoint phones use, when the relay is configured.
+    pub fn relay_endpoint(&self) -> Option<String> {
+        let cfg = self.config();
+        cfg.relay_enabled()
+            .then(|| relay::phone_endpoint(&cfg.relay.url, &self.install_id))
+    }
+
+    pub fn relay_status_json(&self) -> serde_json::Value {
+        let cfg = self.config();
+        let handle = self.relay_handle();
+        serde_json::json!({
+            "enabled": cfg.relay.enabled,
+            "url": cfg.relay.url,
+            "endpoint": self.relay_endpoint(),
+            "running": handle.is_some(),
+            "connected": handle.as_ref().map(|h| h.status.connected()).unwrap_or(false),
+            "lastError": handle.as_ref().and_then(|h| h.status.last_error()),
+            "requests": handle.as_ref().map(|h| h.status.requests.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0),
+        })
     }
 
     /// Hostname shown at pairing.
@@ -233,10 +304,17 @@ impl RemoteState {
     }
 
     /// `http://ip:port` for every bound remote address.
+    /// LAN/tailnet endpoints first, the relay last: the phone races them
+    /// and a direct route wins when it is reachable.
     pub fn endpoints(&self) -> Vec<String> {
-        self.listener_handle()
+        let mut endpoints = self
+            .listener_handle()
             .map(|h| h.endpoints())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some(relay) = self.relay_endpoint() {
+            endpoints.push(relay);
+        }
+        endpoints
     }
 
     pub fn is_listening(&self) -> bool {
@@ -261,6 +339,7 @@ impl RemoteState {
             "fingerprint": self.fingerprint(),
             "port": cfg.port,
             "allowLan": cfg.allow_lan,
+            "relay": self.relay_status_json(),
         })
     }
 }

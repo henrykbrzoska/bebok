@@ -20,6 +20,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tokio-tungstenite.workspace = true
+http-body-util.workspace = true
 tower-http = { version = "0.6", features = ["cors"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -30,11 +32,11 @@ uuid.workspace = true
 sha2.workspace = true
 subtle = "2"
 rand = "0.9"
+# `oneshot`: the relay client drives the assembled Router without a socket
+# (and the auth middleware tests do the same).
+tower = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
-# `oneshot` in the auth middleware tests (drives the assembled Router without
-# binding a socket). Already in the lockfile via tower-http.
-tower = { version = "0.5", features = ["util"] }
 # WP-M1: registry fixtures + two-client pairing/SSE integration tests.
 tempfile = "3"
 reqwest.workspace = true

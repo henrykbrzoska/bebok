@@ -99,6 +99,7 @@ pub const TABLE: &[(&str, &str, Access)] = &[
     // -- remote module (WP-M1) ----------------------------------------------
     ("POST", "/remote/enable", Access::Local),
     ("POST", "/remote/disable", Access::Local),
+    ("POST", "/remote/relay", Access::Local),
     ("POST", "/remote/pair/start", Access::Local),
     ("POST", "/remote/pair", Access::Open),
     ("POST", "/remote/pair/confirm/{pairId}", Access::Local),

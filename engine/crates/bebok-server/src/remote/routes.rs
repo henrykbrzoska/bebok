@@ -148,6 +148,11 @@ pub async fn enable(
             tracing::warn!("remote listener failed to start: {e}");
         }
     }
+    if let Some(app) = remote.app()
+        && let Err(e) = remote.start_relay(app)
+    {
+        tracing::warn!("relay failed to start: {e}");
+    }
     publish_status(&state, &remote);
     Ok(Json(remote.status_json()))
 }
@@ -164,6 +169,57 @@ pub async fn disable(
         .map_err(|e| error_json(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e))?;
     if let Some(handle) = remote.set_listener(None) {
         handle.stop();
+    }
+    remote.stop_relay();
+    publish_status(&state, &remote);
+    Ok(Json(remote.status_json()))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RelayBody {
+    pub enabled: bool,
+    #[serde(default)]
+    pub url: String,
+}
+
+/// `POST /remote/relay` (Local) — `{enabled, url}`: persist the relay
+/// settings and start / stop the relay task right away. The tunnel secret
+/// is minted on the first start and never leaves the config file.
+pub async fn relay(
+    State(state): State<AppState>,
+    ext: Option<Extension<Arc<RemoteState>>>,
+    Json(body): Json<RelayBody>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let remote = remote(ext)?;
+    let url = body.url.trim().trim_end_matches('/').to_string();
+    if body.enabled && !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(error_json(
+            StatusCode::BAD_REQUEST,
+            "relay_url",
+            "relay url must start with https:// (http:// only for a local wrangler dev)",
+        ));
+    }
+    remote
+        .update_config(|cfg| {
+            cfg.relay.enabled = body.enabled;
+            cfg.relay.url = url;
+        })
+        .map_err(|e| error_json(StatusCode::INTERNAL_SERVER_ERROR, "config_write", e))?;
+    if body.enabled {
+        if remote.config().enabled {
+            let Some(app) = remote.app() else {
+                return Err(error_json(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "remote_unavailable",
+                    "no router registered for the relay",
+                ));
+            };
+            remote
+                .start_relay(app)
+                .map_err(|e| error_json(StatusCode::INTERNAL_SERVER_ERROR, "relay_start", e))?;
+        }
+    } else {
+        remote.stop_relay();
     }
     publish_status(&state, &remote);
     Ok(Json(remote.status_json()))
