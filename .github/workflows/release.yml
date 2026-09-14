@@ -516,11 +516,11 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.sha }}
 
-      - name: Java (Temurin 17)
+      - name: Java (Temurin 21)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
