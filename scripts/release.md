@@ -78,7 +78,7 @@ newer tag via the GitHub API and link to the release page.
   with `1.6.0` binaries after `preflight` rejected the tag) either has no
   manifest or announces a version the binaries do not carry, and every
   installed app keeps re-offering it.
-- Pre-releases (`X.Y.Z-rc.1`) are never *Latest* on GitHub, so they are the
+- Pre-releases (`X.Y.Z-1`) are never *Latest* on GitHub, so they are the
   way to test the whole update path end to end on all four platforms before
   a real release.
 
@@ -103,8 +103,9 @@ newer tag via the GitHub API and link to the release page.
 
 4. Watch **Actions -> Release**. `preflight` fails fast if the tag does not
    equal the version in the manifests. A tag push publishes the release
-   immediately (not a draft); a version with a `-suffix` (e.g. `1.5.0-rc.1`)
-   is marked as a pre-release.
+   immediately (not a draft); a version with a numeric `-N` suffix (e.g.
+   `1.5.0-1`) is marked as a pre-release. The suffix must be a number: the
+   MSI bundler rejects `-rc.1` and the like, so `preflight` does too.
 5. Optionally edit the generated notes on the Releases page.
 
 To rebuild a tag (e.g. after a runner hiccup) re-run the workflow, or delete
@@ -129,11 +130,11 @@ gh workflow run release.yml --ref main -f draft=true
 
 # build a specific tag/ref as a draft (do not point this at a tag that is
 # already released - see the note below)
-gh workflow run release.yml --ref main -f tag=1.5.0-rc.1 -f draft=true
+gh workflow run release.yml --ref main -f tag=1.5.0-1 -f draft=true
 
 gh run watch
 gh release list
-gh release delete 1.5.0-rc.1 --yes   # remove the test draft
+gh release delete 1.5.0-1 --yes   # remove the test draft
 ```
 
 `preflight` still requires the manifests to agree with the tag / with each
@@ -142,7 +143,7 @@ for that tag (the `release` job fails with a clear error, the build artifacts
 stay attached to the workflow run), because `softprops/action-gh-release`
 would otherwise overwrite its assets and re-apply the `draft` flag. So to test
 the whole pipeline end to end, bump the version on the branch first (e.g.
-`npm run version:bump -- 1.5.0-rc.1`, commit) and dispatch from that branch;
+`npm run version:bump -- 1.5.0-1`, commit) and dispatch from that branch;
 an existing *draft* release for the tag is updated in place.
 
 `gh workflow run release.yml` needs the workflow to exist on the ref you pass
