@@ -24,70 +24,92 @@ Installed desktop apps update themselves from what that workflow publishes
 it silently breaks auto-update for everyone. Never upload, replace or delete
 release assets by hand.
 
-### Checklist
+The process is one command, one PR, one merge:
 
-1. **Default branch is green** in CI (Actions -> CI) and contains everything
-   that should ship. Work from a clean checkout of it.
-2. **Changelog**: rename `## Unreleased` in `CHANGELOG.md` to
-   `## X.Y.Z — YYYY-MM-DD` and tidy the entries. The release job copies this
-   section into `latest.json` as the update notes users see in the app.
-3. **Bump the version** in all seven manifests/lockfiles with one command:
+```mermaid
+flowchart LR
+    A["node scripts/release.mjs X.Y.Z"] --> B["branch release/X.Y.Z<br/>CHANGELOG + version bump<br/>PR → main"]
+    B -->|"release.yml (pull_request)"| C["DRAFT release X.Y.Z<br/>installers · .sig · latest.json"]
+    C --> D{"install the draft,<br/>test the update path"}
+    D -->|"merge the PR"| E["push to main"]
+    E -->|"release.yml (push)"| F["tag X.Y.Z<br/>publish the release"]
+    F --> G["installed apps update<br/>(next start / every 6 h)"]
+```
 
-   ```bash
-   cd client && npm run version:bump -- X.Y.Z
-   ```
+### 1. Start: `node scripts/release.mjs X.Y.Z`
 
-   Do not edit the version by hand anywhere - `preflight` fails the release
-   if `client/package.json`, `client/src-tauri/tauri.conf.json`, both
-   `Cargo.toml` and both `Cargo.lock` files disagree with the tag.
-4. **Commit and tag** - the tag is the bare version, on the bump commit:
+Works on Linux, macOS and Windows (Node >= 20, `git`, `gh` logged in). It:
 
-   ```bash
-   git add -A
-   git commit -m "chore: bump version to X.Y.Z"
-   git tag X.Y.Z
-   git push origin HEAD X.Y.Z
-   ```
+- checks a clean tree, switches to `main`, fast-forwards to `origin/main`
+  and looks at the last CI run;
+- takes the version (or suggests the next patch/minor/major) and refuses one
+  that is already tagged;
+- shows the `## Unreleased` section of `CHANGELOG.md` and renames it to
+  `## X.Y.Z — YYYY-MM-DD` (these notes become the update notes users see
+  in the app - write them before you start);
+- runs `npm run version:bump -- X.Y.Z` (all seven manifests/lockfiles);
+- commits `chore: release X.Y.Z` on `release/X.Y.Z`, pushes and opens the
+  PR (`--no-pr` prints the command instead, `--yes` skips the questions).
 
-5. **Watch Actions -> Release** (~25-30 min): `preflight` (tag == manifests)
-   -> four build legs (linux-x64, windows-x64, macos-arm64, macos-x64) ->
-   `release` (merges `SHA256SUMS.txt`, composes `latest.json`, publishes the
-   GitHub Release). A tag push publishes immediately, not as a draft.
-6. **Verify** on the Releases page: installers for all four platforms, their
-   `.sig` files, `SHA256SUMS.txt` and `latest.json`; then
+Nothing is released yet.
 
-   ```bash
-   curl -sL https://github.com/henrykbrzoska/bebok/releases/latest/download/latest.json | head -5
-   ```
+### 2. Test: the PR builds a draft
 
-   must show the new version. Finally, on a machine with the previous version
-   installed: topbar version chip -> *Check for updates* -> the new version is
-   offered -> *Install & restart* works.
-7. Done. Nothing else to publish: installed apps pick the release up within
-   10 s of their next start or at their next 6-hourly check.
+Every push to a `release/**` PR runs the full pipeline and creates (or
+refreshes) a **draft** GitHub Release named `X.Y.Z` - installers for all
+four platforms, their `.sig` files, `SHA256SUMS.txt` and `latest.json`.
+Drafts are invisible to users and never *Latest*, so installed apps ignore
+them. Download the draft from the Releases page, install it on a machine
+that runs the previous version and check the update path (topbar version
+chip -> Updates -> *Check for updates*). `node scripts/release.mjs status`
+shows the PR, the run, the draft and the live feed at any time.
 
-### If the workflow fails
+### 3. Ship: merge the PR
 
-- `preflight` failed (tag/manifest mismatch): fix with `npm run version:bump`,
-  commit, then either move the tag (`git tag -f X.Y.Z && git push -f origin X.Y.Z`)
-  if nothing was published yet, or bump to the next patch version and tag
-  that. Do **not** create the release by hand from local builds - that is how
-  `1.6.1` ended up as *Latest* with `1.6.0` binaries and no manifest.
-- A build leg failed (runner hiccup): re-run the failed jobs from the Actions
-  UI; the `release` job runs once all four legs are green.
-- The `release` job failed at "Compose latest.json": a signed bundle is
-  missing. Check that `TAURI_SIGNING_PRIVATE_KEY` is set (Settings ->
-  Secrets and variables -> Actions) - the updater key is mandatory.
+Merging pushes the bumped version to `main`. The workflow sees a version
+without a tag, rebuilds it from the merge commit, tags it `X.Y.Z` and
+publishes the release (the draft is promoted, `draft: false`). Within 10 s
+of their next start - or at their next 6-hourly check - installed apps offer
+*Install & restart*.
 
-### Pre-releases and dry runs
+Verify afterwards:
 
-- Version suffixes must be **numeric**: `X.Y.Z-1`, `X.Y.Z-2` … The MSI
-  bundler rejects `-rc.1` / `-beta.1`, so `preflight` rejects them too. A
-  suffixed tag is published as a *pre-release*: not *Latest*, never offered
-  to installed apps.
-- To test the pipeline without publishing: bump on a branch, then
-  `gh workflow run release.yml --ref <branch> -f draft=true`. Delete the
-  draft (`gh release delete X.Y.Z-N --yes`) when done.
+```bash
+node scripts/release.mjs status X.Y.Z      # PR merged · tag exists · release published · latest.json → X.Y.Z
+```
+
+Any other push to `main` (a normal feature merge) stops in `preflight` in a
+few seconds: its version is already tagged, nothing to release.
+
+### If something fails
+
+- **CI red on the release PR** - fix on the same `release/X.Y.Z` branch and
+  push; the draft is rebuilt. If the fix needs code on `main`, merge that
+  first and rebase the release branch.
+- **`preflight` says the version is already released** - someone tagged that
+  version already; run `cd client && npm run version:bump -- <next>` on the
+  release branch and push.
+- **A build leg failed** (runner hiccup) - re-run the failed jobs from the
+  Actions UI; the `release` job waits for all four.
+- **`release` failed at "Compose latest.json"** - a signed bundle is missing;
+  check that `TAURI_SIGNING_PRIVATE_KEY` is set (Settings -> Secrets and
+  variables -> Actions). The updater key is mandatory.
+- **The merge published nothing** - the pushed version was already tagged
+  (see the preflight log). Do **not** create the release by hand from local
+  builds: that is how `1.6.1` ended up as *Latest* with `1.6.0` binaries and
+  no manifest. Bump to the next patch and go through the PR again.
+
+### Manual and test paths
+
+- Tagging by hand still works: `git tag X.Y.Z && git push origin X.Y.Z` on a
+  commit whose manifests already say `X.Y.Z` publishes exactly like a merge.
+- Pipeline dry run without a PR: bump on any branch, then
+  `gh workflow run release.yml --ref <branch> -f draft=true`; delete the
+  draft (`gh release delete X.Y.Z --yes`) afterwards.
+- Version suffixes must be **numeric** (`X.Y.Z-1`): the MSI bundler rejects
+  `-rc.1` / `-beta.1`, so `preflight` rejects them too. A suffixed tag is
+  published as a *pre-release* - not *Latest*, never offered to installed
+  apps.
 
 ### Keys and secrets
 

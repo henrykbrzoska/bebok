@@ -88,7 +88,8 @@ client/                      Angular 20.3 (standalone, signals, zoneless) — se
                              updater commands update_check / update_install / relaunch_after_update)
   android/, capacitor.config.ts   Capacitor shell + EngineLauncher plugin — wired but NOT part of any release
   scripts/                   copy-sidecar.mjs, bump-version.mjs (npm run version:bump), tauri helpers
-scripts/bebok.mjs            root orchestration;  scripts/release.md  release runbook
+scripts/bebok.mjs            root orchestration;  scripts/release.mjs  guided release (PR -> draft -> merge -> publish)
+scripts/latest-json.mjs      updater manifest (CI);  scripts/release.md  runbook (CI mechanics)
 .github/workflows/ci.yml     fmt + clippy + build + test (engine), npm ci + build (client)
 .github/workflows/release.yml tag-triggered 4-leg matrix, SHA256SUMS.txt, optional signing
 docs/screenshots/            README images;  CHANGELOG.md;  LICENSE (AGPL-3.0-or-later)
@@ -247,7 +248,9 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   use isolated data dirs (`InstanceStore::with_data_dir`).
 - **Versioning / release**: `cd client && npm run version:bump -- X.Y.Z` edits
   all seven manifests and lockfiles; `preflight` in `release.yml` fails if they
-  disagree with the tag. Full runbook in [`scripts/release.md`](./scripts/release.md).
+  disagree with the tag. Process: [`CONTRIBUTING.md`](./CONTRIBUTING.md#releasing)
+  (`node scripts/release.mjs X.Y.Z` -> draft from the PR -> merge publishes); CI
+  mechanics in [`scripts/release.md`](./scripts/release.md).
 
 ## 7. Gotchas
 

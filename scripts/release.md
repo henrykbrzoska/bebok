@@ -1,16 +1,22 @@
-# Releasing Bebok
+# Releasing Bebok - CI mechanics
 
-Releases are built by `.github/workflows/release.yml` on every pushed tag
-that looks like `X.Y.Z` or `vX.Y.Z` (existing tags use the bare `1.4.1`
-form). One workflow run produces every platform bundle, a merged
-`SHA256SUMS.txt`, the updater manifest `latest.json`, and creates the GitHub
-Release with auto-generated notes.
+`.github/workflows/release.yml` is the only producer of releases. It runs on:
 
-The step-by-step process (changelog -> version bump -> tag -> watch -> verify)
-and what to do when a run fails is in
-[CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing). This file covers the
-mechanics: what the workflow builds, signing, the updater feed, dry runs and
-the local equivalent of one matrix leg.
+| Trigger | Result |
+|---|---|
+| `pull_request` into `main` from `release/**` | **draft** release named after the manifest version (the pre-release testers install) |
+| `push` to `main` whose manifest version has no tag | tags the commit and **publishes** (the merged release PR); any other push stops in `preflight` |
+| `push` of a tag `X.Y.Z` / `vX.Y.Z` | publishes (manual path) |
+| `workflow_dispatch` | same pipeline, draft by default (pipeline dry runs) |
+
+One run produces every platform bundle, a merged `SHA256SUMS.txt`, the
+updater manifest `latest.json`, and creates or updates the GitHub Release.
+
+The day-to-day process (`node scripts/release.mjs X.Y.Z` -> test the draft
+-> merge) and what to do when a run fails is in
+[CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing). This file covers
+the mechanics: what the workflow builds, signing, the updater feed, dry runs
+and the local equivalent of one matrix leg.
 
 ## What gets built
 
@@ -91,10 +97,10 @@ newer tag via the GitHub API and link to the release page.
 
 ## Cutting a release
 
-Follow the checklist in [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing):
-changelog section -> `cd client && npm run version:bump -- X.Y.Z` -> commit
--> `git tag X.Y.Z` -> push -> watch **Actions -> Release** -> verify
-`latest.json` and an in-app update from the previous version.
+`node scripts/release.mjs X.Y.Z` (see [CONTRIBUTING.md#releasing](../CONTRIBUTING.md#releasing)).
+The manual equivalent is: changelog section -> `cd client && npm run
+version:bump -- X.Y.Z` -> commit -> `git tag X.Y.Z` -> `git push origin
+main X.Y.Z`.
 
 `preflight` fails fast if the tag does not equal the version in the
 manifests. A tag push publishes the release immediately (not a draft); a

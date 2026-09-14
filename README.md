@@ -308,15 +308,15 @@ At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 
 ## Releasing
 
-Releases are cut by tagging: `CHANGELOG.md` section -> `cd client && npm run
-version:bump -- X.Y.Z` (all seven manifests/lockfiles) -> commit -> `git tag
-X.Y.Z` -> push. `.github/workflows/release.yml` then builds the four platform
-legs, merges `SHA256SUMS.txt`, composes the updater manifest `latest.json` and
-publishes the GitHub Release. Installed desktop apps check that manifest on
-start and every 6 h (topbar version chip -> *Check for updates*) and install
-the signed bundle in place, so releases must **never** be assembled by hand.
-Step-by-step checklist and failure handling: [CONTRIBUTING.md](CONTRIBUTING.md#releasing);
-CI internals, secrets and signing: [scripts/release.md](scripts/release.md).
+One command, one PR, one merge: `node scripts/release.mjs X.Y.Z` renames the
+`## Unreleased` changelog section, bumps all seven manifests/lockfiles and
+opens a `release/X.Y.Z` PR; CI builds a **draft** release from the PR (install
+it, test it); merging tags `X.Y.Z` and publishes it automatically. Installed
+desktop apps check `latest.json` on start and every 6 h (topbar version chip
+-> *Check for updates*) and install the signed bundle in place, so releases
+must **never** be assembled by hand. Checklist, diagram and failure handling:
+[CONTRIBUTING.md](CONTRIBUTING.md#releasing); CI internals, secrets and
+signing: [scripts/release.md](scripts/release.md).
 
 ## Contributing
 
