@@ -261,6 +261,14 @@ test parses `routes/mod.rs`, so every new route needs an explicit
    /session/{id}/cloud`. The phone falls back to them when the relay answers
    `503 engine_offline`.
 
+4. **Share links** (`devices.rs` `create_share`, `scope::share_allowed`):
+   a device-registry entry with `session = Some(id)`. It passes the remote
+   allowlist *and* must stay inside `/session/{that id}/...` (+ `/event`
+   and `/permission`, both filtered to the session, `/version`,
+   `/remote/status`, `/remote/heartbeat`). Minted by `POST /session/{id}/share`
+   as `bebok://share?v=1&ep=...&s=...&t=...`; the client registers a `share`
+   engine target (`core/remote/share.store.ts`) and switches to it.
+
 The relay is a dumb pipe: it never sees a device token in the clear and a
 compromised worker can at most refuse service. Deploying it is manual
 (`relay/README.md`: `wrangler login` + `npm run deploy`), outside

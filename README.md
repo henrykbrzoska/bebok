@@ -211,7 +211,10 @@ into Settings -> Remote -> Relay and pair again: the QR now also carries
 the relay endpoint, and the phone uses the direct route at home and the
 relay elsewhere. Chats marked with the cloud toggle in the chat toolbar are
 mirrored to the relay after every turn, so the phone can still read them
-while the desktop is off.
+while the desktop is off. **Share** in the chat toolbar makes a
+`bebok://share?...` link for one session: paste it into another Bebok
+(sidebar -> Shared sessions -> +) or open it on a phone to follow and steer
+that session only.
 
 The mobile client connects to a remote engine over LAN (see the connect
 screen). The PTY surface (/pty*) is compiled out of Android engine builds,

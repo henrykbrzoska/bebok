@@ -16,10 +16,17 @@
 - **Cloud chats**: a cloud toggle in the chat toolbar mirrors that session
   to the relay after every turn (meta + newest messages); the phone lists
   and reads mirrored chats while the desktop is offline.
+- **Session share links**: Share in the chat toolbar mints a
+  `bebok://share?...` link carrying the desktop's endpoints and a token
+  confined to that one session; pasted into another Bebok (sidebar ->
+  Shared sessions -> +) or opened on a phone it joins the session - follow,
+  prompt, abort, answer permissions - with 'Back to my engine' to return.
+  Revoke under Settings -> Remote -> Paired devices.
 - Engine: `POST /remote/relay`, `POST /remote/relay/reset`,
-  `POST /session/{id}/cloud`; `GET /remote/status` gains `relay`; partial
-  `PUT /config` bodies now deep-merge instead of replacing a section;
-  pairing works with a relay-only engine.
+  `POST /session/{id}/cloud`, `POST/GET /session/{id}/share`;
+  `GET /remote/status` gains `relay`; partial `PUT /config` bodies now
+  deep-merge instead of replacing a section; pairing works with a
+  relay-only engine.
 
 ## 1.7.0 — 2026-09-14
 
