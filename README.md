@@ -303,8 +303,6 @@ docker run --rm -v "C:\path\to\bebok:/src" -w /src/client node:22 bash -c "npm c
 ```
 
 Copy the tree into a named volume first if `npm ci` over the bind mount is slow.
-At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
-`bebok-server` `routes::processes`) fail on Linux; clippy and the client build pass.
 
 ## Releasing
 
