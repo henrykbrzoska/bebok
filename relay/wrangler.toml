@@ -1,0 +1,18 @@
+# Bebok relay: one Durable Object per engine ("tunnel"), addressed by the
+# engine's install id. The engine dials in over WebSocket; phones talk plain
+# HTTPS to /t/<id>/... and the DO forwards each request over that socket.
+name = "bebok-relay"
+main = "src/index.ts"
+compatibility_date = "2026-08-22"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "TUNNEL"
+class_name = "Tunnel"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Tunnel"]

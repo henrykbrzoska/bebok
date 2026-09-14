@@ -72,3 +72,23 @@ jobs:
       - name: Build (type-check)
         working-directory: client
         run: npm run build
+
+  relay:
+    name: relay (workerd)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - name: Install
+        working-directory: relay
+        run: npm ci --legacy-peer-deps
+      - name: Typecheck
+        working-directory: relay
+        run: npm run typecheck
+      - name: Test
+        working-directory: relay
+        run: npm test
