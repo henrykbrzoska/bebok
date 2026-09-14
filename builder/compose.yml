@@ -1,0 +1,75 @@
+# Local builder - the same artifacts as release.yml, from Docker.
+#
+#   npm run builder                     # interactive (targets, version) - recommended
+#   VERSION=1.8.0-test1 docker compose -f builder/compose.yml run --rm linux
+#
+# The repo is mounted read-only; every build works on a private copy inside
+# the container. Artifacts: $BEBOK_OUT/<version>/<platform>/ (default
+# ~/bebok-dist). Secrets are read from ~/.tauri when present (updater key,
+# Android keystore) so the output is signed exactly like CI's.
+#
+# The images are linux/amd64 like the CI runners (deb/AppImage/exe/apk must
+# be x86_64 builds); on Apple silicon Docker runs them through Rosetta, which
+# is slower than native but produces identical bits.
+
+x-builder: &builder
+  platform: linux/amd64
+  init: true
+  environment:
+    VERSION: ${VERSION:?set VERSION, e.g. 1.8.0-test1}
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}
+    ANDROID_KEY_ALIAS: ${ANDROID_KEY_ALIAS:-bebok}
+  volumes:
+    - ${BEBOK_SRC:-..}:/repo:ro
+    - ${BEBOK_OUT:-~/bebok-dist}:/out
+    - ${BEBOK_SECRETS:-~/.tauri}:/secrets:ro
+    - cargo-registry:/usr/local/cargo/registry
+    - npm-cache:/cache/npm
+
+services:
+  linux:
+    <<: *builder
+    build: { context: .., dockerfile: builder/Dockerfile, target: linux }
+    image: bebok-builder:linux
+    volumes:
+      - ${BEBOK_SRC:-..}:/repo:ro
+      - ${BEBOK_OUT:-~/bebok-dist}:/out
+      - ${BEBOK_SECRETS:-~/.tauri}:/secrets:ro
+      - cargo-registry:/usr/local/cargo/registry
+      - npm-cache:/cache/npm
+      - target-linux:/cache/target-linux
+
+  windows:
+    <<: *builder
+    build: { context: .., dockerfile: builder/Dockerfile, target: windows }
+    image: bebok-builder:windows
+    volumes:
+      - ${BEBOK_SRC:-..}:/repo:ro
+      - ${BEBOK_OUT:-~/bebok-dist}:/out
+      - ${BEBOK_SECRETS:-~/.tauri}:/secrets:ro
+      - cargo-registry:/usr/local/cargo/registry
+      - npm-cache:/cache/npm
+      - target-windows:/cache/target-windows
+      - xwin-cache:/cache/xwin
+
+  android:
+    <<: *builder
+    build: { context: .., dockerfile: builder/Dockerfile, target: android }
+    image: bebok-builder:android
+    volumes:
+      - ${BEBOK_SRC:-..}:/repo:ro
+      - ${BEBOK_OUT:-~/bebok-dist}:/out
+      - ${BEBOK_SECRETS:-~/.tauri}:/secrets:ro
+      - cargo-registry:/usr/local/cargo/registry
+      - npm-cache:/cache/npm
+      - target-android:/cache/target-android
+      - gradle-cache:/cache/gradle
+
+volumes:
+  cargo-registry:
+  npm-cache:
+  target-linux:
+  target-windows:
+  target-android:
+  xwin-cache:
+  gradle-cache:
