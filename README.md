@@ -309,8 +309,11 @@ At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 Releases: `cd client && npm run version:bump -- X.Y.Z` (edits all seven
 manifests/lockfiles), update `CHANGELOG.md`, commit, `git tag X.Y.Z`, push the tag.
 `.github/workflows/release.yml` builds the four platform legs, merges
-`SHA256SUMS.txt` and publishes the GitHub release; signing (Authenticode, GPG,
-Tauri updater) is optional and gated on secrets. See [scripts/release.md](scripts/release.md).
+`SHA256SUMS.txt`, composes the updater manifest `latest.json` and publishes the
+GitHub release. The desktop app checks that manifest on start and every 6 h
+(About -> *Check for updates*) and installs signed bundles in place, so
+`TAURI_SIGNING_PRIVATE_KEY` is required; Authenticode and GPG signing stay
+optional. See [scripts/release.md](scripts/release.md).
 
 ## Contributing
 

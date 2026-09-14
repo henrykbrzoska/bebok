@@ -1,4 +1,4 @@
-//! Meta routes: agents, plugins, docker probe, provider models.
+//! Meta routes: version, agents, plugins, docker probe, provider models.
 //!
 //! Future extension point for Task 5 (sidebar/topbar): new introspection
 //! endpoints register here without touching the route table shape in
@@ -36,6 +36,13 @@ pub async fn list_agents(
         .map_err(|e| err_response(&e))?;
     let agents = instance.agent_infos();
     Ok(Json(serde_json::json!({ "agents": agents })))
+}
+
+/// `GET /version` -> the engine's own version (workspace version, identical
+/// to the desktop shell's in a consistent release). The GUI shows it next to
+/// its own version so a half-applied update is visible instead of silent.
+pub async fn version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
 }
 
 /// `GET /plugins` -> registered plugins + exposed hook points (introspection
@@ -102,4 +109,29 @@ pub async fn list_models(
     Ok(Json(
         serde_json::json!({ "provider": q.provider, "models": models }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::auth::tests::test_app;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use tower::ServiceExt as _;
+
+    #[tokio::test]
+    async fn version_reports_the_workspace_version() {
+        let req = Request::builder()
+            .uri("/version")
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", crate::auth::token()),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let res = test_app().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
 }

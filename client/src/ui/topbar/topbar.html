@@ -37,6 +37,15 @@
     >
       <span class="about-icon" aria-hidden="true">👻</span>
       <span class="about-label">{{ t('topbar.about') }}</span>
+      @if (update.available(); as available) {
+        <span
+          class="about-badge"
+          data-testid="update-badge"
+          [title]="
+            t('update.available', { version: available.version, current: available.currentVersion })
+          "
+        ></span>
+      }
     </a>
     @if (isChat()) {
       <button

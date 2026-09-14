@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Auto-update
+- Desktop shell: `tauri-plugin-updater` driven from Rust (`update_check`,
+  `update_install` with `update://progress`, `relaunch_after_update`,
+  `desktop_info`); the sidecar is killed in `on_before_exit` so the Windows
+  installer can overwrite `bebok-server.exe`. Feed:
+  `releases/latest/download/latest.json`, verified against
+  `plugins.updater.pubkey`.
+- Client: `UpdateStore` (check 10 s after start, then every 6 h; GitHub API
+  fallback in browser mode / dev builds), non-modal `<app-update-banner>` with
+  download progress, version card + "Check for updates" on About, badge on
+  the About chip; install is blocked while an agent turn runs.
+- Engine: `GET /version`.
+- Release: `scripts/latest-json.mjs` composes `latest.json` in the `release`
+  job; `TAURI_SIGNING_PRIVATE_KEY` is now required; macOS updater archives are
+  named `bebok_<version>_<arch>.app.tar.gz`.
+
 ## 1.6.0 — 2026-09-13
 
 Fleet generation, delegation roster, preview/explorer/chat upgrades,

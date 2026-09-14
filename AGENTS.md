@@ -83,7 +83,8 @@ engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.8
   crates/bebok-skills/       AGENTS.md + skill/<name>/SKILL.md discovery, frontmatter, toggles
   crates/bebok-pty/          PTY manager (portable-pty, scrollback ring, single-use tickets, Job Object)
 client/                      Angular 20.3 (standalone, signals, zoneless) — see §5
-  src-tauri/                 Tauri 2 shell (spawns sidecar --port 0, parses BEBOK_READY, browser viewer window)
+  src-tauri/                 Tauri 2 shell (spawns sidecar --port 0, parses BEBOK_READY, browser viewer window,
+                             updater commands update_check / update_install / relaunch_after_update)
   android/, capacitor.config.ts   Capacitor shell + EngineLauncher plugin — wired but NOT part of any release
   scripts/                   copy-sidecar.mjs, bump-version.mjs (npm run version:bump), tauri helpers
 scripts/bebok.mjs            root orchestration;  scripts/release.md  release runbook
@@ -216,6 +217,11 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
 - Tauri shell (`src-tauri/src/lib.rs`): spawns `bebok-server --port 0`, parses
   `BEBOK_READY`, exposes `engine_info` and `open_browser_viewer` (second
   WebviewWindow on `/browser-view?session=`; browser mode falls back to `window.open`).
+  Auto-update lives there too (`update_check` / `update_install` /
+  `relaunch_after_update` / `desktop_info`) rather than in the JS updater
+  plugin: only the Rust `UpdaterBuilder::on_before_exit` can kill the sidecar
+  before the installer runs. The client side is `core/update.store.ts` +
+  `ui/update-banner/`.
 - Mobile: `capacitor.config.ts` + `android/` with an `EngineLauncher` plugin exist
   but no binaries are bundled and nothing is released; treat as unreleased scaffolding.
 
