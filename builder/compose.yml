@@ -1,7 +1,13 @@
-# Local builder - the same artifacts as release.yml, from Docker.
+# Local builder stack - the same artifacts as release.yml, from Docker.
 #
-#   npm run builder                     # interactive (targets, version) - recommended
-#   VERSION=1.8.0-test1 docker compose -f builder/compose.yml run --rm linux
+# The three builder containers are long-lived and idle (visible in Docker
+# Desktop / OrbStack as project `bebok-builder`); a build is a `docker
+# compose exec` into one of them, driven by scripts/builder.mjs:
+#
+#   npm run builder                     # interactive: pick targets + version, starts the stack if needed
+#   npm run builder:up                  # (re)build the images and start all three idle containers
+#   npm run builder:down                # stop and remove the containers (caches stay)
+#   docker compose -f builder/compose.yml exec -e VERSION=1.8.0-test1 linux bebok-build   # by hand
 #
 # The repo is mounted read-only; every build works on a private copy inside
 # the container. Artifacts: $BEBOK_OUT/<version>/<platform>/ (default
@@ -12,23 +18,21 @@
 # be x86_64 builds); on Apple silicon Docker runs them through Rosetta, which
 # is slower than native but produces identical bits.
 
+name: bebok-builder
+
 x-builder: &builder
   platform: linux/amd64
   init: true
+  entrypoint: ["sleep", "infinity"]
+  restart: unless-stopped
   environment:
-    VERSION: ${VERSION:?set VERSION, e.g. 1.8.0-test1}
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}
     ANDROID_KEY_ALIAS: ${ANDROID_KEY_ALIAS:-bebok}
-  volumes:
-    - ${BEBOK_SRC:-..}:/repo:ro
-    - ${BEBOK_OUT:-~/bebok-dist}:/out
-    - ${BEBOK_SECRETS:-~/.tauri}:/secrets:ro
-    - cargo-registry:/usr/local/cargo/registry
-    - npm-cache:/cache/npm
 
 services:
   linux:
     <<: *builder
+    container_name: bebok-builder-linux
     build: { context: .., dockerfile: builder/Dockerfile, target: linux }
     image: bebok-builder:linux
     volumes:
@@ -41,6 +45,7 @@ services:
 
   windows:
     <<: *builder
+    container_name: bebok-builder-windows
     build: { context: .., dockerfile: builder/Dockerfile, target: windows }
     image: bebok-builder:windows
     volumes:
@@ -54,6 +59,7 @@ services:
 
   android:
     <<: *builder
+    container_name: bebok-builder-android
     build: { context: .., dockerfile: builder/Dockerfile, target: android }
     image: bebok-builder:android
     volumes:

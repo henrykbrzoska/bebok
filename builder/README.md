@@ -6,7 +6,19 @@ without installing toolchains on the host.
 ```bash
 npm run builder                                   # asks: which targets, which version
 npm run builder -- --targets linux,android --version 1.8.0-test1 --yes
+npm run builder:up                                # build the images + start the idle stack
+npm run builder:status                            # which builder containers are running
+npm run builder:down                              # stop the stack (caches stay)
 ```
+
+The Docker side is a long-lived compose stack (project `bebok-builder`):
+three idle containers, `bebok-builder-linux` / `-windows` / `-android`,
+that show up in Docker Desktop / OrbStack and stay running between builds.
+`npm run builder` starts the ones it needs (building the images the first
+time) and runs each build as a `docker compose exec … bebok-build` inside
+the matching container; the containers keep running afterwards, ready for
+the next build. Manually: `docker compose -f builder/compose.yml exec -e
+VERSION=1.8.0-test1 linux bebok-build`.
 
 The script checks the host first and the menu shows how (or whether) each
 target can be built there: Linux and Android always go through Docker;

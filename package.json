@@ -16,6 +16,9 @@
     "release": "node scripts/release.mjs",
     "release:status": "node scripts/release.mjs status",
     "release:check": "node scripts/release.mjs check",
-    "builder": "node scripts/builder.mjs"
+    "builder": "node scripts/builder.mjs",
+    "builder:up": "node scripts/builder.mjs --up",
+    "builder:down": "node scripts/builder.mjs --down",
+    "builder:status": "node scripts/builder.mjs --status"
   }
 }

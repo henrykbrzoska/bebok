@@ -4,6 +4,7 @@
 //   npm run builder                              interactive: pick targets + version
 //   npm run builder -- --targets linux,android --version 1.8.0-test1 --yes
 //   npm run builder -- --out ~/somewhere                 (default: ~/bebok-dist)
+//   npm run builder:up | builder:down | builder:status   the Docker stack (idle containers; a build is an exec)
 //
 // What can be built depends on the host (checked up front, the menu says so):
 //
@@ -18,7 +19,7 @@
 // when ~/.tauri holds the updater key / Android keystore.
 
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -51,6 +52,25 @@ function fail(m) {
 }
 
 const hasDocker = () => run('docker', ['compose', 'version'], { quiet: true }).ok;
+const DOCKER_TARGETS = ['linux', 'windows', 'android'];
+const composeEnv = () => ({ BEBOK_SRC: ROOT, BEBOK_OUT: OUT, BEBOK_SECRETS: join(homedir(), '.tauri') });
+const compose = (args, opts = {}) => run('docker', ['compose', '-f', COMPOSE, ...args], { env: composeEnv(), ...opts });
+
+/** Running builder containers, by service name. */
+function stackStatus() {
+  const r = compose(['ps', '--format', '{{.Service}}\t{{.State}}'], { quiet: true });
+  const up = new Set();
+  for (const line of r.out.split('\n')) {
+    const [service, state] = line.split('\t');
+    if (state === 'running') up.add(service);
+  }
+  return up;
+}
+
+/** Start (and build the image of) the idle container for `service`; a no-op when it is already up. */
+function stackUp(services, { build = false } = {}) {
+  return compose(['up', '-d', ...(build ? ['--build'] : []), ...services]).ok;
+}
 const hasCargo = () => run('cargo', ['--version'], { quiet: true }).ok;
 
 /**
@@ -115,6 +135,20 @@ const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/;
 async function main() {
   log(c.bold('\nBebok builder') + c.dim(`  (artifacts -> ${OUT})\n`));
 
+  // ---- stack management: `--up` / `--down` / `--status` (the containers idle between builds)
+  if (argv.includes('--up') || argv.includes('--down') || argv.includes('--status')) {
+    if (!hasDocker()) fail('Docker (with compose) is required');
+    if (argv.includes('--down')) {
+      if (!compose(['down']).ok) fail('docker compose down failed');
+    } else if (argv.includes('--up')) {
+      if (!stackUp(DOCKER_TARGETS, { build: true })) fail('docker compose up failed');
+    }
+    const up = stackStatus();
+    log(`${c.bold('Builder stack')} ${c.dim('(docker compose project bebok-builder)')}`);
+    for (const id of DOCKER_TARGETS) log(`  ${up.has(id) ? c.green('●') : c.dim('○')} bebok-builder-${id}  ${up.has(id) ? 'running (idle)' : c.dim('stopped')}`);
+    return;
+  }
+
   // ---- targets, gated by what this host can do
   const TARGETS = hostPlan();
   const hostName = isMac ? 'macOS' : isWin ? 'Windows' : 'Linux';
@@ -160,9 +194,8 @@ async function main() {
     log(`\n${c.bold(`== ${t.id} ==`)}`);
     let ok;
     if (t.mode === 'docker') {
-      ok = run('docker', ['compose', '-f', COMPOSE, 'run', '--rm', '--build', t.id], {
-        env: { VERSION: version, BEBOK_SRC: ROOT, BEBOK_OUT: OUT, BEBOK_SECRETS: secrets },
-      }).ok;
+      ok = (stackStatus().has(t.id) || stackUp([t.id], { build: true }))
+        && compose(['exec', '-T', '-e', `VERSION=${version}`, t.id, 'bebok-build']).ok;
     } else {
       ok = buildNative(t.id, version, outDir, secrets);
     }
@@ -199,7 +232,7 @@ function buildNative(id, version, outDir, secrets) {
   for (const f of files) {
     if (/^(client\/node_modules|relay\/node_modules|engine\/target|client\/src-tauri\/target)\//.test(f)) continue;
     const src = join(ROOT, f);
-    if (!existsSync(src)) continue;
+    if (!existsSync(src) || statSync(src).isDirectory()) continue;
     mkdirSync(dirname(join(work, f)), { recursive: true });
     cpSync(src, join(work, f));
   }
@@ -273,7 +306,8 @@ function mergeChecksums(outDir) {
   const lines = [];
   for (const platform of readdirSync(outDir)) {
     const dir = join(outDir, platform);
-    for (const f of existsSync(dir) ? readdirSync(dir) : []) {
+    if (!statSync(dir).isDirectory()) continue;
+    for (const f of readdirSync(dir)) {
       if (/^SHA256SUMS-.*\.txt$/.test(f)) {
         for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) if (line.trim()) lines.push(line.replace(/ {1,2}\*?/, `  ${platform}/`));
       }
