@@ -124,6 +124,10 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/remote/relay", post(remote::routes::relay))
         .route("/remote/relay/reset", post(remote::routes::relay_reset))
         .route("/session/{id}/cloud", post(remote::routes::session_cloud))
+        .route(
+            "/session/{id}/share",
+            post(remote::routes::session_share).get(remote::routes::session_shares),
+        )
         .route("/remote/pair/start", post(remote::routes::pair_start))
         .route("/remote/pair", post(remote::routes::pair))
         .route(

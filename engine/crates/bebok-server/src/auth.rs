@@ -230,6 +230,7 @@ pub fn authorize(
         return Ok(RequestScope::Remote {
             device_id: auth.device_id,
             generation: auth.generation,
+            session: auth.session,
         });
     }
     Err(())
@@ -297,11 +298,25 @@ pub async fn require_token(mut req: Request, next: Next) -> Response {
         Ok(scope) => scope,
         Err(()) => return unauthorized(),
     };
-    if let RequestScope::Remote { device_id, .. } = &scope {
+    if let RequestScope::Remote {
+        device_id, session, ..
+    } = &scope
+    {
         if !remote::scope::remote_allowed(req.method(), req.uri().path()) {
             tracing::warn!(
                 device = %device_id,
                 "remote scope denied: {} {}",
+                req.method(),
+                req.uri().path()
+            );
+            return remote_scope_denied();
+        }
+        if let Some(session) = session
+            && !remote::scope::share_allowed(req.method(), req.uri().path(), session)
+        {
+            tracing::warn!(
+                device = %device_id,
+                "share scope denied: {} {}",
                 req.method(),
                 req.uri().path()
             );

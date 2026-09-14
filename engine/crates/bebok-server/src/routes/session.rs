@@ -303,11 +303,20 @@ pub async fn get_messages(
 pub async fn pending_permissions(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
+    scope: Option<axum::Extension<crate::routes::remote::RequestScope>>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let Some(directory) = q.directory else {
         return Err(ApiError::bad_request("missing ?directory= parameter").into_response());
     };
-    let asks = state.store.pending_permissions(&directory).await;
+    let mut asks = state.store.pending_permissions(&directory).await;
+    // 1.8 share link: a caller confined to one session sees only its asks.
+    if let Some(axum::Extension(crate::routes::remote::RequestScope::Remote {
+        session: Some(session),
+        ..
+    })) = scope
+    {
+        asks.retain(|ask| ask["sessionID"].as_str() == Some(session.as_str()));
+    }
     Ok(Json(serde_json::json!({ "asks": asks })))
 }
 

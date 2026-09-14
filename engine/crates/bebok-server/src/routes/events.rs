@@ -73,6 +73,7 @@ pub async fn event_stream(
             RequestScope::Remote {
                 device_id,
                 generation,
+                session,
             },
             Some(Extension(remote)),
         ) => {
@@ -99,6 +100,7 @@ pub async fn event_stream(
                     state: remote.clone(),
                     device_id,
                     generation,
+                    session,
                     slot,
                 },
             );

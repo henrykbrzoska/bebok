@@ -42,7 +42,12 @@ pub async fn snapshot_frame(
         .unwrap_or_else(|e| e.into_inner())
         .list()
         .iter()
-        .filter(|d| !d.revoked)
+        .filter(|d| {
+            !d.revoked
+                && d.session
+                    .as_deref()
+                    .is_none_or(|s| s == session_id.to_string())
+        })
         .map(|d| d.token_hash.clone())
         .collect();
     let messages = session.messages_snapshot().await;

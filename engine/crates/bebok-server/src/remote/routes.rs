@@ -208,6 +208,122 @@ pub async fn relay_reset(
     Ok(Json(remote.status_json()))
 }
 
+#[derive(Debug, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ShareBody {
+    pub label: String,
+}
+
+/// The `bebok://share?...` link a joiner pastes: endpoints + the session +
+/// its token. Same query style as the pairing QR (`pair-protocol.ts`).
+pub fn share_url(
+    endpoints: &[String],
+    session_id: &str,
+    token: &str,
+    engine_name: &str,
+    fingerprint: &str,
+) -> String {
+    let enc = |s: &str| {
+        let mut out = String::new();
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char)
+                }
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    };
+    format!(
+        "bebok://share?v=1&ep={}&s={}&t={}&n={}&fp={}",
+        enc(&endpoints.join(",")),
+        enc(session_id),
+        enc(token),
+        enc(engine_name),
+        enc(fingerprint)
+    )
+}
+
+/// `POST /session/{id}/share` (Local) — mint a share link for one session:
+/// a device-registry entry confined to that session, plus the link text.
+pub async fn session_share(
+    State(state): State<AppState>,
+    ext: Option<Extension<Arc<RemoteState>>>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+    body: Option<Json<ShareBody>>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let remote = remote(ext)?;
+    if !remote.reachable() {
+        return Err(error_json(
+            StatusCode::CONFLICT,
+            "remote_disabled",
+            "enable remote access first (no remote listener and no relay is running)",
+        ));
+    }
+    let session = state
+        .store
+        .open_session(id)
+        .await
+        .map_err(|e| crate::error::err_response(&e))?;
+    let meta = session.meta_snapshot().await;
+    let label = body
+        .map(|Json(b)| b.label)
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(|| {
+            meta.title
+                .clone()
+                .or(meta.alias.clone())
+                .unwrap_or_else(|| "shared session".into())
+        });
+    let (device, token) = remote
+        .devices
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .create_share(&id.to_string(), &label)
+        .map_err(|e| match e {
+            super::devices::RegistryError::Full => error_json(
+                StatusCode::CONFLICT,
+                "shares_full",
+                "too many share links - revoke some first",
+            ),
+            other => error_json(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "registry_write",
+                other.to_string(),
+            ),
+        })?;
+    publish_device_changed(&state, &device.id, "created");
+    let endpoints = remote.endpoints();
+    Ok(Json(serde_json::json!({
+        "shareId": device.id,
+        "sessionId": id,
+        "token": token,
+        "endpoints": endpoints,
+        "engineName": remote.engine_name(),
+        "fingerprint": remote.fingerprint(),
+        "url": share_url(&endpoints, &id.to_string(), &token, remote.engine_name(), &remote.fingerprint()),
+    })))
+}
+
+/// `GET /session/{id}/share` (Local) — the live share links of a session
+/// (tokens are never returned again; revoke via `DELETE /remote/devices/{id}`).
+pub async fn session_shares(
+    ext: Option<Extension<Arc<RemoteState>>>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let remote = remote(ext)?;
+    let shares: Vec<serde_json::Value> = remote
+        .devices
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .shares_for(&id.to_string())
+        .into_iter()
+        .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "createdAt": d.created_at, "lastSeen": d.last_seen }))
+        .collect();
+    Ok(Json(serde_json::json!({ "shares": shares })))
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct CloudBody {
     pub enabled: bool,
@@ -721,6 +837,167 @@ mod tests {
     }
 
     /// F10-2 + F10-3: start -> pair -> confirm -> authenticated requests,
+    /// 1.8 share links: a share token is confined to its session - own
+    /// session routes work, other sessions / lists are refused, the event
+    /// stream carries only that session, revoke ends it.
+    #[tokio::test]
+    async fn share_link_is_confined_to_one_session() {
+        let h = harness().await;
+        let c = client();
+        let project = tempfile::tempdir().unwrap();
+        let dir = project.path().to_string_lossy().to_string();
+        let create = |agent: &'static str| {
+            let c = c.clone();
+            let local = h.local.clone();
+            let dir = dir.clone();
+            async move {
+                c.post(format!("{local}/session"))
+                    .bearer_auth(launch_token())
+                    .json(&serde_json::json!({ "directory": dir, "agent": agent }))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<serde_json::Value>()
+                    .await
+                    .unwrap()["sessionID"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            }
+        };
+        let shared = create("code").await;
+        let other = create("code").await;
+
+        // Mint the link on the local port.
+        let res = c
+            .post(format!("{}/session/{shared}/share", h.local))
+            .bearer_auth(launch_token())
+            .json(&serde_json::json!({ "label": "for Ania" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let share: serde_json::Value = res.json().await.unwrap();
+        let token = share["token"].as_str().unwrap().to_string();
+        let url = share["url"].as_str().unwrap();
+        assert!(url.starts_with("bebok://share?v=1&ep="), "{url}");
+        assert!(url.contains(&format!("&s={shared}")));
+        assert!(url.contains("&t="));
+        assert_eq!(share["endpoints"][0], h.remote_url);
+
+        // Listed for the session, as a share in the device registry.
+        let list: serde_json::Value = c
+            .get(format!("{}/session/{shared}/share", h.local))
+            .bearer_auth(launch_token())
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(list["shares"][0]["name"], "for Ania");
+        let devices: serde_json::Value = c
+            .get(format!("{}/remote/devices", h.local))
+            .bearer_auth(launch_token())
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(devices["devices"][0]["session"], shared);
+
+        // Own session: readable and steerable on the remote port.
+        for path in [
+            format!("/session/{shared}"),
+            format!("/session/{shared}/message"),
+            format!("/session/{shared}/agents"),
+        ] {
+            let res = c
+                .get(format!("{}{path}", h.remote_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200, "{path}");
+        }
+        assert_eq!(
+            c.get(format!("{}/permission?directory={dir}", h.remote_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        // Everything else: refused with the remote_scope error.
+        for path in [
+            "/session".to_string(),
+            format!("/session/{other}"),
+            format!("/session/{other}/message"),
+            "/projects".to_string(),
+            "/agent".to_string(),
+        ] {
+            let res = c
+                .get(format!("{}{path}", h.remote_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 403, "{path}");
+        }
+
+        // The event stream only carries the shared session.
+        let res = c
+            .get(format!("{}/event", h.remote_url))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let bus = h.state.store.bus();
+        bus.publish(
+            Event::new("session.updated", &dir, &other)
+                .with_properties(serde_json::json!({ "x": 1 })),
+        );
+        bus.publish(
+            Event::new("session.updated", &dir, &shared)
+                .with_properties(serde_json::json!({ "x": 2 })),
+        );
+        let mut body = String::new();
+        let mut stream = res;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !body.contains("\"x\":2") && tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(1), stream.chunk()).await {
+                Ok(Ok(Some(chunk))) => body.push_str(&String::from_utf8_lossy(&chunk)),
+                _ => break,
+            }
+        }
+        assert!(body.contains("\"x\":2"), "{body}");
+        assert!(!body.contains("\"x\":1"), "other session leaked: {body}");
+
+        // Revoke like any device -> 401.
+        let share_id = share["shareId"].as_str().unwrap();
+        assert_eq!(
+            c.delete(format!("{}/remote/devices/{share_id}", h.local))
+                .bearer_auth(launch_token())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        assert_eq!(
+            c.get(format!("{}/session/{shared}", h.remote_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+    }
+
     /// allowlist enforcement, launch token rejected on the remote port,
     /// code single-use, revoke -> 401.
     #[tokio::test]

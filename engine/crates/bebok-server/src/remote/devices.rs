@@ -27,8 +27,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
 
-/// Upper bound on entries in the registry (revoked-but-kept entries count).
+/// Upper bound on paired phones in the registry (revoked-but-kept entries count).
 pub const MAX_DEVICES: usize = 5;
+/// Upper bound on session share links (1.8), counted separately.
+pub const MAX_SHARES: usize = 20;
 
 /// One paired device (the persisted shape).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,11 +53,21 @@ pub struct Device {
     /// `android` / `ios` / `web` … as reported at pairing.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub platform: String,
+    /// 1.8 share links: the token is confined to this one session (see
+    /// `scope::share_allowed`). `None` = a paired phone with the full remote scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
     /// Memory-only revocation generation: bumped on revoke/remove so open
     /// streams notice. Not persisted (a restart starts at 0 again, which is
     /// fine: a revoked entry is rejected by the flag anyway).
     #[serde(skip)]
     pub generation: u64,
+}
+
+impl Device {
+    pub fn is_share(&self) -> bool {
+        self.session.is_some()
+    }
 }
 
 impl Device {
@@ -70,6 +82,7 @@ impl Device {
             "revoked": self.revoked,
             "model": self.model,
             "platform": self.platform,
+            "session": self.session,
         })
     }
 }
@@ -79,6 +92,8 @@ impl Device {
 pub struct DeviceAuth {
     pub device_id: String,
     pub generation: u64,
+    /// Set for share-link tokens: the only session this caller may touch.
+    pub session: Option<String>,
 }
 
 #[derive(Debug)]
@@ -224,7 +239,7 @@ impl DeviceRegistry {
         platform: &str,
         ip: &str,
     ) -> Result<(Device, String), RegistryError> {
-        if self.devices.len() >= MAX_DEVICES {
+        if self.devices.iter().filter(|d| !d.is_share()).count() >= MAX_DEVICES {
             return Err(RegistryError::Full);
         }
         let token = generate_token();
@@ -239,11 +254,56 @@ impl DeviceRegistry {
             revoked: false,
             model: model.trim().chars().take(64).collect(),
             platform: platform.trim().chars().take(32).collect(),
+            session: None,
             generation: 0,
         };
         self.devices.push(device.clone());
         self.save()?;
         Ok((device, token))
+    }
+
+    /// 1.8: mint a share link token confined to `session_id`. Shares have
+    /// their own cap so they never crowd out paired phones.
+    pub fn create_share(
+        &mut self,
+        session_id: &str,
+        label: &str,
+    ) -> Result<(Device, String), RegistryError> {
+        if self
+            .devices
+            .iter()
+            .filter(|d| d.is_share() && !d.revoked)
+            .count()
+            >= MAX_SHARES
+        {
+            return Err(RegistryError::Full);
+        }
+        let token = generate_token();
+        let now = now_ms();
+        let device = Device {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name: label.trim().chars().take(64).collect(),
+            token_hash: hash_token(&token),
+            created_at: now,
+            last_seen: now,
+            last_ip: String::new(),
+            revoked: false,
+            model: String::new(),
+            platform: "share".to_string(),
+            session: Some(session_id.to_string()),
+            generation: 0,
+        };
+        self.devices.push(device.clone());
+        self.save()?;
+        Ok((device, token))
+    }
+
+    /// Share links for one session (revoked ones excluded).
+    pub fn shares_for(&self, session_id: &str) -> Vec<&Device> {
+        self.devices
+            .iter()
+            .filter(|d| !d.revoked && d.session.as_deref() == Some(session_id))
+            .collect()
     }
 
     /// Verify a presented token. Constant time over the whole registry: the
@@ -258,6 +318,7 @@ impl DeviceRegistry {
                 found = Some(DeviceAuth {
                     device_id: device.id.clone(),
                     generation: device.generation,
+                    session: device.session.clone(),
                 });
             }
         }

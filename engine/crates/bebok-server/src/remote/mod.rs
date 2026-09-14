@@ -60,6 +60,8 @@ pub enum RequestScope {
         device_id: String,
         /// Registry generation at authentication time (revoke bumps it).
         generation: u64,
+        /// 1.8 share link: confined to this session (`scope::share_allowed`).
+        session: Option<String>,
     },
 }
 

@@ -324,8 +324,21 @@ pub struct RemoteStream {
     pub device_id: String,
     /// Registry generation at authentication time.
     pub generation: u64,
+    /// 1.8 share link: only this session's events (and the session-less
+    /// `remote.status` / `permission.*` frames that carry no other session).
+    pub session: Option<String>,
     /// Released when the stream task ends.
     pub slot: SseSlot,
+}
+
+/// Share-scope event filter: keep events of the shared session; drop every
+/// other session's. Session-less frames pass only when they are not about
+/// another session (they carry an empty `session_id`).
+fn share_visible(session: Option<&str>, ev: &Event) -> bool {
+    match session {
+        None => true,
+        Some(sid) => ev.session_id == sid || ev.session_id.is_empty(),
+    }
 }
 
 /// Run the coalescer over a live receiver. Ends (dropping the sender) when
@@ -338,6 +351,7 @@ pub fn spawn(replay: bebok_core::event::Replay, stream: RemoteStream) -> mpsc::R
         state,
         device_id,
         generation,
+        session,
         slot,
     } = stream;
     let bebok_core::event::Replay {
@@ -353,6 +367,9 @@ pub fn spawn(replay: bebok_core::event::Replay, stream: RemoteStream) -> mpsc::R
             return;
         }
         for ev in replay {
+            if !share_visible(session.as_deref(), &ev) {
+                continue;
+            }
             for e in co.offer(ev, Instant::now()) {
                 if tx.send(Frame::Event(e)).await.is_err() {
                     return;
@@ -381,6 +398,9 @@ pub fn spawn(replay: bebok_core::event::Replay, stream: RemoteStream) -> mpsc::R
                 }
                 recv = rx.recv() => match recv {
                     Ok(ev) => {
+                        if !share_visible(session.as_deref(), &ev) {
+                            continue;
+                        }
                         for e in co.offer(ev, Instant::now()) {
                             if tx.send(Frame::Event(e)).await.is_err() {
                                 return;

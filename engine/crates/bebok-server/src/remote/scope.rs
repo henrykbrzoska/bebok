@@ -102,6 +102,8 @@ pub const TABLE: &[(&str, &str, Access)] = &[
     ("POST", "/remote/relay", Access::Local),
     ("POST", "/remote/relay/reset", Access::Local),
     ("POST", "/session/{id}/cloud", Access::Local),
+    ("POST", "/session/{id}/share", Access::Local),
+    ("GET", "/session/{id}/share", Access::Local),
     ("POST", "/remote/pair/start", Access::Local),
     ("POST", "/remote/pair", Access::Open),
     ("POST", "/remote/pair/confirm/{pairId}", Access::Local),
@@ -149,6 +151,26 @@ pub fn access_for(method: &Method, path: &str) -> Option<Access> {
 /// routes are denied (deny by default).
 pub fn remote_allowed(method: &Method, path: &str) -> bool {
     matches!(access_for(method, path), Some(Access::Remote))
+}
+
+/// 1.8 share links: on top of [`remote_allowed`], a share token may only
+/// touch its own session - `/session/{that id}/...` - plus the handful of
+/// session-less routes a chat needs (`/event` and `/permission` are
+/// filtered to the session by their handlers).
+pub fn share_allowed(method: &Method, path: &str, session: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let own = format!("/session/{session}");
+    if path == own || path.starts_with(&format!("{own}/")) {
+        return true;
+    }
+    matches!(
+        (method.as_str(), path),
+        ("GET", "/event")
+            | ("GET", "/permission")
+            | ("GET", "/version")
+            | ("GET", "/remote/status")
+            | ("POST", "/remote/heartbeat")
+    )
 }
 
 // -- rate limiting ---------------------------------------------------------
@@ -242,6 +264,25 @@ mod tests {
         assert!(!remote_allowed(&Method::POST, "/processes/p/kill"));
         assert!(!remote_allowed(&Method::DELETE, "/session/abc"));
         assert!(!remote_allowed(&Method::POST, "/remote/pair/start"));
+        // 1.8 share links: own session only, plus the chat plumbing.
+        let sid = "11111111-2222-3333-4444-555555555555";
+        assert!(share_allowed(&Method::GET, &format!("/session/{sid}"), sid));
+        assert!(share_allowed(
+            &Method::POST,
+            &format!("/session/{sid}/prompt"),
+            sid
+        ));
+        assert!(share_allowed(&Method::GET, "/event", sid));
+        assert!(share_allowed(&Method::GET, "/permission", sid));
+        assert!(!share_allowed(&Method::GET, "/session", sid));
+        assert!(!share_allowed(&Method::POST, "/session", sid));
+        assert!(!share_allowed(
+            &Method::GET,
+            "/session/other-id/message",
+            sid
+        ));
+        assert!(!share_allowed(&Method::GET, "/projects", sid));
+        assert!(!share_allowed(&Method::GET, "/agent", sid));
         assert!(!remote_allowed(&Method::GET, "/remote/devices"));
         assert!(!remote_allowed(&Method::POST, "/remote/pair"));
         // Unknown routes: deny by default.
