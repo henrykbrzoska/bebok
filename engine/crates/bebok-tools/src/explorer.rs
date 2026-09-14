@@ -124,8 +124,7 @@ pub fn read_file_bytes(root: &Path, rel: &str) -> Result<Vec<u8>, String> {
     if !path.is_file() {
         return Err(format!("not a file: {rel}"));
     }
-    let meta = std::fs::metadata(&path)
-        .map_err(|e| format!("failed to stat {rel}: {e}"))?;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("failed to stat {rel}: {e}"))?;
     if meta.len() > MAX_BINARY_READ_BYTES as u64 {
         return Err(format!(
             "file too large for binary read: {} bytes (max {MAX_BINARY_READ_BYTES})",

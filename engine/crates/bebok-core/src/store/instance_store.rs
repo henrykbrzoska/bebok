@@ -19,8 +19,8 @@ use crate::config;
 use crate::error::{CoreError, Result};
 use crate::event::EventBus;
 use crate::permission::PermissionEngine;
-use crate::session::{Part, Session, ToolState};
 use crate::session::persist::{self, data_root};
+use crate::session::{Part, Session, ToolState};
 use crate::util::normalize_path;
 
 /// Global store: instances keyed by normalized directory, sessions by id.
@@ -293,18 +293,20 @@ impl InstanceStore {
                 continue;
             }
             for part in &mut msg.parts {
-                if let Part::Tool { state: tool_state, .. } = part {
-                    if matches!(
+                if let Part::Tool {
+                    state: tool_state, ..
+                } = part
+                    && matches!(
                         tool_state,
                         ToolState::Running { .. } | ToolState::Pending { .. }
-                    ) {
-                        let input = tool_state.input().clone();
-                        *tool_state = ToolState::Error {
-                            input,
-                            error: "interrupted by engine restart".to_string(),
-                        };
-                        repaired = true;
-                    }
+                    )
+                {
+                    let input = tool_state.input().clone();
+                    *tool_state = ToolState::Error {
+                        input,
+                        error: "interrupted by engine restart".to_string(),
+                    };
+                    repaired = true;
                 }
             }
         }
