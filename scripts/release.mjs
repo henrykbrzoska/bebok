@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // release.mjs — guided release for Bebok (Linux / macOS / Windows, Node >= 20, zero deps).
 //
+//   npm run release:check                          am I ready to release? (read-only)
 //   npm run release -- [X.Y.Z] [--yes] [--no-pr]   start a release   (node scripts/release.mjs …)
 //   npm run release:status -- [X.Y.Z]              where is the release right now?
 //
@@ -10,7 +11,8 @@
 // GitHub Releases directly - the workflow owns that (see CONTRIBUTING.md).
 //
 // What "start" does, asking before every step unless --yes:
-//   1. checks git, gh (logged in), a clean tree and that origin/<default> is current
+//   1. runs the readiness check (git, gh, clean tree, main in sync, CI green,
+//      changelog has entries, signing secret present, no release PR open)
 //   2. picks the version (argument, or a suggestion from client/package.json)
 //   3. turns "## Unreleased" in CHANGELOG.md into "## X.Y.Z — YYYY-MM-DD"
 //   4. runs `npm run version:bump -- X.Y.Z` (seven manifests/lockfiles)
@@ -132,44 +134,109 @@ function isoDate() {
 }
 
 // ---------------------------------------------------------------------------
+// readiness check (read-only)
+// ---------------------------------------------------------------------------
+
+function lastTag() {
+  const tags = gitTry('tag', '--list', '--sort=-v:refname').stdout.split('\n').filter((t) => VERSION_RE.test(t.replace(/^v/, '')));
+  return tags[0] ?? null;
+}
+
+/** Every item: { ok, label, detail?, fatal? }. `fatal: false` items are warnings. */
+function readiness() {
+  const items = [];
+  const add = (ok, label, detail = '', fatal = true) => items.push({ ok, label, detail, fatal });
+
+  const hasGit = gitTry('--version').status === 0;
+  add(hasGit, 'git installed');
+  const hasGh = ghTry('--version').status === 0;
+  add(hasGh, 'gh installed', hasGh ? '' : 'https://cli.github.com');
+  const ghAuth = hasGh && ghTry('auth', 'status').status === 0;
+  add(ghAuth, 'gh logged in', ghAuth ? '' : 'gh auth login');
+  if (!hasGit) return items;
+
+  const dirty = gitTry('status', '--porcelain').stdout;
+  add(!dirty, 'working tree clean', dirty ? `${dirty.split('\n').length} changed file(s)` : '');
+
+  gitTry('fetch', '--prune', '--tags', 'origin');
+  const base = defaultBranch();
+  const current = gitTry('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  add(current === base, `on ${base}`, current === base ? '' : `on '${current}' - the script can switch for you`, false);
+  const hasLocalBase = gitTry('rev-parse', '--verify', '--quiet', base).status === 0;
+  const behind = hasLocalBase ? Number(gitTry('rev-list', '--count', `${base}..origin/${base}`).stdout || 0) : 0;
+  const ahead = hasLocalBase ? Number(gitTry('rev-list', '--count', `origin/${base}..${base}`).stdout || 0) : 0;
+  add(ahead === 0, `local ${base} has no unpushed commits`, ahead ? `${ahead} commit(s) ahead of origin/${base} - push or drop them` : '');
+  add(true, `local ${base} ${behind ? `is ${behind} commit(s) behind origin (will fast-forward)` : 'in sync with origin'}`, '', false);
+
+  if (ghAuth) {
+    const ci = ghTry('run', 'list', '--workflow', 'ci.yml', '--branch', base, '--limit', '1', '--json', 'conclusion,url', '--jq', '.[0] | "\\(.conclusion) \\(.url)"').stdout;
+    const [conclusion, url] = ci.split(' ');
+    add(conclusion === 'success', `CI green on ${base}`, conclusion === 'success' ? '' : `${conclusion || 'no run'} ${url || ''}`.trim(), false);
+
+    const secrets = ghTry('secret', 'list', '--json', 'name', '--jq', '.[].name').stdout.split('\n');
+    add(secrets.includes('TAURI_SIGNING_PRIVATE_KEY'), 'TAURI_SIGNING_PRIVATE_KEY secret set', secrets.includes('TAURI_SIGNING_PRIVATE_KEY') ? '' : 'Settings -> Secrets and variables -> Actions (or no permission to list secrets)', false);
+
+    const openPr = ghTry('pr', 'list', '--state', 'open', '--json', 'headRefName,url', '--jq', '.[] | select(.headRefName | startswith("release/")) | "\\(.headRefName) \\(.url)"').stdout;
+    add(!openPr, 'no release PR already open', openPr);
+  }
+
+  const changelog = existsSync(CHANGELOG) ? readFileSync(CHANGELOG, 'utf8') : '';
+  const section = unreleasedSection(changelog);
+  const entries = section ? section.body.split('\n').filter((l) => /^\s*[-*]/.test(l)).length : 0;
+  add(Boolean(section && section.body), 'CHANGELOG.md has a filled "## Unreleased" section', section ? (section.body ? `${entries} bullet(s)` : 'section is empty') : 'section missing');
+
+  const tag = lastTag();
+  const since = tag ? Number(gitTry('rev-list', '--count', `${tag}..origin/${base}`).stdout || 0) : null;
+  const version = manifestVersion();
+  add(since === null || since > 0, `commits on ${base} since last tag${tag ? ` ${tag}` : ''}`, since === null ? 'no release tag yet' : since ? `${since}` : 'nothing new to release', false);
+  add(true, `manifest version ${version}${tagExists(version) ? ' (released - the next release bumps it)' : ' (not tagged yet)'}`, '', false);
+
+  return items;
+}
+
+function printReadiness(items) {
+  for (const { ok, label, detail, fatal } of items) {
+    const mark = ok ? c.green('✓') : fatal ? c.red('✗') : c.yellow('!');
+    log(`${mark} ${label}${detail ? c.dim(`  ${detail}`) : ''}`);
+  }
+  const blockers = items.filter((i) => !i.ok && i.fatal);
+  const warnings = items.filter((i) => !i.ok && !i.fatal);
+  log('');
+  if (blockers.length) log(c.red(`${blockers.length} blocker(s) - fix them and run again.`));
+  else if (warnings.length) log(c.yellow(`Ready with ${warnings.length} warning(s).`));
+  else log(c.green('Ready to release.'));
+  return blockers.length === 0;
+}
+
+function check() {
+  log(c.bold('\nBebok release - readiness\n'));
+  const ready = printReadiness(readiness());
+  if (ready) log(c.dim('Next: npm run release -- X.Y.Z'));
+  process.exitCode = ready ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
 // start
 // ---------------------------------------------------------------------------
 
 async function start() {
   log(c.bold('\nBebok release\n'));
 
-  // 1. tools + tree
-  if (gitTry('--version').status !== 0) fail('git is not installed');
-  if (ghTry('--version').status !== 0) fail('GitHub CLI (gh) is not installed: https://cli.github.com');
-  if (ghTry('auth', 'status').status !== 0) fail('gh is not logged in - run: gh auth login');
-  ok('git + gh ready');
-
-  const dirty = git('status', '--porcelain');
-  if (dirty) fail(`working tree is not clean:\n${dirty}\nCommit or stash first.`);
-  git('fetch', '--prune', '--tags', 'origin');
+  // 1. readiness
+  if (!printReadiness(readiness())) fail('not ready');
   const base = defaultBranch();
   const current = git('rev-parse', '--abbrev-ref', 'HEAD');
   if (current !== base) {
-    warn(`you are on '${current}', releases start from '${base}'`);
     if (!(await confirm(`Switch to ${base}?`))) fail('aborted');
     git('checkout', base);
   }
   const behind = Number(gitTry('rev-list', '--count', `HEAD..origin/${base}`).stdout || 0);
-  const ahead = Number(gitTry('rev-list', '--count', `origin/${base}..HEAD`).stdout || 0);
-  if (ahead > 0) fail(`${base} has ${ahead} local commit(s) not on origin - push or drop them first`);
   if (behind > 0) {
     git('merge', '--ff-only', `origin/${base}`);
     ok(`fast-forwarded ${base} by ${behind} commit(s)`);
   }
-  ok(`on ${base} at ${git('rev-parse', '--short', 'HEAD')} (in sync with origin)`);
-
-  const ciRun = ghTry('run', 'list', '--workflow', 'ci.yml', '--branch', base, '--limit', '1', '--json', 'conclusion', '--jq', '.[0].conclusion').stdout;
-  if (ciRun && ciRun !== 'success') {
-    warn(`last CI run on ${base}: ${ciRun}`);
-    if (!(await confirm('Continue anyway?'))) fail('aborted');
-  } else if (ciRun) {
-    ok(`CI on ${base} is green`);
-  }
+  const warnings = readiness().filter((i) => !i.ok && !i.fatal);
+  if (warnings.length && !(await confirm('Continue despite the warnings above?'))) fail('aborted');
 
   // 2. version
   const currentVersion = manifestVersion();
@@ -295,6 +362,7 @@ function status() {
 
 try {
   if (words[0] === 'status') status();
+  else if (words[0] === 'check') check();
   else if (flags.has('--help') || flags.has('-h')) {
     log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 18).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
   } else await start();

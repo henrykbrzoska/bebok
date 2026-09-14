@@ -22,6 +22,8 @@ flowchart LR
     D --> E["aplikacje same się aktualizują"]
 ```
 
+0. **`npm run release:check`** - lista gotowości, nic nie zmienia (drzewo, CI,
+   changelog, sekret podpisu, otwarty release-PR). `release` i tak zaczyna od niej.
 1. **`npm run release -- X.Y.Z`** - sprawdza drzewo i CI, zamienia
    `## Unreleased` na `## X.Y.Z — data`, podbija wersję we wszystkich
    manifestach, otwiera PR `release/X.Y.Z`. Changelog napisz wcześniej: to

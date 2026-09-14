@@ -22,6 +22,8 @@ flowchart LR
     D --> E["apps update themselves"]
 ```
 
+0. **`npm run release:check`** - read-only readiness list (tree, CI, changelog,
+   signing secret, open release PR). `release` runs it first anyway.
 1. **`npm run release -- X.Y.Z`** - checks the tree and CI, turns
    `## Unreleased` into `## X.Y.Z — date`, bumps the version everywhere,
    opens the PR `release/X.Y.Z`. Write the changelog first: it becomes the

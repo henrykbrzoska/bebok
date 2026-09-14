@@ -28,6 +28,7 @@ npm run doctor                     # rustc/cargo, node/npm, tauri cli, OS-level 
 npm run full-build-dev -- --open   # cargo build -p bebok-server (debug) + start it + ng serve
 npm run full-build-app             # cargo build --release --target <triple> + sidecar:copy + tauri build
 npm run engine | npm run client    # one half only
+npm run release:check              # readiness list (read-only); release -- X.Y.Z runs it first
 npm run release -- X.Y.Z           # guided release: changelog + bump + release/X.Y.Z PR (CI does the rest)
 dev.cmd / ./dev.sh [tauri] [flags] # shortcuts for full-build-dev
 ```
