@@ -16,7 +16,9 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ENGINE_API } from '../../../core/engine-api';
 import { RemoteApiError, RemoteDevice, RemotePairStart } from '../../../core/engine.dtos';
 import { RemoteDesktopStore } from '../../../core/remote-desktop.store';
+import { hostClass, isRelayEndpoint } from '../../../core/remote/endpoint-probe';
 import { I18nService } from '../../../i18n/i18n.service';
+import type { MessageKey } from '../../../i18n';
 import { ToastStore } from '../../../ui/toast/toast.store';
 import { encodeQr, qrToSvg } from './qrcode';
 
@@ -76,6 +78,40 @@ export class RemoteTab implements OnInit, OnDestroy {
     const matrix = encodeQr(this.pairingUri(start));
     return matrix ? this.sanitizer.bypassSecurityTrustHtml(qrToSvg(matrix, 4)) : null;
   });
+
+  /** The addresses a phone can be pointed at by hand, relay first (works from anywhere). */
+  readonly pairAddresses = computed(() => {
+    const start = this.pairStart();
+    if (!start) {
+      return [];
+    }
+    const kindOf = (url: string): MessageKey => {
+      if (isRelayEndpoint(url)) {
+        return 'remote.pairAddressRelay';
+      }
+      try {
+        return hostClass(new URL(url).hostname) === 'tailnet'
+          ? 'remote.pairAddressTailnet'
+          : 'remote.pairAddressLan';
+      } catch {
+        return 'remote.pairAddressLan';
+      }
+    };
+    return start.endpoints
+      .map((url) => ({ url, kindKey: kindOf(url) }))
+      .sort((a, b) => Number(isRelayEndpoint(b.url)) - Number(isRelayEndpoint(a.url)));
+  });
+  readonly copied = signal<string | null>(null);
+
+  async copyText(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copied.set(text);
+      setTimeout(() => this.copied.update((v) => (v === text ? null : v)), 1500);
+    } catch {
+      this.copied.set(null);
+    }
+  }
 
   readonly secondsLeft = computed(() => {
     const start = this.pairStart();
@@ -317,7 +353,7 @@ export class RemoteTab implements OnInit, OnDestroy {
     return parts.length > 0 ? parts.join(' · ') : this.t('remote.deviceUnknown');
   }
 
-  private pairingUri(start: RemotePairStart): string {
+  pairingUri(start: RemotePairStart): string {
     return `bebok://pair?v=1&ep=${start.endpoints.join(',')}&code=${start.code}&fp=${start.fingerprint}`;
   }
 

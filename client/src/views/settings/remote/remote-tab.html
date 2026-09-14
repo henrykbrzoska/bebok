@@ -189,6 +189,24 @@
             <button type="button" (click)="dismissPairStart()">{{ t('remote.reject') }}</button>
           </div>
         </div>
+        <div class="pair-addresses" data-testid="pair-addresses">
+          <span class="micro-label">{{ t('remote.pairAddressLabel') }}</span>
+          <p class="small muted">{{ t('remote.pairAddressHint') }}</p>
+          @for (entry of pairAddresses(); track entry.url) {
+            <div class="pair-address">
+              <span class="pair-address-kind">{{ t(entry.kindKey) }}</span>
+              <code class="pair-address-url mono">{{ entry.url }}</code>
+              <button type="button" class="ghost" (click)="copyText(entry.url)">
+                {{ copied() === entry.url ? t('chat.copied') : t('remote.pairCopy') }}
+              </button>
+            </div>
+          }
+          <button type="button" class="ghost" (click)="copyText(pairingUri(pairStart()!))">
+            {{
+              copied() === pairingUri(pairStart()!) ? t('chat.copied') : t('remote.pairCopyLink')
+            }}
+          </button>
+        </div>
       }
     </div>
   }

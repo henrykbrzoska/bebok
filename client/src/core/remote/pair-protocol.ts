@@ -35,11 +35,7 @@ export interface PairInvite {
 }
 
 export type PairUrlErrorReason =
-  | 'not_pair_url'
-  | 'unsupported_version'
-  | 'missing_code'
-  | 'missing_endpoints'
-  | 'bad_endpoint';
+  'not_pair_url' | 'unsupported_version' | 'missing_code' | 'missing_endpoints' | 'bad_endpoint';
 
 export class PairUrlError extends Error {
   constructor(
@@ -190,7 +186,9 @@ export class PairError extends Error {
     readonly status: number | null,
     detail?: string,
   ) {
-    super(detail ? `${code} (${status ?? 'network'}): ${detail}` : `${code} (${status ?? 'network'})`);
+    super(
+      detail ? `${code} (${status ?? 'network'}): ${detail}` : `${code} (${status ?? 'network'})`,
+    );
     this.name = 'PairError';
   }
 
@@ -278,7 +276,9 @@ export async function pairWithDesktop(
   } catch {
     /* status only */
   }
-  const code$ = isPairErrorCode(engineCode) ? engineCode : (STATUS_TO_CODE[res.status] ?? 'unknown');
+  const code$ = isPairErrorCode(engineCode)
+    ? engineCode
+    : (STATUS_TO_CODE[res.status] ?? 'unknown');
   throw new PairError(code$, res.status, detail);
 }
 
