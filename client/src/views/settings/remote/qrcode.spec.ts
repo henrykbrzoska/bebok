@@ -9,7 +9,9 @@ describe('encodeQr', () => {
   });
 
   it('places the three finder patterns (dark corners)', () => {
-    const matrix = encodeQr('bebok://pair?v=1&ep=http://100.101.102.103:8790&code=ABCDEFGH&fp=deadbeef')!;
+    const matrix = encodeQr(
+      'bebok://pair?v=1&ep=http://100.101.102.103:8790&code=ABCDEFGH&fp=deadbeef',
+    )!;
     const size = matrix.length;
     // top-left finder centre is always dark
     expect(matrix[3][3]).toBeTrue();
@@ -32,6 +34,36 @@ describe('encodeQr', () => {
   it('returns null when the text cannot fit in version <= 10', () => {
     const huge = 'x'.repeat(2000);
     expect(encodeQr(huge)).toBeNull();
+  });
+
+  it('matches the reference matrix for "hello" (decoded by Apple Vision / ML Kit)', () => {
+    // Regression guard for the format-info placement: a transposed block
+    // still has three finders and the right size but no decoder reads it.
+    const expected = [
+      '111111100101101111111',
+      '100000100111001000001',
+      '101110101101101011101',
+      '101110100101001011101',
+      '101110100010101011101',
+      '100000100000101000001',
+      '111111101010101111111',
+      '000000001101100000000',
+      '111011111111011000100',
+      '011111011100001000011',
+      '011111101000100011111',
+      '001100000000001000010',
+      '000010110110101010000',
+      '000000001101010100111',
+      '111111101111011100111',
+      '100000101111110110000',
+      '101110101111011100011',
+      '101110100010001100110',
+      '101110101110100010101',
+      '100000101100001010010',
+      '111111101010101100011',
+    ];
+    const matrix = encodeQr('hello')!;
+    expect(matrix.map((row) => row.map((b) => (b ? '1' : '0')).join(''))).toEqual(expected);
   });
 
   it('is deterministic for the same input', () => {

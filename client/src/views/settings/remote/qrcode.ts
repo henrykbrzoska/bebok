@@ -82,24 +82,25 @@ function rsRemainder(data: number[], eccLen: number): number[] {
 }
 
 /** Per-version (1-10) EC level L layout: ecc bytes/block + block groups. */
-const QR_LEVEL_L: Record<number, { ecc: number; groups: Array<[count: number, dataLen: number]> }> = {
-  1: { ecc: 7, groups: [[1, 19]] },
-  2: { ecc: 10, groups: [[1, 34]] },
-  3: { ecc: 15, groups: [[1, 55]] },
-  4: { ecc: 20, groups: [[1, 80]] },
-  5: { ecc: 26, groups: [[1, 108]] },
-  6: { ecc: 18, groups: [[2, 68]] },
-  7: { ecc: 20, groups: [[2, 78]] },
-  8: { ecc: 24, groups: [[2, 97]] },
-  9: { ecc: 30, groups: [[2, 116]] },
-  10: {
-    ecc: 18,
-    groups: [
-      [2, 68],
-      [2, 69],
-    ],
-  },
-};
+const QR_LEVEL_L: Record<number, { ecc: number; groups: Array<[count: number, dataLen: number]> }> =
+  {
+    1: { ecc: 7, groups: [[1, 19]] },
+    2: { ecc: 10, groups: [[1, 34]] },
+    3: { ecc: 15, groups: [[1, 55]] },
+    4: { ecc: 20, groups: [[1, 80]] },
+    5: { ecc: 26, groups: [[1, 108]] },
+    6: { ecc: 18, groups: [[2, 68]] },
+    7: { ecc: 20, groups: [[2, 78]] },
+    8: { ecc: 24, groups: [[2, 97]] },
+    9: { ecc: 30, groups: [[2, 116]] },
+    10: {
+      ecc: 18,
+      groups: [
+        [2, 68],
+        [2, 69],
+      ],
+    },
+  };
 
 /** Alignment-pattern coordinate list per version (2-10); version 1 has none. */
 const ALIGNMENT: Record<number, number[]> = {
@@ -246,7 +247,11 @@ function buildMatrix(version: number, dataBits: number[]): boolean[][] {
           dx <= 6 &&
           dy >= 0 &&
           dy <= 6 &&
-          (dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
+          (dx === 0 ||
+            dx === 6 ||
+            dy === 0 ||
+            dy === 6 ||
+            (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
         matrix[y][x] = inRing;
       }
     }
@@ -341,20 +346,22 @@ function buildMatrix(version: number, dataBits: number[]): boolean[][] {
   const formatBits = ((formatData << 10) | frem) ^ 0x5412;
   const fbit = (i: number) => (formatBits >>> i) & 1;
 
+  // first copy: bits 0-7 down column 8 (skipping the timing row), 8-14 along row 8 leftwards
   for (let i = 0; i <= 5; i++) {
-    matrix[8][i] = fbit(i) === 1;
+    matrix[i][8] = fbit(i) === 1;
   }
-  matrix[8][7] = fbit(6) === 1;
+  matrix[7][8] = fbit(6) === 1;
   matrix[8][8] = fbit(7) === 1;
-  matrix[7][8] = fbit(8) === 1;
+  matrix[8][7] = fbit(8) === 1;
   for (let i = 9; i <= 14; i++) {
-    matrix[14 - i][8] = fbit(i) === 1;
+    matrix[8][14 - i] = fbit(i) === 1;
   }
-  for (let i = 0; i <= 6; i++) {
-    matrix[size - 1 - i][8] = fbit(i) === 1;
+  // second copy: bits 0-7 along row 8 from the right edge, 8-14 down column 8 at the bottom
+  for (let i = 0; i <= 7; i++) {
+    matrix[8][size - 1 - i] = fbit(i) === 1;
   }
-  for (let i = 7; i <= 14; i++) {
-    matrix[8][size - 15 + i] = fbit(i) === 1;
+  for (let i = 8; i <= 14; i++) {
+    matrix[size - 15 + i][8] = fbit(i) === 1;
   }
 
   // version info (versions 7-40 only): BCH(18,6), no xor mask
