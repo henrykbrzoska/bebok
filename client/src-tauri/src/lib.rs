@@ -9,6 +9,11 @@
 //! 3. Kill the sidecar when the app exits.
 //! 4. WP-BROWSER2 (F7-6): open the browser viewer as a second webview window
 //!    (`open_browser_viewer`), placed right of the main window.
+//! 5. Auto-update (`update_check` / `update_install` / `relaunch_after_update`):
+//!    `tauri-plugin-updater` against the GitHub Releases `latest.json`, driven
+//!    from Rust rather than the JS plugin API so the sidecar can be killed in
+//!    `on_before_exit` - the plugin's default hook skips `RunEvent::Exit`, and
+//!    the Windows installer cannot overwrite a locked `bebok-server.exe`.
 //!
 //! The directory picker and every REST/SSE call happen in the Angular client;
 //! the shell only owns process plumbing. State lives in the engine, so
@@ -18,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -29,6 +34,38 @@ struct EngineConnectionInfo {
     #[serde(rename = "baseUrl")]
     base_url: String,
 }
+
+/// Static facts about this desktop build, handed to the webview through
+/// `desktop_info` (the client gates the update check on `debug`).
+#[derive(Debug, Clone, Serialize)]
+struct DesktopInfo {
+    version: String,
+    debug: bool,
+    os: &'static str,
+    arch: &'static str,
+}
+
+/// A release newer than the running shell, as reported by `update_check`.
+#[derive(Debug, Clone, Serialize)]
+struct UpdateInfo {
+    version: String,
+    #[serde(rename = "currentVersion")]
+    current_version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+/// Download progress event payload (`update://progress`).
+#[derive(Debug, Clone, Serialize)]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+/// The update found by the last `update_check`, consumed by `update_install`.
+#[cfg(desktop)]
+#[derive(Default)]
+struct PendingUpdate(Mutex<Option<tauri_plugin_updater::Update>>);
 
 #[derive(Default)]
 struct EngineState {
@@ -68,13 +105,102 @@ async fn engine_info(
     }
 }
 
+/// Webview command: version + build flavour of the shell itself.
+#[tauri::command]
+fn desktop_info(app: tauri::AppHandle) -> DesktopInfo {
+    DesktopInfo {
+        version: app.package_info().version.to_string(),
+        debug: cfg!(debug_assertions),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+    }
+}
+
+/// Webview command: restart the shell after an update was installed. The
+/// sidecar is killed first so the new GUI never talks to the old engine.
+#[tauri::command]
+fn relaunch_after_update(app: tauri::AppHandle, state: tauri::State<'_, Arc<EngineState>>) {
+    state.kill_child();
+    app.restart();
+}
+
+/// Webview command: ask the release feed whether a newer version exists.
+/// `None` means up to date; errors are network/feed problems (offline, no
+/// `latest.json` for this platform, bad signature format).
+#[cfg(desktop)]
+#[tauri::command]
+async fn update_check(
+    app: tauri::AppHandle,
+    engine: tauri::State<'_, Arc<EngineState>>,
+    pending: tauri::State<'_, PendingUpdate>,
+) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let state_for_exit = engine.inner().clone();
+    let update = app
+        .updater_builder()
+        .on_before_exit(move || state_for_exit.kill_child())
+        .build()
+        .map_err(|err| err.to_string())?
+        .check()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let info = update.as_ref().map(|u| UpdateInfo {
+        version: u.version.clone(),
+        current_version: u.current_version.clone(),
+        notes: u.body.clone(),
+        date: u.date.map(|d| d.to_string()),
+    });
+    *pending.0.lock().unwrap() = update;
+    Ok(info)
+}
+
+/// Webview command: download and install the update found by `update_check`,
+/// emitting `update://progress` on the calling window. On Windows the process
+/// exits inside this call (the installer takes over); elsewhere it returns and
+/// the client calls `relaunch_after_update`.
+#[cfg(desktop)]
+#[tauri::command]
+async fn update_install(
+    window: tauri::Window,
+    pending: tauri::State<'_, PendingUpdate>,
+) -> Result<(), String> {
+    let update = pending
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "no pending update - run update_check first".to_string())?;
+
+    let mut downloaded: u64 = 0;
+    let progress_window = window.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ =
+                    progress_window.emit("update://progress", UpdateProgress { downloaded, total });
+            },
+            || {},
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Window label for a session's browser viewer (one window per session).
 /// Session ids are UUIDs; anything else is sanitised so the label stays a
 /// valid Tauri window label (`[a-zA-Z0-9\-/:_]`).
 fn viewer_label(session_id: &str) -> String {
     let safe: String = session_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("browser-viewer-{safe}")
 }
@@ -108,7 +234,11 @@ fn position_right_of(
 ) -> Option<(f64, f64)> {
     let (x, y) = outer_position?;
     let (w, _) = outer_size?;
-    let scale = if scale_factor > 0.0 { scale_factor } else { 1.0 };
+    let scale = if scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
     Some(((x as f64 + w as f64) / scale + VIEWER_GAP, y as f64 / scale))
 }
 
@@ -149,21 +279,51 @@ fn open_browser_viewer(app: tauri::AppHandle, session_id: String) -> Result<(), 
         .map_err(|err| format!("failed to open the browser viewer window: {err}"))
 }
 
+#[cfg(desktop)]
+fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        engine_info,
+        open_browser_viewer,
+        desktop_info,
+        relaunch_after_update,
+        update_check,
+        update_install
+    ]
+}
+
+#[cfg(not(desktop))]
+fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        engine_info,
+        open_browser_viewer,
+        desktop_info,
+        relaunch_after_update
+    ]
+}
+
 fn parse_ready(line: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(line);
     let prefix = "BEBOK_READY ";
-    text.strip_prefix(prefix).map(|rest| rest.trim().to_string())
+    text.strip_prefix(prefix)
+        .map(|rest| rest.trim().to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            let engine_state = Arc::new(EngineState::default());
-            app.manage(engine_state.clone());
+    let engine_state = Arc::new(EngineState::default());
 
+    let builder = tauri::Builder::default()
+        .manage(engine_state.clone())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(desktop)]
+    let builder = builder
+        .manage(PendingUpdate::default())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
+        .setup(move |app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let sidecar = match handle.shell().sidecar("bebok-server") {
@@ -195,9 +355,7 @@ pub fn run() {
                                     tracing_log_to_stderr(&format!(
                                         "engine ready at {url} (sidecar)"
                                     ));
-                                    engine_state.mark_ready(EngineConnectionInfo {
-                                        base_url: url,
-                                    });
+                                    engine_state.mark_ready(EngineConnectionInfo { base_url: url });
                                 }
                             }
                         }
@@ -222,11 +380,14 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine_info, open_browser_viewer])
+        .invoke_handler(invoke_handler())
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
                 let state = app_handle.state::<Arc<EngineState>>();
                 state.kill_child();
             }
@@ -246,8 +407,10 @@ mod tests {
     #[test]
     fn parse_ready_extracts_the_url() {
         assert_eq!(
-            parse_ready(b"BEBOK_READY http://127.0.0.1:8787/?token=abc
-"),
+            parse_ready(
+                b"BEBOK_READY http://127.0.0.1:8787/?token=abc
+"
+            ),
             Some("http://127.0.0.1:8787/?token=abc".to_string())
         );
         assert_eq!(parse_ready(b"something else"), None);

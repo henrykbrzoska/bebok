@@ -85,6 +85,14 @@
   line-height: 1;
 }
 
+.about-badge {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
 /* Icon-only below ~1100px: the label collapses, the tooltip (`title`) still
    carries the full text - keeps the topbar from crowding the breadcrumb on
    narrower windows while the 1400px layout stays untouched. */

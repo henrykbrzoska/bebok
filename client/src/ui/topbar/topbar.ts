@@ -17,6 +17,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 
 import { SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
+import { UpdateStore } from '../../core/update.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { NavIcon } from '../sidebar/nav-icon';
@@ -39,6 +40,7 @@ export interface SubAgentCrumb {
 })
 export class Topbar {
   readonly shell = inject(ShellStore);
+  readonly update = inject(UpdateStore);
   private readonly i18n = inject(I18nService);
   private readonly chat = inject(ChatSessionStore);
   private readonly project = inject(ProjectSessionsStore);

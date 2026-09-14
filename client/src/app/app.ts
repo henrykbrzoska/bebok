@@ -16,6 +16,7 @@ import { CustomCssService } from '../core/custom-css.service';
 import { EngineClient } from '../core/engine-client.service';
 import { EventsStore } from '../core/events.store';
 import { ToolSafetyStore } from '../core/tool-safety.store';
+import { UpdateStore } from '../core/update.store';
 import { AppShell } from '../ui/shell/app-shell';
 
 @Component({
@@ -30,6 +31,7 @@ export class App implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly customCss = inject(CustomCssService);
   private readonly toolSafety = inject(ToolSafetyStore);
+  private readonly updates = inject(UpdateStore);
 
   /**
    * WP-BROWSER2 (F7-6): routes flagged `data.bare` (the browser viewer
@@ -62,6 +64,10 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     void this.syncCustomCss();
+    // Update checks belong to the main window only; viewer windows are bare.
+    if (!this.bare()) {
+      this.updates.start();
+    }
   }
 
   private async syncCustomCss(): Promise<void> {
@@ -79,6 +85,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.updates.stop();
     this.unsubscribeEvents();
     this.subscription.unsubscribe();
   }

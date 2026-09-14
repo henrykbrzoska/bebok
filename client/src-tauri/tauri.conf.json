@@ -29,5 +29,14 @@
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "externalBin": ["binaries/bebok-server"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/henrykbrzoska/bebok/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzMDhEN0YwODhEMEQzOTMKUldTVDA5Q0k4TmNJc3l2TFU4ZjN0VmdJR3lEZFc1QmJBU0hiNkVHS2lBNnFmcWZsQ3EyUjkveEwK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

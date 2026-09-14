@@ -10,7 +10,9 @@ name: Release
 # Signing is OPTIONAL and gated on repository secrets (see scripts/release.md):
 #   WINDOWS_CERT_PFX_BASE64 + WINDOWS_CERT_PASSWORD  -> Authenticode-sign .exe/.msi
 #   GPG_PRIVATE_KEY + GPG_PASSPHRASE                  -> .asc detached signatures (Linux + SHA256SUMS)
-#   TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD)           -> Tauri updater .sig artifacts
+# The updater signature is NOT optional: installed apps only accept bundles
+# signed with the key whose public half sits in tauri.conf.json:
+#   TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD)           -> Tauri updater .sig artifacts + latest.json
 # macOS builds are never signed/notarized: Gatekeeper will warn on first launch.
 
 on:
@@ -259,10 +261,12 @@ jobs:
         shell: bash
         run: echo "::notice title=GPG signing skipped::GPG_PRIVATE_KEY / GPG_PASSPHRASE not set - no .asc signatures for Linux artifacts."
 
-      - name: Tauri updater signing skipped
+      - name: Require the updater signing key
         if: env.TAURI_SIGNING_PRIVATE_KEY == ''
         shell: bash
-        run: echo "::notice title=Updater signing skipped::TAURI_SIGNING_PRIVATE_KEY not set - no .sig updater artifacts."
+        run: |
+          echo "::error title=Updater signing key missing::TAURI_SIGNING_PRIVATE_KEY is not set. Installed desktop apps only accept signed bundles (tauri.conf.json plugins.updater.pubkey); see scripts/release.md."
+          exit 1
 
       # ---- engine -----------------------------------------------------------
       - name: Build engine (release, ${{ matrix.target }})
@@ -353,9 +357,11 @@ jobs:
               arch=$(basename "$bundle"/dmg/*.dmg .dmg | sed -E "s/^bebok_${VERSION}_//")
               cp "$bundle"/dmg/*.dmg "$out"/
               if ls "$bundle"/macos/*.app.tar.gz > /dev/null 2>&1; then
-                # Produced by Tauri when updater artifacts are enabled (with .sig).
-                cp "$bundle"/macos/*.app.tar.gz "$out"/
-                cp "$bundle"/macos/*.app.tar.gz.sig "$out"/ 2>/dev/null || true
+                # Produced by Tauri when updater artifacts are enabled (with .sig),
+                # named after the product (bebok.app.tar.gz): version + arch it
+                # like the dmg so both macOS legs can share one release.
+                cp "$bundle"/macos/*.app.tar.gz "$out/bebok_${VERSION}_${arch}.app.tar.gz"
+                cp "$bundle"/macos/*.app.tar.gz.sig "$out/bebok_${VERSION}_${arch}.app.tar.gz.sig"
               else
                 tar -czf "$out/bebok_${VERSION}_${arch}.app.tar.gz" -C "$bundle/macos" bebok.app
               fi
@@ -428,11 +434,42 @@ jobs:
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
     steps:
+      - name: Checkout (release scripts + CHANGELOG)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          sparse-checkout: |
+            scripts
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The desktop updater manifest: fails when any signed bundle is missing.
+      - name: Compose latest.json (updater manifest)
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node scripts/latest-json.mjs \
+            --artifacts artifacts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --repo "$REPO" \
+            --changelog CHANGELOG.md
+          echo "== latest.json =="; cat artifacts/latest.json
 
       - name: Merge SHA256SUMS
         shell: bash
@@ -494,6 +531,7 @@ jobs:
             echo "| Headless engine (browser mode) | \`bebok-server-${VERSION}-<platform>[.exe]\` |"
             echo
             echo "Verify downloads against \`SHA256SUMS.txt\`."
+            echo "\`latest.json\` and the \`*.sig\` files feed the desktop app's built-in updater (About -> Check for updates)."
             if [ -f artifacts/SHA256SUMS.txt.asc ]; then
               echo "\`SHA256SUMS.txt.asc\` and \`*.asc\` are GPG detached signatures (public key: \`bebok-release-signing-key.asc\`)."
             fi
