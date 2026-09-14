@@ -19,6 +19,7 @@ import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
+import { isImagePath } from '../../ui/right-drawer/panels/preview-panel';
 import { ShellStore } from '../../ui/shell/shell.store';
 import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
@@ -119,6 +120,19 @@ export class ExplorerView implements OnInit {
   readonly isMarkdownSelection = computed(() => {
     const p = this.selectedPath();
     return !!p && /\.(md|markdown)$/i.test(p);
+  });
+
+  /** Image preview (binary fetch, data-URL rendering). */
+  readonly imageData = signal<string | null>(null);
+  readonly imageMime = signal<string | null>(null);
+  readonly isImageSelection = computed(() => this.imageData() !== null);
+  readonly imageUrl = computed(() => {
+    const data = this.imageData();
+    const mime = this.imageMime();
+    if (!data || !mime) {
+      return '';
+    }
+    return `data:${mime};base64,${data}`;
   });
 
   readonly markdownRows = computed<MarkdownRow[]>(() =>
@@ -252,11 +266,23 @@ export class ExplorerView implements OnInit {
     this.fileLoading.set(true);
     this.error.set(null);
     try {
-      const res = await this.engine.fsFile(dir, node.path);
-      this.fileContent.set(res.content);
-      this.draftContent.set(res.content);
+      if (isImagePath(node.path)) {
+        const res = await this.engine.fsFileBinary(dir, node.path);
+        this.imageData.set(res.content);
+        this.imageMime.set(res.media_type ?? 'image/png');
+        this.fileContent.set('');
+        this.draftContent.set('');
+      } else {
+        const res = await this.engine.fsFile(dir, node.path);
+        this.fileContent.set(res.content);
+        this.draftContent.set(res.content);
+        this.imageData.set(null);
+        this.imageMime.set(null);
+      }
     } catch (err) {
       this.fileContent.set('');
+      this.imageData.set(null);
+      this.imageMime.set(null);
       this.error.set(this.describe(err));
     } finally {
       this.fileLoading.set(false);

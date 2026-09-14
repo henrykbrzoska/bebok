@@ -1,52 +1,47 @@
-# O que é um Bebok?
+# O que é Bebok?
 
-![Uma estátua de bronze de um bebok em Katowice, sobre um pedestal com a inscrição "BEBOK"](/about/bebok-katowice.jpg)
+![Silhueta negra de um bebok — figura peluda com chifres, presas e garras](/about/bebok.png)
 
-*Foto: "Katowicki Bebok" por [Kyoukaa](https://commons.wikimedia.org/wiki/User:Kyoukaa), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Katowicki_Bebok.jpg).*
+## O que é bebok?
 
-## Quem é o bebok?
+Bebok — na Silésia, também encontrado como *bobok* (Grande Polônia, Pequena Polônia) ou *babok* (Cujávia) — é um fantasma que há séculos não deixa as crianças dormirem às margens do Vístula e do Oder. Não tem uma aparência fixa e definida, porque ninguém que o viu de verdade depois quis dar detalhes. Já que vivia sobretudo na imaginação de meninos apavorados (sil. *crianças*), cada um imaginava-o à sua maneira — e bem assim, porque aquilo que realmente mora na escuridão não espera o nosso descrever. Às vezes era uma criaturinha nojenta, raspando as garras no chão. Outras vezes — uma figura enorme, peluda, negra, com cascos batendo no chão num ritmo que não correspondia a nenhuma melodia conhecida, e uns olhos enormes que captavam cada raio de luz e o devolviam em ouro — olhos que enxergavam para três lados ao mesmo tempo.
 
-No folclore da Alta Silésia (Górny Śląsk), o **bebok** — também grafado *bobok*, *babok*, *bobek* ou *bobik* em regiões vizinhas da Polónia — é um ser sombrio, parecido com o bicho-papão. Não tem forma fixa: como existia apenas na imaginação de crianças assustadas, as descrições variam muito, desde uma pequena criatura parecida com um rato até uma figura enorme, peluda e negra, com cascos que batem no chão e olhos colocados em três lados da cabeça.
+O bebok morava nas fronteiras da casa e da aldeia. Na cabana, escondia-se no porão escuro — ali onde a arrepio corre pelas costas antes que você pense no porquê — ou num canto atrás da porta; lá fora, na floresta densa, num celeiro velho ou num edifício abandonado, "logo à porta", como diz uma das fontes regionais: perto o suficiente para que o horror fosse real, mas nunca perto o bastante para vê-lo desperto. As avós e os avós (sil. *avós maternos e paternos*) usavam-no como ferramenta educativa — não foi pouca criança que ouviu sussurrar: "Fica quieto, senão o bebok leva-te", quando não queria dormir ou mexia onde não devia. Curiosamente, a ameaça tinha também um lado prático e preventivo: machados, pregos e martelos "o bebok levava-os", ou seja, simplesmente guardavam-se fora do alcance das crianças — ou assim se explicava quando faltava alguma coisa de manhã.
 
-O bebok pertencia às margens da casa e da aldeia. Lá dentro, escondia-se em caves escuras e no canto logo atrás da porta. Lá fora, mantinha-se em florestas densas, celeiros antigos e edifícios abandonados — "logo atrás do limiar", como diz um relato regional: suficientemente perto para ser uma ameaça credível, mas nunca chegando a ser visto por completo. Pais e avós usavam-no como ferramenta educativa: avisava-se uma criança que não se comportasse, não quisesse dormir ou mexesse em algo perigoso de que o bebok viria buscá-la. Num pequeno truque interessante, a ameaça servia também de proteção real — machados, pregos e martelos eram "levados pelo bebok", ou seja, simplesmente guardados fora do alcance.
+O bebok nunca teve uma única história registada — não existe uma versão canónica da lenda — e por isso sobreviveu sobretudo na conversa oral, na narrativa sussurrada à noite, e é exatamente por isso que em cada aldea ele parecia um pouco diferente. Porque aquilo que não tem forma não se pode encerrar num conto — nem se pode fugir dele.
 
-Como nunca foi fixado por escrito como uma personagem única — não existe uma história canónica do bebok —, a figura sobreviveu sobretudo pela tradição oral, e é exatamente por isso que soa um pouco diferente em cada narrativa.
+## A lenda
 
-## Uma lenda
+Quase toda casa silésia tinha a sua versão desta história, mas todas soavam parecida com a que a avó Hanka contava — sempre no escuro, sempre em voz baixa, sempre de modo a que se ouvisse o bater do pé atrás da parede.
 
-Quase todas as casas silesianas parecem ter tido a sua própria versão desta história, mas todas se assemelham à que a avó Hanka costumava contar.
+Houve um rapaz que simplesmente se recusava a dormir. Todas as noites brigava, esticava o momento de apagar a luz e escapava da cama para deambular pela cabana — debaixo da mesa, atrás do armário, no porão, onde jaziam as batatas (sil. *tubérculos*). A avó avisava-o repetidamente: "Fica quieto, senão o bebok leva-te." O rapaz ria. Não acreditava nas sombras. E a sombra não precisa que nela acreditem.
 
-Era uma vez um menino que se recusava a ir dormir. Todas as noites discutia, adiava o momento e escapulia-se da cama para bisbilhotar pela casa — debaixo da mesa, atrás do armário, na cave onde se guardavam as batatas. A avó avisava-o vezes sem conta: "Porta-te bem, ou o bebok vem buscar-te." O menino ria-se. Não acreditava em sombras.
+Certa noite, desceu ao porão com uma vela, convencido de que provaria não haver nada com que temer. A escada rangeu sob ele como costelas velhas. A chama tremeu — e apagou-se por um instante, como se alguém soprasse por trás. Algo se moveu por detrás dos sacos de batatas — uma forma alta demais para aquele porão, com olhos que captavam a luz da vela e a devolviam em ouro. Duas mãos com garras alcançaram a vela — não o rapaz — e apagaram-na entre dedos enegrecidos. Na escuridão, ouviu-se uma voz como o farfalhar de folhas secas, ou como a respiração de alguém que está perto demais: "Dorme já. A manhã não é tua para a guardares."
 
-Certa noite, desceu à cave com uma vela, certo de que provaria que não havia nada a temer. A vela tremeluziu. Algo se moveu atrás dos sacos de batatas — uma forma alta demais para a divisão, com olhos que captavam a pequena chama e a devolviam dourada. Duas mãos com garras estenderam-se para a vela — não para o menino — e apagaram-na entre dedos enegrecidos. Na escuridão, uma voz como folhas secas disse apenas: "Dorme agora. A manhã não é tua para guardares."
+O rapaz não se lembrou de como voltou à cama. Mas a partir daquela noite adormecia assim que a cabeça tocava no travesseiro — e, coisa estranha, deixou de perder coisas. As bolinhas ficavam na caixa, os sapatos em pares, os cadernos na mochila. Anos mais tarde, já adulto e cético, chegou à conclusão de que o bebok não o assustava de todo — simplesmente cuidava da ordem noturna, limpando discretamente o pequeno caos que as crianças deixam quando já deviam estar a dormir. E o bater dos cascos no porão escuro? Eram apenas arrumações.
 
-O menino não se lembrava de ter voltado para a cama, mas, a partir dessa noite, adormecia assim que a cabeça tocava na almofada — e, curiosamente, deixou de perder coisas. As berlindes ficavam na lata, os sapatos ficavam aos pares, os trabalhos de casa ficavam na mochila. Anos depois, já adulto e céptico, concluiu que o bebok não o andara a assustar de todo: tinha estado a vigiar, arrumando em silêncio o pequeno caos que as crianças deixam para trás enquanto deveriam estar a dormir.
+E este é o ponto de viragem com que os silésios até hoje sorriem — embora o sorriso por vezes seja nervoso, porque cada um se lembra da noite em que o bater foi um pouco demasiado nítido. O bebok é menos um monstro e mais um guarda-noturno severo mas bem-intencionado. Assusta a preguiça, limpa o que ficou na escuridão, e parece assustador apenas para quem ainda não foi dormir. E isso, pensando bem, é um bastante bom emprego noturno para algo que vigia o código à noite — apanhando o que se estraga, para que de manhã tudo esteja outra vez no seu lugar.
 
-É essa a reviravolta que ainda faz sorrir os silesianos: o bebok é menos um monstro e mais um guarda-noturno rigoroso mas bem-intencionado. Afugenta o descuido, arruma o que fica na escuridão, e só parece ameaçador para quem ainda não foi para a cama. O que, pensando bem, também é uma boa descrição de funções para algo que vigia código durante a noite — perseguindo o que está mal comportado para que de manhã tudo volte a estar em ordem.
+## De onde veio o nome
 
-## De onde vem o nome
-
-As raízes da palavra apontam para algo simples: som e repulsa. No dialeto silesiano, *be* é uma exclamação para algo feio ou repugnante — o mesmo som instintivo que uma criança faz perante algo nojento. Duplicá-lo em *be-bok* intensifica-o, resultando em "o verdadeiramente feio". O vestígio escrito mais antigo desta crença remonta a um texto do século XVII conhecido como *Peregrynacja dziadowska* ("a peregrinação do mendigo"), e no século XIX o etnógrafo Oskar Kolberg registou-a como uma crença regional viva, ao lado dos seus primos *bobok* (Grande Polónia, Pequena Polónia) e *babok* (Cujávia).
+A raiz da palavra é simples: o som e a repulsa — e a repulsa, como se sabe, é por vezes o primeiro sinal do medo. Na fala silésia (sil. *dialecto*), "be" é um grito para algo feio ou repugnante — exatamente o mesmo som reflexo que uma criança faz ao ver algo nojento, antes de conseguir gritar. A duplicação para "be-bok" reforça esse significado, dando como resultado "aquilo que é verdadeiramente feio". O mais antigo rasto escrito destas crenças provém de um texto do século XVII conhecido como *Peregrynacja dziadowska* — e o próprio título soa como a previsão de algo que espera na escuridão à porta. No século XIX, o etnógrafo Oskar Kolberg registou o bebok como uma crença regional viva — ao lado dos seus primos: *bobok* (Grande Polônia, Pequena Polônia) e *babok* (Cujávia) — como se um único demónio não bastasse e fosse preciso guardar as fronteiras em cada dialecto.
 
 ## O bebok hoje
 
-O bebok nunca desapareceu de verdade. Desde julho de 2021, pequenas esculturas de bronze de beboks — concebidas pelo artista de Katowice Grzegorz Chudy e fundidas por Dariusz Kik e Karolina Piechota — têm vindo a surgir pela cidade, começando pelo bairro de Nikiszowiec.
+O bebok, na verdade, nunca desapareceu. Simplicmente mudou de forma — do assustador noturno passou a símbolo, e do símbolo a mascote. Mas atenção: uma mascote que se lembra da escuridão.
 
-![Uma estátua de bronze de um bebok disfarçado de detetive, segurando uma lupa](/about/bebok-szerlok.jpg)
+Desde julho de 2021, por Katowice — começando no Nikiszowiec, onde cada tijolo lembra cada sussurro — surgem pequenas figuras castanhas de beboks, desenhadas pelo artista de Katowice Grzegorz Chudy e fundidas por Dariusz Kik e Karolina Piechota.
 
-*Foto: "Katowice bebok Szerlok 2024" por [Gower](https://commons.wikimedia.org/wiki/User:Gower), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Katowice_bebok_Szerlok_2024.jpg).*
+Hoje, há mais de cem espalhadas pela cidade (mais um que foi parar até em Sopote — como se tivesse fugido do resto), cada uma com o seu nome e personalidade, frequentemente enfeitadas pelos habitantes nas festividades. Comparam-se aos anões de Breslávia, e a sua coleção ("Caçador de Beboks") tornou-se um verdadeiro hobby local — embora nem todo caçador queira admitir que procura um pouco tarde da noite, quando as ruas se esvaziam e as figuras projectam sombras que parecem mais longas do que deviam. Para além das esculturas, o bebok vive em jogos de cartas e de telemóvel, pelúrias, murais, livros e curtas-metragens — o antigo assustador do porão transformou-se no símbolo simpático da cidade. Mas ao anoitecer, quando passas junto a uma dessas figuras e ela está precisamente a olhar na tua direção — sabes que não é por acaso.
 
-Hoje há mais de cem espalhadas por Katowice (mais uma de visita a Sopot), cada uma com o seu próprio nome e personalidade, muitas vezes vestidas por moradores conforme a época do ano. São frequentemente comparadas aos famosos anões de Wrocław, e colecioná-las ("Łowca Beboków" / "caçador de beboks") tornou-se um verdadeiro passatempo local. Para além das esculturas, o bebok aparece em jogos de cartas e para telemóvel, peluches, murais, livros e curtas-metragens — um antigo habitante assustador da cave transformado em simpática mascote da cidade.
+## Por que esta aplicação se chama Bebok
 
-## Por que razão esta aplicação se chama Bebok
-
-Gostámos da ideia de uma criatura que ronda à noite, arrumando discretamente para que a manhã pareça melhor do que a noite anterior. É exatamente essa a descrição de funções de um agente de programação: trabalha enquanto não estás a ver e — tal como o bebok que vigia a cave das batatas — está ali para afugentar os bugs de debaixo da cama, não a ti.
+Gostámos da ideia de criar algo que de noite circula em silêncio e limpa a bagunça para que de manhã esteja melhor do que estava à noite. Algo que trabalha quando não olhas — no escuridão, ao som de teclas em vez de cascos, com os olhos fixos no código em vez de no porão de batatas. É exactamente a mesma descrição de funções de um agente de programação — e exactamente o mesmo medo que o bebok desperta: não medo dele próprio, mas de que de manhã se descubra que algo mudou durante a noite, algo foi corrigido, algo foi arrumado. E que aquilo que fez isso já desapareceu — deixando apenas a ordem e uma sombra na parede que se afasta demasiado depressa.
 
 ## Fontes
 
-- [Bebok — Wikipédia (polaco)](https://pl.wikipedia.org/wiki/Bebok)
-- [Katowice beboks — Wikipédia (inglês)](https://en.wikipedia.org/wiki/Katowice_beboks)
-- [Katowickie beboki — Wikipédia (polaco)](https://pl.wikipedia.org/wiki/Katowickie_beboki)
+- [Bebok — Wikipedia (pl)](https://pl.wikipedia.org/wiki/Bebok)
+- [Katowice beboks — Wikipedia (en)](https://en.wikipedia.org/wiki/Katowice_beboks)
+- [Katowickie beboki — Wikipedia (pl)](https://pl.wikipedia.org/wiki/Katowickie_beboki)
 - [Bebok — górnośląski demon, antryj.pl](https://antryj.pl/obyczaje/bebok)
 - [Bebok hunt: Katowice's Cutest Little Monsters, WannaBeEverywhere](https://www.wannabeeverywhere.com/poland/bebok-hunt/)
-- Imagens: Wikimedia Commons, CC BY-SA 4.0 (créditos sob cada foto)

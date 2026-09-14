@@ -19,6 +19,7 @@ import { EngineTargetStore } from '../core/engine-target.store';
 import { EventsStore } from '../core/events.store';
 import { FormFactor } from '../core/form-factor';
 import { ToolSafetyStore } from '../core/tool-safety.store';
+import { UpdateStore } from '../core/update.store';
 import { MobileShell } from '../ui/mobile-shell/mobile-shell';
 import { AppShell } from '../ui/shell/app-shell';
 
@@ -35,6 +36,7 @@ export class App implements OnInit, OnDestroy {
   private readonly customCss = inject(CustomCssService);
   private readonly toolSafety = inject(ToolSafetyStore);
   private readonly targets = inject(EngineTargetStore);
+  private readonly updates = inject(UpdateStore);
 
   /**
    * WP-M2 (F10-8): phone form factor -> `MobileShell` instead of `AppShell`.
@@ -76,6 +78,10 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     void this.syncCustomCss();
+    // Update checks belong to the main window only; viewer windows are bare.
+    if (!this.bare()) {
+      this.updates.start();
+    }
   }
 
   private async syncCustomCss(): Promise<void> {
@@ -93,6 +99,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.updates.stop();
     this.unsubscribeEvents();
     this.subscription.unsubscribe();
   }

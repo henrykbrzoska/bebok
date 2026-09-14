@@ -9,6 +9,7 @@ import { DebugView } from '../views/debug/debug';
 import { StatsView } from '../views/stats/stats';
 import { BrowserView } from '../views/browser-view/browser-view';
 import { AboutView } from '../views/about/about';
+import { UpdatesView } from '../views/updates/updates';
 import { redirectToDesktop, redirectToMobile } from '../ui/mobile-shell/mobile.guards';
 
 /**
@@ -34,6 +35,7 @@ export const routes: Routes = [
   { path: 'stats', component: StatsView, canActivate: mobile, data: { screen: 'stats' } },
   // F8-4: static, localized "What is Bebok?" explainer page.
   { path: 'about', component: AboutView, canActivate: mobile, data: { screen: 'about' } },
+  { path: 'updates', component: UpdatesView, canActivate: mobile, data: { screen: 'updates' } },
   // WP-M2 (F10-8): the mobile shell + its five tabs, one lazy chunk.
   {
     path: 'm',

@@ -24,10 +24,13 @@
 //!
 //! ## Abort propagation
 //!
-//! Cancelling a child task (via `POST /session/{id}/task/{taskID}/abort`) also
-//! cancels the parent turn — the orchestrator model is asked what to do next.
-//! If the child is aborted, the `task` tool returns a descriptive error so the
-//! user sees *which* task was cancelled.
+//! The parent's abort token cascades downward to all children via tokio's
+//! `CancellationToken` tree, so cancelling the parent turn stops every child.
+//! When a single child is aborted externally (via
+//! `POST /session/{id}/task/{taskID}/abort`), the route handler also cancels
+//! the parent's abort token, stopping the entire orchestrator turn. If the
+//! child is aborted, the `task` tool returns a descriptive error so the
+//! orchestrator knows *which* task was cancelled.
 
 use std::sync::{Arc, Weak};
 

@@ -19,8 +19,8 @@ use crate::config;
 use crate::error::{CoreError, Result};
 use crate::event::EventBus;
 use crate::permission::PermissionEngine;
-use crate::session::Session;
 use crate::session::persist::{self, data_root};
+use crate::session::{Part, Session, ToolState};
 use crate::util::normalize_path;
 
 /// Global store: instances keyed by normalized directory, sessions by id.
@@ -282,6 +282,44 @@ impl InstanceStore {
                 None => break,
             }
         }
+        // Repair interrupted tool calls left behind by a crash or engine
+        // restart. Tool parts stuck in `Running` or `Pending` are dead —
+        // no active turn will resume them — so transition them to `Error`
+        // to unblock future prompts (without this the model sees an
+        // orphaned tool call and returns 400 Missing tool response).
+        let mut repaired = false;
+        for msg in &mut messages {
+            if msg.role != crate::session::Role::Assistant {
+                continue;
+            }
+            for part in &mut msg.parts {
+                if let Part::Tool {
+                    state: tool_state, ..
+                } = part
+                    && matches!(
+                        tool_state,
+                        ToolState::Running { .. } | ToolState::Pending { .. }
+                    )
+                {
+                    let input = tool_state.input().clone();
+                    *tool_state = ToolState::Error {
+                        input,
+                        error: "interrupted by engine restart".to_string(),
+                    };
+                    repaired = true;
+                }
+            }
+        }
+
+        // Persist repaired messages so the fix survives future opens.
+        if repaired {
+            for (i, msg) in messages.iter().enumerate() {
+                if let Err(e) = persist::persist_message(state.disk_dir(), i, msg).await {
+                    tracing::warn!("failed to persist repaired message {i}: {e}");
+                }
+            }
+        }
+
         let count = messages.len();
         *state.messages.write().await = messages;
         state.note_message_index(count);
@@ -702,6 +740,10 @@ mod tests {
             .unwrap();
         let instance = store.get_or_create_instance(dir).await.unwrap();
         let engine = instance.permission.clone();
+        // Hermetic: the instance loads the real global config, which may set
+        // `yolo` (auto-allow everything) on a dev machine. Force it off so
+        // the default `Ask` for mutating tools is what we exercise here.
+        engine.set_yolo(false);
 
         // Child A asks for one path: default `Ask`, suggested rule is the TOOL.
         let first = engine.evaluate(

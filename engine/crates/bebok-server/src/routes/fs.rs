@@ -14,6 +14,10 @@ pub struct FsQuery {
     pub directory: String,
     #[serde(default)]
     pub path: Option<String>,
+    /// When `true` (or `1`), read the file as raw bytes, base64-encode the
+    /// content and return `binary: true` + `media_type` in the response.
+    #[serde(default)]
+    pub binary: bool,
 }
 
 fn is_project_config_path(root: &std::path::Path, rel: &str) -> bool {
@@ -50,6 +54,39 @@ fn is_project_config_path(root: &std::path::Path, rel: &str) -> bool {
     )
 }
 
+/// Map a file extension to a MIME media type for binary responses.
+fn media_type_from_path(rel: &str) -> &'static str {
+    let ext = std::path::Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "wasm" => "application/wasm",
+        "txt" | "md" | "rs" | "ts" | "js" | "py" | "go" | "java" | "c" | "cpp" | "h" | "css"
+        | "html" | "toml" | "yaml" | "yml" | "sh" | "bat" | "cmd" | "ps1" => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 /// `GET /fs/tree?directory=&path=` -> immediate children of `path` (lazy,
 /// gitignore-aware). The client expands a directory by requesting its path.
 pub async fn fs_tree(
@@ -69,6 +106,10 @@ pub async fn fs_tree(
 }
 
 /// `GET /fs/file?directory=&path=` -> file content (for the viewer/diffs).
+/// When `?binary=true` (or `?binary=1`), the file is read as raw bytes,
+/// base64-encoded, and returned with `media_type` metadata.  When the text
+/// read fails with a UTF-8 error (binary file accessed without the flag),
+/// the handler automatically falls back to binary mode.
 pub async fn fs_file(
     State(state): State<AppState>,
     Query(q): Query<FsQuery>,
@@ -88,10 +129,44 @@ pub async fn fs_file(
             ApiError::forbidden("use /config to inspect project configuration").into_response(),
         );
     }
-    match bebok_core::explorer::read_file_text(&instance.root, rel) {
-        Ok(text) => Ok(Json(serde_json::json!({ "path": rel, "content": text }))),
-        Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+
+    if q.binary {
+        read_binary(&instance.root, rel)
+    } else {
+        match bebok_core::explorer::read_file_text(&instance.root, rel) {
+            Ok(text) => Ok(Json(serde_json::json!({ "path": rel, "content": text }))),
+            // Non-UTF8 text read failure (e.g. binary file accessed without
+            // the binary flag): silently fall back to binary mode so images
+            // and other assets always load regardless of the client path.
+            Err(e) if is_likely_binary_error(&e) => read_binary(&instance.root, rel),
+            Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+        }
     }
+}
+
+/// Read a file as raw bytes, base64-encode it, and return with media type.
+fn read_binary(
+    root: &std::path::Path,
+    rel: &str,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    use base64::Engine as _;
+    let bytes = bebok_core::explorer::read_file_bytes(root, rel)
+        .map_err(|e| ApiError::bad_request(e).into_response())?;
+    let media_type = media_type_from_path(rel);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Json(serde_json::json!({
+        "path": rel,
+        "content": encoded,
+        "binary": true,
+        "media_type": media_type,
+    })))
+}
+
+/// Heuristic: a text-read error that looks like a UTF-8 / binary mismatch
+/// is worth auto-falling back to binary mode.
+fn is_likely_binary_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("utf-8") || lower.contains("utf8") || lower.contains("invalid")
 }
 
 /// `PUT /fs/file?directory=&path=` -> save file content (explorer edit mode).

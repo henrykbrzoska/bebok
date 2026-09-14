@@ -1,143 +1,200 @@
-# Bebok 1.4.1
+# Bebok 1.5.0
 
-Bebok is a local-first AI coding agent built from scratch with a Rust engine and an Angular client. The engine owns sessions, tools, permissions and configuration, while the client provides the desktop and browser interface.
+Bebok is a local-first AI coding agent. A headless Rust engine (axum + tokio,
+HTTP + SSE + WebSocket) owns sessions, tools, permissions, sub-agents and
+configuration; a thin Angular client renders it. The client runs as a desktop
+app (Tauri 2, engine bundled as a sidecar) or in the browser against an engine
+you start yourself. Everything runs on your machine; the only network traffic
+is to the LLM providers you configure.
 
-## Screenshots
+Roadmap: 1.6.0 adds an Android app (chat + remote follow).
 
-![English Studio Board chat with tool activity and panels](docs/screenshots/chat-studio-board.jpg)
+![Chat with collapsed tool groups, context meter and the right drawer](docs/screenshots/chat-tool-groups.png)
 
-English Studio Board chat with tool activity and panels.
+![Agents panel with live sub-agent tasks](docs/screenshots/agents-panel.png)
+
+![Changes panel with a unified diff of a file modified by the agent](docs/screenshots/changes-diff.png)
+
+![Explorer with syntax highlighting](docs/screenshots/explorer-highlight.png)
 
 ![Provider settings with a masked API key](docs/screenshots/settings-providers.jpg)
 
-Provider settings with a masked API key.
-
-![Project Explorer showing code](docs/screenshots/explorer-code.jpg)
-
-Project Explorer showing code from the current project.
-
 ## Features
 
-- **Rust engine + SSE** - axum, tokio; all logic and state live in the engine (the GUI only renders).
-- **Agent loop** - streaming + tool calls across **many providers** (OpenAI, Anthropic, Z.ai/GLM, xAI, DeepSeek, Google, Mistral, Groq, Qwen, OpenRouter, Ollama), selected by model prefix.
-- **Permissions** - `globset` patterns (`tool(args)`), `allow`/`deny`/`ask` verdicts, decision cache, global + project rules.
-- **Built-in tools** - `read_file` (with `offset`/`limit` line ranges), `write_file`, `append_file`, `edit_file`, `bash`, `fetch` (HTTP), plus native Rust ports of the common shell commands (`pwd`, `list_dir`, `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`, `glob`, `grep`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`) so the agent never needs OS-specific scripts.
-- **MCP** - `rmcp` bridge (stdio + streamable HTTP); MCP tools join the shared permission gate as `mcp__<server>__<tool>`.
-- **Agents** - built-in presets (`code`, `ask`, `plan`, `debug`, `orchestrator`) + files in `~/.config/bebok/agent/*.md` and `<project>/.bebok/agent/*.md` with hot reload.
-- **Skills & AGENTS.md** - global/project `AGENTS.md` + `skill/*/SKILL.md` appended to the system prompt (with toggles).
-- **Explorer** - gitignore-aware lazy file tree + preview/edit served through the engine (`/fs/*`).
-- **Debug log** - a single `debug.log` file next to the global config (cleared on startup, 10 000 chars cap) logging LLM + HTTP requests/responses, shown in the Debug tab.
-- **Plugins** - in-process event-observer API: any `BebokPlugin` observes every bus event and can hook (mutate/veto) the agent loop at `before.request`, `before.tool`, `after.tool`, `turn.end`, `permission.resolved` (register code-side; introspect via `GET /plugins`).
-- **Context management** - tool-output truncation, pruning, and compaction (internal fork; full history always available) + in-place rollback (`truncate`).
-- **Sessions** - fork / `continueLast` / export / truncate / delete; sidebar (tokens, prompt-cache, cost, files changed).
-- **Configuration** - JSONC (with comments), per-agent-type model overrides, provider registry, interpreter paths (python/python3/node/php/docker/git), Docker access check, yolo mode.
-- **Thinking effort** - configurable reasoning level (`off`/`low`/`medium`/`high`/`max`), mapped per provider (`reasoning_effort` for OpenAI-compatible, `budget_tokens` for Anthropic/Z.ai).
-- **Terminal** - engine-owned PTY (portable-pty, 1 MiB scrollback ring, resize, one-time 30 s tickets) + xterm.js tabs with reattach. Not available in Android builds (PTY surface is compiled out there).
-- **i18n** - 12 languages, default English.
+### Chat
+- Every tool call collapses into a one-line row; consecutive tool-only turns merge
+  into one group with summed In/Out usage (group -> call -> arguments/output expand).
+- Safety-level dots on each tool call (`safe` / `caution` / `dangerous` /
+  `uncategorized`) with a legend.
+- Context meter (tokens sent vs. the model window from the catalog), "Compact
+  context" button, automatic compaction at 85 % with a server-side marker.
+- Typed inline chips for paths, commands and identifiers; file paths and `.md`
+  links open the Preview panel; bare URLs are clickable.
+- Syntax highlighting (highlight.js, lazy per language) shared by chat, Preview,
+  Explorer and the diff view; ATX headings; model text is HTML-escaped.
+- Long transcripts render the last 60 messages with "Load earlier messages".
+- Image attachments (png/jpeg/webp/gif, 5 per prompt, 5 MiB each) for vision models.
+- Thinking effort per session (`off` / `low` / `medium` / `high` / `max`).
 
-## Tech stack
+### Panels (right drawer, 320 px, multi-select)
+- **Session** - tokens, cache hit rate, cost, sub-agents, active MCP servers and
+  skills, YOLO toggle.
+- **Explorer** - gitignore-aware lazy tree with viewer/editor served by the engine.
+- **Terminal** - engine-owned PTYs (xterm.js, 1 MiB scrollback, survive GUI
+  restarts) plus **Processes**: background `bash` jobs with log tailing and kill.
+- **Agents** - live sub-agent list with a read-only streaming transcript overlay.
+- **Changes** - files modified by tools, unified/split diff against git HEAD or a
+  first-write snapshot, "Open in Explorer", confirmed revert (sub-agent sessions included).
+- **Preview** - Markdown renderer with file picker, pin and modified-on-disk notice.
+- **Browser** - latest screenshot and URL from the browser tools, "Open in window".
 
-- **Engine**: Rust, edition 2024 (axum, tokio, rmcp, globset, notify, ignore, reqwest, serde).
-- **Client**: Angular 20.3 (standalone components, signals, zoneless).
-- **Desktop**: Tauri 2 (shell spawning the engine as a sidecar).
-(@TODO - **Mobile**: Capacitor (client → remote engine over LAN).)
+### Agents & verification
+- Presets `code`, `ask`, `plan`, `debug`, `orchestrator` plus your own
+  `<config dir>/bebok/agent/*.md` and `<project>/.bebok/agent/*.md` (hot reload).
+- Delegation with supervision: `delegation.mode` `off` | `auto` | `always`,
+  `max_concurrent`, `model_policy` `inherit` | `cheaper` (default; catalog-based
+  cheaper sibling) | explicit model; background tasks via `task`, `task_status`,
+  `task_wait`, `task_cancel`; token-free progress rows in the parent transcript.
+- Autonomous frontend verification (`verify.frontend`): the sub-agent starts every
+  dependency on its own non-default port, waits for readiness, screenshots the
+  loaded page, checks the API, fixes and re-verifies, and must report
+  `Status: PASS` / `PASS WITH NOTES` / `FAIL` - the parent treats it as a gate.
+- `browser_open` / `screenshot` / `click` / `type` / `get_text` / `eval` /
+  `console` / `wait` / `find` drive an installed Chrome, Edge or Chromium through
+  CDP (`chromiumoxide`). Display modes: `headed` (default), `viewer` (a second
+  window with a live frame stream), `drawer`. Screenshots reach the model as images.
+- `bash` supports `background: true` with readiness waits (`ready_port` /
+  `ready_text` / `ready_timeout`) and `bash_kill`.
 
-## Structure
-```text
-./
-├── engine/ # Rust workspace (virtual; default-members = bebok-server)
-│ ├── crates/
-│ │ ├── bebok-core/ # config/, session/, agent/, permission/, store/, event bus, plugin, context, debug
-│ │ ├── bebok-server/ # binary: main.rs + server.rs + state.rs + cli.rs + cors.rs + error.rs
-│ │ │ # + middleware.rs + routes/ (facade) + services/ (orchestration)
-│ │ ├── bebok-tools/ # Tool trait + built-in tools + registry + runtimes + docker probe + explorer
-│ │ ├── bebok-llm/ # Provider trait + OpenAI/Anthropic/Z.ai/OpenAI-compatible clients (SSE) + spec.rs
-│ │ ├── bebok-mcp/ # MCP bridge (rmcp)
-│ │ ├── bebok-skills/ # AGENTS.md + skills discovery + frontmatter + prompt assembly
-│ │ └── bebok-pty/ # PTY manager: spawn, scrollback ring, resize, tickets, Job Object
-│ └── Cargo.toml
-├── client/ # Angular 20 (web) + Tauri 2 (desktop) + Capacitor (mobile)
-│ ├── src/
-│ │ ├── app/ # bootstrap, routes
-│ │ ├── core/ # engine client, transport, events/activity/tabs/prefs/css stores, DTOs
-│ │ ├── views/ # start/, chat/, explorer/, terminal/, settings/, connect/, config/, debug/
-│ │ ├── ui/ # permission-popup/, session-sidebar/, html-preview/, shared UI
-│ │ └── i18n/ # 12 translation dictionaries (en.ts is the reference)
-│ ├── scripts/copy-sidecar.mjs # release binary -> src-tauri/binaries/bebok-server-[.exe]
-│ ├── capacitor.config.ts # mobile shell (webDir -> dist/bebok/browser)
-│ └── src-tauri/ # Tauri 2 shell (spawns engine sidecar, native dialogs)
-├── scripts/bebok.mjs # root orchestration: doctor / full-build-dev / full-build-app (npm run … from ./)
-├── scripts/release.md # tag-triggered release pipeline, signing secrets, local build leg
-├── dev.cmd, dev.sh # shortcuts for `npm run full-build-dev`
-├── AGENTS.md # contributor/agent orientation guide
-└── LICENSE
-```
+### Projects & git
+- Project registry with groups and a grouped, collapsible switcher.
+- Git awareness per project (branch, remote, GitHub, dirty count).
+- Worktree sessions: "Run in a git worktree" creates a branch under
+  `<project>/.bebok/worktrees/` (gitignored by the engine); branch badge in the
+  sidebar; worktree removal offered when the session is deleted.
 
+### Providers & models
+- Catalog-driven provider settings ("Test connection", model list, per-provider
+  env var hint), vendored [models.dev](https://models.dev) snapshot for context
+  windows, pricing and cheaper-sibling mapping.
+- Streaming with retry/backoff and vendor-neutral error mapping (rate limits,
+  `retry_after`), prompt-cache accounting, cost per session.
+- Reasoning effort mapped per provider (`reasoning_effort` for OpenAI-compatible,
+  `budget_tokens` for Anthropic / Z.ai).
 
-## Requirements
+### Security
+- Per-launch capability token: the engine prints `BEBOK_READY http://127.0.0.1:<port>/?token=...`;
+  every request needs `Authorization: Bearer` or `?token=`; a rejected token shows a
+  reconnect prompt in the client.
+- Path guards confine file tools and the Explorer to the project root; the engine
+  binds `127.0.0.1` and restricts CORS to known origins.
+- Secrets are redacted in `GET /config` and the diagnostic log; the `token=` query
+  is scrubbed from access logs.
+- Explicit tool safety categories (`GET /tools/safety`, overridable per tool in
+  config) and permission rules (`globset` patterns over `tool(args)`, verdicts
+  `allow` / `deny` / `ask`, global + project layers, "Always allow this tool").
+- `browser_*` tools default to Ask even when read-only; MCP tools join the same
+  gate as `mcp__<server>__<tool>`.
 
-- Rust ≥ 1.85 (edition 2024)
-- Node.js ≥ 20 + npm
-- (desktop) Tauri 2 system dependencies - see [tauri.app](https://tauri.app/start/prerequisites/)
+### Also
+- **Stats** screen (`GET /stats`): per-project / per-model / per-day usage and cost
+  with sortable tables.
+- **About** page ("What is Bebok?") with the Silesian legend, in all 12 UI languages.
+- MCP bridge (`rmcp`, stdio + streamable HTTP), `AGENTS.md` + `skill/*/SKILL.md`
+  prompt assembly, in-process plugin hooks, JSONC config with comment-preserving writers.
+- Built-in cross-platform tools: `read_file`, `write_file`, `edit_file`,
+  `append_file`, `sed`, `fetch`, `bash` and native ports of `pwd`, `list_dir`,
+  `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`,
+  `glob`, `grep`, `find`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`, `ln`,
+  `gzip`, `realpath`, `basename`, `dirname`, `sha256sum`, `base64`.
 
-The engine and client build on **Linux and Windows**. CI
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds and tests the
-engine (`cargo build` / `cargo test --workspace` from `engine/`) plus the client
-(`npm ci` + `npm run build` from `client/`) on both `ubuntu-latest` and
-`windows-latest`.
+## Supported providers
 
-## Quick start
+Built into `bebok-llm` (`engine/crates/bebok-llm/src/spec.rs`); the model prefix
+selects the provider (`openai/gpt-4.1`, `anthropic/claude-sonnet-4-5`, ...).
+The API key comes from the provider entry in config, else `<NAME>_API_KEY`
+(e.g. `OPENAI_API_KEY`, `ZAI_API_KEY`), else the top-level `api_key` fallback.
+
+| Name | Kind | Default endpoint |
+|---|---|---|
+| `openai` | openai | `https://api.openai.com/v1` |
+| `anthropic` | anthropic | `https://api.anthropic.com/v1` |
+| `zai` | anthropic | `https://api.z.ai/api/anthropic/v1` |
+| `xai` | openai | `https://api.x.ai/v1` |
+| `deepseek` | openai | `https://api.deepseek.com/v1` |
+| `google` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `mistralai` | openai | `https://api.mistral.ai/v1` |
+| `groq` | openai | `https://api.groq.com/openai/v1` |
+| `qwen` | openai | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` |
+| `ollama` | openai | `http://localhost:11434/v1` (no key) |
+
+Any other OpenAI-compatible or Anthropic-compatible server can be added as a
+custom provider (name, kind, endpoint, key) in Settings > Providers.
+
+## Downloads (1.5.0)
+
+Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.5.0>
+(all assets built by the release workflow from commit `28d673b`; checksums in `SHA256SUMS.txt`).
+
+| OS | Desktop app | Headless engine |
+|---|---|---|
+| Windows x64 | `bebok_1.5.0_x64-setup.exe` (NSIS), `bebok_1.5.0_x64_en-US.msi`, `bebok-1.5.0-windows-x64-portable.zip` | `bebok-server-1.5.0-windows-x64.exe` |
+| Linux x64 | `bebok_1.5.0_amd64.deb`, `bebok_1.5.0_amd64.AppImage`, `bebok-1.5.0-linux-x64-portable.tar.gz` | `bebok-server-1.5.0-linux-x64` |
+| macOS Apple silicon | `bebok_1.5.0_aarch64.dmg`, `bebok_1.5.0_aarch64.app.tar.gz` | `bebok-server-1.5.0-macos-arm64` |
+| macOS Intel | `bebok_1.5.0_x64.dmg`, `bebok_1.5.0_x64.app.tar.gz` | `bebok-server-1.5.0-macos-x64` |
+
+The builds are **unsigned**. macOS: Gatekeeper blocks the first launch -
+right-click > Open, or `xattr -dr com.apple.quarantine /Applications/bebok.app`.
+Windows: SmartScreen shows "Windows protected your PC" - More info > Run anyway.
+Linux: the AppImage and the portable build need WebKitGTK 4.1 on the host.
+Portable archives contain `bebok-desktop` and `bebok-server` side by side; keep
+them together (the shell resolves the sidecar next to its own executable). The
+standalone `bebok-server` binary is for browser mode / a remote engine.
+
+## Quick start (from source)
+
+Prerequisites: Rust >= 1.88 (edition 2024), Node.js 22 (>= 20 works) + npm,
+and for the desktop shell the Tauri 2 system dependencies for your OS
+(WebView2 + MSVC build tools on Windows, `webkit2gtk-4.1` / `libsoup-3.0` /
+`gtk+-3.0` / `librsvg-2.0` on Linux, Xcode command line tools on macOS - see
+[tauri.app](https://tauri.app/start/prerequisites/)). Browser mode needs no Tauri deps.
 
 ```bash
-npm run doctor           # checks rustc/cargo, node, tauri cli and the OS-level Tauri deps
-npm run full-build-dev   # builds + starts the engine and `ng serve`, opens with the token wired in (--open)
-npm run full-build-app   # engine release + sidecar + Tauri bundles for this OS, prints paths + SHA256
+npm run doctor                    # rustc/cargo, node/npm, tauri cli, OS-level Tauri deps
+npm run full-build-dev -- --open  # engine (debug) + ng serve, browser opens already connected
+npm run full-build-app            # engine release + sidecar + Tauri bundles for this OS + SHA256
 ```
 
 Run these from the repo root (`dev.cmd` / `./dev.sh` are shortcuts for
-`full-build-dev`; `dev.cmd tauri` / `./dev.sh --tauri` run the desktop shell
-via `tauri dev` instead). `full-build-dev` prints
-`http://localhost:4200/?engine=<url-encoded BEBOK_READY url>` - the browser
-client adopts that engine address + token once and strips it from the address
-bar, so nothing has to be pasted. Flags: `--port`, `--client-port`, `--no-auth`,
-`--diagnostic`, `--open`, `--tauri`; `full-build-app` takes `--bundles`,
-`--skip-engine`, `--skip-tauri`. See `node scripts/bebok.mjs --help`. The
-manual steps below still work.
+`full-build-dev`; `dev.cmd tauri` / `./dev.sh tauri` run the desktop shell via
+`tauri dev` instead). `full-build-dev` builds `bebok-server`, starts it on
+`:8787`, waits for the `BEBOK_READY http://127.0.0.1:8787/?token=...` line on
+its stdout, starts `ng serve` on `:4200` and prints
+`http://localhost:4200/?engine=<url-encoded BEBOK_READY url>`. The client adopts
+the `?engine=` parameter once on first load (engine URL + token, stored like a
+manual Connect), strips it from the address bar and then talks to the engine with
+`Authorization: Bearer`. Ctrl+C stops both processes.
 
-## Running
+Flags: `--port`, `--client-port`, `--no-auth` (`BEBOK_NO_AUTH=1`),
+`--diagnostic` (`BEBOK_DIAGNOSTIC=1`), `--open`, `--tauri`; `full-build-app`
+takes `--bundles nsis,msi|deb,appimage|dmg`, `--skip-engine`, `--skip-tauri`.
+`npm run engine` / `npm run client` run one half only. `node scripts/bebok.mjs --help`
+lists everything.
 
-### 1. Engine (headless)
-
-```bash
-cd engine
-ZAI_API_KEY=<key> cargo run
-```
-
-The engine listens on `http://127.0.0.1:8787` by default (no password). Bind flags are `--host IP`, `--port PORT`, `--addr IP:PORT`, or the `BEBOK_ADDR` environment variable; explicit flags take precedence. Extra CORS origins can be provided through `BEBOK_CORS` (comma separated). Provider API keys resolve through the configured provider, its environment variable, then the top-level `api_key` fallback.
-
-### 2. Client (browser mode)
+Manual equivalent:
 
 ```bash
-cd client
-npm install
-npm start            # http://localhost:4200
-```
-Enter the engine address (the `BEBOK_READY http://127.0.0.1:8787/?token=…` line the engine printed) and pick a project directory - or open `http://localhost:4200/?engine=<url-encoded BEBOK_READY url>` and the client adopts it by itself (this is what `npm run full-build-dev` does).
-
-### 3. Desktop (Tauri)
-
-```bash
-cd engine && cargo build --release
-cd ../client && npm run sidecar:copy && npm run tauri:build
+cd engine && cargo run                          # engine on http://127.0.0.1:8787, prints BEBOK_READY
+cd client && npm install && npm start           # http://localhost:4200, paste the BEBOK_READY URL
+cd engine && cargo build --release && cd ../client && npm run sidecar:copy && npm run tauri:build
 ```
 
-`sidecar:copy` copies the release engine binary to `src-tauri/binaries/bebok-server-[.exe]` using the target triple from `rustc -vV`. `tauri:build` compiles the frontend, bundles the sidecar and produces the platform binary and installers. For development, use `npm run tauri:dev`. `npm run full-build-app` (repo root) chains all of this for the host OS (`--bundles nsis,msi` / `deb,appimage` / `dmg`, unsigned) and prints the artifact paths with SHA256 sums.
+Engine flags: `--host IP`, `--port PORT` (`0` = random, used by the desktop
+shell), `--addr IP:PORT`; explicit flags beat `BEBOK_ADDR`. Logs go to stderr;
+stdout is reserved for the `BEBOK_READY` handshake.
 
-Official builds for Windows, Linux and macOS (Apple silicon + Intel) are produced by GitHub Actions when a `X.Y.Z` tag is pushed - see [scripts/release.md](scripts/release.md) for the version bump (`npm run version:bump -- X.Y.Z`), tagging, optional signing secrets and how to test-run the pipeline without tagging.
-
-The engine prints `BEBOK_READY http://host:port` on stdout so the shell can discover a sidecar started with `--port 0`; logs go to stderr.
-
-### 4. Mobile (Capacitor)
+### Mobile (Capacitor, unreleased)
 
 ```bash
 cd client && npm run build && npx cap sync
@@ -158,162 +215,132 @@ implemented in 1.6.0 (`allowBackup=false` keeps that file out of cloud
 backups; a rooted device or `adb backup`-style extraction can still read
 it). Prefer keys with a small scope / spend cap on the phone.
 
-## Projects
-
-A project is a registered directory with a friendly name. Bebok stores the registry in
-`~/.config/bebok/config.json` under the `projects` key. Desktop uses the native directory
-dialog; browser and Capacitor clients use Bebok's in-app directory browser.
-
-### Tests
-
-```bash
-cd engine && cargo test --workspace   # engine
-cd ../client && npm run build         # client (build = type-check)
-```
 
 ## Configuration
 
-Configuration is JSONC (comments preserved), loaded in layers:
-global ~/.config/bebok/config.json → project /.bebok/config.json
-(overrides global; providers merge by name). Sections:
+Configuration is JSONC (comments preserved on write), layered
+defaults -> global -> project (`<project>/.bebok/config.json`, providers merge
+by name). The global file lives in the OS config directory (`dirs::config_dir()`):
+
+| OS | Global config | Engine data (sessions, digests) |
+|---|---|---|
+| Linux | `~/.config/bebok/config.json` | `~/.local/share/bebok/` |
+| Windows | `%APPDATA%\bebok\config.json` | `%APPDATA%\bebok\` |
+| macOS | `~/Library/Application Support/bebok/config.json` | `~/Library/Application Support/bebok/` |
+
+Custom agents, `AGENTS.md` and `skill/*/SKILL.md` go next to it (`bebok/agent/`,
+`bebok/AGENTS.md`, `bebok/skill/`); the diagnostic log `bebok/debug.log` is cleared
+on every start and served only with `BEBOK_DIAGNOSTIC=1`. Background process logs
+land in `<project>/.bebok/run/<id>.log`.
+
+Environment variables read by the engine:
+
+| Variable | Effect |
+|---|---|
+| `BEBOK_ADDR` | bind address `IP:PORT` (default `127.0.0.1:8787`; CLI flags win) |
+| `BEBOK_NO_AUTH=1` | disable the capability token (local API unauthenticated - logged loudly) |
+| `BEBOK_TOKEN` | use this token instead of generating one per launch |
+| `BEBOK_CORS` | extra allowed origins, comma separated |
+| `BEBOK_DIAGNOSTIC=1` | enable `GET/DELETE /debug/log` (redacted LLM + HTTP trace; 404 otherwise) |
+| `BEBOK_SHELL` | shell for `bash` and the terminal (default `cmd /C` on Windows, `sh -c` elsewhere) |
+| `BEBOK_BROWSER` | path to the Chrome/Edge/Chromium binary for the `browser_*` tools |
+| `BEBOK_BROWSER_HEADLESS=1` | run that browser headless (also `BEBOK_BROWSER_NO_SANDBOX`, `BEBOK_BROWSER_WINDOW_POS`) |
+| `BEBOK_MODEL_CATALOG` | path to a models.dev JSON overriding the vendored snapshot |
+| `<NAME>_API_KEY` | provider key when the config entry leaves `api_key` empty |
+
+Main sections (all editable in Settings; the GUI writes deltas atomically):
 
 ```jsonc
 {
-  "model": "zai/glm-5.3-flash",    // default model (prefix selects the provider)
-
-  // per-agent-type model overrides (code / ask / plan / debug / orchestrator)
-  "models": {
-    "plan": "anthropic/claude-sonnet-4-5"
-  },
-
-  // provider registry: name, kind, endpoint, api_key (empty = env var), models
-  "providers": [
+  "model": "openai/gpt-4.1",                 // default model; prefix = provider
+  "models": { "plan": "anthropic/claude-sonnet-4-5" },   // per-agent overrides
+  "providers": [                             // registry; empty api_key = env var
     { "name": "openai", "kind": "openai", "endpoint": "https://api.openai.com/v1", "api_key": "" },
     { "name": "ollama", "kind": "openai", "endpoint": "http://localhost:11434/v1", "api_key": "" }
   ],
-
-  "api_key": "...",                  // fallback provider key
+  "api_key": "",                             // fallback key
   "max_tokens": 8192,
-  "thinking": "off",               // reasoning effort: off | low | medium | high | max
-  "context_budget": 64000,           // tokens before pruning/compaction
-  "tool_output_cap": 32768,          // per-tool-output truncation (bytes)
-  "yolo": false,                     // auto-allow every tool call (dangerous)
+  "thinking": "off",                         // off | low | medium | high | max
+  "context_budget": 64000,                   // tokens before pruning / auto-compaction
+  "tool_output_cap": 32768,                  // per-tool-output truncation (bytes)
+  "yolo": false,                             // auto-allow every tool call (dangerous)
 
+  "delegation": { "mode": "auto", "max_concurrent": 3, "model_policy": "cheaper" },
+  "verify": { "frontend": "auto" },          // auto | ask | off
+  "tool_safety": { "fetch": "safe", "mcp__github__*": "caution" },     // per-tool overrides
   "permission": { "rules": [
     { "pattern": "bash(git *)", "action": "allow" },
-    { "pattern": "fetch(http://127.0.0.1:*)", "action": "allow" }
+    { "pattern": "fetch(http://127.0.0.1:*)", "action": "allow" },
+    { "pattern": "rm(*)", "action": "deny" }
   ]},
-
-  "mcp": {
-    "filesystem": { "transport": "stdio", "command": "npx", "args": ["-y", "..."], "enabled": true },
-    "github":     { "transport": "http", "url": "https://...", "headers": { "Authorization": "..." }, "enabled": false }
-  },
-
+  "browser": { "display": "headed" },        // headed | viewer | drawer
+  "mcp": { "filesystem": { "transport": "stdio", "command": "npx", "args": ["-y", "..."], "enabled": true } },
   "skills": { "commit-helper": false },
-
-  "runtimes": {
-    "python": "/usr/bin/python3",
-    "python3": "/usr/bin/python3",
-    "node": "/usr/bin/node",
-    "php": "/usr/bin/php",
-    "docker": "/usr/bin/docker",
-    "git": "/usr/bin/git"
-  },
-
-  "ui": { "customCss": "", "customCssFiles": [] }  // client-only theme text
+  "runtimes": { "python": "/usr/bin/python3", "node": "/usr/bin/node", "docker": "/usr/bin/docker", "git": "/usr/bin/git" },
+  "ui": { "customCss": "", "customCssFiles": [] }
 }
 ```
-Effective model per turn: prompt-body model → agent preset model →
-session model → models. → model. An explicit agent on a prompt
-persists to the session for subsequent turns.
 
-Most of this (model, per-type models, providers + "check available models",
-API key, permission rules, MCP, skills, interpreter paths, Docker check) is
-editable in the GUI: Settings. GUI edits go through JSONC delta writers
-(atomic tmp+rename, comments preserved) + instance reload.
+Effective model per turn: prompt-body model -> agent preset model -> session
+model -> `models.<agent>` -> `model`. Read-only tools default to `allow`,
+mutating ones to `ask`; `browser_*` always asks unless the verification policy
+or a rule says otherwise.
 
-## Tools
+## Development
 
-The built-ins are the portable primitives the agent should reach for instead of
-writing OS-specific scripts (`bash` runs `cmd /C` on Windows, `sh -c` elsewhere):
+```text
+engine/                    Rust workspace (edition 2024; default-members = bebok-server)
+  crates/bebok-core/       config/, session/, agent/ (presets, delegation, verify prompts), permission/,
+                           store/, change_tracking, git, stats, tool_safety, plugin, context, event bus
+  crates/bebok-server/     binary: cli, auth (token), cors, middleware, routes/ (route table), services/
+  crates/bebok-tools/      Tool trait + built-ins, browser/ (CDP), processes (background bash), pathguard
+  crates/bebok-llm/        providers, protocols (openai_chat, anthropic_messages), model_catalog, cost, cache_policy
+  crates/bebok-mcp/        rmcp bridge        crates/bebok-skills/  AGENTS.md + skills
+  crates/bebok-pty/        PTY manager (portable-pty, scrollback ring, tickets)
+client/                    Angular 20.3 (standalone, signals, zoneless) + Tauri 2 shell (src-tauri/)
+  src/app | core | views (start, chat, explorer, terminal, settings, stats, about, debug, browser-view)
+  src/ui (shell, sidebar, right-drawer/panels, command-palette, diff-view, ...) | src/i18n (12 languages)
+scripts/bebok.mjs          doctor / full-build-dev / full-build-app / engine / client
+scripts/release.md         release runbook        .github/workflows/{ci,release}.yml
+```
 
-- `read_file` - `path` plus optional `offset` (1-based line) / `limit` (lines);
-  returns the raw file when no range is given, and a `[read_file: lines a-b of n]`
-  marker when it slices (so no `head`/`sed`/node one-liners).
-- `fetch` - HTTP request/response as a tool: `url`, `method` (default `GET`),
-  `headers`, `json` (or raw `body`), `max_bytes` (default 64 KiB, max 1 MiB).
-  Streams the body, pretty-prints JSON, honours the turn's abort token.
-  Same behaviour on every OS, so no `curl`/`jq`/node probe scripts.
-- Per-call permission class: `GET`/`HEAD` count as read-only (default `allow`),
-  every other method defaults to `ask`. Rules match on the URL
-  (`fetch(http://127.0.0.1:*)`) because `url` is the canonical arg text.
-- `bash` - `command` only, run through the platform shell. Reach for it only
-  when no native tool fits (builds, tests, git, package managers).
-- File management - native ports of the common shell commands, identical on
-  every OS: `mkdir`, `touch`, `cp`, `mv`, `rm` (a directory needs
-  `recursive: true`), `chmod`, `ln` (symbolic or hard), `gzip`
-  (compress/decompress), and `append_file` (grows a file without re-sending its
-  whole content).
-- Inspection - `list_dir`, `tree`, `stat` (type/size/mtime/mode), `du` (size
-  breakdown), `head`, `tail`, `wc`, `sort`, `uniq`, `diff` (unified, Myers),
-  `which` (is it installed?), `glob`, `grep`, `find` (glob/type/depth,
-  gitignore-aware), `realpath`, `basename`, `dirname`, `sha256sum`, `base64`
-  (read-only unless `out` is given).
-- Text - `read_file` (ranges), `edit_file` (literal replace), `sed`
-  (`s/pattern/replacement/flags`, regex, in place by default).
-- Read-only tools default to `allow`, mutating ones to `ask` (see Permissions).
+Tests:
 
-## Endpoints (engine)
+```bash
+cd engine && cargo test --workspace                      # ~550 tests (1.5.0 QA: 0 failures)
+cd engine && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
+cd client && npm test                                    # ng test (Karma + Jasmine, ~63 spec files)
+cd client && npm run build                               # type-check + bundle
+```
 
-Directory-keyed endpoints take ?directory=. The single route table lives in
-engine/crates/bebok-server/src/routes/mod.rs.
+CI (`.github/workflows/ci.yml`) runs fmt, clippy, build and test for the engine
+and `npm ci` + `npm run build` for the client on `ubuntu-22.04` and `windows-latest`.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | /session | create ({ directory, agent?, model?, continueLast?, forkOf? }) |
-| GET | /session?directory= | list sessions |
-| GET | /session/{id} | session meta (+ usage totals) |
-| DELETE | /session/{id} | delete session (409 while a turn runs) |
-| GET | /session/{id}/message | messages (full parts transcript) |
-| POST | /session/{id}/prompt | start a turn (202; 409 when busy) |
-| POST | /session/{id}/abort | abort a turn |
-| GET | /session/{id}/export | full JSON export (meta + transcript) |
-| POST | /session/{id}/compact | compact as an internal fork (new session, parent set) |
-| POST | /session/{id}/truncate | rollback in place ({ keep }) |
-| POST | /session/{id}/permission/{requestID} | permission decision (allow/deny + always) |
-| GET | /agent?directory= | agents (presets + files) |
-| GET | /mcp?directory= | MCP servers + status |
-| POST | /mcp/{name}/toggle?directory= | enable/disable an MCP server |
-| GET/PUT | /config?directory= | resolved config (PUT = delta write + reload) |
-| GET | /docker?directory= | Docker access probe |
-| GET | /models?directory=&provider= | list a providers models (persists into project config) |
-| GET | /fs/tree?directory=&path= | gitignore-aware lazy file tree (immediate children) |
-| GET/PUT | /fs/file?directory=&path= | file content (viewer / edit) |
-| GET | /plugins | registered plugins + exposed hook points |
-| GET | /event | SSE stream ({ type, directory, sessionID, properties }) |
-| GET/DELETE | /debug/log | debug log (LLM + HTTP requests/responses) |
-| POST/GET | /pty | create / list terminal sessions (non-Android only) |
-| POST | /pty/{id}/ticket | one-time connect ticket (30 s TTL, single-use) |
-| GET | /pty/{id}/connect?ticket= | WebSocket upgrade (terminal) |
+Linux tests from a Windows host (Docker Desktop, WSL2 backend; use a real clone,
+not a linked worktree, and `bash -c`, not `bash -lc`):
 
-Status semantics: 202 = prompt accepted (turn runs in background),
-409 = session busy, 404 = unknown session/ask/rule, 400 = bad request.
+```powershell
+docker run --rm -v "C:\path\to\bebok:/src" -w /src/engine -e CARGO_TERM_COLOR=never rust:1.97-bookworm bash -c "apt-get update -qq && apt-get install -y -qq git pkg-config libssl-dev && git config --global --add safe.directory /src && cargo test --workspace --no-fail-fast"
+docker run --rm -v "C:\path\to\bebok:/src" -w /src/client node:22 bash -c "npm ci && npx ng build"
+```
 
-## [windows] — finding the desktop sidecar engine + delegation test (2026-09-11)
+Copy the tree into a named volume first if `npm ci` over the bind mount is slow.
 
-bebok-desktop.exe spawns bebok-server.exe with `--port 0`, so the engine port is random.
-Find it with `tasklist | findstr /I bebok` (get the bebok-server.exe PID) then
-`netstat -ano | findstr LISTENING` (match that PID to a 127.0.0.1:PORT line — e.g. PID 5980
--> 127.0.0.1:64083 on 2026-09-11). Port 8787 applies only to `cd engine && cargo run`.
-Verify with GET /plugins and GET /agent?directory= (both 200 on the sidecar).
+## Releasing
 
-Delegation smoke test: create an orchestrator session (POST /session), prompt it
-(POST /session/{id}/prompt -> 202), poll GET /session/{id}/message, then list sessions
-(GET /session?directory=) filtering by parent==parentID to find the ASK child.
-Note: the orchestrator may answer directly without calling the `task` tool unless told
-"You MUST use the `task` tool now ... Do NOT answer directly". Cancelling a child aborts
-the whole parent turn. Unit-level proof without a running engine:
-`cd engine && cargo test -p bebok-core task_` (5 passed).
+`npm run release` - the script suggests the version from the commits, drafts
+the changelog, opens a `release/X.Y.Z` PR; CI builds a draft release from it;
+merging publishes it and installed desktop apps update themselves. Never
+assemble releases by hand. [CONTRIBUTING.md](CONTRIBUTING.md#releasing)
+([PL](CONTRIBUTING.pl.md)) has the three steps; CI internals are in
+[scripts/release.md](scripts/release.md).
 
-Cmd gotchas: no head/tail/wc/grep/curl — use findstr/tasklist/netstat; avoid
-`node -e` quoting traps by writing probe .js files and running `node file.js`.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) (Polish: [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md))
+and [AGENTS.md](AGENTS.md).
+
+## License
+
+GNU Affero General Public License v3.0 or later - see [LICENSE](LICENSE).
+Copyright (C) 2026 Henryk Brzoska.

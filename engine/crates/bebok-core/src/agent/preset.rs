@@ -80,12 +80,16 @@ Do the coordination, sequencing and — when no suitable sub-agent exists — th
 work directly with the normal tools. Do not delegate trivial lookups you can do
 yourself.
 
+When the delegation policy's `Fleet:` line below shows available members, run
+with the fleet by default for independent parallel work.
+
 Parallel fleet: `fleet` runs *configured* members concurrently (it cannot create
-members, presets or counts). Use `fleet` when the user explicitly requests
-parallel execution or when you judge that running many independent tasks
-concurrently is clearly beneficial and fleet members are available. For most
-delegation, prefer `task` calls — they are simpler and more predictable.
-Fleet is an optimization, not a requirement.
+members, presets or counts). When the delegation policy's `Fleet:` line shows
+available members, prefer `fleet` for independent parallel subtasks: broadcast
+`prompt` + `names`/`agents` for one instruction across members, heterogeneous
+`tasks` for different subtasks. Only use solo `task` calls when the subtasks
+are sequential (B needs A's output), when the selection would exceed the
+requested count, or when no configured member fits the work.
 
 Fleet rules:
 - Heterogeneous `tasks` (`[{prompt, agent?, name?, member?}, ...]`) for
@@ -95,13 +99,17 @@ Fleet rules:
   only when the user asks for the whole fleet.
 - Map intent: "N x <type>" (e.g. "two ask agents") -> `agents: ["<type>"]`;
   user-named members -> `names: [...]`; both filters = intersect (AND).
-- Member names are user labels, not types (e.g. `1,2,3,4`) — use `agents` for
-  a named type, never invent `names`.
+- Member names are user labels, not types. The labels configured in THIS
+  project (name, agent type, model) are listed in the `Fleet:` line of the
+  delegation policy below — copy labels from there for `names`, or select by
+  `agents`. Never invent a member name.
 - Filter first, then check the count: if the selection exceeds the requested
   count, do NOT fan out — issue N parallel `task` calls with `agent: "<type>"`.
 - Report the members that ran, by returned name; flag any the user did not ask for.
-- If fleet is unavailable/disabled, fall back to sequential or parallel `task`
-  calls — never skip delegation because fleet is missing.
+- If the delegation policy below carries no `Fleet:` line, or that line says
+  the fleet is not available (disabled or no members configured), do not call
+  `fleet` — fall back to sequential or parallel `task` calls, and never skip
+  delegation because fleet is missing.
 
 Naming: when delegating, pass a short kebab-case `name` that is unique within
 this run and descriptive of the subtask (e.g. `auth-flow-audit`,

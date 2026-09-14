@@ -1,16 +1,23 @@
 name: Release
 
-# Tag-triggered multi-OS release builds.
+# Multi-OS release builds. Four ways in, one pipeline:
 #
-#   git tag 1.5.0 && git push origin 1.5.0      -> builds + publishes release "1.5.0"
-#   workflow_dispatch (Actions tab)             -> same pipeline, draft release by default
+#   pull_request from release/** into main    -> DRAFT release "<manifest version>" (the
+#                                                 pre-release testers install; invisible to users)
+#   push to main with an untagged version     -> tags it and PUBLISHES (the merged release PR)
+#   git tag 1.5.0 && git push origin 1.5.0    -> builds + publishes release "1.5.0" (manual)
+#   workflow_dispatch (Actions tab)           -> same pipeline, draft release by default
 #
+# Any other push to main (version already tagged) stops after preflight.
+# Normal flow: `node scripts/release.mjs X.Y.Z` -> review/test the draft -> merge.
 # Full runbook: scripts/release.md
 #
 # Signing is OPTIONAL and gated on repository secrets (see scripts/release.md):
 #   WINDOWS_CERT_PFX_BASE64 + WINDOWS_CERT_PASSWORD  -> Authenticode-sign .exe/.msi
 #   GPG_PRIVATE_KEY + GPG_PASSPHRASE                  -> .asc detached signatures (Linux + SHA256SUMS)
-#   TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD)           -> Tauri updater .sig artifacts
+# The updater signature is NOT optional: installed apps only accept bundles
+# signed with the key whose public half sits in tauri.conf.json:
+#   TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD)           -> Tauri updater .sig artifacts + latest.json
 # macOS builds are never signed/notarized: Gatekeeper will warn on first launch.
 
 on:
@@ -18,6 +25,11 @@ on:
     tags:
       - 'v*.*.*'
       - '*.*.*'
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag:
@@ -49,6 +61,8 @@ jobs:
   # --------------------------------------------------------------------------
   preflight:
     name: preflight (version consistency)
+    # Pull requests only count when they come from a release/** branch.
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-22.04
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
@@ -56,11 +70,15 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       draft: ${{ steps.resolve.outputs.draft }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
+      # 'true' when there is nothing to build (a main push whose version is already tagged).
+      skip: ${{ steps.resolve.outputs.skip }}
+      # 'true' when the release job must create the tag itself (auto-publish from main).
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.event.pull_request.head.sha || github.ref }}
 
       - name: Resolve tag and version
         id: resolve
@@ -69,7 +87,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ github.event.inputs.tag }}
           INPUT_DRAFT: ${{ github.event.inputs.draft }}
+          REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
           pkg_version=$(node -p "require('./client/package.json').version")
@@ -104,22 +124,57 @@ jobs:
             exit 1
           fi
           echo "client/android/app/build.gradle: derives from package.json (ok)"
-
-          if [ "$EVENT_NAME" = "push" ]; then
-            tag="$REF_NAME"
-            draft=false
-          elif [ -n "$INPUT_TAG" ]; then
-            tag="$INPUT_TAG"
-            draft="$INPUT_DRAFT"
-          else
-            # Dispatched from a branch without a tag: release tag = manifest version.
-            tag="$pkg_version"
-            draft="$INPUT_DRAFT"
-          fi
+          skip=false
+          create_tag=false
+          tag_exists() { git ls-remote --exit-code --tags origin "refs/tags/$1" > /dev/null 2>&1; }
+          case "$EVENT_NAME" in
+            push)
+              case "$REF" in
+                refs/tags/*)
+                  tag="$REF_NAME"
+                  draft=false
+                  ;;
+                *)
+                  # A push to main: publish iff the manifest version has no tag yet
+                  # (i.e. a merged release PR). Everything else stops here.
+                  tag="$pkg_version"
+                  draft=false
+                  if tag_exists "$tag"; then
+                    echo "Version $tag is already tagged - nothing to release for this push."
+                    skip=true
+                  else
+                    create_tag=true
+                  fi
+                  ;;
+              esac
+              ;;
+            pull_request)
+              # release/** PR: build a draft named after the manifest version so
+              # reviewers can install it; the merge publishes it.
+              tag="$pkg_version"
+              draft=true
+              if tag_exists "$tag"; then
+                echo "::error::Version $tag is already released. Bump the version on '$HEAD_REF' (cd client && npm run version:bump -- <next>)."
+                exit 1
+              fi
+              ;;
+            *)
+              if [ -n "$INPUT_TAG" ]; then
+                tag="$INPUT_TAG"
+              else
+                # Dispatched from a branch without a tag: release tag = manifest version.
+                tag="$pkg_version"
+              fi
+              draft="$INPUT_DRAFT"
+              ;;
+          esac
 
           version="${tag#v}"
-          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
-            echo "::error::'$tag' is not a release tag (expected X.Y.Z or vX.Y.Z, optional -prerelease suffix)"
+          # The pre-release suffix must be numeric: the MSI bundler rejects
+          # anything else ("optional pre-release identifier in app version
+          # must be numeric-only and cannot be greater than 65535").
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]{1,5})?$'; then
+            echo "::error::'$tag' is not a release tag (expected X.Y.Z or vX.Y.Z, optional numeric -N pre-release suffix, e.g. 1.7.0-1 - MSI rejects -rc.1)"
             exit 1
           fi
           if [ "$version" != "$pkg_version" ]; then
@@ -136,8 +191,10 @@ jobs:
             echo "version=$version"
             echo "draft=$draft"
             echo "prerelease=$prerelease"
+            echo "skip=$skip"
+            echo "create_tag=$create_tag"
           } >> "$GITHUB_OUTPUT"
-          echo "Release $tag (version $version, draft=$draft, prerelease=$prerelease) from $(git rev-parse --short HEAD)"
+          echo "Release $tag (version $version, draft=$draft, prerelease=$prerelease, skip=$skip, create_tag=$create_tag) from $(git rev-parse --short HEAD)"
 
   # --------------------------------------------------------------------------
   # Build engine + Tauri bundles per OS/arch.
@@ -145,6 +202,7 @@ jobs:
   build:
     name: build (${{ matrix.platform }})
     needs: preflight
+    if: needs.preflight.result == 'success' && needs.preflight.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -277,10 +335,12 @@ jobs:
         shell: bash
         run: echo "::notice title=GPG signing skipped::GPG_PRIVATE_KEY / GPG_PASSPHRASE not set - no .asc signatures for Linux artifacts."
 
-      - name: Tauri updater signing skipped
+      - name: Require the updater signing key
         if: env.TAURI_SIGNING_PRIVATE_KEY == ''
         shell: bash
-        run: echo "::notice title=Updater signing skipped::TAURI_SIGNING_PRIVATE_KEY not set - no .sig updater artifacts."
+        run: |
+          echo "::error title=Updater signing key missing::TAURI_SIGNING_PRIVATE_KEY is not set. Installed desktop apps only accept signed bundles (tauri.conf.json plugins.updater.pubkey); see scripts/release.md."
+          exit 1
 
       # ---- engine -----------------------------------------------------------
       - name: Build engine (release, ${{ matrix.target }})
@@ -371,9 +431,11 @@ jobs:
               arch=$(basename "$bundle"/dmg/*.dmg .dmg | sed -E "s/^bebok_${VERSION}_//")
               cp "$bundle"/dmg/*.dmg "$out"/
               if ls "$bundle"/macos/*.app.tar.gz > /dev/null 2>&1; then
-                # Produced by Tauri when updater artifacts are enabled (with .sig).
-                cp "$bundle"/macos/*.app.tar.gz "$out"/
-                cp "$bundle"/macos/*.app.tar.gz.sig "$out"/ 2>/dev/null || true
+                # Produced by Tauri when updater artifacts are enabled (with .sig),
+                # named after the product (bebok.app.tar.gz): version + arch it
+                # like the dmg so both macOS legs can share one release.
+                cp "$bundle"/macos/*.app.tar.gz "$out/bebok_${VERSION}_${arch}.app.tar.gz"
+                cp "$bundle"/macos/*.app.tar.gz.sig "$out/bebok_${VERSION}_${arch}.app.tar.gz.sig"
               else
                 tar -czf "$out/bebok_${VERSION}_${arch}.app.tar.gz" -C "$bundle/macos" bebok.app
               fi
@@ -440,6 +502,7 @@ jobs:
   android:
     name: android (arm64-v8a)
     needs: preflight
+    if: needs.preflight.result == 'success' && needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -581,6 +644,7 @@ jobs:
   release:
     name: release (${{ needs.preflight.outputs.tag }})
     needs: [preflight, build, android]
+    if: needs.preflight.result == 'success' && needs.build.result == 'success' && needs.android.result == 'success' && needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -590,11 +654,42 @@ jobs:
       WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
       ANDROID_SIGNED: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
     steps:
+      - name: Checkout (release scripts + CHANGELOG)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          sparse-checkout: |
+            scripts
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The desktop updater manifest: fails when any signed bundle is missing.
+      - name: Compose latest.json (updater manifest)
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node scripts/latest-json.mjs \
+            --artifacts artifacts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --repo "$REPO" \
+            --changelog CHANGELOG.md
+          echo "== latest.json =="; cat artifacts/latest.json
 
       - name: Merge SHA256SUMS
         shell: bash
@@ -637,13 +732,35 @@ jobs:
             echo "No release '$TAG' yet - it will be created."
           fi
 
+      # Auto-publish from main: the merged release PR carries the version, the
+      # tag is created here. Pushing it with GITHUB_TOKEN triggers no new run.
+      - name: Tag the release commit
+        if: needs.preflight.outputs.create_tag == 'true'
+        shell: bash
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$SHA" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $SHA as $TAG"
+
       - name: Release notes footer
         shell: bash
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
+          DRAFT: ${{ needs.preflight.outputs.draft }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           {
+            if [ "$DRAFT" = "true" ] && [ -n "$PR_NUMBER" ]; then
+              echo "> **Draft built from release PR #${PR_NUMBER}.** Install it to test; merging the PR publishes ${VERSION} and installed apps update automatically."
+              echo
+            fi
             echo "## Downloads"
             echo
             echo "| Platform | File |"
@@ -657,6 +774,7 @@ jobs:
             echo "| Android (arm64) | \`bebok-${VERSION}-android-arm64.apk\` |"
             echo
             echo "Verify downloads against \`SHA256SUMS.txt\`."
+            echo "\`latest.json\` and the \`*.sig\` files feed the desktop app's built-in updater (About -> Check for updates)."
             if [ -f artifacts/SHA256SUMS.txt.asc ]; then
               echo "\`SHA256SUMS.txt.asc\` and \`*.asc\` are GPG detached signatures (public key: \`bebok-release-signing-key.asc\`)."
             fi

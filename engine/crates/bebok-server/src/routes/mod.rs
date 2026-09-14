@@ -58,6 +58,8 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/session/{id}/agents", get(agents::list_agents))
         // F9-10: what `delegation.model_policy` resolves to.
         .route("/delegation/models", get(agents::delegation_models))
+        // Fleet generation via LLM (min 3 members per agent type).
+        .route("/fleet/generate", post(agents::generate_fleet))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
         .route("/session/{id}/changes", get(changes::list_changes))
@@ -103,6 +105,7 @@ pub fn build_api_router() -> Router<AppState> {
             "/projects/{id}/git/worktree/remove",
             post(git::remove_worktree),
         )
+        .route("/version", get(meta::version))
         .route("/plugins", get(meta::list_plugins))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(

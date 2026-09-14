@@ -19,6 +19,7 @@ import { RouterLink } from '@angular/router';
 import { SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { RemoteDesktopStore } from '../../core/remote-desktop.store';
+import { UpdateStore } from '../../core/update.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { NavIcon } from '../sidebar/nav-icon';
@@ -42,6 +43,7 @@ export interface SubAgentCrumb {
 })
 export class Topbar {
   readonly shell = inject(ShellStore);
+  readonly update = inject(UpdateStore);
   private readonly i18n = inject(I18nService);
   private readonly chat = inject(ChatSessionStore);
   private readonly project = inject(ProjectSessionsStore);
@@ -119,9 +121,22 @@ export class Topbar {
         return this.t('nav.settings');
       case 'about':
         return this.t('topbar.about');
+      case 'updates':
+        return this.t('updates.title');
       default:
         return null;
     }
+  });
+
+  readonly versionTitle = computed(() => {
+    const available = this.update.available();
+    if (available) {
+      return this.t('update.available', {
+        version: available.version,
+        current: available.currentVersion,
+      });
+    }
+    return this.t('topbar.version', { version: this.update.currentVersion() ?? '?' });
   });
 
   readonly drawerOpen = this.shell.rightDrawerOpen;

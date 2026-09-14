@@ -8,6 +8,7 @@ pub mod context;
 pub mod debug;
 pub mod error;
 pub mod event;
+pub mod fleet_gen;
 pub mod git;
 pub mod llm_trace;
 pub mod permission;

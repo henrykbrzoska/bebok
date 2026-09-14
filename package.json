@@ -12,6 +12,9 @@
     "full-build-app": "node scripts/bebok.mjs full-build-app",
     "full-build-apk": "node scripts/bebok.mjs full-build-apk",
     "engine": "node scripts/bebok.mjs engine",
-    "client": "node scripts/bebok.mjs client"
+    "client": "node scripts/bebok.mjs client",
+    "release": "node scripts/release.mjs",
+    "release:status": "node scripts/release.mjs status",
+    "release:check": "node scripts/release.mjs check"
   }
 }

@@ -85,6 +85,23 @@
   line-height: 1;
 }
 
+.chip.version {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  text-decoration: none;
+}
+
+.chip.version.update {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.version-new {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Icon-only below ~1100px: the label collapses, the tooltip (`title`) still
    carries the full text - keeps the topbar from crowding the breadcrumb on
    narrower windows while the 1400px layout stays untouched. */

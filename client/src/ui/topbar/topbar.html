@@ -41,6 +41,19 @@
       </a>
     }
     <a
+      class="chip version"
+      routerLink="/updates"
+      [class.on]="shell.activeScreen() === 'updates'"
+      [class.update]="update.available() !== null"
+      [title]="versionTitle()"
+      data-testid="version-chip"
+    >
+      <span class="mono">{{ update.currentVersion() ?? '…' }}</span>
+      @if (update.available(); as available) {
+        <span class="version-new" data-testid="update-badge">↑ {{ available.version }}</span>
+      }
+    </a>
+    <a
       class="chip about"
       routerLink="/about"
       [class.on]="shell.activeScreen() === 'about'"

@@ -19,9 +19,11 @@
 //!   `background: true`) push a [`TaskResult`] onto the parent so `task_wait`
 //!   / `task_status` can hand it to the model later.
 //!
-//! Abort propagation is unchanged: every child token is
-//! `ctx.abort.child_token()`, so cancelling the parent turn cancels every
-//! running or queued child; `task_cancel` cancels one child token only.
+//! Abort propagation: every child token is `ctx.abort.child_token()`, so
+//! cancelling the parent turn cancels every running or queued child via
+//! tokio's token tree. `task_cancel` cancels one child token only.
+//! The HTTP route `POST /session/{id}/task/{taskID}/abort` cancels both
+//! the child and the parent turn.
 
 use std::sync::Arc;
 use std::time::Duration;

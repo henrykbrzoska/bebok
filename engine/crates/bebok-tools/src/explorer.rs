@@ -113,6 +113,27 @@ pub fn validate_rel(root: &Path, rel: &str) -> Result<(), String> {
     normalize_rel(root, rel).map(|_| ())
 }
 
+/// Maximum file size for binary reads: 10 MiB.
+pub const MAX_BINARY_READ_BYTES: usize = 10 * 1024 * 1024;
+
+/// Read a file's raw bytes for the `/fs/file?binary=true` endpoint, guarding
+/// against escaping the root. Returns `Ok(bytes)` for readable files up to
+/// [`MAX_BINARY_READ_BYTES`], an error string otherwise.
+pub fn read_file_bytes(root: &Path, rel: &str) -> Result<Vec<u8>, String> {
+    let path = normalize_rel(root, rel)?;
+    if !path.is_file() {
+        return Err(format!("not a file: {rel}"));
+    }
+    let meta = std::fs::metadata(&path).map_err(|e| format!("failed to stat {rel}: {e}"))?;
+    if meta.len() > MAX_BINARY_READ_BYTES as u64 {
+        return Err(format!(
+            "file too large for binary read: {} bytes (max {MAX_BINARY_READ_BYTES})",
+            meta.len()
+        ));
+    }
+    std::fs::read(&path).map_err(|e| format!("failed to read {rel}: {e}"))
+}
+
 /// Read a file's contents for the `/fs/file` viewer endpoint, guarding against
 /// escaping the root. Returns `Ok(text)` for readable UTF-8 text, an error
 /// string otherwise.
@@ -140,6 +161,46 @@ pub fn write_file_text(root: &Path, rel: &str, content: &str) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_file_bytes_works_and_rejects_traversal() {
+        let base = std::env::temp_dir().join(format!("bebok-explorer-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // Write a binary file (non-UTF8 bytes).
+        let bin_path = root.join("image.png");
+        let data: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+        std::fs::write(&bin_path, &data).unwrap();
+
+        let got = read_file_bytes(&root, "image.png").unwrap();
+        assert_eq!(got, data);
+
+        // Not a file.
+        assert!(read_file_bytes(&root, ".").is_err());
+
+        // Traversal.
+        assert!(read_file_bytes(&root, "../secret.txt").is_err());
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn read_file_bytes_rejects_oversized() {
+        let base = std::env::temp_dir().join(format!("bebok-explorer-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // Create a file exceeding the cap.
+        let big = root.join("big.bin");
+        let payload = vec![0u8; MAX_BINARY_READ_BYTES + 1];
+        std::fs::write(&big, &payload).unwrap();
+
+        let err = read_file_bytes(&root, "big.bin").unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn rejects_traversal_for_read_write_and_tree() {

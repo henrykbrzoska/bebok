@@ -283,6 +283,17 @@
             <input type="checkbox" [checked]="follow()" (change)="follow.set(!follow())" />
             {{ t('chat.follow') }}
           </label>
+          @if (fleetAvailable()) {
+            <label class="follow-toggle" [title]="t('chat.fleetToggleHint')">
+              <input
+                type="checkbox"
+                [checked]="runAsFleet()"
+                (change)="runAsFleet.set(!runAsFleet())"
+                [attr.aria-label]="t('chat.runAsFleet')"
+              />
+              {{ t('chat.runAsFleet') }}
+            </label>
+          }
           <button
             class="icon-action"
             type="button"

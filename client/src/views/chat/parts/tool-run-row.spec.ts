@@ -167,7 +167,7 @@ describe('ToolRunRowComponent (F6-1c)', () => {
     await fixture.whenStable();
 
     expect(root().querySelector<HTMLButtonElement>('.group-head')!.getAttribute('aria-expanded')).toBe('true');
-    const toolHeads = root().querySelectorAll<HTMLButtonElement>('.tool-head');
+    const toolHeads = root().querySelectorAll<HTMLButtonElement>('.head-toggle');
     expect(toolHeads.length).toBe(2);
     toolHeads.forEach((head) => expect(head.getAttribute('aria-expanded')).toBe('false'));
     const strips = root().querySelectorAll('.turn-strip');

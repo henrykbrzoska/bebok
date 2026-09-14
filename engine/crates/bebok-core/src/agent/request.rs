@@ -116,7 +116,21 @@ impl<'a> RequestBuilder<'a> {
                                         is_error: true,
                                     });
                                 }
-                                _ => {}
+                                _ => {
+                                    // Pending / Running — the tool never
+                                    // finished (turn was interrupted). Emit a
+                                    // synthetic error result so every
+                                    // tool_call_id has a matching response;
+                                    // without this OpenAI-compatible providers
+                                    // return 400 "Missing tool response for
+                                    // tool_call_id(s)".
+                                    tool_results.push(ToolResult {
+                                        tool_use_id: id.clone(),
+                                        content: "[tool did not complete: turn was interrupted before execution finished]"
+                                            .to_string(),
+                                        is_error: true,
+                                    });
+                                }
                             }
                         }
                     }
@@ -164,8 +178,10 @@ impl<'a> RequestBuilder<'a> {
             .filter(|t| {
                 // The `fleet` fan-out tool is orchestrator-only: withheld from
                 // every other agent so parallel fleets are never user-triggered
-                // or spawned by a sub-agent.
-                if t.name() == "fleet" && self.agent.name != "orchestrator" {
+                // or spawned by a sub-agent. The prompt section follows the
+                // same constant (`delegation_policy::FLEET_AGENT`), so it only
+                // advertises the tool to agents that actually have it.
+                if t.name() == "fleet" && self.agent.name != super::delegation_policy::FLEET_AGENT {
                     return false;
                 }
                 if hide_delegation && DELEGATION_TOOLS.contains(&t.name()) {

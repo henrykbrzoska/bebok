@@ -340,6 +340,8 @@ impl TurnRunner {
             }
 
             if abort.is_cancelled() {
+                // Close any tool calls that were streamed but never executed.
+                close_open_tool_calls(&state, &bus, assistant_idx, "aborted").await;
                 // Persist whatever streamed so far (crash-safe transcript),
                 // then add a clear abort marker.
                 state.persist_message_at(assistant_idx).await;
@@ -376,6 +378,7 @@ impl TurnRunner {
             let mut stop = false;
             for batch in batches {
                 if abort.is_cancelled() {
+                    close_open_tool_calls(&state, &bus, assistant_idx, "aborted").await;
                     break;
                 }
 
@@ -451,6 +454,12 @@ impl TurnRunner {
                     // outer loop decide (an abort is handled at its top).
                     break;
                 }
+            }
+
+            // Close any tool calls that remain Pending/Running after the batch
+            // loop exited early (abort, permission deny, or execution failure).
+            if stop {
+                close_open_tool_calls(&state, &bus, assistant_idx, "aborted").await;
             }
         }
 
@@ -539,6 +548,37 @@ pub fn schedule_tool_calls(
         }
     }
     batches
+}
+
+/// Close all tool calls in the assistant message that are still Pending or
+/// Running. This prevents orphaned open tool parts when a turn is aborted
+/// mid-execution or interrupted before all batches complete.
+async fn close_open_tool_calls(
+    state: &Arc<SessionState>,
+    bus: &EventBus,
+    assistant_idx: usize,
+    reason: &str,
+) {
+    let open_ids: Vec<String> = {
+        let messages = state.messages.read().await;
+        messages
+            .get(assistant_idx)
+            .map(|m| {
+                m.parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        crate::session::Part::Tool { id, state, .. } if !state.is_closed() => {
+                            Some(id.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for call_id in open_ids {
+        fail_tool(state, bus, assistant_idx, &call_id, reason).await;
+    }
 }
 
 /// Persist a clear "Turn aborted" assistant message so the transcript is
@@ -1155,10 +1195,12 @@ mod parallel_tests {
             "all three reads must be in flight at once"
         );
         assert_eq!(parts.len(), 3);
-        // Sequential would need >= 600ms; generous margin for a loaded CI box.
+        // `peak == 3` is the proof of overlap; the wall clock only guards
+        // against a pathological stall (a loaded Windows runner took 1.3 s
+        // for the whole turn, so no tight bound here).
         assert!(
-            elapsed < delay * 3,
-            "turn took {elapsed:?}, i.e. it did not overlap the reads"
+            elapsed < Duration::from_secs(10),
+            "turn took {elapsed:?}, something stalled"
         );
         for (id, state) in &parts {
             assert!(

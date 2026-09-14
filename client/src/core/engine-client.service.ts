@@ -34,6 +34,7 @@ import {
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
+  FleetGenResponse,
   FsBrowseResponse,
   FsFileResponse,
   FsTreeResponse,
@@ -278,6 +279,11 @@ export class EngineClient implements EngineApi {
     await authFetch(`${conn.baseUrl}/session`, { method: 'GET' });
   }
 
+  /** `GET /version` -> the engine's own version (workspace version). */
+  getVersion(): Promise<{ version: string }> {
+    return this.request<{ version: string }>('GET', '/version');
+  }
+
   /** Tauri native directory picker; null in browser/http mode. */
   pickDirectory(title: string): Promise<string | null> {
     return this.transport.pickDirectory(title);
@@ -446,19 +452,21 @@ export class EngineClient implements EngineApi {
     );
   }
 
-  prompt(id: string, body: PromptBody | string, agent?: string, model?: string): Promise<unknown> {
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string, fleet?: boolean): Promise<unknown> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
             message: body,
             ...(agent ? { agent } : {}),
             ...(model ? { model } : {}),
+            ...(fleet ? { fleet: true } : {}),
           }
         : {
             message: body.message,
             ...((body.agent ?? agent) ? { agent: (body.agent ?? agent) as string } : {}),
             ...((body.model ?? model) ? { model: (body.model ?? model) as string } : {}),
             ...(body.images?.length ? { images: body.images } : {}),
+            ...((body.fleet ?? fleet) ? { fleet: true } : {}),
           };
     return this.request('POST', `/session/${id}/prompt`, payload);
   }
@@ -611,6 +619,22 @@ export class EngineClient implements EngineApi {
     );
   }
 
+  /**
+   * `POST /fleet/generate?directory=` -> the engine proposes fleet members
+   * (name/agent/model) from the configured providers. Every field of `opts` is
+   * optional; an empty provider pool is answered with 400 by the engine.
+   */
+  generateFleet(
+    directory: string,
+    opts?: { minPerType?: number; types?: string[] },
+  ): Promise<FleetGenResponse> {
+    return this.request<FleetGenResponse>(
+      'POST',
+      `/fleet/generate?directory=${encodeURIComponent(directory)}`,
+      opts ?? {},
+    );
+  }
+
   /** F7-7: every tool the engine knows with its safety category. */
   getToolSafety(directory: string): Promise<ToolSafetyResponse> {
     return this.request<ToolSafetyResponse>(
@@ -658,6 +682,13 @@ export class EngineClient implements EngineApi {
     return this.request<FsFileResponse>(
       'GET',
       `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  fsFileBinary(directory: string, path: string): Promise<FsFileResponse> {
+    return this.request<FsFileResponse>(
+      'GET',
+      `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}&binary=true`,
     );
   }
 
