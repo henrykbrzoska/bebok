@@ -1,0 +1,112 @@
+<section class="updates">
+  <div class="updates-col">
+    <a class="back" routerLink="/">{{ t('about.back') }}</a>
+    <h1 class="title">{{ t('updates.title') }}</h1>
+
+    <section class="card" data-testid="version-card">
+      <dl class="rows">
+        @if (update.shellVersion(); as shell) {
+          <dt>{{ t('updates.shellVersion') }}</dt>
+          <dd class="mono">{{ shell }}</dd>
+        }
+        <dt>{{ t('updates.engineVersion') }}</dt>
+        <dd class="mono">{{ update.engineVersion() ?? '—' }}</dd>
+      </dl>
+      @if (update.versionMismatch()) {
+        <p class="note warn" data-testid="version-mismatch">
+          {{ t('updates.mismatch', { version: update.shellVersion() }) }}
+        </p>
+      }
+      @if (update.debugBuild()) {
+        <p class="note">{{ t('updates.devBuild') }}</p>
+      }
+      <div class="actions">
+        <button
+          type="button"
+          class="check"
+          [disabled]="update.phase() === 'checking'"
+          (click)="update.check()"
+          data-testid="check-updates"
+        >
+          {{ update.phase() === 'checking' ? t('updates.checking') : t('updates.checkUpdates') }}
+        </button>
+        @if (update.available(); as available) {
+          @if (available.installable) {
+            <button
+              type="button"
+              class="primary"
+              [disabled]="
+                update.installBlocked() ||
+                update.phase() === 'downloading' ||
+                update.phase() === 'installing'
+              "
+              (click)="update.install()"
+            >
+              {{ t('update.install') }}
+            </button>
+          } @else {
+            <button type="button" class="primary" (click)="update.openReleasePage()">
+              {{ t('update.download') }}
+            </button>
+          }
+        }
+      </div>
+      <p class="note" data-testid="update-status">
+        @if (update.phase() === 'error' && update.error(); as message) {
+          <span class="warn">{{ t('update.error', { message }) }}</span>
+        } @else if (update.available(); as available) {
+          {{
+            t('update.available', { version: available.version, current: available.currentVersion })
+          }}
+          @if (available.installable && update.installBlocked()) {
+            <br />{{ t('update.busy') }}
+          }
+        } @else if (update.lastCheckedAt()) {
+          {{ t('updates.upToDate') }}
+        }
+      </p>
+    </section>
+
+    @if (update.available()?.notes; as notes) {
+      <section class="card">
+        <h2 class="card-title">
+          {{ t('updates.notesTitle', { version: update.available()!.version }) }}
+        </h2>
+        <app-markdown-view [source]="notes" />
+      </section>
+    }
+
+    <section class="card">
+      <h2 class="card-title">
+        {{ t('updates.releases') }}
+        <a class="ext" [href]="releasesPage" target="_blank" rel="noopener">GitHub ↗</a>
+      </h2>
+      @if (update.releasesLoading() && !update.releases()) {
+        <p class="note">{{ t('about.loading') }}</p>
+      } @else if (update.releasesError(); as message) {
+        <p class="note warn">{{ t('updates.releasesError', { message }) }}</p>
+      } @else if (update.releases(); as releases) {
+        @if (releases.length === 0) {
+          <p class="note">{{ t('updates.noReleases') }}</p>
+        } @else {
+          <ul class="releases" data-testid="release-list">
+            @for (release of releases; track release.version) {
+              <li class="release" [class.current]="release.current">
+                <a class="release-version mono" [href]="release.url" target="_blank" rel="noopener">
+                  {{ release.version }}
+                </a>
+                @if (release.current) {
+                  <span class="tag current-tag">{{ t('updates.currentTag') }}</span>
+                }
+                @if (release.prerelease) {
+                  <span class="tag">{{ t('updates.prereleaseTag') }}</span>
+                }
+                <span class="release-date">{{ formatDate(release.date) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      }
+    </section>
+  </div>
+</section>

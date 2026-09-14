@@ -9,6 +9,7 @@ import { DebugView } from '../views/debug/debug';
 import { StatsView } from '../views/stats/stats';
 import { BrowserView } from '../views/browser-view/browser-view';
 import { AboutView } from '../views/about/about';
+import { UpdatesView } from '../views/updates/updates';
 
 /**
  * Flat routes rendered inside `AppShell` (WP-SHELL / F1-11). Each route
@@ -27,6 +28,7 @@ export const routes: Routes = [
   { path: 'stats', component: StatsView, data: { screen: 'stats' } },
   // F8-4: static, localized "What is Bebok?" explainer page.
   { path: 'about', component: AboutView, data: { screen: 'about' } },
+  { path: 'updates', component: UpdatesView, data: { screen: 'updates' } },
   // WP-BROWSER2 (F7-6): the browser viewer window. `bare: true` makes `App`
   // render it without the shell (own window, no sidebar/topbar/drawer).
   {

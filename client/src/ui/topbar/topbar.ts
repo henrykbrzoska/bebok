@@ -87,9 +87,22 @@ export class Topbar {
         return this.t('nav.settings');
       case 'about':
         return this.t('topbar.about');
+      case 'updates':
+        return this.t('updates.title');
       default:
         return null;
     }
+  });
+
+  readonly versionTitle = computed(() => {
+    const available = this.update.available();
+    if (available) {
+      return this.t('update.available', {
+        version: available.version,
+        current: available.currentVersion,
+      });
+    }
+    return this.t('topbar.version', { version: this.update.currentVersion() ?? '?' });
   });
 
   readonly drawerOpen = this.shell.rightDrawerOpen;

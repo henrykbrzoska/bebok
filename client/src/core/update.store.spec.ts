@@ -116,6 +116,50 @@ describe('UpdateStore', () => {
     expect(store.bannerVisible()).toBeTrue();
   });
 
+  it('lists recent releases with the running one marked', async () => {
+    const list = [
+      {
+        tag_name: '1.6.1',
+        html_url: 'u1',
+        body: null,
+        published_at: null,
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: '1.6.0',
+        html_url: 'u0',
+        body: null,
+        published_at: null,
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: '1.7.0-1',
+        html_url: 'ud',
+        body: null,
+        published_at: null,
+        draft: true,
+        prerelease: true,
+      },
+    ];
+    fetchSpy.and.callFake((input: RequestInfo | URL) =>
+      Promise.resolve(
+        String(input).includes('/releases/latest')
+          ? release('1.6.1')
+          : new Response(JSON.stringify(list), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+      ),
+    );
+    await store.check();
+    await store.loadReleases();
+    const releases = store.releases();
+    expect(releases?.map((entry) => entry.version)).toEqual(['1.6.1', '1.6.0']);
+    expect(releases?.[1].current).toBeTrue();
+  });
+
   it('blocks installing while an agent turn is running', () => {
     expect(store.installBlocked()).toBeFalse();
     running.set(new Set(['s1']));

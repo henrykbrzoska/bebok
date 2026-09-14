@@ -211,7 +211,8 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   the context meter / auto-compaction), `settings/` (7 tabs; Agents tab holds the
   Delegation block and Frontend verification card; Permissions tab holds rules,
   YOLO, Tool safety and Browser display), `explorer/`, `terminal/`, `stats/`,
-  `about/` (renders `public/about/bebok.<lang>.md`), `debug/`, `start/`, `browser-view/`.
+  `about/` (renders `public/about/bebok.<lang>.md`), `updates/` (versions, update check, release list),
+  `debug/`, `start/`, `browser-view/`.
 - `src/i18n/`: 12 dictionaries (`en` is the reference; the `MessageKey` type is
   derived from it, so a missing key in another language is a compile error).
 - Tauri shell (`src-tauri/src/lib.rs`): spawns `bebok-server --port 0`, parses

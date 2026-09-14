@@ -10,15 +10,11 @@
  * translation yet, or when the localized fetch fails for any other reason
  * (e.g. a stale build missing a newly-added locale) - see
  * `loadAboutMarkdown` and `about.spec.ts`.
- *
- * Above the explainer sits the version card: desktop shell + engine versions,
- * "Check for updates" and the install/download action (`UpdateStore`).
  */
 
 import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
-import { UpdateStore } from '../../core/update.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { MarkdownViewComponent } from '../../ui/markdown-view/markdown-view';
 
@@ -64,7 +60,6 @@ export async function loadAboutMarkdown(lang: string, fetchImpl: typeof fetch = 
 })
 export class AboutView {
   private readonly i18n = inject(I18nService);
-  readonly update = inject(UpdateStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 

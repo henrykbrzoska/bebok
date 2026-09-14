@@ -14,8 +14,8 @@
  *
  * Automatic checks run shortly after start and every `CHECK_INTERVAL_MS`;
  * `check()` also backs the "Check for updates" button on the About screen.
- * Dismissing a version hides the banner for that version only (persisted),
- * the About chip keeps its badge.
+ * Dismissing a version hides the banner for that version only (persisted);
+ * the topbar version chip keeps showing the newer version.
  */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
@@ -64,9 +64,21 @@ interface GitHubRelease {
   prerelease: boolean;
 }
 
+/** One row of the Updates screen's release list (GitHub Releases API). */
+export interface ReleaseSummary {
+  version: string;
+  url: string;
+  notes: string | null;
+  date: string | null;
+  prerelease: boolean;
+  /** Same version as the running app. */
+  current: boolean;
+}
+
 export const RELEASES_REPO = 'henrykbrzoska/bebok';
 export const RELEASES_PAGE = `https://github.com/${RELEASES_REPO}/releases`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`;
+const RELEASES_API = `https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=15`;
 
 const DISMISSED_KEY = 'bebok.update.dismissed';
 /** Delay before the first automatic check, so it never competes with startup. */
@@ -123,6 +135,11 @@ export class UpdateStore {
   readonly error = signal<string | null>(null);
   readonly lastCheckedAt = signal<number | null>(null);
   readonly dismissedVersion = signal<string | null>(readDismissed());
+
+  /** Recent releases for the Updates screen; loaded on demand. */
+  readonly releases = signal<ReleaseSummary[] | null>(null);
+  readonly releasesLoading = signal(false);
+  readonly releasesError = signal<string | null>(null);
 
   /** The version the user is on, whichever side reports it. */
   readonly currentVersion = computed(() => this.shellVersion() ?? this.engineVersion());
@@ -252,7 +269,43 @@ export class UpdateStore {
     window.open(url, '_blank', 'noopener');
   }
 
-  /** Hide the banner for the offered version; the About badge stays. */
+  /** Fetch the recent release list (published, non-draft) for the Updates screen. */
+  async loadReleases(): Promise<void> {
+    if (this.releasesLoading()) {
+      return;
+    }
+    this.releasesLoading.set(true);
+    this.releasesError.set(null);
+    try {
+      const res = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } });
+      if (!res.ok) {
+        throw new Error(`GitHub releases API answered ${res.status}`);
+      }
+      const list = (await res.json()) as GitHubRelease[];
+      const current = this.currentVersion();
+      this.releases.set(
+        list
+          .filter((release) => !release.draft)
+          .map((release) => {
+            const version = release.tag_name.replace(/^v/i, '');
+            return {
+              version,
+              url: release.html_url,
+              notes: release.body,
+              date: release.published_at,
+              prerelease: release.prerelease,
+              current: current !== null && compareVersions(version, current) === 0,
+            };
+          }),
+      );
+    } catch (err) {
+      this.releasesError.set(errorMessage(err));
+    } finally {
+      this.releasesLoading.set(false);
+    }
+  }
+
+  /** Hide the banner for the offered version; the version chip keeps its mark. */
   dismiss(): void {
     const version = this.available()?.version ?? null;
     this.dismissedVersion.set(version);

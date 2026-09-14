@@ -85,12 +85,21 @@
   line-height: 1;
 }
 
-.about-badge {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
+.chip.version {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  text-decoration: none;
+}
+
+.chip.version.update {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.version-new {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* Icon-only below ~1100px: the label collapses, the tooltip (`title`) still

@@ -11,8 +11,10 @@
   `plugins.updater.pubkey`.
 - Client: `UpdateStore` (check 10 s after start, then every 6 h; GitHub API
   fallback in browser mode / dev builds), non-modal `<app-update-banner>` with
-  download progress, version card + "Check for updates" on About, badge on
-  the About chip; install is blocked while an agent turn runs.
+  download progress, a version chip in the topbar (highlights `↑ x.y.z` when
+  a newer release exists) opening the new Updates screen (`/updates`:
+  versions, "Check for updates", install / download, release notes, recent
+  releases from GitHub); install is blocked while an agent turn runs.
 - Engine: `GET /version`.
 - Release: `scripts/latest-json.mjs` composes `latest.json` in the `release`
   job; `TAURI_SIGNING_PRIVATE_KEY` is now required; macOS updater archives are

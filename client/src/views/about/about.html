@@ -2,67 +2,6 @@
   <div class="about-col">
     <a class="back" routerLink="/">{{ t('about.back') }}</a>
 
-    <section class="version-card" data-testid="version-card">
-      <h2 class="version-title">{{ t('about.versionTitle') }}</h2>
-      <dl class="version-rows">
-        @if (update.shellVersion(); as shell) {
-          <dt>{{ t('about.shellVersion') }}</dt>
-          <dd class="mono">{{ shell }}</dd>
-        }
-        <dt>{{ t('about.engineVersion') }}</dt>
-        <dd class="mono">{{ update.engineVersion() ?? '—' }}</dd>
-      </dl>
-      @if (update.versionMismatch()) {
-        <p class="version-note warn" data-testid="version-mismatch">
-          {{ t('about.mismatch', { version: update.shellVersion() }) }}
-        </p>
-      }
-      @if (update.debugBuild()) {
-        <p class="version-note">{{ t('about.devBuild') }}</p>
-      }
-      <div class="version-actions">
-        <button
-          type="button"
-          class="check"
-          [disabled]="update.phase() === 'checking'"
-          (click)="update.check()"
-          data-testid="check-updates"
-        >
-          {{ update.phase() === 'checking' ? t('about.checking') : t('about.checkUpdates') }}
-        </button>
-        @if (update.available(); as available) {
-          @if (available.installable) {
-            <button
-              type="button"
-              class="primary"
-              [disabled]="
-                update.installBlocked() ||
-                update.phase() === 'downloading' ||
-                update.phase() === 'installing'
-              "
-              (click)="update.install()"
-            >
-              {{ t('update.install') }}
-            </button>
-          } @else {
-            <button type="button" class="primary" (click)="update.openReleasePage()">
-              {{ t('update.download') }}
-            </button>
-          }
-        }
-      </div>
-      <p class="version-note" data-testid="update-status">
-        @if (update.phase() === 'error' && update.error(); as message) {
-          <span class="warn">{{ t('update.error', { message }) }}</span>
-        } @else if (update.available(); as available) {
-          {{
-            t('update.available', { version: available.version, current: available.currentVersion })
-          }}
-        } @else if (update.lastCheckedAt()) {
-          {{ t('about.upToDate') }}
-        }
-      </p>
-    </section>
 
     @if (loading()) {
       <p class="status">{{ t('about.loading') }}</p>
