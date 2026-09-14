@@ -9,7 +9,8 @@
  * listeners behind both surfaces.
  */
 
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { ENGINE_API } from '../../../core/engine-api';
@@ -21,7 +22,7 @@ import { encodeQr, qrToSvg } from './qrcode';
 
 @Component({
   selector: 'app-settings-remote',
-  imports: [],
+  imports: [FormsModule],
   templateUrl: './remote-tab.html',
   styleUrls: ['../settings-shared.css', './remote-tab.css'],
 })
@@ -88,6 +89,61 @@ export class RemoteTab implements OnInit, OnDestroy {
 
   readonly hasEligibleInterface = computed(() => (this.store.status()?.endpoints.length ?? 0) > 0);
 
+  // 1.8 relay (Cloudflare): the URL draft follows the status until edited.
+  readonly relay = computed(() => this.store.status()?.relay ?? null);
+  readonly relayUrlDraft = signal('');
+  readonly relayBusy = signal(false);
+  readonly relayError = signal<string | null>(null);
+  readonly relayUrlChanged = computed(
+    () => this.relayUrlDraft().trim().replace(/\/+$/, '') !== (this.relay()?.url ?? ''),
+  );
+  private relayDraftSeeded = false;
+
+  constructor() {
+    effect(() => {
+      const url = this.relay()?.url;
+      if (url !== undefined && !this.relayDraftSeeded) {
+        this.relayDraftSeeded = true;
+        this.relayUrlDraft.set(url);
+      }
+    });
+  }
+
+  async resetRelay(): Promise<void> {
+    if (this.relayBusy()) {
+      return;
+    }
+    this.relayBusy.set(true);
+    this.relayError.set(null);
+    try {
+      const status = await this.engine.resetRemoteRelay();
+      this.store.status.set(status);
+      this.toast.show(this.t('remote.relayResetDone'), { kind: 'success' });
+    } catch (err) {
+      this.relayError.set(this.describeError(err));
+    } finally {
+      this.relayBusy.set(false);
+    }
+  }
+
+  async setRelayEnabled(enabled: boolean): Promise<void> {
+    if (this.relayBusy()) {
+      return;
+    }
+    this.relayBusy.set(true);
+    this.relayError.set(null);
+    try {
+      const status = await this.engine.setRemoteRelay(enabled, this.relayUrlDraft().trim());
+      this.store.status.set(status);
+      this.relayUrlDraft.set(status.relay?.url ?? '');
+      this.toast.show(this.t(enabled ? 'remote.relayOn' : 'remote.relayOff'), { kind: 'success' });
+    } catch (err) {
+      this.relayError.set(this.describeError(err));
+    } finally {
+      this.relayBusy.set(false);
+    }
+  }
+
   ngOnInit(): void {
     void this.store.ensure();
     this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
@@ -107,7 +163,9 @@ export class RemoteTab implements OnInit, OnDestroy {
     const wasEnabled = this.store.enabled();
     this.toggleBusy.set(true);
     try {
-      const status = wasEnabled ? await this.engine.disableRemote() : await this.engine.enableRemote();
+      const status = wasEnabled
+        ? await this.engine.disableRemote()
+        : await this.engine.enableRemote();
       this.store.status.set(status);
       this.pendingAllowLan.set(null);
       this.toast.show(this.t(wasEnabled ? 'remote.toastDisabled' : 'remote.toastEnabled'), {
@@ -192,7 +250,9 @@ export class RemoteTab implements OnInit, OnDestroy {
       this.store.clearPairRequest();
       this.pairStart.set(null);
       await this.store.refresh();
-      this.toast.show(this.t('remote.toastDevicePaired', { device: device.name }), { kind: 'success' });
+      this.toast.show(this.t('remote.toastDevicePaired', { device: device.name }), {
+        kind: 'success',
+      });
     } catch (err) {
       this.pairRequestError.set(this.describeError(err));
     } finally {

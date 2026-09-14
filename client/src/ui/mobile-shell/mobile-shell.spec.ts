@@ -40,6 +40,7 @@ describe('MobileShell', () => {
     connect: jasmine.Spy;
     switchTarget: jasmine.Spy;
     unauthorized: ReturnType<typeof signal<boolean>>;
+    viaRelay: ReturnType<typeof signal<boolean>>;
     isTauri: ReturnType<typeof signal<boolean>>;
     isCapacitor: boolean;
     connection: ReturnType<typeof signal<null>>;
@@ -66,6 +67,7 @@ describe('MobileShell', () => {
       }),
       switchTarget: jasmine.createSpy('switchTarget').and.resolveTo(undefined),
       unauthorized: signal(false),
+      viaRelay: signal(false),
       isTauri: signal(false),
       isCapacitor: false,
       connection: signal(null),
@@ -76,7 +78,10 @@ describe('MobileShell', () => {
         provideZonelessChangeDetection(),
         provideRouter(testRoutes),
         { provide: EngineClient, useValue: engine },
-        { provide: EventsStore, useValue: { state: sseState, start: jasmine.createSpy('start') } },
+        {
+          provide: EventsStore,
+          useValue: { state: sseState, desktopOffline: signal(false), start: jasmine.createSpy('start') },
+        },
         {
           provide: ProjectsStore,
           useValue: { refresh: jasmine.createSpy('refresh').and.resolveTo(undefined) },

@@ -8,6 +8,7 @@ import {
   isAllowedRemoteEndpoint,
   isAllowedRemoteHost,
   probeEndpoints,
+  isRelayEndpoint,
 } from './endpoint-probe';
 
 type Behaviour =
@@ -33,9 +34,12 @@ function scriptedFetch(script: Record<string, Behaviour>): jasmine.Spy {
         }
         if (behaviour.kind === 'ok') {
           resolve(
-            new Response(JSON.stringify(behaviour.body ?? { engineName: 'desk', fingerprint: 'fp' }), {
-              status: 200,
-            }),
+            new Response(
+              JSON.stringify(behaviour.body ?? { engineName: 'desk', fingerprint: 'fp' }),
+              {
+                status: 200,
+              },
+            ),
           );
         } else if (behaviour.kind === 'status') {
           resolve(new Response(behaviour.text ?? '{}', { status: behaviour.status }));
@@ -132,7 +136,9 @@ describe('probeEndpoints (WP-M6 / F10-22)', () => {
       caught = err as ProbeError;
     }
     expect(caught?.kind).toBe('bad_endpoint');
-    expect(caught?.attempts.find((a) => a.endpoint === 'http://192.168.1.20:8790')?.status).toBe(503);
+    expect(caught?.attempts.find((a) => a.endpoint === 'http://192.168.1.20:8790')?.status).toBe(
+      503,
+    );
   });
 
   it('an unpaired probe treats the engine 401 as reachable-but-unauthenticated', async () => {
@@ -172,9 +178,16 @@ describe('probeEndpoints (WP-M6 / F10-22)', () => {
 
   it('rejects a 200 from a different engine when a fingerprint is expected', async () => {
     const fetchSpy = scriptedFetch({
-      'http://1.2.3.4:1': { kind: 'ok', afterMs: 1, body: { engineName: 'other', fingerprint: 'nope' } },
+      'http://1.2.3.4:1': {
+        kind: 'ok',
+        afterMs: 1,
+        body: { engineName: 'other', fingerprint: 'nope' },
+      },
     });
-    const pending = probeEndpoints(['http://1.2.3.4:1'], { fetch: fetchSpy, expectFingerprint: 'fp' });
+    const pending = probeEndpoints(['http://1.2.3.4:1'], {
+      fetch: fetchSpy,
+      expectFingerprint: 'fp',
+    });
     jasmine.clock().tick(5);
     let caught: ProbeError | null = null;
     try {
@@ -228,5 +241,19 @@ describe('hostClass / isAllowedRemoteHost (WP-M6 / F10-28)', () => {
     expect(isAllowedRemoteEndpoint('http://100.64.0.7:8790')).toBeTrue();
     expect(isAllowedRemoteEndpoint('http://8.8.8.8:80')).toBeFalse();
     expect(isAllowedRemoteEndpoint('garbage')).toBeFalse();
+  });
+});
+
+describe('isRelayEndpoint (1.8)', () => {
+  it('recognises a bebok-relay tunnel url and nothing else', () => {
+    expect(
+      isRelayEndpoint('https://bebok-relay.x.workers.dev/t/dd36fecb48b2d345ce94f0730e499e38'),
+    ).toBeTrue();
+    expect(
+      isRelayEndpoint('https://bebok-relay.x.workers.dev/t/dd36fecb48b2d345ce94f0730e499e38/'),
+    ).toBeTrue();
+    expect(isRelayEndpoint('http://100.64.0.7:8790')).toBeFalse();
+    expect(isRelayEndpoint('https://x.workers.dev/t/short')).toBeFalse();
+    expect(isRelayEndpoint('not a url')).toBeFalse();
   });
 });

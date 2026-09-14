@@ -20,12 +20,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 
 import { ENGINE_API } from '../engine-api';
 import { EngineTargetStore } from '../engine-target.store';
-import {
-  ProbeError,
-  ProbeStatus,
-  isAllowedRemoteEndpoint,
-  probeEndpoints,
-} from './endpoint-probe';
+import { ProbeError, ProbeStatus, isAllowedRemoteEndpoint, probeEndpoints } from './endpoint-probe';
 import { PairError, PairErrorCode, PairInvite, normalizePairCode } from './pair-protocol';
 
 export type PairingPhase = 'idle' | 'probing' | 'confirm' | 'waiting' | 'paired' | 'error';
@@ -160,11 +155,16 @@ export class PairingFlow {
     const controller = new AbortController();
     this.abort = controller;
     try {
-      const result = await this.engine.pairWithDesktop(candidate.endpoint, candidate.code, deviceName, {
-        model: this.deviceModel || undefined,
-        platform: this.devicePlatform || undefined,
-        signal: controller.signal,
-      });
+      const result = await this.engine.pairWithDesktop(
+        candidate.endpoint,
+        candidate.code,
+        deviceName,
+        {
+          model: this.deviceModel || undefined,
+          platform: this.devicePlatform || undefined,
+          signal: controller.signal,
+        },
+      );
       if (controller.signal.aborted) {
         return false;
       }
@@ -174,6 +174,7 @@ export class PairingFlow {
         kind: 'desktop',
         label: result.engineName || candidate.engineName,
         baseUrl: candidate.endpoint,
+        endpoints: [candidate.endpoint, ...candidate.endpoints],
         token: result.token,
       });
       await this.engine.switchTarget(id);

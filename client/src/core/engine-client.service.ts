@@ -77,6 +77,7 @@ import {
   RemotePairStart,
   RemoteStatus,
 } from './engine.dtos';
+import { isRelayEndpoint, probeEndpoints } from './remote/endpoint-probe';
 import { pairWithDesktop } from './remote/pair-protocol';
 import {
   EmbeddedEngineError,
@@ -93,6 +94,9 @@ export const PLATFORM_TARGET_ID = {
   embedded: 'embedded',
   'remote-url': 'remote-url:default',
 } as const;
+
+/** Window for the direct (tailnet/LAN) endpoints before the relay joins the race. */
+const DIRECT_PROBE_TIMEOUT_MS = 1_500;
 
 @Injectable({ providedIn: 'root' })
 export class EngineClient implements EngineApi {
@@ -194,10 +198,53 @@ export class EngineClient implements EngineApi {
       throw new Error(`unknown engine target: ${id}`);
     }
     const token = target.token ?? (await this.targets.tokenFor(id));
-    const resolved = { ...target, token };
+    const baseUrl = await this.pickEndpoint(target, token);
+    const resolved = { ...target, token, baseUrl };
+    if (baseUrl !== target.baseUrl) {
+      this.targets.upsert({ ...target, baseUrl });
+    }
     this.applyTarget(resolved);
     return resolved;
   }
+
+  /**
+   * 1.8 roaming: a paired desktop advertises several base URLs (tailnet,
+   * LAN, relay). Race the direct ones first (a short window - at home they
+   * answer in milliseconds), then everything including the relay. Falls back
+   * to the last known `baseUrl` when nothing answers, so the caller still
+   * gets a connection to retry against.
+   */
+  private async pickEndpoint(target: EngineTarget, token: string | null): Promise<string> {
+    const endpoints = target.endpoints ?? [];
+    if (target.kind !== 'desktop' || endpoints.length < 2) {
+      return target.baseUrl;
+    }
+    const direct = endpoints.filter((e) => !isRelayEndpoint(e));
+    const options = { token: token ?? undefined };
+    if (direct.length > 0) {
+      try {
+        const hit = await probeEndpoints(direct, {
+          ...options,
+          timeoutMs: DIRECT_PROBE_TIMEOUT_MS,
+        });
+        return hit.endpoint;
+      } catch {
+        /* no direct route - try the relay too */
+      }
+    }
+    try {
+      const hit = await probeEndpoints(endpoints, options);
+      return hit.endpoint;
+    } catch {
+      return target.baseUrl;
+    }
+  }
+
+  /** True when the active connection goes through a `bebok-relay` tunnel. */
+  readonly viaRelay = computed(() => {
+    const conn = this.connection();
+    return conn !== null && isRelayEndpoint(conn.baseUrl);
+  });
 
   private applyTarget(target: EngineTarget): EngineConnection {
     this.inflight.abort();
@@ -256,8 +303,14 @@ export class EngineClient implements EngineApi {
       }
       this.reconfigure({ kind: 'http', baseUrl: normalized });
     } else {
-      this.connection.set(null);
-      await this.connect();
+      const active = this.targets.active();
+      if (active && active.kind === 'desktop') {
+        // Network may have changed (home Wi-Fi <-> 5G): re-race the endpoints.
+        await this.switchTarget(active.id);
+      } else {
+        this.connection.set(null);
+        await this.connect();
+      }
     }
     this.unauthorized.set(false);
     await this.ping();
@@ -452,7 +505,13 @@ export class EngineClient implements EngineApi {
     );
   }
 
-  prompt(id: string, body: PromptBody | string, agent?: string, model?: string, fleet?: boolean): Promise<unknown> {
+  prompt(
+    id: string,
+    body: PromptBody | string,
+    agent?: string,
+    model?: string,
+    fleet?: boolean,
+  ): Promise<unknown> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
@@ -893,6 +952,14 @@ export class EngineClient implements EngineApi {
 
   disableRemote(): Promise<RemoteStatus> {
     return this.remoteRequest<RemoteStatus>('POST', '/remote/disable');
+  }
+
+  setRemoteRelay(enabled: boolean, url: string): Promise<RemoteStatus> {
+    return this.remoteRequest<RemoteStatus>('POST', '/remote/relay', { enabled, url });
+  }
+
+  resetRemoteRelay(): Promise<RemoteStatus> {
+    return this.remoteRequest<RemoteStatus>('POST', '/remote/relay/reset');
   }
 
   startPairing(): Promise<RemotePairStart> {

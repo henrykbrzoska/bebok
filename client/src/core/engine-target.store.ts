@@ -38,6 +38,12 @@ export interface EngineTarget {
   label: string;
   /** Clean base URL (never tokenised), e.g. `http://100.64.0.7:8790`. */
   baseUrl: string;
+  /**
+   * 1.8: every base URL this engine advertised at pairing time (tailnet,
+   * LAN, relay). `baseUrl` is the one that worked last; `switchTarget`
+   * re-races the list so the phone roams between home Wi-Fi and 5G.
+   */
+  endpoints?: string[];
   /** Bearer token for this engine, null when it runs with `BEBOK_NO_AUTH=1`. */
   token: string | null;
   /** Last successful request/stream against this target (epoch ms). */
@@ -160,7 +166,13 @@ export class EngineTargetStore {
         return [...list, entry];
       }
       const next = list.slice();
-      next[idx] = { ...list[idx], ...entry };
+      const merged = { ...list[idx], ...entry };
+      // Never lose known endpoints: union, the fresh order first.
+      const known = [...(entry.endpoints ?? []), ...(list[idx].endpoints ?? [])];
+      if (known.length > 0) {
+        merged.endpoints = known.filter((url, i) => known.indexOf(url) === i);
+      }
+      next[idx] = merged;
       return next;
     });
     if (isPersistedTarget(entry)) {
@@ -295,6 +307,8 @@ function isStoredTarget(value: unknown): value is StoredTarget {
     typeof v['id'] === 'string' &&
     typeof v['baseUrl'] === 'string' &&
     typeof v['label'] === 'string' &&
-    (v['kind'] === 'desktop' || v['kind'] === 'remote-url')
+    (v['kind'] === 'desktop' || v['kind'] === 'remote-url') &&
+    (v['endpoints'] === undefined ||
+      (Array.isArray(v['endpoints']) && v['endpoints'].every((e) => typeof e === 'string')))
   );
 }

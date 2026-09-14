@@ -72,6 +72,9 @@ pub struct RemoteRelayConfig {
     pub enabled: bool,
     pub url: String,
     pub secret: String,
+    /// Random salt mixed into the tunnel id; "Reset tunnel" rotates it (and
+    /// the secret) so a lost or mismatched secret never strands the engine.
+    pub tunnel_salt: String,
 }
 
 /// WP-M1 (F10-1): the `remote` section of the **global** config — the
@@ -157,6 +160,9 @@ impl RemoteConfig {
             }
             if let Some(sec) = relay.get("secret").and_then(Value::as_str) {
                 self.relay.secret = sec.trim().to_string();
+            }
+            if let Some(salt) = relay.get("tunnel_salt").and_then(Value::as_str) {
+                self.relay.tunnel_salt = salt.trim().to_string();
             }
         }
         if let Some(push) = obj.get("push").and_then(Value::as_object) {

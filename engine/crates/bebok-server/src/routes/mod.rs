@@ -122,6 +122,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/remote/enable", post(remote::routes::enable))
         .route("/remote/disable", post(remote::routes::disable))
         .route("/remote/relay", post(remote::routes::relay))
+        .route("/remote/relay/reset", post(remote::routes::relay_reset))
         .route("/remote/pair/start", post(remote::routes::pair_start))
         .route("/remote/pair", post(remote::routes::pair))
         .route(

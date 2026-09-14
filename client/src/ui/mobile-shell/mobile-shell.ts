@@ -83,7 +83,13 @@ export class MobileShell {
     }
   });
 
+  /** 1.8: the active desktop is reached through the Cloudflare relay. */
+  readonly viaRelay = this.engine.viaRelay;
+
   readonly statusLabel = computed(() => {
+    if (this.events.desktopOffline() && this.events.state() !== 'live') {
+      return this.t('mobile.engine.offline');
+    }
     const key: MessageKey = (() => {
       switch (this.events.state()) {
         case 'live':

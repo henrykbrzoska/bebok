@@ -1133,6 +1133,20 @@ export interface RemoteStatus {
   fingerprint: string;
   port: number;
   allowLan: boolean;
+  /** 1.8: the Cloudflare relay (`relay/`), absent on engines older than 1.8. */
+  relay?: RemoteRelayStatus;
+}
+
+export interface RemoteRelayStatus {
+  enabled: boolean;
+  /** Worker origin, e.g. `https://bebok-relay.example.workers.dev`. */
+  url: string;
+  /** `<url>/t/<tunnel>` - what phones connect to; null until configured. */
+  endpoint: string | null;
+  running: boolean;
+  connected: boolean;
+  lastError: string | null;
+  requests: number;
 }
 
 /** One paired device, as returned by `/remote/devices` and pairing confirm. */

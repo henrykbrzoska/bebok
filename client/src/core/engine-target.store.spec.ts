@@ -103,6 +103,29 @@ describe('EngineTargetStore (F10-7)', () => {
     expect(stored[0]['lastOk']).toBe(1234);
   });
 
+  it('unions known endpoints on upsert and persists them (1.8 roaming)', () => {
+    const store = makeStore();
+    store.upsert({
+      ...desktop,
+      endpoints: ['http://100.64.0.7:8790', 'https://r.workers.dev/t/aa'],
+    });
+    store.upsert({
+      ...desktop,
+      baseUrl: 'https://r.workers.dev/t/aa',
+      endpoints: ['https://r.workers.dev/t/aa'],
+    });
+    expect(store.byId(desktop.id)?.baseUrl).toBe('https://r.workers.dev/t/aa');
+    expect(store.byId(desktop.id)?.endpoints).toEqual([
+      'https://r.workers.dev/t/aa',
+      'http://100.64.0.7:8790',
+    ]);
+    const stored = JSON.parse(localStorage.getItem(TARGETS_KEY)!) as Array<Record<string, unknown>>;
+    expect(stored[0]['endpoints']).toEqual([
+      'https://r.workers.dev/t/aa',
+      'http://100.64.0.7:8790',
+    ]);
+  });
+
   it('remove drops the target, its secret and the active pointer', async () => {
     const store = makeStore();
     store.upsert(desktop);

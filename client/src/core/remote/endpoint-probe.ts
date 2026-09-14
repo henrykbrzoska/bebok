@@ -65,7 +65,9 @@ export class ProbeError extends Error {
     readonly kind: ProbeErrorKind,
     readonly attempts: ProbeAttempt[],
   ) {
-    super(`${kind}: ${attempts.map((a) => `${a.endpoint} ${a.failure}${a.status ? ` ${a.status}` : ''}`).join(', ') || 'no candidates'}`);
+    super(
+      `${kind}: ${attempts.map((a) => `${a.endpoint} ${a.failure}${a.status ? ` ${a.status}` : ''}`).join(', ') || 'no candidates'}`,
+    );
     this.name = 'ProbeError';
   }
 }
@@ -87,7 +89,10 @@ export interface ProbeOptions {
  * Race `GET /remote/status` across `endpoints`; resolve with the first 200,
  * reject with `ProbeError` once every candidate failed.
  */
-export function probeEndpoints(endpoints: string[], options: ProbeOptions = {}): Promise<ProbeOutcome> {
+export function probeEndpoints(
+  endpoints: string[],
+  options: ProbeOptions = {},
+): Promise<ProbeOutcome> {
   const doFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const now = options.now ?? (() => Date.now());
@@ -129,7 +134,9 @@ export function probeEndpoints(endpoints: string[], options: ProbeOptions = {}):
       if (pending === 0 && !settled) {
         settled = true;
         options.signal?.removeEventListener('abort', onOuterAbort);
-        const allNetwork = attempts.every((a) => a.failure === 'network' || a.failure === 'timeout');
+        const allNetwork = attempts.every(
+          (a) => a.failure === 'network' || a.failure === 'timeout',
+        );
         reject(new ProbeError(allNetwork ? 'no_route' : 'bad_endpoint', attempts));
       }
     };
@@ -229,13 +236,7 @@ export function probeEndpoints(endpoints: string[], options: ProbeOptions = {}):
 // ---------------------------------------------------------------------------
 
 export type HostClass =
-  | 'loopback'
-  | 'private'
-  | 'tailnet'
-  | 'link-local'
-  | 'local-name'
-  | 'public'
-  | 'invalid';
+  'loopback' | 'private' | 'tailnet' | 'link-local' | 'local-name' | 'public' | 'invalid';
 
 function parseIpv4(host: string): number[] | null {
   const parts = host.split('.');
@@ -300,7 +301,12 @@ export function hostClass(host: string): HostClass {
     }
     return 'public';
   }
-  if (h.endsWith('.local') || h.endsWith('.ts.net') || h.endsWith('.internal') || !h.includes('.')) {
+  if (
+    h.endsWith('.local') ||
+    h.endsWith('.ts.net') ||
+    h.endsWith('.internal') ||
+    !h.includes('.')
+  ) {
     return 'local-name';
   }
   return 'public';
@@ -317,6 +323,15 @@ export function isAllowedRemoteHost(host: string): boolean {
 }
 
 /** `isAllowedRemoteHost` for a full base URL; `https://` is always fine. */
+/** A `bebok-relay` tunnel endpoint (`https://<worker>/t/<32 hex>`). */
+export function isRelayEndpoint(endpoint: string): boolean {
+  try {
+    return /^\/t\/[0-9a-f]{32}\/?$/.test(new URL(endpoint).pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function isAllowedRemoteEndpoint(endpoint: string): boolean {
   let url: URL;
   try {

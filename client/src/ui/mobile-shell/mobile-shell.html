@@ -10,6 +10,9 @@
       data-testid="mobile-status"
     >
       <app-status-dot [tone]="statusTone()" [label]="statusLabel()" />
+      @if (viaRelay()) {
+        <span class="m-via-relay" data-testid="via-relay">{{ t('mobile.engine.viaRelay') }}</span>
+      }
     </button>
 
     <button
@@ -43,7 +46,11 @@
 
   <app-bottom-tabs />
 
-  <app-sheet [open]="engineSheetOpen()" [title]="t('mobile.engine.title')" (close)="closeEngineSheet()">
+  <app-sheet
+    [open]="engineSheetOpen()"
+    [title]="t('mobile.engine.title')"
+    (close)="closeEngineSheet()"
+  >
     <ul class="m-targets" data-testid="mobile-targets">
       @for (target of targets.targets(); track target.id) {
         <li>

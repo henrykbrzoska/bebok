@@ -99,18 +99,18 @@ pub enum EngineFrame {
 
 /// Public tunnel id derived from the per-install id: stable, url-safe, and
 /// not the install id itself (which also seeds the pairing fingerprint).
-pub fn tunnel_id(install_id: &str) -> String {
-    let digest = Sha256::digest(format!("bebok-relay:{install_id}").as_bytes());
+pub fn tunnel_id(install_id: &str, salt: &str) -> String {
+    let digest = Sha256::digest(format!("bebok-relay:{install_id}:{salt}").as_bytes());
     digest[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// `https://worker/t/<tunnel>` - the endpoint phones use (advertised in the
 /// pairing QR next to the LAN/tailnet ones).
-pub fn phone_endpoint(url: &str, install_id: &str) -> String {
-    format!("{}/t/{}", url.trim_end_matches('/'), tunnel_id(install_id))
+pub fn phone_endpoint(url: &str, tunnel: &str) -> String {
+    format!("{}/t/{tunnel}", url.trim_end_matches('/'))
 }
 
-fn engine_socket_url(url: &str, install_id: &str) -> String {
+fn engine_socket_url(url: &str, tunnel: &str) -> String {
     let base = url.trim_end_matches('/');
     let ws = if let Some(rest) = base.strip_prefix("https://") {
         format!("wss://{rest}")
@@ -119,7 +119,7 @@ fn engine_socket_url(url: &str, install_id: &str) -> String {
     } else {
         format!("wss://{base}")
     };
-    format!("{ws}/t/{}/engine", tunnel_id(install_id))
+    format!("{ws}/t/{tunnel}/engine")
 }
 
 /// A 32-byte random secret, url-safe base64 (43 chars).
@@ -176,9 +176,19 @@ impl RelayHandle {
     }
 }
 
+/// Called whenever the socket connects or drops (the routes layer publishes
+/// `remote.status` so the desktop UI flips its badge).
+pub type OnConnectionChange = Arc<dyn Fn(bool) + Send + Sync>;
+
 /// Spawn the relay task. `app` is the fully layered router (the same one the
 /// remote listener serves).
-pub fn start(app: Router, url: String, install_id: String, secret: String) -> RelayHandle {
+pub fn start(
+    app: Router,
+    url: String,
+    tunnel: String,
+    secret: String,
+    on_change: Option<OnConnectionChange>,
+) -> RelayHandle {
     let status = Arc::new(RelayStatus::default());
     let cancel = CancellationToken::new();
     let (outbound, rx) = mpsc::channel::<EngineFrame>(64);
@@ -188,20 +198,27 @@ pub fn start(app: Router, url: String, install_id: String, secret: String) -> Re
         cancel: cancel.clone(),
         outbound,
     };
-    tokio::spawn(run(app, url, install_id, secret, status, cancel, rx));
+    tokio::spawn(run(app, url, tunnel, secret, status, cancel, rx, on_change));
     handle
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run(
     app: Router,
     url: String,
-    install_id: String,
+    tunnel: String,
     secret: String,
     status: Arc<RelayStatus>,
     cancel: CancellationToken,
     mut outbound: mpsc::Receiver<EngineFrame>,
+    on_change: Option<OnConnectionChange>,
 ) {
-    let socket_url = engine_socket_url(&url, &install_id);
+    let notify = |connected: bool| {
+        if let Some(cb) = &on_change {
+            cb(connected);
+        }
+    };
+    let socket_url = engine_socket_url(&url, &tunnel);
     let mut backoff = BACKOFF_MIN;
     loop {
         if cancel.is_cancelled() {
@@ -212,9 +229,11 @@ async fn run(
             Ok(stream) => {
                 tracing::info!("relay connected: {socket_url}");
                 status.connected.store(true, Ordering::Relaxed);
+                notify(true);
                 backoff = BACKOFF_MIN;
                 let reason = serve(stream, &app, &status, &cancel, &mut outbound).await;
                 status.connected.store(false, Ordering::Relaxed);
+                notify(false);
                 if cancel.is_cancelled() {
                     return;
                 }
@@ -461,27 +480,29 @@ mod tests {
 
     #[test]
     fn tunnel_id_is_stable_url_safe_and_not_the_install_id() {
-        let id = tunnel_id("install-abc");
+        let id = tunnel_id("install-abc", "salt1");
         assert_eq!(id.len(), 32);
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(id, tunnel_id("install-abc"));
-        assert_ne!(id, tunnel_id("install-abd"));
+        assert_eq!(id, tunnel_id("install-abc", "salt1"));
+        assert_ne!(id, tunnel_id("install-abd", "salt1"));
+        // A reset (new salt) moves the engine to a fresh tunnel.
+        assert_ne!(id, tunnel_id("install-abc", "salt2"));
         assert!(!id.contains("install"));
     }
 
     #[test]
     fn urls_are_derived_from_the_worker_origin() {
-        let t = tunnel_id("x");
+        let t = tunnel_id("x", "s");
         assert_eq!(
-            phone_endpoint("https://r.workers.dev/", "x"),
+            phone_endpoint("https://r.workers.dev/", &t),
             format!("https://r.workers.dev/t/{t}")
         );
         assert_eq!(
-            engine_socket_url("https://r.workers.dev", "x"),
+            engine_socket_url("https://r.workers.dev", &t),
             format!("wss://r.workers.dev/t/{t}/engine")
         );
         assert_eq!(
-            engine_socket_url("http://localhost:8787", "x"),
+            engine_socket_url("http://localhost:8787", &t),
             format!("ws://localhost:8787/t/{t}/engine")
         );
     }
@@ -590,8 +611,9 @@ mod tests {
         let wrong = start(
             engine_app.clone(),
             format!("http://{addr}"),
-            "install-1".into(),
+            tunnel_id("install-1", ""),
             "wrong".into(),
+            None,
         );
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(!wrong.status.connected());
@@ -607,8 +629,9 @@ mod tests {
         let handle = start(
             engine_app,
             format!("http://{addr}"),
-            "install-1".into(),
+            tunnel_id("install-1", ""),
             "expected-secret".into(),
+            None,
         );
         let frames = tokio::time::timeout(Duration::from_secs(5), done_rx)
             .await

@@ -237,6 +237,10 @@ export interface EngineRestApi {
   getRemoteStatus(): Promise<RemoteStatus>;
   enableRemote(): Promise<RemoteStatus>;
   disableRemote(): Promise<RemoteStatus>;
+  /** 1.8: `POST /remote/relay {enabled, url}` - persist + start/stop the relay. */
+  setRemoteRelay(enabled: boolean, url: string): Promise<RemoteStatus>;
+  /** 1.8: `POST /remote/relay/reset` - new tunnel id + secret (phones re-pair). */
+  resetRemoteRelay(): Promise<RemoteStatus>;
   startPairing(): Promise<RemotePairStart>;
   confirmPairing(pairId: string): Promise<RemoteDevice>;
   rejectPairing(pairId: string): Promise<{ ok: boolean }>;

@@ -76,6 +76,9 @@ describe('RemoteTab (F10-13)', () => {
     revokeDevice: jasmine.Spy;
     putConfig: jasmine.Spy;
     readLastDirectory: jasmine.Spy;
+    resetRemoteRelay: jasmine.createSpy('resetRemoteRelay').and.resolveTo(status({ enabled: true })),
+    setRemoteRelay: jasmine.Spy;
+    resetRemoteRelay: jasmine.Spy;
   };
   let listener: ((event: EngineEvent) => void) | null;
 
@@ -87,7 +90,9 @@ describe('RemoteTab (F10-13)', () => {
       connect: jasmine.createSpy('connect'),
       getRemoteStatus: jasmine.createSpy('getRemoteStatus').and.resolveTo(initialStatus),
       enableRemote: jasmine.createSpy('enableRemote').and.resolveTo(status({ enabled: true })),
-      disableRemote: jasmine.createSpy('disableRemote').and.resolveTo(status({ enabled: false, listening: false })),
+      disableRemote: jasmine
+        .createSpy('disableRemote')
+        .and.resolveTo(status({ enabled: false, listening: false })),
       startPairing: jasmine.createSpy('startPairing').and.resolveTo(pairStart()),
       confirmPairing: jasmine.createSpy('confirmPairing').and.resolveTo(device('d1')),
       rejectPairing: jasmine.createSpy('rejectPairing').and.resolveTo({ ok: true }),
@@ -95,6 +100,24 @@ describe('RemoteTab (F10-13)', () => {
       revokeDevice: jasmine.createSpy('revokeDevice').and.resolveTo({ ok: true }),
       putConfig: jasmine.createSpy('putConfig').and.resolveTo({}),
       readLastDirectory: jasmine.createSpy('readLastDirectory').and.returnValue('/tmp/project'),
+      setRemoteRelay: jasmine
+        .createSpy('setRemoteRelay')
+        .and.callFake((enabled: boolean, url: string) =>
+          Promise.resolve(
+            status({
+              enabled: true,
+              relay: {
+                enabled,
+                url,
+                endpoint: enabled ? `${url}/t/${'a'.repeat(32)}` : null,
+                running: enabled,
+                connected: false,
+                lastError: null,
+                requests: 0,
+              },
+            }),
+          ),
+        ),
     };
     const events = {
       start: jasmine.createSpy('start'),
@@ -128,6 +151,25 @@ describe('RemoteTab (F10-13)', () => {
 
   afterEach(() => {
     fixture?.destroy();
+  });
+
+  it('enables the relay with the typed worker URL and shows the tunnel endpoint (1.8)', async () => {
+    await setup(status({ enabled: true }));
+    const host = fixture.nativeElement as HTMLElement;
+    const url = host.querySelector('[data-testid="relay-url"]') as HTMLInputElement;
+    const toggle = host.querySelector('[data-testid="relay-toggle"]') as HTMLInputElement;
+    expect(toggle.disabled).toBeTrue();
+    component.relayUrlDraft.set('https://bebok-relay.x.workers.dev/');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(url.value).toBe('https://bebok-relay.x.workers.dev/');
+    expect(toggle.disabled).toBeFalse();
+    await component.setRelayEnabled(true);
+    fixture.detectChanges();
+    expect(engine.setRemoteRelay).toHaveBeenCalledWith(true, 'https://bebok-relay.x.workers.dev/');
+    expect(component.relay()?.enabled).toBeTrue();
+    expect(host.querySelector('[data-testid="relay-card"]')?.textContent).toContain('/t/aaaaaaaa');
   });
 
   it('shows "no eligible interface" instead of a blank endpoint list', async () => {

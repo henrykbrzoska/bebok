@@ -86,6 +86,11 @@ export class EventsStore {
 
   readonly state = signal<SseState>('idle');
   /**
+   * 1.8: the relay answered `503 engine_offline` - the tunnel is up but the
+   * desktop at home is not connected. Cleared on the next successful stream.
+   */
+  readonly desktopOffline = signal(false);
+  /**
    * Bumped whenever open views must re-sync from the engine: a fresh stream
    * (first connect, target switch, reconnect without a resumable id) or an
    * `event: resync` from the engine. A reconnect that resumed with
@@ -239,10 +244,15 @@ export class EventsStore {
           this.started = false;
           break;
         }
+        if (res.status === 503 && res.headers.get('x-bebok-relay') === 'tunnel') {
+          this.desktopOffline.set(true);
+          throw new Error('desktop offline (relay has no engine connected)');
+        }
         if (!res.ok || !res.body) {
           throw new Error(`SSE /event -> ${res.status}`);
         }
 
+        this.desktopOffline.set(false);
         this.state.set('live');
         this.everLive = true;
         this.lastEventIdSource = source;

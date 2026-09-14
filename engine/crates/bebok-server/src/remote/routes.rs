@@ -69,6 +69,19 @@ fn remote(ext: Option<Extension<Arc<RemoteState>>>) -> Result<Arc<RemoteState>, 
     })
 }
 
+/// The relay's connect/drop callback: republish `remote.status` so the UI
+/// badge follows the socket, not just the config.
+pub fn relay_status_publisher(
+    state: &AppState,
+    remote: &Arc<RemoteState>,
+) -> super::relay::OnConnectionChange {
+    let bus = state.store.bus().clone();
+    let remote = remote.clone();
+    Arc::new(move |_connected| {
+        bus.publish(Event::new("remote.status", "", "").with_properties(remote.status_json()));
+    })
+}
+
 fn publish_status(state: &AppState, remote: &RemoteState) {
     state
         .store
@@ -149,7 +162,7 @@ pub async fn enable(
         }
     }
     if let Some(app) = remote.app()
-        && let Err(e) = remote.start_relay(app)
+        && let Err(e) = remote.start_relay(app, Some(relay_status_publisher(&state, &remote)))
     {
         tracing::warn!("relay failed to start: {e}");
     }
@@ -171,6 +184,26 @@ pub async fn disable(
         handle.stop();
     }
     remote.stop_relay();
+    publish_status(&state, &remote);
+    Ok(Json(remote.status_json()))
+}
+
+/// `POST /remote/relay/reset` (Local) — new secret + new tunnel id.
+pub async fn relay_reset(
+    State(state): State<AppState>,
+    ext: Option<Extension<Arc<RemoteState>>>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let remote = remote(ext)?;
+    let Some(app) = remote.app() else {
+        return Err(error_json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "remote_unavailable",
+            "no router registered for the relay",
+        ));
+    };
+    remote
+        .reset_relay(app, Some(relay_status_publisher(&state, &remote)))
+        .map_err(|e| error_json(StatusCode::INTERNAL_SERVER_ERROR, "relay_reset", e))?;
     publish_status(&state, &remote);
     Ok(Json(remote.status_json()))
 }
@@ -215,7 +248,7 @@ pub async fn relay(
                 ));
             };
             remote
-                .start_relay(app)
+                .start_relay(app, Some(relay_status_publisher(&state, &remote)))
                 .map_err(|e| error_json(StatusCode::INTERNAL_SERVER_ERROR, "relay_start", e))?;
         }
     } else {

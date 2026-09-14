@@ -171,7 +171,11 @@ impl RemoteState {
     /// Start the relay task for the current config (no-op when it is
     /// disabled, has no URL, or is already running against the same URL).
     /// Mints and persists the tunnel secret on first use.
-    pub fn start_relay(&self, app: axum::Router) -> Result<Option<relay::RelayHandle>, String> {
+    pub fn start_relay(
+        &self,
+        app: axum::Router,
+        on_change: Option<relay::OnConnectionChange>,
+    ) -> Result<Option<relay::RelayHandle>, String> {
         let cfg = self.config();
         if !cfg.relay_enabled() {
             return Ok(None);
@@ -182,16 +186,43 @@ impl RemoteState {
             }
             existing.stop();
         }
-        let secret = if cfg.relay.secret.is_empty() {
+        // First start mints the tunnel credentials; both persist together.
+        let (secret, salt) = if cfg.relay.secret.is_empty() || cfg.relay.tunnel_salt.is_empty() {
             let secret = relay::new_secret();
-            self.update_config(|c| c.relay.secret = secret.clone())?;
-            secret
+            let salt = relay::new_secret();
+            self.update_config(|c| {
+                c.relay.secret = secret.clone();
+                c.relay.tunnel_salt = salt.clone();
+            })?;
+            (secret, salt)
         } else {
-            cfg.relay.secret.clone()
+            (cfg.relay.secret.clone(), cfg.relay.tunnel_salt.clone())
         };
-        let handle = relay::start(app, cfg.relay.url.clone(), self.install_id.clone(), secret);
+        let handle = relay::start(
+            app,
+            cfg.relay.url.clone(),
+            relay::tunnel_id(&self.install_id, &salt),
+            secret,
+            on_change,
+        );
         *self.relay.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle.clone());
         Ok(Some(handle))
+    }
+
+    /// "Reset tunnel": rotate the secret and the tunnel id (a fresh Durable
+    /// Object on the relay), then reconnect. Phones learn the new endpoint at
+    /// their next pairing or from `remote.status` over a direct route.
+    pub fn reset_relay(
+        &self,
+        app: axum::Router,
+        on_change: Option<relay::OnConnectionChange>,
+    ) -> Result<Option<relay::RelayHandle>, String> {
+        self.stop_relay();
+        self.update_config(|c| {
+            c.relay.secret = relay::new_secret();
+            c.relay.tunnel_salt = relay::new_secret();
+        })?;
+        self.start_relay(app, on_change)
     }
 
     pub fn stop_relay(&self) {
@@ -214,8 +245,11 @@ impl RemoteState {
     /// The relay endpoint phones use, when the relay is configured.
     pub fn relay_endpoint(&self) -> Option<String> {
         let cfg = self.config();
-        cfg.relay_enabled()
-            .then(|| relay::phone_endpoint(&cfg.relay.url, &self.install_id))
+        if !cfg.relay_enabled() || cfg.relay.tunnel_salt.is_empty() {
+            return None;
+        }
+        let tunnel = relay::tunnel_id(&self.install_id, &cfg.relay.tunnel_salt);
+        Some(relay::phone_endpoint(&cfg.relay.url, &tunnel))
     }
 
     pub fn relay_status_json(&self) -> serde_json::Value {

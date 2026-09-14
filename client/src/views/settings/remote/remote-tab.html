@@ -19,8 +19,14 @@
         (change)="toggleEnabled()"
       />
       <span class="check-label">{{ t('remote.enableToggle') }}</span>
-      <span class="dot" [class.ok]="store.status()?.listening" [class.idle]="!store.status()?.listening"></span>
-      <span class="small muted">{{ t(store.status()?.listening ? 'remote.statusListening' : 'remote.statusOff') }}</span>
+      <span
+        class="dot"
+        [class.ok]="store.status()?.listening"
+        [class.idle]="!store.status()?.listening"
+      ></span>
+      <span class="small muted">{{
+        t(store.status()?.listening ? 'remote.statusListening' : 'remote.statusOff')
+      }}</span>
     </label>
 
     @if (store.enabled()) {
@@ -74,6 +80,83 @@
   </div>
 
   @if (store.enabled()) {
+    <div class="card" data-testid="relay-card">
+      <h3>{{ t('remote.relayTitle') }}</h3>
+      <p class="card-sub">{{ t('remote.relayHint') }}</p>
+      <label class="field">
+        <span class="micro-label">{{ t('remote.relayUrl') }}</span>
+        <input
+          type="text"
+          [ngModel]="relayUrlDraft()"
+          (ngModelChange)="relayUrlDraft.set($event)"
+          [disabled]="relayBusy()"
+          placeholder="https://bebok-relay.example.workers.dev"
+          spellcheck="false"
+          data-testid="relay-url"
+        />
+      </label>
+      <label class="enabled-check">
+        <input
+          type="checkbox"
+          [checked]="relay()?.enabled ?? false"
+          [disabled]="relayBusy() || !relayUrlDraft().trim()"
+          (change)="setRelayEnabled(!(relay()?.enabled ?? false))"
+          data-testid="relay-toggle"
+        />
+        <span class="check-label">{{ t('remote.relayEnable') }}</span>
+        @if (relay()?.enabled) {
+          <span
+            class="dot"
+            [class.ok]="relay()?.connected"
+            [class.idle]="!relay()?.connected"
+          ></span>
+          <span class="small muted">{{
+            t(relay()?.connected ? 'remote.relayConnected' : 'remote.relayConnecting')
+          }}</span>
+        }
+      </label>
+      @if (relay()?.enabled && relayUrlChanged()) {
+        <div class="note">
+          <button
+            type="button"
+            class="link-btn"
+            (click)="setRelayEnabled(true)"
+            [disabled]="relayBusy()"
+          >
+            {{ t('remote.relayApplyUrl') }}
+          </button>
+        </div>
+      }
+      @if (relay()?.endpoint; as endpoint) {
+        <div class="endpoints">
+          <span class="micro-label">{{ t('remote.relayEndpoint') }}</span>
+          <ul class="endpoint-list">
+            <li class="mono small">{{ endpoint }}</li>
+          </ul>
+        </div>
+      }
+      @if (relay()?.enabled && !relay()?.connected && relay()?.lastError; as message) {
+        <div class="inline-error">{{ t('remote.relayError', { message }) }}</div>
+      }
+      @if (relay()?.enabled) {
+        <div class="note">
+          {{ t('remote.relayResetHint') }}
+          <button
+            type="button"
+            class="link-btn"
+            (click)="resetRelay()"
+            [disabled]="relayBusy()"
+            data-testid="relay-reset"
+          >
+            {{ t('remote.relayReset') }}
+          </button>
+        </div>
+      }
+      @if (relayError(); as message) {
+        <div class="inline-error">{{ message }}</div>
+      }
+    </div>
+
     <div class="card">
       <h3>{{ t('remote.pairDevice') }}</h3>
 
@@ -97,7 +180,9 @@
             <span class="micro-label">{{ t('remote.pairCodeLabel') }}</span>
             <span class="pair-code mono" data-testid="pair-code">{{ pairStart()!.code }}</span>
             @if (!pairCodeExpired()) {
-              <span class="small muted">{{ t('remote.pairExpiresIn', { seconds: secondsLeft() }) }}</span>
+              <span class="small muted">{{
+                t('remote.pairExpiresIn', { seconds: secondsLeft() })
+              }}</span>
             } @else {
               <span class="small muted">{{ t('remote.pairExpired') }}</span>
             }
@@ -112,7 +197,14 @@
     <div class="backdrop">
       <div class="card pair-request-card">
         <h3>{{ t('remote.pairRequestTitle', { device: request.deviceName, ip: request.ip }) }}</h3>
-        <p class="card-sub">{{ t('remote.pairRequestSub', { model: request.model || '?', platform: request.platform || '?' }) }}</p>
+        <p class="card-sub">
+          {{
+            t('remote.pairRequestSub', {
+              model: request.model || '?',
+              platform: request.platform || '?',
+            })
+          }}
+        </p>
         @if (pairRequestError()) {
           <div class="inline-error">{{ pairRequestError() }}</div>
         }
@@ -120,7 +212,12 @@
           <button type="button" (click)="rejectPairRequest()" [disabled]="pairRequestBusy()">
             {{ t('remote.reject') }}
           </button>
-          <button type="button" class="primary" (click)="confirmPairRequest()" [disabled]="pairRequestBusy()">
+          <button
+            type="button"
+            class="primary"
+            (click)="confirmPairRequest()"
+            [disabled]="pairRequestBusy()"
+          >
             {{ t('remote.confirm') }}
           </button>
         </div>
@@ -138,7 +235,9 @@
           <li class="server-row">
             <div class="server-main">
               <span class="server-name">{{ device.name }}</span>
-              <span class="server-status small muted">{{ deviceSubtitle(device) }} &middot; {{ lastSeenLabel(device) }}</span>
+              <span class="server-status small muted"
+                >{{ deviceSubtitle(device) }} &middot; {{ lastSeenLabel(device) }}</span
+              >
             </div>
             <button
               type="button"
