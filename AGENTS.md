@@ -75,7 +75,10 @@ engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.8
   crates/bebok-server/       BINARY: main, cli, auth, cors, middleware, error, state, server,
                              services/ (turn, provider_factory), routes/ (session, agents, browser,
                                changes, processes, git, projects, config, providers, mcp, meta, fs,
-                               fs_browse, tools, stats, events, debug, pty, common, mod = route table)
+                               fs_browse, tools, stats, events, debug, pty, common, mod = route table),
+                             remote/ (devices, scope = exhaustive route allowlist, listener, pairing,
+                               fanout, routes, relay = outbound WS to the Cloudflare relay, cloud = session
+                               snapshots for phones while the desktop is offline)
   crates/bebok-tools/        Tool trait + registry + builtin_tools(); file/shell tools; bash (background),
                              bash_kill, processes (registry), browser/ (driver, discovery, settings,
                              frames, console, tools, verify_tools), pathguard, explorer, runtimes, docker, fetch
@@ -90,6 +93,8 @@ client/                      Angular 20.3 (standalone, signals, zoneless) — se
                              updater commands update_check / update_install / relaunch_after_update)
   android/, capacitor.config.ts   Capacitor shell + EngineLauncher plugin — wired but NOT part of any release
   scripts/                   copy-sidecar.mjs, bump-version.mjs (npm run version:bump), tauri helpers
+relay/                       Cloudflare Worker + Durable Object (`Tunnel`): reverse tunnel for paired phones
+                             (engine dials in, phones use HTTPS), cloud session snapshots; vitest in workerd
 scripts/bebok.mjs            root orchestration;  scripts/release.mjs  guided release (PR -> draft -> merge -> publish)
 scripts/latest-json.mjs      updater manifest (CI);  scripts/release.md  runbook (CI mechanics)
 .github/workflows/ci.yml     fmt + clippy + build + test (engine), npm ci + build (client)
@@ -229,6 +234,37 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   `ui/update-banner/`.
 - Mobile: `capacitor.config.ts` + `android/` with an `EngineLauncher` plugin exist
   but no binaries are bundled and nothing is released; treat as unreleased scaffolding.
+
+## 5b. Remote access, relay and cloud chats (1.8)
+
+Three ways a paired phone reaches an engine, all behind the same device
+tokens and the same exhaustive route allowlist (`remote/scope.rs` - a unit
+test parses `routes/mod.rs`, so every new route needs an explicit
+`Local`/`Remote`/`Open` decision or the build fails):
+
+1. **Tailnet / LAN listener** (WP-M1): the second HTTP listener on
+   `100.64/10` (+ RFC1918 when `remote.allow_lan`).
+2. **Relay** (`remote/relay.rs` + `relay/`): the engine keeps an outbound
+   WebSocket to `wss://<worker>/t/<tunnel>/engine`; every request the
+   phone sends to `https://<worker>/t/<tunnel>/<path>` is replayed through
+   the router tagged `Listener::Remote`, SSE included. Config
+   `remote.relay {enabled, url, secret, tunnel_salt}` (secret + salt minted
+   on first start, `POST /remote/relay/reset` rotates both = fresh tunnel).
+   The relay endpoint is advertised last in `remote.endpoints()`, so the
+   pairing QR carries it and the phone races direct endpoints first
+   (`EngineClient.pickEndpoint`), the relay only when nothing direct answers.
+3. **Cloud chats** (`remote/cloud.rs`): sessions with `Session.cloud` are
+   pushed to the relay's Durable Object after every turn (meta + newest
+   messages, <= 200 / 512 KB, readers = sha256 of the paired device tokens)
+   and served by the DO at `/cloud/sessions[/<id>]` while the engine is
+   offline. Toggle: chat toolbar (desktop scope only) -> `POST
+   /session/{id}/cloud`. The phone falls back to them when the relay answers
+   `503 engine_offline`.
+
+The relay is a dumb pipe: it never sees a device token in the clear and a
+compromised worker can at most refuse service. Deploying it is manual
+(`relay/README.md`: `wrangler login` + `npm run deploy`), outside
+`release.yml`.
 
 ## 6. Conventions
 

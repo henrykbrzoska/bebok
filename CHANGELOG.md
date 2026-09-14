@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Mobile, relay and cloud chats
+- The 1.6 mobile work lands: engine remote module (second listener on
+  Tailscale/LAN, device tokens with an exhaustive route allowlist, QR
+  pairing, SSE resync), the phone shell (`/m/**`: Chat, Remote, Agents,
+  Changes, More), Android build with a foreground service.
+- **Relay** (`relay/`, Cloudflare Worker + Durable Object): the engine keeps
+  an outbound WebSocket to the worker and paired phones reach it over HTTPS
+  from anywhere - no Tailscale or port forwarding. Same tokens and
+  permissions as on the LAN. Settings -> Remote -> Relay (URL, toggle,
+  status, Reset tunnel); the QR code advertises the relay endpoint and the
+  phone roams between direct endpoints and the relay.
+- **Cloud chats**: a cloud toggle in the chat toolbar mirrors that session
+  to the relay after every turn (meta + newest messages); the phone lists
+  and reads mirrored chats while the desktop is offline.
+- Engine: `POST /remote/relay`, `POST /remote/relay/reset`,
+  `POST /session/{id}/cloud`; `GET /remote/status` gains `relay`; partial
+  `PUT /config` bodies now deep-merge instead of replacing a section;
+  pairing works with a relay-only engine.
+
 ## 1.7.0 — 2026-09-14
 
 ### Auto-update

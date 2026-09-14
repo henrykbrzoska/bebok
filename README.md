@@ -201,6 +201,18 @@ cd client && npm run build && npx cap sync
 npx cap open ios     # or: npx cap open android
 ```
 
+**Pairing and remote access.** Settings -> Remote on the desktop turns on
+the remote listener (Tailscale / LAN) and shows a QR code; the phone scans
+it and gets a device token limited to the "follow and steer a session"
+routes. To reach the desktop from anywhere - 5G, another network - deploy
+the tiny relay once (`relay/`, a Cloudflare Worker + Durable Object:
+`cd relay && npx wrangler login && npm run deploy`), paste the worker URL
+into Settings -> Remote -> Relay and pair again: the QR now also carries
+the relay endpoint, and the phone uses the direct route at home and the
+relay elsewhere. Chats marked with the cloud toggle in the chat toolbar are
+mirrored to the relay after every turn, so the phone can still read them
+while the desktop is off.
+
 The mobile client connects to a remote engine over LAN (see the connect
 screen). The PTY surface (/pty*) is compiled out of Android engine builds,
 so the mobile client has no terminal.
