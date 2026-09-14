@@ -160,6 +160,11 @@ export class EngineClient {
     await authFetch(`${conn.baseUrl}/session`, { method: 'GET' });
   }
 
+  /** `GET /version` -> the engine's own version (workspace version). */
+  getVersion(): Promise<{ version: string }> {
+    return this.request<{ version: string }>('GET', '/version');
+  }
+
   /** Tauri native directory picker; null in browser/http mode. */
   pickDirectory(title: string): Promise<string | null> {
     return this.transport.pickDirectory(title);

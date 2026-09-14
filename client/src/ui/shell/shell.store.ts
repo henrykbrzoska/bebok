@@ -26,7 +26,8 @@ export type Screen =
   | 'debug'
   | 'stats'
   | 'settings'
-  | 'about';
+  | 'about'
+  | 'updates';
 
 interface RouteSnapshot {
   screen: Screen;
@@ -147,6 +148,7 @@ const SCREENS: readonly string[] = [
   'stats',
   'settings',
   'about',
+  'updates',
 ];
 
 function isScreen(value: unknown): value is Screen {

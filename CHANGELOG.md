@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Auto-update
+- Desktop shell: `tauri-plugin-updater` driven from Rust (`update_check`,
+  `update_install` with `update://progress`, `relaunch_after_update`,
+  `desktop_info`); the sidecar is killed in `on_before_exit` so the Windows
+  installer can overwrite `bebok-server.exe`. Feed:
+  `releases/latest/download/latest.json`, verified against
+  `plugins.updater.pubkey`.
+- Client: `UpdateStore` (check 10 s after start, then every 6 h; GitHub API
+  fallback in browser mode / dev builds), non-modal `<app-update-banner>` with
+  download progress, a version chip in the topbar (highlights `↑ x.y.z` when
+  a newer release exists) opening the new Updates screen (`/updates`:
+  versions, "Check for updates", install / download, release notes, recent
+  releases from GitHub); install is blocked while an agent turn runs.
+- Engine: `GET /version`.
+- Release: `scripts/latest-json.mjs` composes `latest.json` in the `release`
+  job; `TAURI_SIGNING_PRIVATE_KEY` is now required; macOS updater archives are
+  named `bebok_<version>_<arch>.app.tar.gz`.
+- Release process: `npm run release -- X.Y.Z` opens a `release/X.Y.Z`
+  PR (changelog section + version bump); the PR builds a draft release, the
+  merge tags and publishes it automatically (`release.yml` now also runs on
+  `pull_request` from `release/**` and on `push` to `main`). Pre-release
+  suffixes must be numeric (MSI). `CONTRIBUTING.md` documents the flow.
+
 ## 1.6.0 — 2026-09-13
 
 Fleet generation, delegation roster, preview/explorer/chat upgrades,

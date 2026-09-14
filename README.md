@@ -306,18 +306,19 @@ Copy the tree into a named volume first if `npm ci` over the bind mount is slow.
 At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 `bebok-server` `routes::processes`) fail on Linux; clippy and the client build pass.
 
-Releases: `cd client && npm run version:bump -- X.Y.Z` (edits all seven
-manifests/lockfiles), update `CHANGELOG.md`, commit, `git tag X.Y.Z`, push the tag.
-`.github/workflows/release.yml` builds the four platform legs, merges
-`SHA256SUMS.txt` and publishes the GitHub release; signing (Authenticode, GPG,
-Tauri updater) is optional and gated on secrets. See [scripts/release.md](scripts/release.md).
+## Releasing
+
+`npm run release` - the script suggests the version from the commits, drafts
+the changelog, opens a `release/X.Y.Z` PR; CI builds a draft release from it;
+merging publishes it and installed desktop apps update themselves. Never
+assemble releases by hand. [CONTRIBUTING.md](CONTRIBUTING.md#releasing)
+([PL](CONTRIBUTING.pl.md)) has the three steps; CI internals are in
+[scripts/release.md](scripts/release.md).
 
 ## Contributing
 
-There is no CONTRIBUTING file yet. Conventions: PR-only merges to `main`, one
-git worktree per work package, no `Co-Authored-By` trailers, i18n keys added to
-all 12 dictionaries (`client/src/i18n/en.ts` is the reference), `cargo fmt` +
-clippy clean. See [AGENTS.md](AGENTS.md) for the contributor/agent guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md) (Polish: [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md))
+and [AGENTS.md](AGENTS.md).
 
 ## License
 

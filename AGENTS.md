@@ -12,6 +12,7 @@ mode against a manually started engine). All state and logic live in the
 engine — the GUI only renders and sends input.
 
 Read order: [`README.md`](./README.md) (features, quick start, config shape)
+→ [`CONTRIBUTING.md`](./CONTRIBUTING.md) (rules, release flow; Polish: `CONTRIBUTING.pl.md`)
 → this file → the code: `engine/crates/bebok-server/src/routes/mod.rs` (the
 single route table), `engine/crates/bebok-core/src/agent/mod.rs`,
 `engine/crates/bebok-core/src/store/mod.rs`, `client/src/app/app.routes.ts`.
@@ -27,6 +28,8 @@ npm run doctor                     # rustc/cargo, node/npm, tauri cli, OS-level 
 npm run full-build-dev -- --open   # cargo build -p bebok-server (debug) + start it + ng serve
 npm run full-build-app             # cargo build --release --target <triple> + sidecar:copy + tauri build
 npm run engine | npm run client    # one half only
+npm run release:check              # readiness list (read-only); release -- X.Y.Z runs it first
+npm run release -- X.Y.Z           # guided release: changelog + bump + release/X.Y.Z PR (CI does the rest)
 dev.cmd / ./dev.sh [tauri] [flags] # shortcuts for full-build-dev
 ```
 
@@ -83,10 +86,12 @@ engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.8
   crates/bebok-skills/       AGENTS.md + skill/<name>/SKILL.md discovery, frontmatter, toggles
   crates/bebok-pty/          PTY manager (portable-pty, scrollback ring, single-use tickets, Job Object)
 client/                      Angular 20.3 (standalone, signals, zoneless) — see §5
-  src-tauri/                 Tauri 2 shell (spawns sidecar --port 0, parses BEBOK_READY, browser viewer window)
+  src-tauri/                 Tauri 2 shell (spawns sidecar --port 0, parses BEBOK_READY, browser viewer window,
+                             updater commands update_check / update_install / relaunch_after_update)
   android/, capacitor.config.ts   Capacitor shell + EngineLauncher plugin — wired but NOT part of any release
   scripts/                   copy-sidecar.mjs, bump-version.mjs (npm run version:bump), tauri helpers
-scripts/bebok.mjs            root orchestration;  scripts/release.md  release runbook
+scripts/bebok.mjs            root orchestration;  scripts/release.mjs  guided release (PR -> draft -> merge -> publish)
+scripts/latest-json.mjs      updater manifest (CI);  scripts/release.md  runbook (CI mechanics)
 .github/workflows/ci.yml     fmt + clippy + build + test (engine), npm ci + build (client)
 .github/workflows/release.yml tag-triggered 4-leg matrix, SHA256SUMS.txt, optional signing
 docs/screenshots/            README images;  CHANGELOG.md;  LICENSE (AGPL-3.0-or-later)
@@ -210,12 +215,18 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   the context meter / auto-compaction), `settings/` (7 tabs; Agents tab holds the
   Delegation block and Frontend verification card; Permissions tab holds rules,
   YOLO, Tool safety and Browser display), `explorer/`, `terminal/`, `stats/`,
-  `about/` (renders `public/about/bebok.<lang>.md`), `debug/`, `start/`, `browser-view/`.
+  `about/` (renders `public/about/bebok.<lang>.md`), `updates/` (versions, update check, release list),
+  `debug/`, `start/`, `browser-view/`.
 - `src/i18n/`: 12 dictionaries (`en` is the reference; the `MessageKey` type is
   derived from it, so a missing key in another language is a compile error).
 - Tauri shell (`src-tauri/src/lib.rs`): spawns `bebok-server --port 0`, parses
   `BEBOK_READY`, exposes `engine_info` and `open_browser_viewer` (second
   WebviewWindow on `/browser-view?session=`; browser mode falls back to `window.open`).
+  Auto-update lives there too (`update_check` / `update_install` /
+  `relaunch_after_update` / `desktop_info`) rather than in the JS updater
+  plugin: only the Rust `UpdaterBuilder::on_before_exit` can kill the sidecar
+  before the installer runs. The client side is `core/update.store.ts` +
+  `ui/update-banner/`.
 - Mobile: `capacitor.config.ts` + `android/` with an `EngineLauncher` plugin exist
   but no binaries are bundled and nothing is released; treat as unreleased scaffolding.
 
@@ -224,8 +235,17 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
 - **Branches / merges**: `main` receives PR-only merges (no direct pushes). Work
   packages run in their own git worktree (`git worktree add ../bebok-wt/<name> -b wp/<name>`),
   one branch per package, rebased onto the integration branch before the PR.
-- **Commits**: conventional prefixes (`feat:`, `fix:`, `docs:`, `chore:`, `WP-X:`);
-  **no `Co-Authored-By` trailers**.
+- **Commits**: Conventional Commits - `feat:`, `fix:`, `docs:`, `chore:`,
+  `refactor:`, `test:`, optional scope (`feat(updates): …`), `feat!:` or a
+  `BREAKING CHANGE:` footer for breaking changes. The release script derives
+  the next version and the changelog draft from these prefixes, so a
+  mislabelled commit ships a wrong version number: `feat` = user-visible
+  addition (minor), `fix` = user-visible correction (patch), everything else
+  is invisible to users. Subject in the imperative, no trailing period.
+  **Never add `Co-Authored-By`, `Generated with`, `Signed-off-by` or any
+  other attribution trailer, footer or badge - not in commits, not in PR
+  titles/descriptions, not in code comments, not in the changelog.** The
+  author of a commit is the account that pushes it, full stop.
 - **i18n**: every user-visible string is a key in all 12 dictionaries
   (`client/src/i18n/*.ts`); keys are append-only — never rename or delete;
   a machine translation for the non-English locales is acceptable.
@@ -237,9 +257,21 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   `data-testid` on new interactive elements; specs next to the file.
 - **Secrets**: never commit keys (`.gitignore` covers `.env*`, `.bebok/`); tests
   use isolated data dirs (`InstanceStore::with_data_dir`).
-- **Versioning / release**: `cd client && npm run version:bump -- X.Y.Z` edits
-  all seven manifests and lockfiles; `preflight` in `release.yml` fails if they
-  disagree with the tag. Full runbook in [`scripts/release.md`](./scripts/release.md).
+- **Changelog**: every user-visible change adds a bullet under `## Unreleased`
+  in `CHANGELOG.md` in the same PR (grouped `### Features` / `### Fixes` /
+  `### Other` like the existing sections). Those bullets become the update
+  notes users read inside the app, so write them for users, not for
+  reviewers.
+- **Releasing** - an agent never tags, never creates a GitHub Release, never
+  edits `client/package.json` / `tauri.conf.json` / `Cargo.toml` versions by
+  hand and never uploads assets. The only sanctioned path is
+  `npm run release` (readiness check -> version suggested from the commits
+  -> changelog section -> version bump in all seven manifests ->
+  `release/X.Y.Z` PR); CI builds a draft from that PR and the merge tags and
+  publishes it. When asked to "release", run `npm run release:check`, report
+  the blockers, then run `npm run release` and hand the PR link back - do
+  not merge it yourself. Details: [`CONTRIBUTING.md`](./CONTRIBUTING.md#releasing);
+  CI mechanics: [`scripts/release.md`](./scripts/release.md).
 
 ## 7. Gotchas
 

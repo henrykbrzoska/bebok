@@ -19,6 +19,7 @@ import { DrawerAutoReveal } from '../right-drawer/drawer-auto-reveal.service';
 import { RightDrawer } from '../right-drawer/right-drawer';
 import { Sidebar } from '../sidebar/sidebar';
 import { Topbar } from '../topbar/topbar';
+import { UpdateBanner } from '../update-banner/update-banner';
 import { ShellStore } from './shell.store';
 
 @Component({
@@ -33,6 +34,7 @@ import { ShellStore } from './shell.store';
     DirectoryBrowser,
     ProjectSwitcher,
     ReconnectBanner,
+    UpdateBanner,
   ],
   templateUrl: './app-shell.html',
   styleUrl: './app-shell.css',

@@ -32,7 +32,3 @@
   color: var(--text-muted);
   font-size: var(--fs-12-5);
 }
-
-.status.error {
-  color: var(--danger);
-}
