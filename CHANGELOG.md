@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 — 2026-09-14
 
 ### Auto-update
 - Desktop shell: `tauri-plugin-updater` driven from Rust (`update_check`,
