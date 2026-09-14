@@ -308,23 +308,16 @@ At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
 
 ## Releasing
 
-One command, one PR, one merge: `node scripts/release.mjs X.Y.Z` renames the
-`## Unreleased` changelog section, bumps all seven manifests/lockfiles and
-opens a `release/X.Y.Z` PR; CI builds a **draft** release from the PR (install
-it, test it); merging tags `X.Y.Z` and publishes it automatically. Installed
-desktop apps check `latest.json` on start and every 6 h (topbar version chip
--> *Check for updates*) and install the signed bundle in place, so releases
-must **never** be assembled by hand. Checklist, diagram and failure handling:
-[CONTRIBUTING.md](CONTRIBUTING.md#releasing); CI internals, secrets and
-signing: [scripts/release.md](scripts/release.md).
+`node scripts/release.mjs X.Y.Z` opens a `release/X.Y.Z` PR, CI builds a
+draft release from it, merging publishes it and installed desktop apps update
+themselves. Never assemble releases by hand. Details:
+[CONTRIBUTING.md](CONTRIBUTING.md#releasing) / [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md),
+CI internals in [scripts/release.md](scripts/release.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md): PR-only merges, one git worktree per
-work package, no `Co-Authored-By` trailers, i18n keys added to all 12
-dictionaries (`client/src/i18n/en.ts` is the reference), `cargo fmt` + clippy
-clean, and the release checklist. [AGENTS.md](AGENTS.md) is the
-contributor/agent orientation guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md) (Polish: [CONTRIBUTING.pl.md](CONTRIBUTING.pl.md))
+and [AGENTS.md](AGENTS.md).
 
 ## License
 
