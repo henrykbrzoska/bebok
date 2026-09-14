@@ -87,7 +87,10 @@ export function normalizeEndpoint(raw: string): string | null {
   if (!url.hostname) {
     return null;
   }
-  return `${url.protocol}//${url.host}`;
+  // A relay tunnel lives under a path (`https://<worker>/t/<id>`); LAN and
+  // tailnet endpoints are bare origins.
+  const path = url.pathname.replace(/\/+$/, '');
+  return `${url.protocol}//${url.host}${path === '' ? '' : path}`;
 }
 
 /**

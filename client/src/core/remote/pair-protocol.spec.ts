@@ -65,9 +65,12 @@ describe('parsePairUrl (WP-M6 / F10-22)', () => {
 });
 
 describe('normalizeEndpoint / normalizePairCode', () => {
-  it('adds the scheme and strips paths', () => {
+  it('adds the scheme, keeps the path (relay tunnels), drops query and trailing slash', () => {
     expect(normalizeEndpoint('100.64.0.7:8790')).toBe('http://100.64.0.7:8790');
-    expect(normalizeEndpoint('https://desk.tail.ts.net:8790/x?y')).toBe('https://desk.tail.ts.net:8790');
+    expect(normalizeEndpoint('https://desk.tail.ts.net:8790/?y')).toBe('https://desk.tail.ts.net:8790');
+    expect(normalizeEndpoint('https://relay.example.workers.dev/t/0123456789abcdef0123456789abcdef/')).toBe(
+      'https://relay.example.workers.dev/t/0123456789abcdef0123456789abcdef',
+    );
     expect(normalizeEndpoint('  ')).toBeNull();
     expect(normalizeEndpoint('ws://1.2.3.4')).toBeNull();
   });

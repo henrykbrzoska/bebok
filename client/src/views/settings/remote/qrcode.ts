@@ -390,7 +390,8 @@ export function qrToSvg(matrix: boolean[][], moduleSize = 4): string {
     }
   }
   return (
-    `<svg viewBox="0 0 ${px} ${px}" xmlns="http://www.w3.org/2000/svg" role="img" ` +
-    `shape-rendering="crispEdges"><path d="${path}" fill="currentColor"/></svg>`
+    `<svg viewBox="0 0 ${px} ${px}" width="100%" height="100%" style="display:block" ` +
+    `xmlns="http://www.w3.org/2000/svg" role="img" shape-rendering="crispEdges">` +
+    `<path d="${path}" fill="currentColor"/></svg>`
   );
 }

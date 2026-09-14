@@ -48,5 +48,6 @@ describe('qrToSvg', () => {
     expect(svg).toContain(`viewBox="0 0 ${matrix.length * 4} ${matrix.length * 4}"`);
     expect(svg).toContain('<svg');
     expect(svg).toContain('fill="currentColor"');
+    expect(svg).toContain('width="100%" height="100%"');
   });
 });
