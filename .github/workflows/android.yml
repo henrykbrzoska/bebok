@@ -20,6 +20,9 @@ name: Android
 # caches (see the WP-M3 report for measured times on the introducing run).
 
 on:
+  # Build a signed APK from any branch on demand:
+  #   gh workflow run android.yml --ref <branch> && gh run download <run-id>
+  workflow_dispatch:
   pull_request:
     paths:
       - 'client/**'
