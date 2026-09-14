@@ -81,10 +81,8 @@ fn media_type_from_path(rel: &str) -> &'static str {
         "zip" => "application/zip",
         "gz" | "gzip" => "application/gzip",
         "wasm" => "application/wasm",
-        "txt" | "md" | "rs" | "ts" | "js" | "py" | "go" | "java" | "c" | "cpp" | "h"
-        | "css" | "html" | "toml" | "yaml" | "yml" | "sh" | "bat" | "cmd" | "ps1" => {
-            "text/plain"
-        }
+        "txt" | "md" | "rs" | "ts" | "js" | "py" | "go" | "java" | "c" | "cpp" | "h" | "css"
+        | "html" | "toml" | "yaml" | "yml" | "sh" | "bat" | "cmd" | "ps1" => "text/plain",
         _ => "application/octet-stream",
     }
 }

@@ -332,8 +332,7 @@ fn assemble_prompt(
     // rendered from the *resolved config* so the model sees the members this
     // project actually has (or that the fleet is off) rather than a generic
     // description it would have to guess names from.
-    let fleet =
-        bebok_core::agent::FleetContext::from_config(cfg, &agent.name, fleet_requested);
+    let fleet = bebok_core::agent::FleetContext::from_config(cfg, &agent.name, fleet_requested);
     if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation, &fleet) {
         agent.prompt = format!("{}\n\n{policy}", agent.prompt);
     }
@@ -467,10 +466,14 @@ mod tests {
         let mut orchestrator = bebok_core::agent::Agent::orchestrator();
         assemble_prompt(&instance, &mut orchestrator, &cfg, true);
         let prompt = orchestrator.prompt.clone();
-        assert!(prompt.contains("## Delegation policy (mode: auto)"), "{prompt}");
+        assert!(
+            prompt.contains("## Delegation policy (mode: auto)"),
+            "{prompt}"
+        );
         assert!(prompt.contains("Fleet: enabled here with"), "{prompt}");
         assert!(
-            prompt.contains("- `ask-openai-gpt-4.1-nano` - agent `ask`, model `openai/gpt-4.1-nano`"),
+            prompt
+                .contains("- `ask-openai-gpt-4.1-nano` - agent `ask`, model `openai/gpt-4.1-nano`"),
             "{prompt}"
         );
         assert!(prompt.contains("- `code-zai-glm-5.3-flash`"), "{prompt}");
@@ -482,8 +485,16 @@ mod tests {
         // still shown (fleet-first: usability alone decides).
         let mut solo = bebok_core::agent::Agent::orchestrator();
         assemble_prompt(&instance, &mut solo, &cfg, false);
-        assert!(solo.prompt.contains("Fleet: enabled here with"), "{}", solo.prompt);
-        assert!(solo.prompt.contains("prefer one `fleet` call"), "{}", solo.prompt);
+        assert!(
+            solo.prompt.contains("Fleet: enabled here with"),
+            "{}",
+            solo.prompt
+        );
+        assert!(
+            solo.prompt.contains("prefer one `fleet` call"),
+            "{}",
+            solo.prompt
+        );
 
         // `code` is a main-thread agent as well, but it has no `fleet` tool.
         let mut code = bebok_core::agent::Agent::code();

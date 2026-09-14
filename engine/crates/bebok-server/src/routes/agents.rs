@@ -155,7 +155,9 @@ pub async fn generate_fleet(
     let result = bebok_core::fleet_gen::generate_fleet(&cfg, opts)
         .await
         .map_err(|e| err_response(&e))?;
-    Ok(Json(serde_json::to_value(&result).expect("FleetGenResult serializes")))
+    Ok(Json(
+        serde_json::to_value(&result).expect("FleetGenResult serializes"),
+    ))
 }
 
 /// `GET /session/{id}/agents` -> `{ agents: [...] }`, running first, then by
@@ -515,7 +517,11 @@ mod tests {
         let auth = crate::auth::token();
         let dir = base.join("proj");
         std::fs::create_dir_all(&dir).unwrap();
-        let directory = dir.to_string_lossy().replace('\\', "%5C").replace(':', "%3A").replace('/', "%2F");
+        let directory = dir
+            .to_string_lossy()
+            .replace('\\', "%5C")
+            .replace(':', "%3A")
+            .replace('/', "%2F");
         let body = "{}";
         let response = raw(
             address,
@@ -548,7 +554,11 @@ mod tests {
         let auth = crate::auth::token();
         let dir = base.join("proj");
         std::fs::create_dir_all(&dir).unwrap();
-        let directory = dir.to_string_lossy().replace('\\', "%5C").replace(':', "%3A").replace('/', "%2F");
+        let directory = dir
+            .to_string_lossy()
+            .replace('\\', "%5C")
+            .replace(':', "%3A")
+            .replace('/', "%2F");
         let body = r#"{"types":["code","orchestrator"]}"#;
         let response = raw(
             address,
@@ -559,7 +569,10 @@ mod tests {
         )
         .await;
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
-        assert!(response.contains("orchestrator") || response.contains("invalid agent type"), "{response}");
+        assert!(
+            response.contains("orchestrator") || response.contains("invalid agent type"),
+            "{response}"
+        );
         server.abort();
         let _ = std::fs::remove_dir_all(base);
     }

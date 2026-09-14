@@ -154,7 +154,7 @@ standalone `bebok-server` binary is for browser mode / a remote engine.
 
 ## Quick start (from source)
 
-Prerequisites: Rust >= 1.85 (edition 2024), Node.js 22 (>= 20 works) + npm,
+Prerequisites: Rust >= 1.88 (edition 2024), Node.js 22 (>= 20 works) + npm,
 and for the desktop shell the Tauri 2 system dependencies for your OS
 (WebView2 + MSVC build tools on Windows, `webkit2gtk-4.1` / `libsoup-3.0` /
 `gtk+-3.0` / `librsvg-2.0` on Linux, Xcode command line tools on macOS - see
@@ -303,8 +303,6 @@ docker run --rm -v "C:\path\to\bebok:/src" -w /src/client node:22 bash -c "npm c
 ```
 
 Copy the tree into a named volume first if `npm ci` over the bind mount is slow.
-At 1.5.0 five process-kill tests (`bebok-tools` `processes`/`bash_kill`,
-`bebok-server` `routes::processes`) fail on Linux; clippy and the client build pass.
 
 ## Releasing
 

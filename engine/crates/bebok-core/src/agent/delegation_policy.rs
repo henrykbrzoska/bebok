@@ -320,8 +320,13 @@ mod tests {
 
     #[test]
     fn off_mode_has_no_policy_text() {
-        assert!(delegation_policy_note(&cfg(DelegationMode::Off), &FleetContext::default()).is_none());
-        assert!(delegation_policy_note(&cfg(DelegationMode::Off), &fleet(&[("a", "ask", "m")])).is_none());
+        assert!(
+            delegation_policy_note(&cfg(DelegationMode::Off), &FleetContext::default()).is_none()
+        );
+        assert!(
+            delegation_policy_note(&cfg(DelegationMode::Off), &fleet(&[("a", "ask", "m")]))
+                .is_none()
+        );
     }
 
     #[test]
@@ -364,17 +369,27 @@ mod tests {
             &cfg(DelegationMode::Auto),
             &fleet(&[
                 ("ask-openai-gpt-4.1-nano", "ask", "openai/gpt-4.1-nano"),
-                ("code-deepseek-v4-flash", "code", "deepseek/deepseek-v4-flash"),
+                (
+                    "code-deepseek-v4-flash",
+                    "code",
+                    "deepseek/deepseek-v4-flash",
+                ),
             ]),
         );
-        assert!(note.contains("enabled here with 2 configured member(s)"), "{note}");
+        assert!(
+            note.contains("enabled here with 2 configured member(s)"),
+            "{note}"
+        );
         assert!(
             note.contains("- `ask-openai-gpt-4.1-nano` - agent `ask`, model `openai/gpt-4.1-nano`"),
             "{note}"
         );
         assert!(note.contains("- `code-deepseek-v4-flash`"), "{note}");
         assert!(note.contains("unknown member(s)"), "{note}");
-        assert!(note.contains("EVERY one of the members above runs"), "{note}");
+        assert!(
+            note.contains("EVERY one of the members above runs"),
+            "{note}"
+        );
         // Requested + usable: the roster prefers `fleet` for this prompt.
         assert!(note.contains("prefer one `fleet` call"), "{note}");
         assert!(note.contains("heterogeneous `tasks`"), "{note}");
@@ -413,16 +428,31 @@ mod tests {
             &fleet(&[("ask-a", "ask", "p/m")]),
         );
         assert!(active.contains("prefer one `fleet` call"), "{active}");
-        assert!(active.contains("enabled here with 1 configured member(s)"), "{active}");
+        assert!(
+            active.contains("enabled here with 1 configured member(s)"),
+            "{active}"
+        );
         // ... and usable + NOT requested prefers `fleet` too.
         let unrequested = note_with(
             &cfg(DelegationMode::Auto),
             &fleet_requested(&[("ask-a", "ask", "p/m")], false),
         );
-        assert!(unrequested.contains("enabled here with 1 configured member(s)"), "{unrequested}");
-        assert!(unrequested.contains("prefer one `fleet` call"), "{unrequested}");
-        assert!(unrequested.contains("prefer `fleet` for independent"), "{unrequested}");
-        assert!(!unrequested.contains("do NOT call `fleet`"), "{unrequested}");
+        assert!(
+            unrequested.contains("enabled here with 1 configured member(s)"),
+            "{unrequested}"
+        );
+        assert!(
+            unrequested.contains("prefer one `fleet` call"),
+            "{unrequested}"
+        );
+        assert!(
+            unrequested.contains("prefer `fleet` for independent"),
+            "{unrequested}"
+        );
+        assert!(
+            !unrequested.contains("do NOT call `fleet`"),
+            "{unrequested}"
+        );
     }
 
     #[test]
@@ -436,7 +466,10 @@ mod tests {
         let note = note_with(&cfg(DelegationMode::Auto), &disabled);
         assert!(note.contains("Fleet: NOT available"), "{note}");
         assert!(note.contains("`fleet.enabled` is false"), "{note}");
-        assert!(note.contains("Fall back to sequential or parallel `task` calls"), "{note}");
+        assert!(
+            note.contains("Fall back to sequential or parallel `task` calls"),
+            "{note}"
+        );
         assert!(!note.contains("see the `Fleet:` line below"), "{note}");
         assert!(!note.contains("prefer one `fleet` call"), "{note}");
     }
@@ -483,7 +516,10 @@ mod tests {
             requested: true,
         };
         let note = note_with(&cfg(DelegationMode::Auto), &ctx);
-        assert!(!note.contains("fleet"), "no fleet mention expected:\n{note}");
+        assert!(
+            !note.contains("fleet"),
+            "no fleet mention expected:\n{note}"
+        );
         assert!(!note.contains("`fleet`"), "{note}");
         assert!(note.contains("`task`"), "{note}");
     }
@@ -504,9 +540,7 @@ mod tests {
         assert!(solo.tool_available);
         assert!(solo.is_usable());
         assert!(solo.is_active());
-        assert!(
-            note_with(&cfg(DelegationMode::Auto), &solo).contains("prefer one `fleet` call")
-        );
+        assert!(note_with(&cfg(DelegationMode::Auto), &solo).contains("prefer one `fleet` call"));
 
         let orchestrator = FleetContext::from_config(&conf, "orchestrator", true);
         assert!(orchestrator.tool_available);
@@ -557,10 +591,7 @@ mod tests {
         // Clamped: 0 -> 1.
         let mut c = cfg(DelegationMode::Always);
         c.max_concurrent = 0;
-        assert!(
-            note_with(&c, &FleetContext::default())
-                .contains("At most 1 sub-agents")
-        );
+        assert!(note_with(&c, &FleetContext::default()).contains("At most 1 sub-agents"));
     }
 
     /// F9-7b / F9-10: narration per phase, verifying children's claims,

@@ -59,12 +59,12 @@ Engine tests must run with `BEBOK_NO_AUTH` unset. Linux from a Windows host:
 `docker run --rm -v <clone>:/src -w /src/engine rust:1.97-bookworm bash -c "apt-get install -y -qq git pkg-config libssl-dev && cargo test --workspace"`
 (use a real clone, not a linked worktree — its `.git` file points at a Windows
 path; use `bash -c`, not `bash -lc`; copy into a named volume if `npm ci` over
-the bind mount is slow). Known at 1.5.0: five process-kill tests fail on Linux.
+the bind mount is slow).
 
 ## 3. Repository layout
 
 ```text
-engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.85; default-members = bebok-server)
+engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.88; default-members = bebok-server)
   crates/bebok-core/         config/ (loader, model, jsonc, writer, projects, providers, verify),
                              session/ (persist), store/ (instance_store, instance, lifecycle, session_state),
                              agent/ (preset, catalog, request, turn, gate, exec, observe, images,

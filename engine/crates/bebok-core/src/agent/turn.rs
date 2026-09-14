@@ -1195,10 +1195,12 @@ mod parallel_tests {
             "all three reads must be in flight at once"
         );
         assert_eq!(parts.len(), 3);
-        // Sequential would need >= 600ms; generous margin for a loaded CI box.
+        // `peak == 3` is the proof of overlap; the wall clock only guards
+        // against a pathological stall (a loaded Windows runner took 1.3 s
+        // for the whole turn, so no tight bound here).
         assert!(
-            elapsed < delay * 3,
-            "turn took {elapsed:?}, i.e. it did not overlap the reads"
+            elapsed < Duration::from_secs(10),
+            "turn took {elapsed:?}, something stalled"
         );
         for (id, state) in &parts {
             assert!(

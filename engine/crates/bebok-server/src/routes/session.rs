@@ -380,10 +380,8 @@ pub async fn abort_task(
     // so we must explicitly cancel the parent token here. This cascades to
     // all remaining children via the token tree and breaks the parent's
     // turn loop, persisting "[Turn aborted by user]".
-    if cancelled {
-        if let Some(parent_token) = session.abort_token().await {
-            parent_token.cancel();
-        }
+    if cancelled && let Some(parent_token) = session.abort_token().await {
+        parent_token.cancel();
     }
 
     if cancelled {
@@ -699,8 +697,7 @@ mod tests {
         // `models` map merges per key — a global `models.code` survives the
         // project file above and masks the project default asserted below.
         // Reload project-only (defaults -> project, no global layer).
-        *instance.config.write().unwrap() =
-            bebok_core::config::load_with_global(&project, None);
+        *instance.config.write().unwrap() = bebok_core::config::load_with_global(&project, None);
 
         // No override anywhere: the config default.
         let plain = bebok_core::session::Session::new(dir.clone(), "code");

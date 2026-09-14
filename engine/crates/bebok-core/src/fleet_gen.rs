@@ -33,12 +33,7 @@ fn default_min_per_type() -> usize {
 }
 
 fn default_types() -> Vec<String> {
-    vec![
-        "code".into(),
-        "ask".into(),
-        "plan".into(),
-        "debug".into(),
-    ]
+    vec!["code".into(), "ask".into(), "plan".into(), "debug".into()]
 }
 
 /// Result of fleet generation.
@@ -128,7 +123,11 @@ fn build_candidate_pool(cfg: &ResolvedConfig) -> Vec<Candidate> {
         }
     }
 
-    candidates.sort_by(|a, b| a.blended.partial_cmp(&b.blended).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        a.blended
+            .partial_cmp(&b.blended)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates
 }
 
@@ -160,10 +159,9 @@ pub async fn generate_fleet(cfg: &ResolvedConfig, opts: FleetGenOptions) -> Resu
     let candidates = build_candidate_pool(cfg);
 
     // Find cheapest candidate with supports_tools for generation.
-    let generation_model = candidates
-        .first()
-        .map(|c| c.model.clone())
-        .ok_or_else(|| CoreError::BadRequest("no configured providers with usable models".into()))?;
+    let generation_model = candidates.first().map(|c| c.model.clone()).ok_or_else(|| {
+        CoreError::BadRequest("no configured providers with usable models".into())
+    })?;
 
     // Try LLM generation.
     match try_llm_generate(cfg, &generation_model, &candidates, &types, min_per_type).await {
@@ -211,7 +209,7 @@ async fn try_llm_generate(
     )
     .await
     .map_err(|_| "LLM generation timed out after 120s".to_string())
-    .map_err(|e| CoreError::BadRequest(e))?
+    .map_err(CoreError::BadRequest)?
     .map_err(|e| CoreError::BadRequest(format!("LLM stream error: {e}")))?;
 
     // Collect text from the stream.
@@ -227,7 +225,8 @@ async fn try_llm_generate(
     }
 
     if text.trim().is_empty() {
-        return Err("LLM returned empty response".to_string()).map_err(|e: String| CoreError::BadRequest(e));
+        return Err("LLM returned empty response".to_string())
+            .map_err(|e: String| CoreError::BadRequest(e));
     }
 
     // Parse the response.
@@ -283,12 +282,7 @@ fn build_user_prompt(candidates: &[Candidate], types: &[String], min_per_type: u
         } else {
             ""
         };
-        prompt.push_str(&format!(
-            "- {} (${:.2}/1M){}\n",
-            c.model,
-            c.blended,
-            tag
-        ));
+        prompt.push_str(&format!("- {} (${:.2}/1M){}\n", c.model, c.blended, tag));
     }
 
     prompt.push_str(&format!(
@@ -325,9 +319,9 @@ fn parse_llm_json(text: &str) -> Result<String> {
     let trimmed = stripped.trim();
 
     // Find first '{' and last '}'.
-    let start = trimmed.find('{').ok_or_else(|| {
-        CoreError::BadRequest("LLM response contains no JSON object".to_string())
-    })?;
+    let start = trimmed
+        .find('{')
+        .ok_or_else(|| CoreError::BadRequest("LLM response contains no JSON object".to_string()))?;
     let end = trimmed.rfind('}').ok_or_else(|| {
         CoreError::BadRequest("LLM response contains no closing brace".to_string())
     })?;
@@ -436,10 +430,7 @@ fn validate_and_repair(
     let all_models: Vec<&Candidate> = candidates.iter().collect(); // already sorted cheap-first.
 
     for ty in types {
-        let current_count = members
-            .iter()
-            .filter(|m| m.agent == *ty)
-            .count();
+        let current_count = members.iter().filter(|m| m.agent == *ty).count();
         if current_count >= min_per_type {
             continue;
         }
@@ -572,7 +563,9 @@ fn deterministic_fallback(
         members,
         generation_model: generation_model.to_string(),
         fallback: true,
-        warning: Some(format!("LLM generation failed ({reason}); using deterministic fallback")),
+        warning: Some(format!(
+            "LLM generation failed ({reason}); using deterministic fallback"
+        )),
     }
 }
 
@@ -591,7 +584,11 @@ mod tests {
     }
 
     /// Helper: a ProviderSpec with known models and a fake key.
-    fn fake_spec(name: &str, kind: bebok_llm::ProviderKind, models: Vec<&str>) -> bebok_llm::ProviderSpec {
+    fn fake_spec(
+        name: &str,
+        kind: bebok_llm::ProviderKind,
+        models: Vec<&str>,
+    ) -> bebok_llm::ProviderSpec {
         bebok_llm::ProviderSpec {
             name: name.to_string(),
             kind,
@@ -644,15 +641,16 @@ mod tests {
                 }
             }
         }
-        if let (Some((cheap_model, cheap_price)), Some((exp_model, exp_price))) = (cheap, expensive) {
+        if let (Some((cheap_model, cheap_price)), Some((exp_model, exp_price))) = (cheap, expensive)
+        {
             let cfg = fake_config(vec![
                 fake_spec(
-                    &cheap_model.split('/').next().unwrap(),
+                    cheap_model.split('/').next().unwrap(),
                     bebok_llm::ProviderKind::Openai,
                     vec![cheap_model.split('/').nth(1).unwrap()],
                 ),
                 fake_spec(
-                    &exp_model.split('/').next().unwrap(),
+                    exp_model.split('/').next().unwrap(),
                     bebok_llm::ProviderKind::Openai,
                     vec![exp_model.split('/').nth(1).unwrap()],
                 ),
@@ -722,10 +720,22 @@ Hope this helps!"#;
 
     fn make_candidates() -> Vec<Candidate> {
         vec![
-            Candidate { model: "deepseek/deepseek-chat".into(), blended: 0.5 },
-            Candidate { model: "deepseek/deepseek-reasoner".into(), blended: 1.0 },
-            Candidate { model: "openai/gpt-4.1".into(), blended: 10.0 },
-            Candidate { model: "openai/gpt-4.1-mini".into(), blended: 2.0 },
+            Candidate {
+                model: "deepseek/deepseek-chat".into(),
+                blended: 0.5,
+            },
+            Candidate {
+                model: "deepseek/deepseek-reasoner".into(),
+                blended: 1.0,
+            },
+            Candidate {
+                model: "openai/gpt-4.1".into(),
+                blended: 10.0,
+            },
+            Candidate {
+                model: "openai/gpt-4.1-mini".into(),
+                blended: 2.0,
+            },
         ]
     }
 
@@ -764,24 +774,56 @@ Hope this helps!"#;
     #[test]
     fn validation_deduplicates_names() {
         let parsed = vec![
-            ParsedMember { name: "code-x".into(), agent: "code".into(), model: "deepseek/deepseek-chat".into() },
-            ParsedMember { name: "code-x".into(), agent: "code".into(), model: "openai/gpt-4.1".into() },
-            ParsedMember { name: "code-x".into(), agent: "code".into(), model: "openai/gpt-4.1-mini".into() },
-            ParsedMember { name: "code-x".into(), agent: "code".into(), model: "deepseek/deepseek-reasoner".into() },
+            ParsedMember {
+                name: "code-x".into(),
+                agent: "code".into(),
+                model: "deepseek/deepseek-chat".into(),
+            },
+            ParsedMember {
+                name: "code-x".into(),
+                agent: "code".into(),
+                model: "openai/gpt-4.1".into(),
+            },
+            ParsedMember {
+                name: "code-x".into(),
+                agent: "code".into(),
+                model: "openai/gpt-4.1-mini".into(),
+            },
+            ParsedMember {
+                name: "code-x".into(),
+                agent: "code".into(),
+                model: "deepseek/deepseek-reasoner".into(),
+            },
         ];
         let types = vec!["code".into()];
         let (members, _) = validate_and_repair(parsed, &make_candidates(), &types, 3);
         let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
         let unique: HashSet<&str> = names.iter().copied().collect();
-        assert_eq!(names.len(), unique.len(), "all names must be unique: {names:?}");
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "all names must be unique: {names:?}"
+        );
     }
 
     #[test]
     fn validation_deduplicates_models_per_type() {
         let parsed = vec![
-            ParsedMember { name: "code-1".into(), agent: "code".into(), model: "deepseek/deepseek-chat".into() },
-            ParsedMember { name: "code-2".into(), agent: "code".into(), model: "deepseek/deepseek-chat".into() },
-            ParsedMember { name: "code-3".into(), agent: "code".into(), model: "deepseek/deepseek-chat".into() },
+            ParsedMember {
+                name: "code-1".into(),
+                agent: "code".into(),
+                model: "deepseek/deepseek-chat".into(),
+            },
+            ParsedMember {
+                name: "code-2".into(),
+                agent: "code".into(),
+                model: "deepseek/deepseek-chat".into(),
+            },
+            ParsedMember {
+                name: "code-3".into(),
+                agent: "code".into(),
+                model: "deepseek/deepseek-chat".into(),
+            },
         ];
         let types = vec!["code".into()];
         let (members, _) = validate_and_repair(parsed, &make_candidates(), &types, 3);
@@ -796,9 +838,11 @@ Hope this helps!"#;
 
     #[test]
     fn validation_fills_shortfall() {
-        let parsed = vec![
-            ParsedMember { name: "code-1".into(), agent: "code".into(), model: "deepseek/deepseek-chat".into() },
-        ];
+        let parsed = vec![ParsedMember {
+            name: "code-1".into(),
+            agent: "code".into(),
+            model: "deepseek/deepseek-chat".into(),
+        }];
         let types = vec!["code".into()];
         let (members, _) = validate_and_repair(parsed, &make_candidates(), &types, 3);
         assert_eq!(members.len(), 3, "should fill to minPerType");
@@ -868,7 +912,8 @@ Hope this helps!"#;
 
     #[test]
     fn options_custom_values() {
-        let opts: FleetGenOptions = serde_json::from_str(r#"{"minPerType":5,"types":["code","debug"]}"#).unwrap();
+        let opts: FleetGenOptions =
+            serde_json::from_str(r#"{"minPerType":5,"types":["code","debug"]}"#).unwrap();
         assert_eq!(opts.min_per_type, 5);
         assert_eq!(opts.types, vec!["code", "debug"]);
     }
@@ -894,25 +939,44 @@ Hope this helps!"#;
     #[test]
     fn normalize_bare_model_unique() {
         let candidates = vec![
-            Candidate { model: "openai/gpt-4.1".into(), blended: 1.0 },
-            Candidate { model: "deepseek/deepseek-chat".into(), blended: 0.5 },
+            Candidate {
+                model: "openai/gpt-4.1".into(),
+                blended: 1.0,
+            },
+            Candidate {
+                model: "deepseek/deepseek-chat".into(),
+                blended: 0.5,
+            },
         ];
-        assert_eq!(normalize_model("gpt-4.1", &candidates), Some("openai/gpt-4.1".into()));
+        assert_eq!(
+            normalize_model("gpt-4.1", &candidates),
+            Some("openai/gpt-4.1".into())
+        );
     }
 
     #[test]
     fn normalize_full_model() {
-        let candidates = vec![
-            Candidate { model: "openai/gpt-4.1".into(), blended: 1.0 },
-        ];
-        assert_eq!(normalize_model("openai/gpt-4.1", &candidates), Some("openai/gpt-4.1".into()));
+        let candidates = vec![Candidate {
+            model: "openai/gpt-4.1".into(),
+            blended: 1.0,
+        }];
+        assert_eq!(
+            normalize_model("openai/gpt-4.1", &candidates),
+            Some("openai/gpt-4.1".into())
+        );
     }
 
     #[test]
     fn normalize_ambiguous_bare_model() {
         let candidates = vec![
-            Candidate { model: "openai/chat".into(), blended: 1.0 },
-            Candidate { model: "deepseek/chat".into(), blended: 0.5 },
+            Candidate {
+                model: "openai/chat".into(),
+                blended: 1.0,
+            },
+            Candidate {
+                model: "deepseek/chat".into(),
+                blended: 0.5,
+            },
         ];
         assert_eq!(normalize_model("chat", &candidates), None);
     }

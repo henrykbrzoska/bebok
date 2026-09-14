@@ -487,38 +487,39 @@ async fn kill_tree(pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = signal_group(pid, "-TERM").status().await;
+        signal_group(pid, libc::SIGTERM);
         tokio::time::sleep(TERM_GRACE).await;
         if pid_alive(pid) {
-            let _ = signal_group(pid, "-KILL").status().await;
+            signal_group(pid, libc::SIGKILL);
         }
     }
 }
 
+/// Signal the whole process group led by `pid` (the child was spawned with
+/// `process_group(0)`, so its pgid is its pid). A direct syscall rather than
+/// the `kill` binary: procps `kill -TERM -1234` parses `-1234` as a signal
+/// number and silently signals nothing, which is why background processes
+/// survived on Linux. Never signals pgid 0 or 1 (our own group / everything).
 #[cfg(not(windows))]
-fn signal_group(pid: u32, signal: &str) -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("kill");
-    cmd.arg(signal)
-        .arg(format!("-{pid}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    cmd
+fn signal_group(pid: u32, signal: libc::c_int) {
+    if pid <= 1 {
+        return;
+    }
+    // SAFETY: plain kill(2) on a pgid we spawned; the kernel validates it.
+    unsafe {
+        libc::kill(-(pid as libc::pid_t), signal);
+    }
 }
 
 #[cfg(not(windows))]
 fn pid_alive(pid: u32) -> bool {
-    // `kill -0` succeeds while the process exists (zombies included; the
+    if pid <= 1 {
+        return false;
+    }
+    // Signal 0 succeeds while the process exists (zombies included; the
     // waiter reaps ours, so a lingering zombie only costs one extra SIGKILL).
-    std::process::Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // SAFETY: kill(2) with signal 0 delivers nothing.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
 /// Kill the process tree rooted at `pid` without a tokio runtime.
@@ -536,22 +537,10 @@ fn kill_tree_blocking(pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = std::process::Command::new("kill")
-            .arg("-TERM")
-            .arg(format!("-{pid}"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        signal_group(pid, libc::SIGTERM);
         std::thread::sleep(TERM_GRACE);
         if pid_alive(pid) {
-            let _ = std::process::Command::new("kill")
-                .arg("-KILL")
-                .arg(format!("-{pid}"))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            signal_group(pid, libc::SIGKILL);
         }
     }
 }

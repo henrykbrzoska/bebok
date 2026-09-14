@@ -312,6 +312,9 @@ fn writer_loop(mut writer: Box<dyn Write + Send>, mut rx: mpsc::Receiver<Vec<u8>
 ///   the Job Object could not be assigned; the primary tree-kill is the Job
 ///   Object terminated in [`PtySession::kill`].
 fn kill_process_tree(pid: u32) {
+    if pid <= 1 {
+        return;
+    }
     #[cfg(unix)]
     unsafe {
         libc::kill(-(pid as i32), libc::SIGKILL);
