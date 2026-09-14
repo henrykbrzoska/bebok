@@ -376,6 +376,7 @@ export const pl: Record<MessageKey, string> = {
   'sidebar.today': 'Dzisiaj',
   'sidebar.older': 'Starsze',
   'sidebar.noSessions': 'Brak sesji',
+  'sidebar.cloud': 'Kopiowany do chmury',
   'sidebar.noMatches': 'Brak pasujących sesji',
   'sidebar.noProject': 'Nie wybrano projektu',
   'sidebar.railExplorer': 'Ex',
@@ -492,6 +493,10 @@ export const pl: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'Kompaktuj kontekst',
+  'chat.cloudOn': 'W chmurze',
+  'chat.cloudOff': 'Chmura',
+  'chat.cloudOnTitle': 'Kopiowane do relay po każdej turze - do odczytu na telefonie nawet gdy ten komputer jest wyłączony. Kliknij, aby przestać.',
+  'chat.cloudOffTitle': 'Kopiuj ten czat do relay, żeby telefon mógł go czytać, gdy komputer jest wyłączony.',
   'chat.compacting': 'Kompaktowanie…',
   'chat.compactTitle': 'Streść starsze wiadomości w nowej sesji (kompaktowanie kontekstu)',
   'chat.compactIdle': 'Kompaktowanie wymaga bezczynnej sesji z kilkoma wiadomościami',
@@ -1010,6 +1015,8 @@ export const pl: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'Komputer niedostępny – dane z pamięci podręcznej; nowe polecenia czekają w kolejce 10 minut.',
   'mobile.remote.dismiss': 'Zamknij',
   'mobile.remote.cachedTranscript': 'Transkrypt z pamięci podręcznej – ostatnie {n} wiadomości',
+  'mobile.remote.cloudList': 'Komputer offline – czaty skopiowane do chmury',
+  'mobile.remote.cloudTranscript': 'Z chmury – ostatnie {n} wiadomości (komputer offline)',
   'mobile.remote.aborting': 'Zatrzymywanie…',
   'mobile.remote.queuePrompt': 'Prompt',
   'mobile.remote.queuePermission': 'Uprawnienie',

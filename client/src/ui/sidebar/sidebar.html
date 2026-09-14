@@ -104,6 +104,9 @@
                 [labelHidden]="true"
               />
               <span class="session-title">{{ sessionTitle(row.session) }}</span>
+              @if (row.session.cloud) {
+                <span class="session-cloud" [title]="t('sidebar.cloud')" aria-hidden="true">☁</span>
+              }
             </span>
             <span class="session-meta">
               {{ sessionMeta(row.session) }}

@@ -376,6 +376,7 @@ export const uk: Record<MessageKey, string> = {
   'sidebar.today': 'Сьогодні',
   'sidebar.older': 'Давніші',
   'sidebar.noSessions': 'Немає сесій',
+  'sidebar.cloud': 'Скопійовано в хмару',
   'sidebar.noMatches': 'Немає відповідних сесій',
   'sidebar.noProject': 'Проєкт не вибрано',
   'sidebar.railExplorer': 'Ex',
@@ -492,6 +493,10 @@ export const uk: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'Стиснути контекст',
+  'chat.cloudOn': 'У хмарі',
+  'chat.cloudOff': 'Хмара',
+  'chat.cloudOnTitle': 'Копіюється на релей після кожного ходу - читається на телефоні навіть коли цей комп’ютер вимкнений. Натисніть, щоб зупинити.',
+  'chat.cloudOffTitle': 'Копіювати цей чат на релей, щоб телефон міг читати його, коли комп’ютер вимкнений.',
   'chat.compacting': 'Стискання…',
   'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
   'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
@@ -1011,6 +1016,8 @@ export const uk: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'Комп\'ютер недоступний – кешовані дані; нові команди в черзі 10 хвилин.',
   'mobile.remote.dismiss': 'Закрити',
   'mobile.remote.cachedTranscript': 'Кешована стенограма – останні {n} повідомлень',
+  'mobile.remote.cloudList': 'Комп’ютер офлайн – чати, скопійовані в хмару',
+  'mobile.remote.cloudTranscript': 'З хмари – останні {n} повідомлень (комп’ютер офлайн)',
   'mobile.remote.aborting': 'Зупинення…',
   'mobile.remote.queuePrompt': 'Промпт',
   'mobile.remote.queuePermission': 'Дозвіл',

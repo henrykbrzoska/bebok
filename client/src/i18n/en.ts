@@ -384,6 +384,7 @@ export const en = {
   'sidebar.today': 'Today',
   'sidebar.older': 'Older',
   'sidebar.noSessions': 'No sessions',
+  'sidebar.cloud': 'Mirrored to the cloud',
   'sidebar.noMatches': 'No sessions match',
   'sidebar.noProject': 'No project selected',
   'sidebar.railExplorer': 'Ex',
@@ -500,6 +501,10 @@ export const en = {
 
   // F6-4: compaction
   'chat.compact': 'Compact context',
+  'chat.cloudOn': 'In cloud',
+  'chat.cloudOff': 'Cloud',
+  'chat.cloudOnTitle': 'Mirrored to the relay after every turn - readable on your phone even when this desktop is off. Click to stop.',
+  'chat.cloudOffTitle': 'Mirror this chat to the relay so your phone can read it while this desktop is off.',
   'chat.compacting': 'Compacting…',
   'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
   'chat.compactIdle': 'Compaction needs an idle session with a few messages',
@@ -1019,6 +1024,8 @@ export const en = {
   'mobile.remote.offlineBanner': 'Desktop unreachable – showing cached data; new commands are queued for 10 minutes.',
   'mobile.remote.dismiss': 'Dismiss',
   'mobile.remote.cachedTranscript': 'Cached transcript – last {n} messages',
+  'mobile.remote.cloudList': 'Desktop offline – showing the chats it mirrored to the cloud',
+  'mobile.remote.cloudTranscript': 'From the cloud – last {n} messages (desktop offline)',
   'mobile.remote.aborting': 'Stopping…',
   'mobile.remote.queuePrompt': 'Prompt',
   'mobile.remote.queuePermission': 'Permission',

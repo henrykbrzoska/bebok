@@ -375,6 +375,7 @@ export const ko: Record<MessageKey, string> = {
   'sidebar.today': '오늘',
   'sidebar.older': '이전',
   'sidebar.noSessions': '세션 없음',
+  'sidebar.cloud': '클라우드에 복제됨',
   'sidebar.noMatches': '일치하는 세션 없음',
   'sidebar.noProject': '선택된 프로젝트 없음',
   'sidebar.railExplorer': 'Ex',
@@ -491,6 +492,10 @@ export const ko: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': '컨텍스트 압축',
+  'chat.cloudOn': '클라우드에 있음',
+  'chat.cloudOff': '클라우드',
+  'chat.cloudOnTitle': '매 턴 후 릴레이에 복제 - 이 데스크톱이 꺼져 있어도 휴대폰에서 읽을 수 있습니다. 클릭하면 중지합니다.',
+  'chat.cloudOffTitle': '이 채팅을 릴레이에 복제하여 데스크톱이 꺼진 동안에도 휴대폰에서 읽을 수 있게 합니다.',
   'chat.compacting': '압축 중…',
   'chat.compactTitle': '이전 메시지를 요약해 새 세션으로 만듭니다 (컨텍스트 압축)',
   'chat.compactIdle': '압축하려면 메시지가 몇 개 있는 유휴 세션이 필요합니다',
@@ -1010,6 +1015,8 @@ export const ko: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': '데스크톱에 연결할 수 없음 – 캐시 데이터 표시 중, 새 명령은 10분간 대기열에 보관됩니다.',
   'mobile.remote.dismiss': '닫기',
   'mobile.remote.cachedTranscript': '캐시된 대화 – 최근 {n}개 메시지',
+  'mobile.remote.cloudList': '데스크톱 오프라인 – 클라우드에 복제된 채팅 표시',
+  'mobile.remote.cloudTranscript': '클라우드에서 – 최근 {n}개 메시지 (데스크톱 오프라인)',
   'mobile.remote.aborting': '중지 중…',
   'mobile.remote.queuePrompt': '프롬프트',
   'mobile.remote.queuePermission': '권한',

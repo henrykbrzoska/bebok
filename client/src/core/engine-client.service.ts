@@ -17,6 +17,8 @@ import type { EngineApi, PermissionDecisionInput } from './engine-api';
 import { EngineTarget, EngineTargetStore } from './engine-target.store';
 import {
   AbortResponse,
+  CloudSessionList,
+  CloudSessionSnapshot,
   AbortTaskResponse,
   AgentEntry,
   AgentInfo,
@@ -960,6 +962,31 @@ export class EngineClient implements EngineApi {
 
   resetRemoteRelay(): Promise<RemoteStatus> {
     return this.remoteRequest<RemoteStatus>('POST', '/remote/relay/reset');
+  }
+
+  setSessionCloud(id: string, enabled: boolean): Promise<{ id: string; cloud: boolean }> {
+    return this.request<{ id: string; cloud: boolean }>('POST', `/session/${id}/cloud`, { enabled });
+  }
+
+  cloudSessions(): Promise<CloudSessionList> {
+    return this.cloudRequest<CloudSessionList>('/cloud/sessions');
+  }
+
+  cloudSession(id: string): Promise<CloudSessionSnapshot> {
+    return this.cloudRequest<CloudSessionSnapshot>(`/cloud/sessions/${encodeURIComponent(id)}`);
+  }
+
+  /** `GET <relay tunnel>/cloud/...` - the Durable Object answers, not the engine. */
+  private async cloudRequest<T>(path: string): Promise<T> {
+    const conn = this.requireConnection();
+    if (!isRelayEndpoint(conn.baseUrl)) {
+      throw new Error('cloud chats are only reachable through the relay');
+    }
+    const res = await authFetch(`${conn.baseUrl}${path}`, { method: 'GET' });
+    if (!res.ok) {
+      throw new Error(`relay GET ${path} -> ${res.status}`);
+    }
+    return (await res.json()) as T;
   }
 
   startPairing(): Promise<RemotePairStart> {

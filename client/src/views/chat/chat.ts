@@ -52,12 +52,7 @@ export const MESSAGE_WINDOW = 60;
 const DRAFT_KEY = 'bebok.sessionDrafts';
 const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const ACCEPTED_IMAGE_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif',
-]);
+const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 /** Longest edge kept when downscaling a staged image. */
 const IMAGE_MAX_EDGE = 2048;
 /** Staged files above this are downscaled/re-encoded before sending (~1 MiB). */
@@ -365,9 +360,7 @@ export class ChatView implements OnInit, OnDestroy {
   readonly permission = viewChild(PermissionPopup);
 
   /** True while a permission decision is outstanding (F2-8, bug B15). */
-  readonly permissionBlocked = computed(
-    () => (this.permission()?.asks().length ?? 0) > 0,
-  );
+  readonly permissionBlocked = computed(() => (this.permission()?.asks().length ?? 0) > 0);
 
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
@@ -534,9 +527,7 @@ export class ChatView implements OnInit, OnDestroy {
     // Restore running state: the activity store (SSE `session.updated`) is
     // authoritative; fall back to the locally cached flag for turns started
     // here that haven't produced an event yet.
-    this.running.set(
-      this.activity.isRunning(nextID) || this.runningBySession.get(nextID) === true,
-    );
+    this.running.set(this.activity.isRunning(nextID) || this.runningBySession.get(nextID) === true);
     this.sending.set(false);
     this.filterModel.set(null);
     this.follow.set(true);
@@ -548,9 +539,7 @@ export class ChatView implements OnInit, OnDestroy {
     }
     // Re-sync running (events may have arrived during load) and drain any
     // restored queue now that agent/model for this session are loaded.
-    this.running.set(
-      this.activity.isRunning(nextID) || this.running(),
-    );
+    this.running.set(this.activity.isRunning(nextID) || this.running());
     if (!this.running() && this.queue().length > 0) {
       void this.drainQueue();
     }
@@ -892,9 +881,7 @@ export class ChatView implements OnInit, OnDestroy {
         if (!el) {
           return;
         }
-        const target = el.querySelector<HTMLElement>(
-          '#' + CSS.escape('msg-' + msgs[i].id),
-        );
+        const target = el.querySelector<HTMLElement>('#' + CSS.escape('msg-' + msgs[i].id));
         if (target) {
           target.scrollIntoView({ behavior: 'smooth', block: 'start' });
           this.follow.set(false);
@@ -997,10 +984,7 @@ export class ChatView implements OnInit, OnDestroy {
     // engine reports the session idle (or right below on a failed POST).
     this.work.begin(sessionID);
     try {
-      await this.engine.prompt(
-        sessionID,
-        queuedPromptBody(head),
-      );
+      await this.engine.prompt(sessionID, queuedPromptBody(head));
       // Tab switched while the POST was in flight: leave the new tab alone.
       if (sessionID !== this.sessionID()) {
         return;
@@ -1054,9 +1038,7 @@ export class ChatView implements OnInit, OnDestroy {
     // Drop the matching optimistic echo as well.
     if (removed) {
       this.pending.update((p) => {
-        const at = p.findIndex(
-          (x) => x.text === removed.text && x.state === 'sending',
-        );
+        const at = p.findIndex((x) => x.text === removed.text && x.state === 'sending');
         if (at < 0) {
           return p;
         }
@@ -1091,13 +1073,14 @@ export class ChatView implements OnInit, OnDestroy {
     try {
       // The fork endpoint is inclusive. A first prompt has no prior message,
       // so start an equivalent empty session instead.
-      const created = index === 0
-        ? await this.engine.createSession(
-            directory,
-            this.meta()?.agent ?? this.selectedAgent(),
-            this.meta()?.model ?? undefined,
-          )
-        : await this.engine.forkSession(directory, sessionID, index - 1);
+      const created =
+        index === 0
+          ? await this.engine.createSession(
+              directory,
+              this.meta()?.agent ?? this.selectedAgent(),
+              this.meta()?.model ?? undefined,
+            )
+          : await this.engine.forkSession(directory, sessionID, index - 1);
       if (sessionID !== this.sessionID()) {
         return;
       }
@@ -1155,6 +1138,26 @@ export class ChatView implements OnInit, OnDestroy {
    * a fresh forked session and open it. Compaction is fork-based, so the
    * caller navigates to the new id rather than expecting an in-place change.
    */
+  /** 1.8 cloud chats: only the desktop (a Local-scope caller) may flip the flag. */
+  readonly canToggleCloud = computed(() => !this.targets.remoteScope() && this.meta() !== null);
+  readonly cloudBusy = signal(false);
+
+  async toggleCloud(): Promise<void> {
+    const meta = this.meta();
+    if (!meta || this.cloudBusy()) {
+      return;
+    }
+    this.cloudBusy.set(true);
+    try {
+      const result = await this.engine.setSessionCloud(meta.id, !meta.cloud);
+      this.meta.set({ ...meta, cloud: result.cloud });
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.cloudBusy.set(false);
+    }
+  }
+
   async compactNow(): Promise<void> {
     if (!this.canCompact()) {
       return;
@@ -1171,10 +1174,7 @@ export class ChatView implements OnInit, OnDestroy {
     this.compacting.set(true);
     this.error.set(null);
     try {
-      const result = await this.engine.compactSession(
-        sessionID,
-        this.sessionStore.compactBudget(),
-      );
+      const result = await this.engine.compactSession(sessionID, this.sessionStore.compactBudget());
       return result.sessionID;
     } catch (err) {
       if (sessionID === this.sessionID()) {
@@ -1346,18 +1346,14 @@ export class ChatView implements OnInit, OnDestroy {
     if (!items || items.length === 0) {
       return false;
     }
-    return [...items].some(
-      (item) => item.kind === 'file' && item.type.startsWith('image/'),
-    );
+    return [...items].some((item) => item.kind === 'file' && item.type.startsWith('image/'));
   }
 
   /** Validate + stage image files (reads them as base64 data URLs). */
   async addFiles(files: File[]): Promise<void> {
     for (const file of files) {
       if (this.attachments().length >= MAX_IMAGES) {
-        this.attachError.set(
-          this.t('chat.tooManyImages').replace('{n}', String(MAX_IMAGES)),
-        );
+        this.attachError.set(this.t('chat.tooManyImages').replace('{n}', String(MAX_IMAGES)));
         break;
       }
       const mime = file.type || 'image/png';
@@ -1368,23 +1364,18 @@ export class ChatView implements OnInit, OnDestroy {
         continue;
       }
       if (file.size > MAX_IMAGE_BYTES) {
-        this.attachError.set(
-          this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
-        );
+        this.attachError.set(this.t('chat.imageTooLarge').replace('{name}', file.name || mime));
         continue;
       }
       try {
         const prepared = await prepareImage(file, mime);
         if (prepared.size > MAX_IMAGE_BYTES) {
-          this.attachError.set(
-            this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
-          );
+          this.attachError.set(this.t('chat.imageTooLarge').replace('{name}', file.name || mime));
           continue;
         }
         // Split `data:<mime>;base64,<payload>`: send raw base64 only.
         const comma = prepared.dataUrl.indexOf(',');
-        const base64 =
-          comma >= 0 ? prepared.dataUrl.slice(comma + 1) : prepared.dataUrl;
+        const base64 = comma >= 0 ? prepared.dataUrl.slice(comma + 1) : prepared.dataUrl;
         // The engine validates and trusts the *payload bytes*; label the
         // attachment with what the bytes actually are so a mislabelled file
         // (e.g. a JPEG named .png) is not rejected for a MIME mismatch.
@@ -1497,14 +1488,16 @@ export function retryDraft(message: Message): {
       return [];
     }
     const base64 = part.data;
-    return [{
-      id: `retry-attachment-${++attachmentSeq}`,
-      media_type: part.media_type,
-      dataUrl: `data:${part.media_type};base64,${base64}`,
-      base64,
-      name: part.name ?? '',
-      size: part.bytes ?? Math.floor((base64.length * 3) / 4),
-    }];
+    return [
+      {
+        id: `retry-attachment-${++attachmentSeq}`,
+        media_type: part.media_type,
+        dataUrl: `data:${part.media_type};base64,${base64}`,
+        base64,
+        name: part.name ?? '',
+        size: part.bytes ?? Math.floor((base64.length * 3) / 4),
+      },
+    ];
   });
   return { text: text?.type === 'text' ? text.text : '', attachments };
 }
@@ -1537,8 +1530,7 @@ function sniffMediaType(base64: string): string | null {
     return null;
   }
   const bytes = [...raw].map((c) => c.charCodeAt(0));
-  const ascii = (from: number, to: number) =>
-    String.fromCharCode(...bytes.slice(from, to));
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.slice(from, to));
   if (bytes[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (ascii(0, 4) === 'GIF8') return 'image/gif';

@@ -512,3 +512,10 @@
 :host-context(.density-compact) .group-label {
   padding-top: var(--space-6);
 }
+
+.session-cloud {
+  flex: none;
+  margin-left: var(--space-4);
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+}

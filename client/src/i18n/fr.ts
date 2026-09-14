@@ -376,6 +376,7 @@ export const fr: Record<MessageKey, string> = {
   'sidebar.today': 'Aujourd\'hui',
   'sidebar.older': 'Plus anciennes',
   'sidebar.noSessions': 'Aucune session',
+  'sidebar.cloud': 'Copié dans le cloud',
   'sidebar.noMatches': 'Aucune session correspondante',
   'sidebar.noProject': 'Aucun projet sélectionné',
   'sidebar.railExplorer': 'Ex',
@@ -492,6 +493,10 @@ export const fr: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'Compacter le contexte',
+  'chat.cloudOn': 'Dans le cloud',
+  'chat.cloudOff': 'Cloud',
+  'chat.cloudOnTitle': 'Copié vers le relais après chaque tour - lisible sur le téléphone même quand ce bureau est éteint. Cliquer pour arrêter.',
+  'chat.cloudOffTitle': 'Copier cette discussion vers le relais pour que le téléphone puisse la lire quand ce bureau est éteint.',
   'chat.compacting': 'Compactage…',
   'chat.compactTitle': 'Résumer les anciens messages dans une nouvelle session (compactage du contexte)',
   'chat.compactIdle': 'Le compactage nécessite une session inactive avec quelques messages',
@@ -1010,6 +1015,8 @@ export const fr: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'Ordinateur injoignable – données en cache ; les nouvelles commandes sont mises en file pendant 10 minutes.',
   'mobile.remote.dismiss': 'Fermer',
   'mobile.remote.cachedTranscript': 'Transcription en cache – {n} derniers messages',
+  'mobile.remote.cloudList': 'Bureau hors ligne – discussions copiées dans le cloud',
+  'mobile.remote.cloudTranscript': 'Depuis le cloud – {n} derniers messages (bureau hors ligne)',
   'mobile.remote.aborting': 'Arrêt…',
   'mobile.remote.queuePrompt': 'Prompt',
   'mobile.remote.queuePermission': 'Permission',

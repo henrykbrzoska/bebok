@@ -376,6 +376,7 @@ export const de: Record<MessageKey, string> = {
   'sidebar.today': 'Heute',
   'sidebar.older': 'Älter',
   'sidebar.noSessions': 'Keine Sitzungen',
+  'sidebar.cloud': 'In die Cloud gespiegelt',
   'sidebar.noMatches': 'Keine passenden Sitzungen',
   'sidebar.noProject': 'Kein Projekt ausgewählt',
   'sidebar.railExplorer': 'Ex',
@@ -492,6 +493,10 @@ export const de: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'Kontext verdichten',
+  'chat.cloudOn': 'In der Cloud',
+  'chat.cloudOff': 'Cloud',
+  'chat.cloudOnTitle': 'Nach jedem Zug zum Relay gespiegelt - am Telefon lesbar, auch wenn dieser Desktop aus ist. Klicken zum Beenden.',
+  'chat.cloudOffTitle': 'Diesen Chat zum Relay spiegeln, damit das Telefon ihn lesen kann, während dieser Desktop aus ist.',
   'chat.compacting': 'Verdichte…',
   'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
   'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
@@ -1010,6 +1015,8 @@ export const de: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'Desktop nicht erreichbar – zwischengespeicherte Daten; neue Befehle warten 10 Minuten in der Warteschlange.',
   'mobile.remote.dismiss': 'Schließen',
   'mobile.remote.cachedTranscript': 'Zwischengespeicherter Verlauf – letzte {n} Nachrichten',
+  'mobile.remote.cloudList': 'Desktop offline – Chats aus der Cloud-Spiegelung',
+  'mobile.remote.cloudTranscript': 'Aus der Cloud – letzte {n} Nachrichten (Desktop offline)',
   'mobile.remote.aborting': 'Wird gestoppt…',
   'mobile.remote.queuePrompt': 'Prompt',
   'mobile.remote.queuePermission': 'Berechtigung',

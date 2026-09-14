@@ -375,6 +375,7 @@ export const zh: Record<MessageKey, string> = {
   'sidebar.today': '今天',
   'sidebar.older': '更早',
   'sidebar.noSessions': '没有会话',
+  'sidebar.cloud': '已复制到云端',
   'sidebar.noMatches': '没有匹配的会话',
   'sidebar.noProject': '未选择项目',
   'sidebar.railExplorer': 'Ex',
@@ -491,6 +492,10 @@ export const zh: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': '压缩上下文',
+  'chat.cloudOn': '已在云端',
+  'chat.cloudOff': '云端',
+  'chat.cloudOnTitle': '每轮结束后复制到中继 - 即使此桌面关机，手机也可阅读。点击停止。',
+  'chat.cloudOffTitle': '将此聊天复制到中继，以便桌面关机时手机也能阅读。',
   'chat.compacting': '压缩中…',
   'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
   'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
@@ -1010,6 +1015,8 @@ export const zh: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': '无法连接桌面 – 显示缓存数据；新命令将排队 10 分钟。',
   'mobile.remote.dismiss': '关闭',
   'mobile.remote.cachedTranscript': '缓存的记录 – 最近 {n} 条消息',
+  'mobile.remote.cloudList': '桌面离线 – 显示已复制到云端的聊天',
+  'mobile.remote.cloudTranscript': '来自云端 – 最近 {n} 条消息（桌面离线）',
   'mobile.remote.aborting': '正在停止…',
   'mobile.remote.queuePrompt': '提示',
   'mobile.remote.queuePermission': '权限',

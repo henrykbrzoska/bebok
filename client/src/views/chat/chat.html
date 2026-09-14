@@ -3,7 +3,11 @@
     @if (agents().length > 0) {
       <label class="tb-field">
         <span class="tb-label">{{ t('chat.agent') }}</span>
-        <select class="tb-select" [ngModel]="selectedAgent()" (ngModelChange)="onAgentChange($event)">
+        <select
+          class="tb-select"
+          [ngModel]="selectedAgent()"
+          (ngModelChange)="onAgentChange($event)"
+        >
           @for (agent of agents(); track agent.name) {
             <option [value]="agent.name">{{ agent.name }}</option>
           }
@@ -11,7 +15,11 @@
       </label>
       <label class="tb-field">
         <span class="tb-label">{{ t('chat.model') }}</span>
-        <select class="tb-select" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
+        <select
+          class="tb-select"
+          [ngModel]="selectedModel()"
+          (ngModelChange)="selectedModel.set($event)"
+        >
           <option value="">{{ t('settings.defaultOption') }}</option>
           @if (selectedModel() && !availableModels().includes(selectedModel())) {
             <option [value]="selectedModel()">{{ selectedModel() }}</option>
@@ -28,7 +36,12 @@
         data-testid="effective-model"
         [title]="t('chat.effectiveModel') + ': ' + effectiveModel().id"
         [attr.aria-label]="t('chat.effectiveModel') + ': ' + effectiveModel().id"
-      >@if (effectiveModel().provider) {<span class="provider">{{ effectiveModel().provider }}</span> }{{ effectiveModel().model }}</span>
+      >
+        @if (effectiveModel().provider) {
+          <span class="provider">{{ effectiveModel().provider }}</span>
+        }
+        {{ effectiveModel().model }}</span
+      >
     }
     <label class="tb-field">
       <span class="tb-label">{{ t('settings.thinking') }}</span>
@@ -57,6 +70,21 @@
       </span>
     }
 
+    @if (canToggleCloud()) {
+      <button
+        class="tb-cloud"
+        type="button"
+        data-testid="cloud-toggle"
+        [class.on]="meta()?.cloud"
+        [disabled]="cloudBusy()"
+        (click)="toggleCloud()"
+        [attr.aria-pressed]="meta()?.cloud ? 'true' : 'false'"
+        [title]="meta()?.cloud ? t('chat.cloudOnTitle') : t('chat.cloudOffTitle')"
+      >
+        ☁ {{ meta()?.cloud ? t('chat.cloudOn') : t('chat.cloudOff') }}
+      </button>
+    }
+
     <button
       class="tb-compact"
       type="button"
@@ -64,7 +92,9 @@
       (click)="compactNow()"
       [disabled]="!canCompact()"
       [title]="canCompact() ? t('chat.compactTitle') : t('chat.compactIdle')"
-    >{{ compacting() ? t('chat.compacting') : t('chat.compact') }}</button>
+    >
+      {{ compacting() ? t('chat.compacting') : t('chat.compact') }}
+    </button>
 
     <button
       class="tb-abort"
@@ -72,7 +102,9 @@
       (click)="abortTurn()"
       [disabled]="!running()"
       [title]="running() ? t('chat.abort') : t('chat.abortIdle')"
-    >{{ t('chat.abort') }}</button>
+    >
+      {{ t('chat.abort') }}
+    </button>
   </header>
 
   <div class="chat-main">
@@ -80,112 +112,124 @@
       <div class="scroll-wrap">
         <div #scroll cdkScrollable class="scroll" (scroll)="onScroll()">
           <div class="thread">
-          @if (loading()) {
-            <div class="placeholder">{{ t('chat.loading') }}</div>
-          } @else if (filteredMessages().length === 0 && pending().length === 0) {
-            <div class="placeholder empty-state">
-              <img class="empty-logo" src="/logo.svg" alt="" aria-hidden="true" />
-              <p class="placeholder-title">{{ t('chat.noMessages') }}</p>
-              <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
-            </div>
-          } @else {
-            @if (hiddenCount() > 0) {
-              <div class="load-earlier">
-                <button type="button" class="load-earlier-btn" (click)="loadEarlier()">
-                  {{ t('chat.loadEarlier') }}
-                </button>
-                <span class="load-earlier-hint">{{ t('chat.earlierHidden', { n: hiddenCount() }) }}</span>
+            @if (loading()) {
+              <div class="placeholder">{{ t('chat.loading') }}</div>
+            } @else if (filteredMessages().length === 0 && pending().length === 0) {
+              <div class="placeholder empty-state">
+                <img class="empty-logo" src="/logo.svg" alt="" aria-hidden="true" />
+                <p class="placeholder-title">{{ t('chat.noMessages') }}</p>
+                <p class="placeholder-hint">{{ t('chat.sendFirst') }}</p>
               </div>
-            }
-            <div class="messages">
-              @for (row of transcriptRows(); track row.kind === 'run' ? row.key : row.message.id) {
-                @if (row.kind === 'single') {
-                  <app-message-row
-                    [rowId]="'msg-'+row.message.id"
-                    [message]="row.message"
-                    [taskLinks]="taskLinks()"
-                    [sessionModel]="effectiveModel().id"
-                    [rollbackEnabled]="true"
-                    (rollback)="rollbackTo($event)"
-                  />
-                } @else {
-                  <app-tool-run-row
-                    [rowId]="'msg-'+row.key"
-                    [messages]="row.messages"
-                    [taskLinks]="taskLinks()"
-                  />
-                }
+            } @else {
+              @if (hiddenCount() > 0) {
+                <div class="load-earlier">
+                  <button type="button" class="load-earlier-btn" (click)="loadEarlier()">
+                    {{ t('chat.loadEarlier') }}
+                  </button>
+                  <span class="load-earlier-hint">{{
+                    t('chat.earlierHidden', { n: hiddenCount() })
+                  }}</span>
+                </div>
               }
-            </div>
-            @for (p of pending(); track p.id) {
-              <div class="pending user-bubble">
-                <div class="parts">
-                  @if (p.images?.length) {
-                    <div class="pending-thumbs">
-                      @for (img of p.images; track $index) {
-                        <img class="thumb" [src]="pendingImageUrl(img)" [alt]="img.name || 'image'" />
-                      }
-                    </div>
-                  }
-                  <div class="text">{{ p.text }}</div>
-                </div>
-                <div class="status">
-                  @if (p.state === 'sending') {
-                    <span class="dot" [title]="t('chat.sending')"></span>
+              <div class="messages">
+                @for (
+                  row of transcriptRows();
+                  track row.kind === 'run' ? row.key : row.message.id
+                ) {
+                  @if (row.kind === 'single') {
+                    <app-message-row
+                      [rowId]="'msg-' + row.message.id"
+                      [message]="row.message"
+                      [taskLinks]="taskLinks()"
+                      [sessionModel]="effectiveModel().id"
+                      [rollbackEnabled]="true"
+                      (rollback)="rollbackTo($event)"
+                    />
                   } @else {
-                    <span class="sent" [title]="t('chat.sent')">✓</span>
-                  }
-                </div>
-              </div>
-            }
-          }
-
-          @if (activeTasks().length > 0) {
-            <div class="active-tasks">
-              @for (task of activeTasks(); track task.taskID) {
-                <div class="active-task">
-                  <div class="active-task-info">
-                    <span class="active-task-spinner"></span>
-                    @if (task.childSessionID) {
-                      <a
-                        class="active-task-link"
-                        [routerLink]="['/chat', task.childSessionID]"
-                        [queryParams]="{directory: meta()?.directory}"
-                        [title]="t('chat.openSubagent')"
-                      >{{ task.name || task.agent || task.description || task.taskID }}</a>
-                    } @else {
-                      <span class="active-task-desc">{{ task.name || task.agent || task.description || task.taskID }}</span>
-                    }
-                  </div>
-                  @if (liveTasks.byTaskID(task.taskID); as live) {
-                    <app-task-progress-line
-                      class="active-task-progress"
-                      [status]="live.status"
-                      [progress]="live.progress"
-                      [tokens]="live.tokens.input + live.tokens.output"
+                    <app-tool-run-row
+                      [rowId]="'msg-' + row.key"
+                      [messages]="row.messages"
+                      [taskLinks]="taskLinks()"
                     />
                   }
-                  <button class="danger small" (click)="abortTask(task.taskID)">
-                    {{ t('chat.abortTask') }}
-                  </button>
+                }
+              </div>
+              @for (p of pending(); track p.id) {
+                <div class="pending user-bubble">
+                  <div class="parts">
+                    @if (p.images?.length) {
+                      <div class="pending-thumbs">
+                        @for (img of p.images; track $index) {
+                          <img
+                            class="thumb"
+                            [src]="pendingImageUrl(img)"
+                            [alt]="img.name || 'image'"
+                          />
+                        }
+                      </div>
+                    }
+                    <div class="text">{{ p.text }}</div>
+                  </div>
+                  <div class="status">
+                    @if (p.state === 'sending') {
+                      <span class="dot" [title]="t('chat.sending')"></span>
+                    } @else {
+                      <span class="sent" [title]="t('chat.sent')">✓</span>
+                    }
+                  </div>
                 </div>
               }
-            </div>
-          }
+            }
 
-          @if (running() && !loading()) {
-            <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
-              <img class="typing-logo" src="/logo.svg" alt="" aria-hidden="true" />
-              <span class="typing-text">{{ t('chat.typing') }}</span>
-              <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
-            </div>
-          }
+            @if (activeTasks().length > 0) {
+              <div class="active-tasks">
+                @for (task of activeTasks(); track task.taskID) {
+                  <div class="active-task">
+                    <div class="active-task-info">
+                      <span class="active-task-spinner"></span>
+                      @if (task.childSessionID) {
+                        <a
+                          class="active-task-link"
+                          [routerLink]="['/chat', task.childSessionID]"
+                          [queryParams]="{ directory: meta()?.directory }"
+                          [title]="t('chat.openSubagent')"
+                          >{{ task.name || task.agent || task.description || task.taskID }}</a
+                        >
+                      } @else {
+                        <span class="active-task-desc">{{
+                          task.name || task.agent || task.description || task.taskID
+                        }}</span>
+                      }
+                    </div>
+                    @if (liveTasks.byTaskID(task.taskID); as live) {
+                      <app-task-progress-line
+                        class="active-task-progress"
+                        [status]="live.status"
+                        [progress]="live.progress"
+                        [tokens]="live.tokens.input + live.tokens.output"
+                      />
+                    }
+                    <button class="danger small" (click)="abortTask(task.taskID)">
+                      {{ t('chat.abortTask') }}
+                    </button>
+                  </div>
+                }
+              </div>
+            }
 
-          <app-permission-popup
-            #permission
-            [activeSessionID]="sessionID()"
-            [directory]="meta()?.directory"
-          />
+            @if (running() && !loading()) {
+              <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
+                <img class="typing-logo" src="/logo.svg" alt="" aria-hidden="true" />
+                <span class="typing-text">{{ t('chat.typing') }}</span>
+                <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+              </div>
+            }
+
+            <app-permission-popup
+              #permission
+              [activeSessionID]="sessionID()"
+              [directory]="meta()?.directory"
+            />
           </div>
         </div>
       </div>
@@ -195,7 +239,9 @@
           class="jump-last-user"
           (click)="scrollToLastUser()"
           [title]="t('chat.goToLastUser')"
-        >↑ {{ t('chat.goToLastUser') }}</button>
+        >
+          ↑ {{ t('chat.goToLastUser') }}
+        </button>
       }
 
       @if (error()) {
@@ -226,7 +272,9 @@
                   class="icon-btn danger attach-remove"
                   (click)="removeAttachment(a.id)"
                   [title]="t('chat.removeAttachment')"
-                >&times;</button>
+                >
+                  &times;
+                </button>
               </div>
             }
           </div>
@@ -264,12 +312,22 @@
                   @if (q.images.length > 0) {
                     <span class="queue-thumbs">
                       @for (img of q.images; track $index) {
-                        <img class="thumb small" [src]="queuedImageUrl(img)" [alt]="img.name || 'image'" />
+                        <img
+                          class="thumb small"
+                          [src]="queuedImageUrl(img)"
+                          [alt]="img.name || 'image'"
+                        />
                       }
                     </span>
                   }
-                  <span class="queue-item-text">{{ truncateQueueText(q.text) || (q.images.length ? '🖼' : '') }}</span>
-                  <button class="icon-btn danger" (click)="removeFromQueue(i)" [title]="t('chat.removeFromQueue')">
+                  <span class="queue-item-text">{{
+                    truncateQueueText(q.text) || (q.images.length ? '🖼' : '')
+                  }}</span>
+                  <button
+                    class="icon-btn danger"
+                    (click)="removeFromQueue(i)"
+                    [title]="t('chat.removeFromQueue')"
+                  >
                     &times;
                   </button>
                 </div>
@@ -301,7 +359,9 @@
             [title]="t('chat.attachImage')"
             [attr.aria-label]="t('chat.attachImage')"
             [disabled]="loading() || attachments().length >= 5"
-          >📎</button>
+          >
+            📎
+          </button>
           @if (isCapacitor) {
             <app-composer-capture
               [model]="effectiveModel().id"
@@ -320,7 +380,9 @@
               [attr.aria-label]="t('chat.mic')"
               [attr.aria-pressed]="dictating()"
               [disabled]="!micSupported() || loading()"
-            >🎙</button>
+            >
+              🎙
+            </button>
           }
           @if (queue().length > 0) {
             <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
@@ -328,7 +390,12 @@
           <button
             class="primary send"
             (click)="sendPrompt()"
-            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading() || permissionBlocked()"
+            [disabled]="
+              (!draft().trim() && attachments().length === 0) ||
+              sending() ||
+              loading() ||
+              permissionBlocked()
+            "
             [title]="permissionBlocked() ? t('perm.blocksSend') : t('chat.send')"
           >
             {{ sending() ? t('chat.sending') : t('chat.send') }}

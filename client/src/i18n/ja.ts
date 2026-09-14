@@ -375,6 +375,7 @@ export const ja: Record<MessageKey, string> = {
   'sidebar.today': '今日',
   'sidebar.older': '以前',
   'sidebar.noSessions': 'セッションがありません',
+  'sidebar.cloud': 'クラウドに複製済み',
   'sidebar.noMatches': '一致するセッションがありません',
   'sidebar.noProject': 'プロジェクトが未選択です',
   'sidebar.railExplorer': 'Ex',
@@ -491,6 +492,10 @@ export const ja: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'コンテキストを圧縮',
+  'chat.cloudOn': 'クラウド上',
+  'chat.cloudOff': 'クラウド',
+  'chat.cloudOnTitle': '各ターン後にリレーへ複製 - このデスクトップが停止中でもスマホで閲覧できます。クリックで停止。',
+  'chat.cloudOffTitle': 'このチャットをリレーへ複製し、デスクトップ停止中もスマホで読めるようにします。',
   'chat.compacting': '圧縮中…',
   'chat.compactTitle': '古いメッセージを要約して新しいセッションにまとめる（コンテキスト圧縮）',
   'chat.compactIdle': '圧縮にはメッセージが数件ある待機中のセッションが必要です',
@@ -1010,6 +1015,8 @@ export const ja: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'デスクトップに接続できません – キャッシュを表示中。新しいコマンドは 10 分間キューに入ります。',
   'mobile.remote.dismiss': '閉じる',
   'mobile.remote.cachedTranscript': 'キャッシュされた履歴 – 最新 {n} 件',
+  'mobile.remote.cloudList': 'デスクトップはオフライン – クラウドに複製されたチャットを表示',
+  'mobile.remote.cloudTranscript': 'クラウドから – 最新 {n} 件（デスクトップはオフライン）',
   'mobile.remote.aborting': '停止中…',
   'mobile.remote.queuePrompt': 'プロンプト',
   'mobile.remote.queuePermission': '権限',

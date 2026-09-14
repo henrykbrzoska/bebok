@@ -375,6 +375,7 @@ export const hi: Record<MessageKey, string> = {
   'sidebar.today': 'आज',
   'sidebar.older': 'पुराने',
   'sidebar.noSessions': 'कोई सत्र नहीं',
+  'sidebar.cloud': 'क्लाउड में कॉपी',
   'sidebar.noMatches': 'कोई मेल खाता सत्र नहीं',
   'sidebar.noProject': 'कोई प्रोजेक्ट चयनित नहीं',
   'sidebar.railExplorer': 'Ex',
@@ -491,6 +492,10 @@ export const hi: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'संदर्भ संक्षिप्त करें',
+  'chat.cloudOn': 'क्लाउड में',
+  'chat.cloudOff': 'क्लाउड',
+  'chat.cloudOnTitle': 'हर टर्न के बाद रिले पर कॉपी - डेस्कटॉप बंद होने पर भी फ़ोन पर पढ़ने योग्य। रोकने के लिए क्लिक करें।',
+  'chat.cloudOffTitle': 'इस चैट को रिले पर कॉपी करें ताकि डेस्कटॉप बंद होने पर फ़ोन इसे पढ़ सके।',
   'chat.compacting': 'संक्षिप्त हो रहा है…',
   'chat.compactTitle': 'पुराने संदेशों का सारांश बनाकर नया सत्र खोलें (संदर्भ संक्षेपण)',
   'chat.compactIdle': 'संक्षेपण के लिए कुछ संदेशों वाला निष्क्रिय सत्र चाहिए',
@@ -1010,6 +1015,8 @@ export const hi: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'डेस्कटॉप अनुपलब्ध – कैश किया डेटा दिख रहा है; नए आदेश 10 मिनट तक कतार में रहेंगे।',
   'mobile.remote.dismiss': 'हटाएँ',
   'mobile.remote.cachedTranscript': 'कैश किया ट्रांसक्रिप्ट – अंतिम {n} संदेश',
+  'mobile.remote.cloudList': 'डेस्कटॉप ऑफ़लाइन – क्लाउड में कॉपी की गई चैट',
+  'mobile.remote.cloudTranscript': 'क्लाउड से – आख़िरी {n} संदेश (डेस्कटॉप ऑफ़लाइन)',
   'mobile.remote.aborting': 'रोका जा रहा है…',
   'mobile.remote.queuePrompt': 'प्रॉम्प्ट',
   'mobile.remote.queuePermission': 'अनुमति',

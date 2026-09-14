@@ -182,6 +182,8 @@ export interface SessionMeta {
   /** Context window of that model, resolved live from the engine's catalog. */
   context_window?: number | null;
   share?: unknown;
+  /** 1.8: mirrored to the relay after every turn (cloud icon). */
+  cloud?: boolean;
   /**
    * WP-GIT: branch name when the session runs in a Bebok git worktree
    * (`<root>/.bebok/worktrees/<branch>`), derived by the engine from
@@ -1135,6 +1137,27 @@ export interface RemoteStatus {
   allowLan: boolean;
   /** 1.8: the Cloudflare relay (`relay/`), absent on engines older than 1.8. */
   relay?: RemoteRelayStatus;
+}
+
+/** One row of the relay's `/cloud/sessions` (served even when the engine is offline). */
+export interface CloudSessionRow {
+  sessionId: string;
+  updatedAt: number;
+  meta: SessionMeta | null;
+}
+
+export interface CloudSessionList {
+  engineOnline: boolean;
+  sessions: CloudSessionRow[];
+}
+
+export interface CloudSessionSnapshot {
+  engineOnline: boolean;
+  updatedAt: number;
+  meta: SessionMeta;
+  messages: Message[];
+  truncated: boolean;
+  total: number;
 }
 
 export interface RemoteRelayStatus {

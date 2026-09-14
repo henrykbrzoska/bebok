@@ -22,6 +22,8 @@ import { EngineClient } from './engine-client.service';
 import type { EngineTarget } from './engine-target.store';
 import type {
   AbortResponse,
+  CloudSessionList,
+  CloudSessionSnapshot,
   AbortTaskResponse,
   AgentEntry,
   AgentInfo,
@@ -241,6 +243,15 @@ export interface EngineRestApi {
   setRemoteRelay(enabled: boolean, url: string): Promise<RemoteStatus>;
   /** 1.8: `POST /remote/relay/reset` - new tunnel id + secret (phones re-pair). */
   resetRemoteRelay(): Promise<RemoteStatus>;
+  /** 1.8 cloud chats: `POST /session/{id}/cloud {enabled}` (desktop only). */
+  setSessionCloud(id: string, enabled: boolean): Promise<{ id: string; cloud: boolean }>;
+  /**
+   * 1.8 cloud chats, phone side: the relay's own `/cloud/sessions[/<id>]`,
+   * answered from the Durable Object even while the desktop is offline.
+   * Rejects when the active connection is not a relay tunnel.
+   */
+  cloudSessions(): Promise<CloudSessionList>;
+  cloudSession(id: string): Promise<CloudSessionSnapshot>;
   startPairing(): Promise<RemotePairStart>;
   confirmPairing(pairId: string): Promise<RemoteDevice>;
   rejectPairing(pairId: string): Promise<{ ok: boolean }>;

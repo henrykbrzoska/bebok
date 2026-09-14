@@ -34,7 +34,13 @@ import {
 import { EngineClient } from '../../../core/engine-client.service';
 import { EngineTargetStore } from '../../../core/engine-target.store';
 import { Message } from '../../../core/engine.dtos';
-import { CachedTranscript, OfflineCache, OfflineQueue, QueuedCommand } from '../../../core/remote/offline-cache';
+import {
+  CachedTranscript,
+  OfflineCache,
+  OfflineQueue,
+  QueuedCommand,
+} from '../../../core/remote/offline-cache';
+import { isRelayEndpoint } from '../../../core/remote/endpoint-probe';
 import { RemoteStore } from '../../../core/remote/remote.store';
 import { MobileSessionContext } from '../../../core/remote/session-context';
 import { I18nService } from '../../../i18n/i18n.service';
@@ -64,7 +70,12 @@ export function cachedText(message: Message): string {
         <div class="offline" role="status" data-testid="remote-offline-banner">
           <span class="offline-text">{{ t('mobile.remote.offlineBanner') }}</span>
           @if (remote.noRoute()) {
-            <button type="button" class="link" (click)="remote.openTailscale()" data-testid="remote-open-tailscale">
+            <button
+              type="button"
+              class="link"
+              (click)="remote.openTailscale()"
+              data-testid="remote-open-tailscale"
+            >
               {{ t('mobile.remote.openTailscale') }}
             </button>
           }
@@ -84,7 +95,9 @@ export function cachedText(message: Message): string {
                   class="queue-dismiss"
                   (click)="queue.dismiss(cmd.id)"
                   [attr.aria-label]="t('mobile.remote.dismiss')"
-                >×</button>
+                >
+                  ×
+                </button>
               }
             </li>
           }
@@ -95,7 +108,11 @@ export function cachedText(message: Message): string {
         @if (showCached()) {
           <div class="cached" data-testid="remote-cached-transcript">
             <p class="cached-head">
-              {{ t('mobile.remote.cachedTranscript', { n: cached()!.messages.length }) }}
+              {{
+                fromCloud()
+                  ? t('mobile.remote.cloudTranscript', { n: cached()!.messages.length })
+                  : t('mobile.remote.cachedTranscript', { n: cached()!.messages.length })
+              }}
             </p>
             @for (m of cached()!.messages; track m.id) {
               @if (cachedText(m); as text) {
@@ -106,7 +123,11 @@ export function cachedText(message: Message): string {
         }
         <app-chat />
         @if (remote.offline()) {
-          <form class="offline-composer" (ngSubmit)="sendQueued()" data-testid="remote-offline-composer">
+          <form
+            class="offline-composer"
+            (ngSubmit)="sendQueued()"
+            data-testid="remote-offline-composer"
+          >
             <textarea
               rows="2"
               [ngModel]="draft()"
@@ -115,7 +136,12 @@ export function cachedText(message: Message): string {
               [placeholder]="t('mobile.remote.offlineComposer')"
               data-testid="remote-offline-draft"
             ></textarea>
-            <button type="submit" class="queue-send" [disabled]="!draft().trim()" data-testid="remote-offline-send">
+            <button
+              type="submit"
+              class="queue-send"
+              [disabled]="!draft().trim()"
+              data-testid="remote-offline-send"
+            >
               {{ t('mobile.remote.queueSend') }}
             </button>
           </form>
@@ -210,7 +236,8 @@ export function cachedText(message: Message): string {
         display: flex;
         gap: var(--space-8);
         align-items: flex-end;
-        padding: var(--space-8) var(--space-12) calc(var(--space-8) + env(safe-area-inset-bottom, 0px));
+        padding: var(--space-8) var(--space-12)
+          calc(var(--space-8) + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--border);
         background: var(--bg);
       }
@@ -423,6 +450,8 @@ export class RemoteSessionView {
 
   readonly aborting = signal(false);
   readonly cached = signal<CachedTranscript | null>(null);
+  /** 1.8: `cached` came from the relay's cloud snapshot, not this phone's cache. */
+  readonly fromCloud = signal(false);
   /** Offline composer draft (queued, never sent directly). */
   readonly draft = signal('');
 
@@ -532,8 +561,32 @@ export class RemoteSessionView {
       return;
     }
     const cached = await this.cache.getTranscript(targetId, id);
-    if (cached && this.sessionID() === id) {
-      this.cached.set(cached);
+    // 1.8: the relay's cloud snapshot beats the local cache when it is newer
+    // (it is written by the desktop after every turn, the cache only when
+    // this phone was watching).
+    const cloud = await this.loadCloudSnapshot(id);
+    const best = cloud && (!cached || cloud.savedAt >= cached.savedAt) ? cloud : (cached ?? cloud);
+    if (best && this.sessionID() === id) {
+      this.cached.set(best);
+      this.fromCloud.set(best === cloud && cloud !== null);
+    }
+  }
+
+  private async loadCloudSnapshot(id: string): Promise<CachedTranscript | null> {
+    try {
+      const conn = this.engine.connection();
+      if (!conn || !isRelayEndpoint(conn.baseUrl)) {
+        return null;
+      }
+      const snapshot = await this.engine.cloudSession(id);
+      return {
+        sessionID: id,
+        messages: snapshot.messages,
+        savedAt: snapshot.updatedAt,
+        truncated: snapshot.truncated,
+      };
+    } catch {
+      return null;
     }
   }
 

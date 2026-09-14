@@ -28,6 +28,7 @@ import { EngineTargetStore } from '../../../core/engine-target.store';
 import { EngineEvent, ProjectEntry, SessionMeta } from '../../../core/engine.dtos';
 import { EventsStore } from '../../../core/events.store';
 import { OfflineCache } from '../../../core/remote/offline-cache';
+import { isRelayEndpoint } from '../../../core/remote/endpoint-probe';
 import { I18nService } from '../../../i18n/i18n.service';
 
 const REFRESH_DEBOUNCE_MS = 300;
@@ -94,7 +95,11 @@ export function relativeTime(at: number, now: number = Date.now()): string {
         </div>
       }
 
-      @if (fromCache()) {
+      @if (fromCloud()) {
+        <p class="cached" role="status" data-testid="remote-list-cloud">
+          {{ t('mobile.remote.cloudList') }}
+        </p>
+      } @else if (fromCache()) {
         <p class="cached" role="status" data-testid="remote-list-cached">
           {{ t('mobile.remote.cachedList', { when: relative(cachedAt()) }) }}
         </p>
@@ -125,7 +130,12 @@ export function relativeTime(at: number, now: number = Date.now()): string {
               >
                 <span class="dot" aria-hidden="true"></span>
                 <span class="main">
-                  <span class="title">{{ titleOf(row.session) }}</span>
+                  <span class="title"
+                    >{{ titleOf(row.session) }}
+                    @if (row.session.cloud) {
+                      <span class="cloud" aria-hidden="true"> ☁</span>
+                    }
+                  </span>
                   <span class="meta">
                     <span class="project">{{ row.projectName }}</span>
                     @if (row.session.agent) {
@@ -307,6 +317,8 @@ export class RemoteSessionList {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly fromCache = signal(false);
+  /** 1.8: the desktop is offline and the rows come from the relay's cloud snapshots. */
+  readonly fromCloud = signal(false);
   readonly cachedAt = signal(0);
 
   readonly state = computed(() => {
@@ -386,19 +398,50 @@ export class RemoteSessionList {
       this.sessions.set(merged);
       this.error.set(null);
       this.fromCache.set(false);
+      this.fromCloud.set(false);
       void this.cache.putSessions(targetId, merged);
     } catch (err) {
       if (seq !== this.loadSeq) {
         return;
       }
       this.error.set(err instanceof Error ? err.message : String(err));
-      if (this.sessions().length === 0) {
-        await this.loadCached(targetId);
+      if (!(await this.loadCloud())) {
+        if (this.sessions().length === 0) {
+          await this.loadCached(targetId);
+        }
       }
     } finally {
       if (seq === this.loadSeq) {
         this.loading.set(false);
       }
+    }
+  }
+
+  /**
+   * 1.8: through the relay, the Durable Object still lists the sessions the
+   * desktop mirrored (`cloud` flag) while the desktop itself is offline.
+   */
+  private async loadCloud(): Promise<boolean> {
+    try {
+      const conn = this.engine.connection();
+      if (!conn || !isRelayEndpoint(conn.baseUrl)) {
+        return false;
+      }
+      const list = await this.engine.cloudSessions();
+      if (list.engineOnline) {
+        return false;
+      }
+      const sessions = list.sessions
+        .map((row) => row.meta)
+        .filter((meta): meta is SessionMeta => meta !== null)
+        .map((meta) => ({ ...meta, cloud: true }));
+      this.sessions.set(sessions);
+      this.fromCloud.set(true);
+      this.fromCache.set(false);
+      this.error.set(null);
+      return true;
+    } catch {
+      return false;
     }
   }
 

@@ -376,6 +376,7 @@ export const pt: Record<MessageKey, string> = {
   'sidebar.today': 'Hoje',
   'sidebar.older': 'Mais antigas',
   'sidebar.noSessions': 'Sem sessões',
+  'sidebar.cloud': 'Copiado para a nuvem',
   'sidebar.noMatches': 'Nenhuma sessão corresponde',
   'sidebar.noProject': 'Nenhum projeto selecionado',
   'sidebar.railExplorer': 'Ex',
@@ -492,6 +493,10 @@ export const pt: Record<MessageKey, string> = {
 
   // F6-4: compaction
   'chat.compact': 'Compactar contexto',
+  'chat.cloudOn': 'Na nuvem',
+  'chat.cloudOff': 'Nuvem',
+  'chat.cloudOnTitle': 'Copiado para o relay após cada turno - legível no telefone mesmo com este desktop desligado. Clique para parar.',
+  'chat.cloudOffTitle': 'Copiar este chat para o relay para que o telefone possa lê-lo com o desktop desligado.',
   'chat.compacting': 'A compactar…',
   'chat.compactTitle': 'Resumir as mensagens antigas numa nova sessão (compactar contexto)',
   'chat.compactIdle': 'Compactar requer uma sessão inativa com algumas mensagens',
@@ -1010,6 +1015,8 @@ export const pt: Record<MessageKey, string> = {
   'mobile.remote.offlineBanner': 'Desktop inacessível – dados em cache; novos comandos ficam em fila durante 10 minutos.',
   'mobile.remote.dismiss': 'Dispensar',
   'mobile.remote.cachedTranscript': 'Transcrição em cache – últimas {n} mensagens',
+  'mobile.remote.cloudList': 'Desktop offline – chats copiados para a nuvem',
+  'mobile.remote.cloudTranscript': 'Da nuvem – últimas {n} mensagens (desktop offline)',
   'mobile.remote.aborting': 'A parar…',
   'mobile.remote.queuePrompt': 'Prompt',
   'mobile.remote.queuePermission': 'Permissão',
