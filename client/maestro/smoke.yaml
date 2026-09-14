@@ -17,7 +17,8 @@ appId: dev.bebok.mobile
 # The embedded engine (F10-9) needs a few seconds on first boot (extracting
 # the per-ABI binaries to filesDir + starting bebok-server); poll rather than
 # assert immediately.
-- assertVisible:
-    text: "engine live"
+- extendedWaitUntil:
+    visible:
+      text: "engine live"
     timeout: 30000
 - takeScreenshot: WP-M3-smoke

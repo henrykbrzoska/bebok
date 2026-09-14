@@ -16,38 +16,45 @@ appId: dev.bebok.mobile
 - clearState
 - launchApp
 - waitForAnimationToEnd
-- assertVisible:
-    text: "engine live"
+- extendedWaitUntil:
+    visible:
+      text: "engine live"
     timeout: 40000
 - assertVisible: "Welcome to Bebok"
 - tapOn: "Chat locally"
-- assertVisible:
-    text: "Quick session"
+- extendedWaitUntil:
+    visible:
+      text: "Quick session"
     timeout: 10000
 - takeScreenshot: WP-M5-chat-home
 - tapOn: "Quick session"
-- assertVisible:
-    text: "Describe the task.*"
+- extendedWaitUntil:
+    visible:
+      text: "Describe the task.*"
     timeout: 15000
 - tapOn: "Describe the task.*"
 - inputText: "[write] hello from maestro"
 - tapOn: "Send"
-- assertVisible:
-    text: "Permission required"
+- extendedWaitUntil:
+    visible:
+      text: "Permission required"
     timeout: 20000
 - takeScreenshot: WP-M5-permission
 - tapOn: "Allow"
-- assertVisible:
-    text: "Mock reply to.*"
+- extendedWaitUntil:
+    visible:
+      text: "Mock reply to.*"
     timeout: 20000
 - takeScreenshot: WP-M5-reply
 - stopApp
 - launchApp
 - waitForAnimationToEnd
-- assertVisible:
-    text: "engine live"
+- extendedWaitUntil:
+    visible:
+      text: "engine live"
     timeout: 40000
-- assertVisible:
-    text: "hello from maestro"
+- extendedWaitUntil:
+    visible:
+      text: "hello from maestro"
     timeout: 15000
 - takeScreenshot: WP-M5-history
