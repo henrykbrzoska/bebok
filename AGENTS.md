@@ -64,7 +64,7 @@ the bind mount is slow). Known at 1.5.0: five process-kill tests fail on Linux.
 ## 3. Repository layout
 
 ```text
-engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.85; default-members = bebok-server)
+engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.88; default-members = bebok-server)
   crates/bebok-core/         config/ (loader, model, jsonc, writer, projects, providers, verify),
                              session/ (persist), store/ (instance_store, instance, lifecycle, session_state),
                              agent/ (preset, catalog, request, turn, gate, exec, observe, images,
