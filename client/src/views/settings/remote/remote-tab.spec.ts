@@ -76,7 +76,6 @@ describe('RemoteTab (F10-13)', () => {
     revokeDevice: jasmine.Spy;
     putConfig: jasmine.Spy;
     readLastDirectory: jasmine.Spy;
-    resetRemoteRelay: jasmine.createSpy('resetRemoteRelay').and.resolveTo(status({ enabled: true })),
     setRemoteRelay: jasmine.Spy;
     resetRemoteRelay: jasmine.Spy;
   };
@@ -100,6 +99,9 @@ describe('RemoteTab (F10-13)', () => {
       revokeDevice: jasmine.createSpy('revokeDevice').and.resolveTo({ ok: true }),
       putConfig: jasmine.createSpy('putConfig').and.resolveTo({}),
       readLastDirectory: jasmine.createSpy('readLastDirectory').and.returnValue('/tmp/project'),
+      resetRemoteRelay: jasmine
+        .createSpy('resetRemoteRelay')
+        .and.resolveTo(status({ enabled: true })),
       setRemoteRelay: jasmine
         .createSpy('setRemoteRelay')
         .and.callFake((enabled: boolean, url: string) =>
