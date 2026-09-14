@@ -59,7 +59,9 @@ import { I18nService } from '../../i18n/i18n.service';
             </span>
           } @else {
             @if (update.error(); as message) {
-              <span class="error" role="alert">{{ t('update.error', { message }) }}</span>
+              <span class="error" role="alert">{{
+                update.feedMissing() ? t('update.noManifest') : t('update.error', { message })
+              }}</span>
             }
             @if (available.installable && update.installBlocked()) {
               <span class="muted" data-testid="update-blocked">{{ t('update.busy') }}</span>

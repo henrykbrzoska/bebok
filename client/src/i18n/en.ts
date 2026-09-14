@@ -723,6 +723,7 @@ export const en = {
   'update.notes': "What's new",
   'update.busy': 'Finish or stop the running agent turns first — the restart would cut them off.',
   'update.error': 'Update failed: {message}',
+  'update.noManifest': 'The latest release on GitHub has no updater manifest, so this build cannot update itself yet — install newer versions from the releases page.',
   'update.ready': 'Update installed. Restart to use Bebok {version}.',
   'update.restart': 'Restart now',
   'topbar.version': 'Bebok {version}',

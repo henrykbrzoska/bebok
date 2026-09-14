@@ -43,6 +43,7 @@ describe('UpdatesView', () => {
             releasesError: signal(null),
             phase,
             error: signal(null),
+            feedMissing: signal(false),
             lastCheckedAt: signal(null),
             installBlocked: signal(false),
             check,

@@ -715,6 +715,7 @@ export const fr: Record<MessageKey, string> = {
   'update.notes': 'Nouveautés',
   'update.busy': "Terminez ou arrêtez d'abord les tours d'agent en cours — le redémarrage les interromprait.",
   'update.error': 'Échec de la mise à jour : {message}',
+  'update.noManifest': 'La dernière version sur GitHub n\'a pas de manifeste de mise à jour, ce build ne peut donc pas encore se mettre à jour seul — installez les nouvelles versions depuis la page des versions.',
   'update.ready': 'Mise à jour installée. Redémarrez pour utiliser Bebok {version}.',
   'update.restart': 'Redémarrer maintenant',
   'topbar.version': 'Bebok {version}',

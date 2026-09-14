@@ -714,6 +714,7 @@ export const ja: Record<MessageKey, string> = {
   'update.notes': '新機能',
   'update.busy': '先に実行中のエージェントターンを終了または停止してください — 再起動で中断されます。',
   'update.error': 'アップデートに失敗しました: {message}',
+  'update.noManifest': 'GitHub の最新リリースにはアップデーターのマニフェストがないため、このビルドはまだ自動更新できません — 新しいバージョンはリリースページからインストールしてください。',
   'update.ready': 'アップデートをインストールしました。再起動して Bebok {version} を使用してください。',
   'update.restart': '今すぐ再起動',
   'topbar.version': 'Bebok {version}',

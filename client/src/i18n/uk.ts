@@ -715,6 +715,7 @@ export const uk: Record<MessageKey, string> = {
   'update.notes': 'Що нового',
   'update.busy': 'Спочатку завершіть або зупиніть активні ходи агента — перезапуск їх перерве.',
   'update.error': 'Не вдалося оновити: {message}',
+  'update.noManifest': 'Найновіший випуск на GitHub не має маніфесту оновлення, тому ця збірка ще не може оновитися сама — новіші версії встановлюйте зі сторінки випусків.',
   'update.ready': 'Оновлення встановлено. Перезапустіть, щоб використовувати Bebok {version}.',
   'update.restart': 'Перезапустити зараз',
   'topbar.version': 'Bebok {version}',

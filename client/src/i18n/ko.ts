@@ -714,6 +714,7 @@ export const ko: Record<MessageKey, string> = {
   'update.notes': '새로운 기능',
   'update.busy': '먼저 실행 중인 에이전트 턴을 끝내거나 중지하세요 — 다시 시작하면 중단됩니다.',
   'update.error': '업데이트 실패: {message}',
+  'update.noManifest': 'GitHub의 최신 릴리스에 업데이터 매니페스트가 없어 이 빌드는 아직 스스로 업데이트할 수 없습니다 — 새 버전은 릴리스 페이지에서 설치하세요.',
   'update.ready': '업데이트가 설치되었습니다. Bebok {version}을(를) 사용하려면 다시 시작하세요.',
   'update.restart': '지금 다시 시작',
   'topbar.version': 'Bebok {version}',

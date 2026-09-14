@@ -714,6 +714,7 @@ export const zh: Record<MessageKey, string> = {
   'update.notes': '更新内容',
   'update.busy': '请先完成或停止正在运行的代理回合 — 重启会中断它们。',
   'update.error': '更新失败：{message}',
+  'update.noManifest': 'GitHub 上的最新版本没有更新清单，因此此构建暂时无法自动更新 — 请从版本页面安装新版本。',
   'update.ready': '更新已安装。重启以使用 Bebok {version}。',
   'update.restart': '立即重启',
   'topbar.version': 'Bebok {version}',

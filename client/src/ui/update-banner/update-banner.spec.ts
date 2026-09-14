@@ -53,6 +53,7 @@ describe('UpdateBanner', () => {
             installBlocked,
             bannerVisible,
             error: signal(null),
+            feedMissing: signal(false),
             progressPercent: signal(null),
             install,
             relaunch,

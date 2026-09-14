@@ -162,6 +162,15 @@ export class UpdateStore {
     return update !== null && update.version !== this.dismissedVersion();
   });
 
+  /**
+   * The release feed answered but carried no updater manifest - the current
+   * *Latest* release on GitHub was not produced by the release workflow.
+   */
+  readonly feedMissing = computed(() => {
+    const message = this.error();
+    return message !== null && /valid release JSON|latest\.json/i.test(message);
+  });
+
   readonly progressPercent = computed(() => {
     const progress = this.progress();
     if (!progress || !progress.total) {

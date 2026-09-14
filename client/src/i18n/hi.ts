@@ -714,6 +714,7 @@ export const hi: Record<MessageKey, string> = {
   'update.notes': 'नया क्या है',
   'update.busy': 'पहले चल रहे एजेंट टर्न पूरे करें या रोकें — पुनः प्रारंभ उन्हें बीच में रोक देगा।',
   'update.error': 'अपडेट विफल: {message}',
+  'update.noManifest': 'GitHub पर नवीनतम रिलीज़ में अपडेटर मैनिफ़ेस्ट नहीं है, इसलिए यह बिल्ड अभी खुद अपडेट नहीं हो सकता — नए संस्करण रिलीज़ पेज से इंस्टॉल करें।',
   'update.ready': 'अपडेट इंस्टॉल हो गया। Bebok {version} उपयोग करने के लिए पुनः प्रारंभ करें।',
   'update.restart': 'अभी पुनः प्रारंभ करें',
   'topbar.version': 'Bebok {version}',

@@ -53,7 +53,9 @@
       </div>
       <p class="note" data-testid="update-status">
         @if (update.phase() === 'error' && update.error(); as message) {
-          <span class="warn">{{ t('update.error', { message }) }}</span>
+          <span class="warn">{{
+            update.feedMissing() ? t('update.noManifest') : t('update.error', { message })
+          }}</span>
         } @else if (update.available(); as available) {
           {{
             t('update.available', { version: available.version, current: available.currentVersion })
