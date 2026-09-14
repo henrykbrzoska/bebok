@@ -5,14 +5,20 @@
 //   npm run builder -- --targets linux,android --version 1.8.0-test1 --yes
 //   npm run builder -- --out ~/somewhere                 (default: ~/bebok-dist)
 //
-// Linux / Windows / Android run in Docker (builder/compose.yml, images built on
-// first use). macOS cannot be built in a container: on a macOS host that leg
-// runs natively with the same steps (cargo + tauri, signed when ~/.tauri has
-// the key). Everything works on a private copy - the checkout keeps its
-// version - and lands in <out>/<version>/<platform>/ with CI's file names.
+// What can be built depends on the host (checked up front, the menu says so):
+//
+//   linux    Docker (ubuntu:22.04 like CI)                     any host with Docker
+//   android  Docker (JDK 21 + SDK + NDK like CI)               any host with Docker
+//   windows  native on Windows (msi + nsis, exactly CI's leg)  Windows host
+//            otherwise cross-built in Docker (nsis only, cargo-xwin, experimental)
+//   macos    native on macOS (app + dmg, exactly CI's leg)      macOS host only - no container can build it
+//
+// Everything works on a private copy - the checkout keeps its version - and
+// lands in <out>/<version>/<platform>/ with CI's file names, signed like CI
+// when ~/.tauri holds the updater key / Android keystore.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, cpSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -44,12 +50,34 @@ function fail(m) {
   process.exit(1);
 }
 
-const TARGETS = [
-  { id: 'linux', label: 'Linux x64 (deb, AppImage, portable)', docker: true },
-  { id: 'windows', label: 'Windows x64 (NSIS installer, portable; cross-built, experimental)', docker: true },
-  { id: 'android', label: 'Android arm64 (APK)', docker: true },
-  { id: 'macos', label: `macOS ${process.arch === 'arm64' ? 'Apple silicon' : 'Intel'} (dmg, app.tar.gz)`, docker: false, host: isMac },
-];
+const hasDocker = () => run('docker', ['compose', 'version'], { quiet: true }).ok;
+const hasCargo = () => run('cargo', ['--version'], { quiet: true }).ok;
+
+/**
+ * How each target can be built on this host. `mode` is 'docker', 'native' or
+ * null (not possible here); `why` explains a null / a downgrade.
+ */
+function hostPlan() {
+  const docker = hasDocker();
+  const cargo = hasCargo();
+  const dockerOr = (why) => (docker ? { mode: 'docker' } : { mode: null, why: `needs Docker${why ? ` (${why})` : ''}` });
+  return [
+    { id: 'linux', label: 'Linux x64 (deb, AppImage, portable)', ...dockerOr() },
+    { id: 'android', label: 'Android arm64 (APK)', ...dockerOr() },
+    {
+      id: 'windows',
+      label: isWin
+        ? 'Windows x64 (MSI + NSIS installers, portable) - native, same as CI'
+        : 'Windows x64 (NSIS installer, portable) - cross-built in Docker, experimental; MSI needs a Windows host',
+      ...(isWin ? (cargo ? { mode: 'native' } : { mode: null, why: 'needs cargo + node on this Windows host' }) : dockerOr('cross-build')),
+    },
+    {
+      id: 'macos',
+      label: `macOS ${process.arch === 'arm64' ? 'Apple silicon' : 'Intel'} (dmg, app.tar.gz) - native, same as CI`,
+      ...(isMac ? (cargo ? { mode: 'native' } : { mode: null, why: 'needs cargo + Xcode command line tools' }) : { mode: null, why: 'only on a macOS host (no container can build .app/.dmg)' }),
+    },
+  ];
+}
 
 let rl = null;
 async function ask(q, fallback) {
@@ -60,7 +88,7 @@ async function ask(q, fallback) {
 }
 
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { stdio: opts.quiet ? 'pipe' : 'inherit', cwd: opts.cwd ?? ROOT, env: { ...process.env, ...(opts.env ?? {}) }, encoding: 'utf8', windowsHide: true });
+  const r = spawnSync(cmd, args, { stdio: opts.quiet ? 'pipe' : 'inherit', cwd: opts.cwd ?? ROOT, env: { ...process.env, ...(opts.env ?? {}) }, encoding: 'utf8', windowsHide: true, shell: opts.shell ?? false });
   if (r.error) return { ok: false, out: r.error.message };
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
@@ -87,23 +115,26 @@ const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/;
 async function main() {
   log(c.bold('\nBebok builder') + c.dim(`  (artifacts -> ${OUT})\n`));
 
-  // ---- targets
+  // ---- targets, gated by what this host can do
+  const TARGETS = hostPlan();
+  const hostName = isMac ? 'macOS' : isWin ? 'Windows' : 'Linux';
+  log(c.dim(`host: ${hostName} ${process.arch}`));
   let picked = (flag('targets') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (picked.length === 0) {
     TARGETS.forEach((t, i) => {
-      const note = !t.docker && !t.host ? c.dim('  (needs a macOS host - skipped)') : '';
-      log(`  ${i + 1}) ${t.label}${note}`);
+      const how = t.mode === 'docker' ? c.dim('docker') : t.mode === 'native' ? c.green('native') : c.red(`unavailable: ${t.why}`);
+      log(`  ${t.mode ? i + 1 : '-'}) ${t.label}  ${how}`);
     });
     const answer = await ask('\nWhich targets? (numbers, comma-separated, or "all")', 'all');
     picked =
       answer === 'all'
-        ? TARGETS.filter((t) => t.docker || t.host).map((t) => t.id)
+        ? TARGETS.filter((t) => t.mode).map((t) => t.id)
         : answer.split(/[,\s]+/).map((n) => TARGETS[Number(n) - 1]?.id).filter(Boolean);
   }
   const targets = TARGETS.filter((t) => picked.includes(t.id));
   if (targets.length === 0) fail('no targets selected');
-  const unbuildable = targets.filter((t) => !t.docker && !t.host);
-  if (unbuildable.length) fail(`${unbuildable.map((t) => t.id).join(', ')}: only on a macOS host`);
+  const blocked = targets.filter((t) => !t.mode);
+  if (blocked.length) fail(blocked.map((t) => `${t.id}: ${t.why}`).join('\n  '));
 
   // ---- version
   let version = flag('version') ?? (await ask('Version for these builds', suggestVersion()));
@@ -112,17 +143,12 @@ async function main() {
   const outDir = join(OUT, version);
   mkdirSync(outDir, { recursive: true });
 
-  // ---- tools
-  const needDocker = targets.some((t) => t.docker);
-  if (needDocker) {
-    if (!run('docker', ['compose', 'version'], { quiet: true }).ok) fail('docker compose is not available - start Docker Desktop / OrbStack');
-  }
   const secrets = join(homedir(), '.tauri');
   const hasUpdaterKey = existsSync(join(secrets, 'bebok.key'));
   const hasKeystore = existsSync(join(secrets, 'bebok-android.keystore'));
   log(`\n${c.bold('Plan')}`);
   log(`  version   ${version}`);
-  log(`  targets   ${targets.map((t) => t.id).join(', ')}`);
+  log(`  targets   ${targets.map((t) => `${t.id} (${t.mode})`).join(', ')}`);
   log(`  updater   ${hasUpdaterKey ? c.green('signed (~/.tauri/bebok.key)') : c.yellow('unsigned - not installable as an update')}`);
   if (targets.some((t) => t.id === 'android')) log(`  apk       ${hasKeystore ? c.green('signed (~/.tauri/bebok-android.keystore)') : c.yellow('debug key')}`);
   log(`  output    ${outDir}\n`);
@@ -133,12 +159,12 @@ async function main() {
     const started = Date.now();
     log(`\n${c.bold(`== ${t.id} ==`)}`);
     let ok;
-    if (t.docker) {
+    if (t.mode === 'docker') {
       ok = run('docker', ['compose', '-f', COMPOSE, 'run', '--rm', '--build', t.id], {
         env: { VERSION: version, BEBOK_SRC: ROOT, BEBOK_OUT: OUT, BEBOK_SECRETS: secrets },
       }).ok;
     } else {
-      ok = buildMacos(version, outDir, secrets);
+      ok = buildNative(t.id, version, outDir, secrets);
     }
     results.push({ id: t.id, ok, seconds: Math.round((Date.now() - started) / 1000) });
     if (!ok) log(c.red(`${t.id} failed`));
@@ -154,12 +180,17 @@ async function main() {
   process.exitCode = results.every((r) => r.ok) ? 0 : 1;
 }
 
-/** The macOS leg, natively: same steps as release.yml's macos-* matrix entry. */
-function buildMacos(version, outDir, secrets) {
-  const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
-  const platform = process.arch === 'arm64' ? 'macos-arm64' : 'macos-x64';
+/**
+ * A native leg (macOS on a Mac, Windows on Windows): the same steps as the
+ * matching release.yml matrix entry, on a private copy of the checkout.
+ */
+function buildNative(id, version, outDir, secrets) {
+  const mac = id === 'macos';
+  const triple = mac ? (process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin') : 'x86_64-pc-windows-msvc';
+  const platform = mac ? (process.arch === 'arm64' ? 'macos-arm64' : 'macos-x64') : 'windows-x64';
   const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
-  const work = join(OUT, '.work-macos');
+  const exe = mac ? '' : '.exe';
+  const work = join(OUT, `.work-${id}`);
   log(c.dim(`private copy -> ${work}`));
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
@@ -180,7 +211,11 @@ function buildMacos(version, outDir, secrets) {
   ]) {
     if (existsSync(join(ROOT, from))) {
       mkdirSync(dirname(join(work, to)), { recursive: true });
-      run('ln', ['-s', join(ROOT, from), join(work, to)], { quiet: true });
+      try {
+        symlinkSync(join(ROOT, from), join(work, to), isWin ? 'junction' : 'dir');
+      } catch {
+        /* falls back to npm ci / a cold cargo build below */
+      }
     }
   }
   if (!existsSync(join(work, 'client', 'node_modules'))) {
@@ -194,25 +229,43 @@ function buildMacos(version, outDir, secrets) {
     env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? '';
   }
   if (!run('cargo', ['build', '--release', '--locked', '-p', 'bebok-server', '--target', triple], { cwd: join(work, 'engine') }).ok) return false;
-  if (!run('npm', ['run', 'sidecar:copy', '--', '--target', triple], { cwd: join(work, 'client'), quiet: true }).ok) return false;
+  if (!run(isWin ? 'npm.cmd' : 'npm', ['run', 'sidecar:copy', '--', '--target', triple], { cwd: join(work, 'client'), quiet: true, shell: isWin }).ok) return false;
   const override = join(work, 'client', 'tauri-release-override.json');
   writeFileSync(override, JSON.stringify(env.TAURI_SIGNING_PRIVATE_KEY ? { bundle: { createUpdaterArtifacts: true } } : {}));
-  if (!run('npx', ['tauri', 'build', '--ci', '--target', triple, '--bundles', 'app,dmg', '--config', 'tauri-release-override.json'], { cwd: join(work, 'client'), env }).ok) return false;
+  const bundles = mac ? 'app,dmg' : 'msi,nsis';
+  if (!run(isWin ? 'npx.cmd' : 'npx', ['tauri', 'build', '--ci', '--target', triple, '--bundles', bundles, '--config', 'tauri-release-override.json'], { cwd: join(work, 'client'), env, shell: isWin }).ok) return false;
 
   const p = join(outDir, platform);
   mkdirSync(p, { recursive: true });
   const bundle = join(work, 'client', 'src-tauri', 'target', triple, 'release', 'bundle');
-  cpSync(join(work, 'engine', 'target', triple, 'release', 'bebok-server'), join(p, `bebok-server-${version}-${platform}`));
-  for (const f of readdirSync(join(bundle, 'dmg'))) if (f.endsWith('.dmg')) cpSync(join(bundle, 'dmg', f), join(p, f));
-  const mac = join(bundle, 'macos');
-  const tgz = readdirSync(mac).find((f) => f.endsWith('.app.tar.gz'));
-  if (tgz) {
-    cpSync(join(mac, tgz), join(p, `bebok_${version}_${arch}.app.tar.gz`));
-    if (existsSync(join(mac, `${tgz}.sig`))) cpSync(join(mac, `${tgz}.sig`), join(p, `bebok_${version}_${arch}.app.tar.gz.sig`));
+  const bin = join(work, 'client', 'src-tauri', 'target', triple, 'release');
+  cpSync(join(work, 'engine', 'target', triple, 'release', `bebok-server${exe}`), join(p, `bebok-server-${version}-${platform}${exe}`));
+  if (mac) {
+    for (const f of readdirSync(join(bundle, 'dmg'))) if (f.endsWith('.dmg')) cpSync(join(bundle, 'dmg', f), join(p, f));
+    const macDir = join(bundle, 'macos');
+    const tgz = readdirSync(macDir).find((f) => f.endsWith('.app.tar.gz'));
+    if (tgz) {
+      cpSync(join(macDir, tgz), join(p, `bebok_${version}_${arch}.app.tar.gz`));
+      if (existsSync(join(macDir, `${tgz}.sig`))) cpSync(join(macDir, `${tgz}.sig`), join(p, `bebok_${version}_${arch}.app.tar.gz.sig`));
+    } else {
+      run('tar', ['-czf', join(p, `bebok_${version}_${arch}.app.tar.gz`), '-C', macDir, 'bebok.app'], { quiet: true });
+    }
+    run('bash', ['-c', `cd "${p}" && shasum -a 256 -- * > SHA256SUMS-${platform}.txt`], { quiet: true });
   } else {
-    run('tar', ['-czf', join(p, `bebok_${version}_${arch}.app.tar.gz`), '-C', mac, 'bebok.app'], { quiet: true });
+    for (const sub of ['msi', 'nsis']) {
+      const dir = join(bundle, sub);
+      if (!existsSync(dir)) continue;
+      for (const f of readdirSync(dir)) if (/\.(msi|exe)(\.sig)?$/.test(f)) cpSync(join(dir, f), join(p, f));
+    }
+    // Portable zip like CI: desktop exe + sidecar + LICENSE + README.
+    const stage = join(OUT, '.stage', `bebok-${version}`);
+    rmSync(join(OUT, '.stage'), { recursive: true, force: true });
+    mkdirSync(stage, { recursive: true });
+    const app = existsSync(join(bin, 'bebok-desktop.exe')) ? join(bin, 'bebok-desktop.exe') : join(bin, 'bebok.exe');
+    for (const [from, to] of [[app, 'bebok-desktop.exe'], [join(work, 'engine', 'target', triple, 'release', 'bebok-server.exe'), 'bebok-server.exe'], [join(work, 'LICENSE'), 'LICENSE'], [join(work, 'README.md'), 'README.md']]) cpSync(from, join(stage, to));
+    run('powershell', ['-NoProfile', '-Command', `Compress-Archive -Force -Path '${stage}' -DestinationPath '${join(p, `bebok-${version}-${platform}-portable.zip`)}'`], { quiet: true });
+    run('powershell', ['-NoProfile', '-Command', `cd '${p}'; Get-ChildItem -File | Where-Object { $_.Name -ne 'SHA256SUMS-${platform}.txt' } | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Set-Content -Encoding ascii 'SHA256SUMS-${platform}.txt'`], { quiet: true });
   }
-  run('bash', ['-c', `cd "${p}" && shasum -a 256 -- * > SHA256SUMS-${platform}.txt`], { quiet: true });
   return true;
 }
 

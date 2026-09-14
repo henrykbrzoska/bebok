@@ -221,10 +221,10 @@ jobs:
           target: default
           emulator-options: -no-window -no-audio -no-boot-anim -camera-back none
           disable-animations: true
+          # Each line runs as its own command, so no `export PATH` carries over.
           script: |
             adb install -r apk/*.apk
-            export PATH="$HOME/.maestro/bin:$PATH"
-            maestro test client/maestro/smoke.yaml
+            $HOME/.maestro/bin/maestro test client/maestro/smoke.yaml
 
       - name: Upload Maestro results
         if: always()

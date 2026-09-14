@@ -8,6 +8,12 @@ npm run builder                                   # asks: which targets, which v
 npm run builder -- --targets linux,android --version 1.8.0-test1 --yes
 ```
 
+The script checks the host first and the menu shows how (or whether) each
+target can be built there: Linux and Android always go through Docker;
+Windows is native on a Windows host (MSI + NSIS, exactly CI's leg) and a
+Docker cross-build elsewhere (NSIS only); macOS is native on a Mac and
+unavailable anywhere else.
+
 | Target | Where | Output |
 |---|---|---|
 | `linux` | Docker (`ubuntu:22.04`, same deps as the CI leg) | `bebok_<v>_amd64.deb`, `.AppImage`, portable `.tar.gz`, headless `bebok-server` |
