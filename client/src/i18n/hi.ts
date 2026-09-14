@@ -988,6 +988,8 @@ export const hi: Record<MessageKey, string> = {
   'mobile.pair.scan': 'QR कोड स्कैन करें',
   'mobile.pair.scanning': 'कैमरा खोला जा रहा है…',
   'mobile.pair.scanUnsupported': 'यहाँ स्कैनिंग उपलब्ध नहीं है ({reason})। कोड हाथ से दर्ज करें।',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': 'या',
   'mobile.pair.code': 'पेयरिंग कोड',
   'mobile.pair.endpoint': 'डेस्कटॉप पता',

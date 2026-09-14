@@ -997,6 +997,8 @@ export const en = {
   'mobile.pair.scan': 'Scan QR code',
   'mobile.pair.scanning': 'Opening camera…',
   'mobile.pair.scanUnsupported': 'Scanning is not available here ({reason}). Enter the code by hand.',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': 'or',
   'mobile.pair.code': 'Pairing code',
   'mobile.pair.endpoint': 'Desktop address',

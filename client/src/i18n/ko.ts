@@ -988,6 +988,8 @@ export const ko: Record<MessageKey, string> = {
   'mobile.pair.scan': 'QR 코드 스캔',
   'mobile.pair.scanning': '카메라 여는 중…',
   'mobile.pair.scanUnsupported': '여기서는 스캔할 수 없습니다({reason}). 코드를 직접 입력하세요.',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': '또는',
   'mobile.pair.code': '페어링 코드',
   'mobile.pair.endpoint': '데스크톱 주소',

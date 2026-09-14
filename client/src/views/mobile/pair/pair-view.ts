@@ -86,7 +86,9 @@ const URL_ERROR_KEY: Record<PairUrlError['reason'], MessageKey> = {
             <p class="error" role="alert" data-testid="pair-scan-error">{{ err }}</p>
           }
 
-          <div class="divider"><span>{{ t('mobile.pair.or') }}</span></div>
+          <div class="divider">
+            <span>{{ t('mobile.pair.or') }}</span>
+          </div>
 
           <form class="manual" (ngSubmit)="submitManual()" data-testid="pair-manual">
             <label class="field">
@@ -231,6 +233,20 @@ const URL_ERROR_KEY: Record<PairUrlError['reason'], MessageKey> = {
         }
       }
     </section>
+    @if (scanner.active()) {
+      <div class="scan-overlay" data-testid="pair-scan-overlay">
+        <div class="scan-frame" aria-hidden="true"></div>
+        <p class="scan-hint">{{ t('mobile.pair.scanHint') }}</p>
+        <button
+          type="button"
+          class="btn-secondary scan-cancel"
+          (click)="scanner.cancel()"
+          data-testid="pair-scan-cancel"
+        >
+          {{ t('mobile.pair.scanCancel') }}
+        </button>
+      </div>
+    }
   `,
   styles: [
     `
@@ -396,6 +412,47 @@ const URL_ERROR_KEY: Record<PairUrlError['reason'], MessageKey> = {
         opacity: 0.5;
         cursor: default;
       }
+
+      /* Drawn over the native camera preview (the rest of the page is hidden
+         by body.barcode-scanner-active, see styles.css). */
+      .scan-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        visibility: visible;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-16);
+        padding: var(--space-24);
+        background: transparent;
+      }
+
+      .scan-frame {
+        width: min(70vw, 280px);
+        aspect-ratio: 1;
+        border: 3px solid #fff;
+        border-radius: 16px;
+        box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+      }
+
+      .scan-hint {
+        color: #fff;
+        text-align: center;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        margin: 0;
+      }
+
+      .scan-cancel {
+        position: fixed;
+        left: var(--space-24);
+        right: var(--space-24);
+        bottom: calc(var(--space-24) + env(safe-area-inset-bottom));
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        border-color: #fff;
+      }
     `,
   ],
 })
@@ -473,7 +530,8 @@ export class PairView {
       const invite = parsePairUrl(url);
       void this.start(invite);
     } catch (err) {
-      const key = err instanceof PairUrlError ? URL_ERROR_KEY[err.reason] : 'mobile.pair.urlNotPair';
+      const key =
+        err instanceof PairUrlError ? URL_ERROR_KEY[err.reason] : 'mobile.pair.urlNotPair';
       this.scanError.set(this.t(key));
     }
   }

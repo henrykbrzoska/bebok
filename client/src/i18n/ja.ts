@@ -988,6 +988,8 @@ export const ja: Record<MessageKey, string> = {
   'mobile.pair.scan': 'QR コードをスキャン',
   'mobile.pair.scanning': 'カメラを起動中…',
   'mobile.pair.scanUnsupported': 'ここではスキャンできません（{reason}）。コードを手入力してください。',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': 'または',
   'mobile.pair.code': 'ペアリングコード',
   'mobile.pair.endpoint': 'デスクトップのアドレス',

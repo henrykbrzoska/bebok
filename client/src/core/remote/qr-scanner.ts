@@ -1,30 +1,47 @@
 /**
  * QR scanner (WP-M6 / F10-22) over `@capacitor-mlkit/barcode-scanning`.
  *
- * Uses the plugin's ready-made `scan()` UI (Google's code-scanner module:
- * no camera permission prompt, no WebView overlay to style), guarded by the
- * module-availability check the plugin documents. Only loaded dynamically
- * and only on a native platform - the desktop bundle never references it,
- * and the browser web-shell falls back to manual entry / deep link.
+ * Scans in-app: the plugin runs ML Kit in-process on a CameraX preview
+ * drawn *behind* the WebView, so the page must go transparent while a scan
+ * is active (`body.barcode-scanner-active` in styles.css; the pair view
+ * keeps only its overlay visible). This replaced Google's code-scanner
+ * activity (`scan()`), which lives in Play Services and fails on some
+ * devices with a bare "Failed to scan code." after a few seconds.
+ *
+ * Only loaded dynamically and only on a native platform - the desktop
+ * bundle never references it, and the browser web-shell falls back to
+ * manual entry / deep link.
  */
 
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 
 export type ScanOutcome =
   | { kind: 'scanned'; value: string }
   | { kind: 'cancelled' }
   | { kind: 'unsupported'; reason: string };
 
+export const SCANNER_ACTIVE_CLASS = 'barcode-scanner-active';
+
+interface ListenerHandle {
+  remove(): Promise<void>;
+}
+
 /** The subset of the plugin used here (injectable for specs). */
 export interface BarcodeScannerLike {
   isSupported(): Promise<{ supported: boolean }>;
-  isGoogleBarcodeScannerModuleAvailable(): Promise<{ available: boolean }>;
-  installGoogleBarcodeScannerModule(): Promise<void>;
-  scan(options?: { formats?: string[] }): Promise<{ barcodes: { rawValue: string; displayValue: string }[] }>;
+  requestPermissions(): Promise<{ camera: string }>;
+  startScan(options?: { formats?: string[] }): Promise<void>;
+  stopScan(): Promise<void>;
+  onBarcodes(handler: (values: string[]) => void): Promise<ListenerHandle>;
+  onError(handler: (message: string) => void): Promise<ListenerHandle>;
 }
 
 @Injectable({ providedIn: 'root' })
 export class QrScanner {
+  /** True while the camera preview is up (the pair view shows its overlay). */
+  readonly active = signal(false);
+  private cancelCurrent: (() => void) | null = null;
+
   /** Load the plugin (overridable in specs). */
   loadPlugin: () => Promise<BarcodeScannerLike> = async () => {
     const mod = await import('@capacitor-mlkit/barcode-scanning');
@@ -33,12 +50,14 @@ export class QrScanner {
     const scanner = mod.BarcodeScanner;
     return {
       isSupported: () => scanner.isSupported(),
-      isGoogleBarcodeScannerModuleAvailable: () => scanner.isGoogleBarcodeScannerModuleAvailable(),
-      installGoogleBarcodeScannerModule: () => scanner.installGoogleBarcodeScannerModule(),
-      scan: (options) =>
-        scanner.scan(options as Parameters<typeof scanner.scan>[0]) as Promise<{
-          barcodes: { rawValue: string; displayValue: string }[];
-        }>,
+      requestPermissions: () => scanner.requestPermissions(),
+      startScan: (options) => scanner.startScan(options as Parameters<typeof scanner.startScan>[0]),
+      stopScan: () => scanner.stopScan(),
+      onBarcodes: (handler) =>
+        scanner.addListener('barcodesScanned', (event) =>
+          handler(event.barcodes.map((b) => b.rawValue || b.displayValue).filter((v) => !!v)),
+        ),
+      onError: (handler) => scanner.addListener('scanError', (event) => handler(event.message)),
     };
   };
 
@@ -51,6 +70,11 @@ export class QrScanner {
       return false;
     }
   };
+
+  /** Close the preview without a result (the overlay's Cancel button, back). */
+  cancel(): void {
+    this.cancelCurrent?.();
+  }
 
   async scan(): Promise<ScanOutcome> {
     if (!this.isNative()) {
@@ -67,20 +91,57 @@ export class QrScanner {
       if (!supported) {
         return { kind: 'unsupported', reason: 'no_camera' };
       }
-      const { available } = await plugin.isGoogleBarcodeScannerModuleAvailable();
-      if (!available) {
-        await plugin.installGoogleBarcodeScannerModule();
+      const { camera } = await plugin.requestPermissions();
+      if (camera !== 'granted' && camera !== 'limited') {
+        return { kind: 'unsupported', reason: 'camera_denied' };
       }
-      const { barcodes } = await plugin.scan({ formats: ['QR_CODE'] });
-      const value = barcodes.map((b) => b.rawValue || b.displayValue).find((v) => !!v);
-      return value ? { kind: 'scanned', value } : { kind: 'cancelled' };
     } catch (err) {
-      const message = describe(err);
-      if (/cancel/i.test(message)) {
-        return { kind: 'cancelled' };
-      }
-      return { kind: 'unsupported', reason: message };
+      return { kind: 'unsupported', reason: describe(err) };
     }
+
+    const handles: ListenerHandle[] = [];
+    const cleanup = async () => {
+      this.cancelCurrent = null;
+      this.active.set(false);
+      document.body.classList.remove(SCANNER_ACTIVE_CLASS);
+      for (const h of handles.splice(0)) {
+        await h.remove().catch(() => undefined);
+      }
+      await plugin.stopScan().catch(() => undefined);
+    };
+
+    const outcome = await new Promise<ScanOutcome>((resolve) => {
+      let done = false;
+      const finish = (o: ScanOutcome) => {
+        if (!done) {
+          done = true;
+          resolve(o);
+        }
+      };
+      this.cancelCurrent = () => finish({ kind: 'cancelled' });
+      void (async () => {
+        try {
+          handles.push(
+            await plugin.onBarcodes((values) => {
+              const value = values.find((v) => v.startsWith('bebok:')) ?? values[0];
+              if (value) {
+                finish({ kind: 'scanned', value });
+              }
+            }),
+          );
+          handles.push(
+            await plugin.onError((message) => finish({ kind: 'unsupported', reason: message })),
+          );
+          document.body.classList.add(SCANNER_ACTIVE_CLASS);
+          this.active.set(true);
+          await plugin.startScan({ formats: ['QR_CODE'] });
+        } catch (err) {
+          finish({ kind: 'unsupported', reason: describe(err) });
+        }
+      })();
+    });
+    await cleanup();
+    return outcome;
   }
 }
 

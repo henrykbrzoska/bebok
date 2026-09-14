@@ -988,6 +988,8 @@ export const es: Record<MessageKey, string> = {
   'mobile.pair.scan': 'Escanear código QR',
   'mobile.pair.scanning': 'Abriendo la cámara…',
   'mobile.pair.scanUnsupported': 'El escaneo no está disponible aquí ({reason}). Introduce el código a mano.',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': 'o',
   'mobile.pair.code': 'Código de vinculación',
   'mobile.pair.endpoint': 'Dirección del escritorio',

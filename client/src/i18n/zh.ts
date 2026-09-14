@@ -988,6 +988,8 @@ export const zh: Record<MessageKey, string> = {
   'mobile.pair.scan': '扫描二维码',
   'mobile.pair.scanning': '正在打开相机…',
   'mobile.pair.scanUnsupported': '此处无法扫描（{reason}）。请手动输入代码。',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': '或',
   'mobile.pair.code': '配对代码',
   'mobile.pair.endpoint': '桌面地址',

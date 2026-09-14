@@ -46,8 +46,9 @@
    * Tauri builds may run offline, so no Google Fonts <link>); otherwise the
    * stack degrades to the platform UI / monospace faces.
    */
-  --font-sans: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  --font-sans:
+    'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
 
   --fs-11: 11px;
@@ -150,7 +151,9 @@ button {
   border-radius: var(--radius-control-sm);
   padding: 6px 14px;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 button:hover:not(:disabled) {
@@ -474,4 +477,20 @@ app-text-part .md .ic-jt-punct {
   body {
     height: 100dvh;
   }
+}
+
+/* In-app QR scanning (@capacitor-mlkit/barcode-scanning startScan): the
+   camera preview is a native view behind the WebView, so the page goes
+   transparent and only the pair view's overlay stays visible. */
+body.barcode-scanner-active,
+body.barcode-scanner-active > * {
+  background: transparent !important;
+}
+
+body.barcode-scanner-active > * {
+  visibility: hidden;
+}
+
+html:has(> body.barcode-scanner-active) {
+  background: transparent !important;
 }

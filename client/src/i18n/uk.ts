@@ -989,6 +989,8 @@ export const uk: Record<MessageKey, string> = {
   'mobile.pair.scan': 'Сканувати QR-код',
   'mobile.pair.scanning': 'Відкриття камери…',
   'mobile.pair.scanUnsupported': 'Сканування тут недоступне ({reason}). Введіть код вручну.',
+  'mobile.pair.scanHint': 'Point the camera at the QR code on the desktop.',
+  'mobile.pair.scanCancel': 'Cancel',
   'mobile.pair.or': 'або',
   'mobile.pair.code': 'Код підключення',
   'mobile.pair.endpoint': 'Адреса комп\'ютера',
