@@ -3,6 +3,17 @@
 //! One stream (`GET /event`), every event carries the envelope
 //! `{ type, directory, sessionID, properties }` so clients can route by
 //! directory. No polling anywhere.
+//!
+//! Known event types include `session.*`, `message.updated`,
+//! `message.part.updated`, `permission.asked` / `permission.resolved`,
+//! `task.started` / `task.progress` / `task.ended`, `browser.frame`,
+//! `agent.list.changed`, `config.changed`, `pty.exited`,
+//! `plugin.changed` (plugin declaration installed / enabled / disabled:
+//! `properties` carries `{ name, change }` with `change` one of
+//! `installed` / `enabled` / `disabled`) and
+//! `code.index.updated` (Phase 0 code-index wiring: `properties` carries
+//! `{ status, files, symbols }`; `symbols` is 0 until the index engine
+//! lands).
 
 use tokio::sync::broadcast;
 
@@ -30,6 +41,29 @@ impl Event {
     pub fn with_properties(mut self, properties: serde_json::Value) -> Self {
         self.properties = properties;
         self
+    }
+
+    /// TOR B plugin declarations: `plugin.changed` for an instance
+    /// directory, with `properties = { name, change }`. `change` is one of
+    /// `installed` (declaration + slot dir created) / `enabled` /
+    /// `disabled` (the `enabled` switch flipped).
+    pub fn plugin_changed(directory: &str, name: &str, change: &str) -> Self {
+        Self::new("plugin.changed", directory, "").with_properties(serde_json::json!({
+            "name": name,
+            "change": change,
+        }))
+    }
+
+    /// Phase 0 code-index wiring: `code.index.updated` for an instance
+    /// directory, with `properties = { status, files, symbols }`.
+    /// `status` is one of `ready` / `indexing` / `disabled`; `symbols` is 0
+    /// in Phase 0 (no index engine yet).
+    pub fn code_index_updated(directory: &str, status: &str, files: usize, symbols: usize) -> Self {
+        Self::new("code.index.updated", directory, "").with_properties(serde_json::json!({
+            "status": status,
+            "files": files,
+            "symbols": symbols,
+        }))
     }
 }
 
@@ -60,5 +94,29 @@ impl EventBus {
 impl Default for EventBus {
     fn default() -> Self {
         Self::new(1024)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Event;
+
+    #[test]
+    fn plugin_changed_has_correct_kind_and_properties() {
+        let event = Event::plugin_changed("/projects/acme", "bebok-index", "installed");
+        assert_eq!(event.kind, "plugin.changed");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.properties["name"], "bebok-index");
+        assert_eq!(event.properties["change"], "installed");
+    }
+
+    #[test]
+    fn code_index_updated_has_correct_kind_and_properties() {
+        let event = Event::code_index_updated("/projects/acme", "indexing", 12, 0);
+        assert_eq!(event.kind, "code.index.updated");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.properties["status"], "indexing");
+        assert_eq!(event.properties["files"], 12);
+        assert_eq!(event.properties["symbols"], 0);
     }
 }

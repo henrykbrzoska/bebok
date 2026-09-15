@@ -30,6 +30,13 @@ pub const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Path segments below the project root that hold session worktrees.
 pub const WORKTREES_SUBDIR: [&str; 2] = [".bebok", "worktrees"];
 
+/// `.bebok/` segment (shared parent of worktrees and plugin slots in
+/// `<root>/.bebok/.gitignore`).
+const PLUGINS_SLOT_PARENT: &str = ".bebok";
+/// Gitignore entry hiding local plugin checkout slots while keeping
+/// `plugins/*.json` declarations committable (directory-only pattern).
+pub const PLUGINS_SLOT_ENTRY: &str = "plugins/*/";
+
 /// Captured result of one `git` run.
 #[derive(Debug, Clone)]
 pub struct GitOutput {
@@ -313,6 +320,42 @@ pub fn ensure_worktrees_ignored(root: &Path) -> Result<(), GitError> {
         text.push_str("# Written by Bebok: git worktrees of \"Run in a git worktree\" sessions.\n");
     }
     text.push_str(&entry);
+    text.push('\n');
+    std::fs::write(&ignore, text).map_err(|e| GitError::Io(e.to_string()))
+}
+
+/// Make sure `<root>/.bebok/.gitignore` ignores plugin slot directories
+/// (`plugins/*/`). Plugin *declarations* (`<root>/.bebok/plugins/*.json`)
+/// stay committable — only the per-plugin slot directories
+/// (`<root>/.bebok/plugins/<name>/`, e.g. the `bebok-index` checkout) are
+/// ignored, hence the trailing-slash directory pattern with a wildcard
+/// instead of ignoring `plugins/` outright. Written only when missing (or
+/// when it lacks the entry) - the project's own top-level `.gitignore` is
+/// never touched, because that is the user's file.
+pub fn ensure_plugin_slots_ignored(root: &Path) -> Result<(), GitError> {
+    let dot_bebok = root.join(PLUGINS_SLOT_PARENT);
+    std::fs::create_dir_all(&dot_bebok).map_err(|e| GitError::Io(e.to_string()))?;
+    let ignore = dot_bebok.join(".gitignore");
+    let existing = std::fs::read_to_string(&ignore).unwrap_or_default();
+    let already = existing.lines().any(|l| {
+        let l = l.trim();
+        l == PLUGINS_SLOT_ENTRY
+            || l == "plugins/*"
+            || l == "/plugins/*/"
+            || l == "plugins/bebok-index/"
+            || l == "*"
+    });
+    if already {
+        return Ok(());
+    }
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    if text.is_empty() {
+        text.push_str("# Written by Bebok: local plugin checkout slots (declarations *.json stay committable).\n");
+    }
+    text.push_str(PLUGINS_SLOT_ENTRY);
     text.push('\n');
     std::fs::write(&ignore, text).map_err(|e| GitError::Io(e.to_string()))
 }
@@ -638,6 +681,65 @@ mod tests {
         ensure_worktrees_ignored(&root).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
         assert_eq!(text, "config.json\nworktrees/\n");
+    }
+
+    #[test]
+    fn ensure_plugin_slots_ignored_writes_once_and_appends_when_missing() {
+        let fx = Fixture::new("plugin-ignore");
+        let root = fx.dir("proj");
+        ensure_plugin_slots_ignored(&root).unwrap();
+        let file = root.join(".bebok").join(".gitignore");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.lines().any(|l| l == PLUGINS_SLOT_ENTRY),
+            "missing {PLUGINS_SLOT_ENTRY} in: {text}"
+        );
+        // Idempotent.
+        ensure_plugin_slots_ignored(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+        // An existing file without the entry gets it appended (no trailing
+        // newline in the existing content).
+        std::fs::write(&file, "worktrees/").unwrap();
+        ensure_plugin_slots_ignored(&root).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text, "worktrees/\nplugins/*/\n");
+    }
+
+    #[tokio::test]
+    async fn plugin_slot_ignored_but_decl_json_not() {
+        require_git!();
+        let fx = Fixture::new("plugin-slot");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+        // Slot dir + declaration file, as install_plugin leaves them.
+        std::fs::create_dir_all(repo.join(".bebok").join("plugins").join("bebok-index")).unwrap();
+        std::fs::write(
+            repo.join(".bebok").join("plugins").join("bebok-index.json"),
+            "{}\n",
+        )
+        .unwrap();
+        ensure_plugin_slots_ignored(&repo).unwrap();
+
+        // `git check-ignore -q` exits 0 (ignored) vs 1 (not ignored).
+        let slot = run(
+            &repo,
+            &["check-ignore", "-q", ".bebok/plugins/bebok-index/"],
+        )
+        .await
+        .expect("git spawns");
+        assert!(slot.success, "slot dir must be ignored");
+        // Also ignored when addressed without the trailing slash.
+        let slot_bare = run(&repo, &["check-ignore", "-q", ".bebok/plugins/bebok-index"])
+            .await
+            .expect("git spawns");
+        assert!(slot_bare.success, "slot dir (bare path) must be ignored");
+        let decl = run(
+            &repo,
+            &["check-ignore", "-q", ".bebok/plugins/bebok-index.json"],
+        )
+        .await
+        .expect("git spawns");
+        assert!(!decl.success, "declaration *.json must stay committable");
     }
 
     #[test]

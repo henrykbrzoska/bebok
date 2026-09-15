@@ -178,6 +178,7 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
+                "code_search".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -229,6 +230,7 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
+                "code_search".to_string(),
             ],
             permissions: vec![
                 Rule {

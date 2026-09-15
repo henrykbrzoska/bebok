@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use bebok_core::agent::run_turn;
+use bebok_core::agent::TurnRunner;
 use bebok_core::error::CoreError;
 use bebok_core::store::SessionState;
 
@@ -220,7 +220,13 @@ pub async fn prompt_turn(
         // Safety net: if run_turn panics the turn slot is still released.
         let mut release = ReleaseOnDrop::new(task_state.clone());
 
-        let result = run_turn(
+        // PR1-część 2: file mutations during this turn invalidate the
+        // instance's code index (debounced rescan inside the backend).
+        let inst_c = instance.clone();
+        type IndexNotify = std::sync::Arc<dyn Fn(Option<&str>) + Send + Sync>;
+        let notify: IndexNotify =
+            std::sync::Arc::new(move |rel| inst_c.notify_code_index_changed(rel));
+        let result = TurnRunner::new(
             task_state.clone(),
             agent,
             instance.tools.clone(),
@@ -230,6 +236,9 @@ pub async fn prompt_turn(
             abort.clone(),
             &model,
         )
+        .with_code_index_changed(notify)
+        .code_index_query_adapter(instance.code_index_query_adapter())
+        .run()
         .await;
 
         // Happy path: disarm the panic guard, then do the normal teardown

@@ -10,9 +10,12 @@ pub mod error;
 pub mod event;
 pub mod fleet_gen;
 pub mod git;
+pub mod index;
 pub mod llm_trace;
 pub mod permission;
 pub mod plugin;
+pub mod plugin_decl;
+pub mod plugin_registry;
 pub mod provider;
 pub mod session;
 pub mod stats;
@@ -33,10 +36,26 @@ pub use provider::build_provider;
 pub use store::{Instance, InstanceStore, SessionState};
 pub use tool_safety::{SafetyCategory, SafetyOverrides, ToolSafetyEntry};
 
+/// Adapter from the core's [`index::CodeIndexBackend`] to the
+/// tool-facing [`bebok_tools::CodeIndexQuery`] contract.
+pub mod code_index_query_adapter;
+
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{
     BebokPlugin, Hook, HookResult, PermissionHook, PluginHost, RequestHook, RequestMessage,
     ToolCallHook, ToolResultHook, TurnHook, hook_names,
+};
+
+/// On-disk plugin declaration contract (`<project>/.bebok/plugins/*.json`).
+pub use plugin_decl::{
+    DeclaredPlugin, KNOWN_PLUGIN_NAME, KNOWN_PLUGIN_REPO, KNOWN_PLUGIN_URL, PluginDecl,
+};
+
+/// Central plugin registry (remote catalogue + manifest validation).
+pub use plugin_registry::{
+    PLUGIN_MANIFEST_FILE, PluginManifest, PluginRegistryFile, REGISTRY_REPO, REGISTRY_TTL,
+    REGISTRY_URL, RegistryPlugin, fallback_registry, latest_tag, load_registry_or_fallback,
+    read_manifest,
 };
 
 /// Re-exported for the server layer (skills discovery + prompt assembly).

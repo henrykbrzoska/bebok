@@ -102,6 +102,7 @@ async fn connects_lists_calls_and_toggles_off() {
         root: base.clone(),
         session_id: "sess".to_string(),
         abort: CancellationToken::new(),
+        index: None,
     };
     let out = echo
         .execute(ctx, serde_json::json!({ "text": "hello" }))

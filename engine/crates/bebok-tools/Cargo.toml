@@ -12,6 +12,7 @@ flate2.workspace = true
 futures.workspace = true
 glob.workspace = true
 ignore.workspace = true
+thiserror.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true

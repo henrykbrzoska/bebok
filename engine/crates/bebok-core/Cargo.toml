@@ -6,18 +6,27 @@ license.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+blake3.workspace = true
 dirs.workspace = true
 futures.workspace = true
 globset.workspace = true
+ignore.workspace = true
 notify.workspace = true
+rusqlite.workspace = true
+tantivy.workspace = true
+
 bebok-llm = { path = "../bebok-llm" }
+bebok-code-index = { path = "../bebok-code-index" }
 bebok-mcp = { path = "../bebok-mcp" }
 bebok-skills = { path = "../bebok-skills" }
 bebok-tools = { path = "../bebok-tools" }
+
 regex.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

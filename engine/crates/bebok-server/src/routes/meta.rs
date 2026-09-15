@@ -2,7 +2,7 @@
 //!
 //! Future extension point for Task 5 (sidebar/topbar): new introspection
 //! endpoints register here without touching the route table shape in
-//! `routes/mod.rs`.
+//! `routes/mod.rs`. Plugin declarations live in `routes::plugins`.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -43,17 +43,6 @@ pub async fn list_agents(
 /// its own version so a half-applied update is visible instead of silent.
 pub async fn version() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
-}
-
-/// `GET /plugins` -> registered plugins + exposed hook points (introspection
-/// for the plugin system: shows what is plugged in and where it can hook).
-pub async fn list_plugins() -> Json<serde_json::Value> {
-    let host = bebok_core::PluginHost::global();
-    Json(serde_json::json!({
-        "plugins": host.names().await,
-        "hooks": bebok_core::hook_names(),
-        "attached": true,
-    }))
 }
 
 /// `GET /docker?directory=` -> Docker access probe (resolves `runtimes.docker`).

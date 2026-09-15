@@ -45,6 +45,17 @@ impl Hook {
     /// After a permission decision was made (ask resolved / cache hit).
     /// Payload: [`PermissionHook`].
     pub const PERMISSION_RESOLVED: Hook = Hook("permission.resolved");
+    /// After a file was written by a tool (success only). Payload:
+    /// [`FileWriteHook`]. Emit-only today: the code-index invalidation is
+    /// wired directly (turn service → `Instance::notify_code_index_changed`),
+    /// no plugin subscribes here yet. TODO: move that wiring onto this hook
+    /// once the plugin host owns the backend registry.
+    pub const AFTER_FILE_WRITE: Hook = Hook("after.file_write");
+    /// After a store instance was created (backend attached). Payload:
+    /// [`InstanceCreatedHook`]. Emit-only today (no subscriber in-tree);
+    /// observers (SSE bus, watchers) can learn the new instance + whether
+    /// its index backend is enabled.
+    pub const INSTANCE_CREATED: Hook = Hook("instance.created");
 }
 
 impl fmt::Display for Hook {
@@ -128,6 +139,23 @@ pub struct PermissionHook {
     pub tool: String,
     pub decision: String, // "allow" | "deny"
     pub pattern: String,
+}
+
+/// Payload for [`Hook::AFTER_FILE_WRITE`]: a tool successfully mutated a
+/// file. `path` is the tool's `path` argument (instance-relative); tools
+/// without a path (e.g. `bash`) report `None` and invalidate broadly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWriteHook {
+    pub tool: String,
+    pub path: Option<String>,
+}
+
+/// Payload for [`Hook::INSTANCE_CREATED`]: a store instance was created
+/// (or lazily attached) with its code-index backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceCreatedHook {
+    pub directory: String,
+    pub index_enabled: bool,
 }
 
 /// Result of running one plugin at one hook.
@@ -323,6 +351,8 @@ pub fn hook_names() -> Vec<&'static str> {
         Hook::AFTER_TOOL.0,
         Hook::TURN_END.0,
         Hook::PERMISSION_RESOLVED.0,
+        Hook::AFTER_FILE_WRITE.0,
+        Hook::INSTANCE_CREATED.0,
     ]
 }
 

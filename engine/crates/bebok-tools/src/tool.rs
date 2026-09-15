@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::code_search::CodeIndexQuery;
+
 /// An image produced by a tool (e.g. a `browser_screenshot`), delivered to
 /// the model as an image part next to the textual tool result.
 ///
@@ -55,8 +57,9 @@ impl ToolOutput {
 
 /// Execution context passed to every tool invocation.
 ///
-/// Carries the instance root, the session id, and the cancellation token bound
-/// to the current turn. Permission decisions are made by the agent loop's
+/// Carries the instance root, the session id, the cancellation token bound
+/// to the current turn, and the optional code-index backend (used by
+/// `code_search`). Permission decisions are made by the agent loop's
 /// permission gate *before* [`Tool::execute`] is called; tools themselves never
 /// ask for permission.
 #[derive(Clone)]
@@ -67,6 +70,10 @@ pub struct ToolCtx {
     pub session_id: String,
     /// Cancellation token tied to the current turn.
     pub abort: CancellationToken,
+    /// Code-index backend for `code_search` (e.g. `Arc<dyn CodeIndexBackend>`
+    /// from `bebok-core`). `None` when no instance/index is available — the
+    /// tool answers with a graceful message instead of failing.
+    pub index: Option<Arc<dyn CodeIndexQuery>>,
 }
 
 /// The single extension point for all tools (built-in and MCP).
@@ -117,6 +124,7 @@ pub fn tool_ctx(root: PathBuf, session_id: String, abort: CancellationToken) -> 
         root,
         session_id,
         abort,
+        index: None,
     }
 }
 

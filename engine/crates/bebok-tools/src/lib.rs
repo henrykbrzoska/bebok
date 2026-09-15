@@ -11,6 +11,7 @@ pub mod bash;
 pub mod bash_kill;
 pub mod browser;
 pub mod chmod;
+pub mod code_search;
 pub mod cp;
 pub mod diff;
 pub mod dirname;
@@ -49,6 +50,7 @@ pub mod wc;
 pub mod which;
 pub mod write_file;
 
+pub use code_search::{CodeIndexError, CodeIndexHit, CodeIndexQuery};
 pub use docker::{DockerStatus, check_docker};
 pub use explorer::FsEntry;
 pub use pathguard::resolve_in_root;
@@ -89,6 +91,7 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         Arc::new(du::Du),
         Arc::new(glob_tool::Glob),
         Arc::new(grep::Grep),
+        Arc::new(code_search::CodeSearch::without_index()),
         Arc::new(find::Find),
         Arc::new(sort::Sort),
         Arc::new(uniq::Uniq),

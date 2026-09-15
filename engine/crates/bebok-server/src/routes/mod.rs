@@ -19,8 +19,10 @@ pub mod events;
 pub mod fs;
 pub mod fs_browse;
 pub mod git;
+pub mod index;
 pub mod mcp;
 pub mod meta;
+pub mod plugins;
 pub mod processes;
 pub mod projects;
 pub mod providers;
@@ -78,6 +80,9 @@ pub fn build_api_router() -> Router<AppState> {
             post(browser::browser_action),
         )
         .route("/agent", get(meta::list_agents))
+        // Faza 1: per-instance code index (status + manual rebuild).
+        .route("/index/status", get(index::get_index_status))
+        .route("/index/rebuild", post(index::post_index_rebuild))
         .route("/mcp", get(mcp::list_mcp))
         .route("/mcp/{name}/toggle", post(mcp::toggle_mcp))
         .route("/config", get(config::get_config).put(config::put_config))
@@ -102,7 +107,10 @@ pub fn build_api_router() -> Router<AppState> {
             post(git::remove_worktree),
         )
         .route("/version", get(meta::version))
-        .route("/plugins", get(meta::list_plugins))
+        .route("/plugins", get(plugins::list_plugins))
+        .route("/plugins/registry", get(plugins::plugin_registry))
+        .route("/plugins/{name}/install", post(plugins::install_plugin))
+        .route("/plugins/{name}/toggle", post(plugins::toggle_plugin))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(
             "/tools/safety",

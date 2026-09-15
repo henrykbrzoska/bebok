@@ -169,6 +169,7 @@ mod tests {
             root: base.clone(),
             session_id: "find-test".to_string(),
             abort: CancellationToken::new(),
+            index: None,
         };
 
         let out = Find
