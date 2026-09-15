@@ -129,6 +129,9 @@
             }
           </div>
         } @else {
+          @if (find.open()) {
+            <app-find-bar scope="explorer" [text]="fileContent()" [container]="findContainer()" />
+          }
           <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
         }
       }
