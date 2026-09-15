@@ -38,6 +38,7 @@ import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ToastHost } from '../../ui/toast/toast-host';
 import { ChatSessionStore } from './chat-session.store';
+import { SurveyBridge } from './survey-bridge';
 import { resolveEffectiveModel } from './effective-model';
 import { ComposerCapture } from './parts/composer-capture';
 import { MessageRowComponent } from './parts/message-row';
@@ -460,7 +461,18 @@ export class ChatView implements OnInit, OnDestroy {
     });
   }
 
+  private readonly surveyBridge = inject(SurveyBridge);
+  /** `ask_user` card -> compact answers as the next user message (1.8). */
+  private readonly submitSurvey = async (text: string): Promise<void> => {
+    if (this.loading() || this.permissionBlocked()) {
+      throw new Error(this.t('survey.busy'));
+    }
+    this.draft.set(text);
+    await this.sendPrompt();
+  };
+
   async ngOnInit(): Promise<void> {
+    this.surveyBridge.attach(this.submitSurvey);
     if (!this.engine.connected()) {
       try {
         await this.engine.connect();
@@ -480,6 +492,7 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.surveyBridge.detach(this.submitSurvey);
     this.sessionStore.clear();
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();

@@ -58,7 +58,9 @@ pub async fn chat_workspace(
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| err_response(&CoreError::Io(e)))?;
-    Ok(Json(serde_json::json!({ "directory": dir.to_string_lossy() })))
+    Ok(Json(
+        serde_json::json!({ "directory": dir.to_string_lossy() }),
+    ))
 }
 
 /// `GET /plugins` -> registered plugins + exposed hook points (introspection

@@ -5,6 +5,7 @@
 //! know the difference.
 
 pub mod append_file;
+pub mod ask_user;
 pub mod base64;
 pub mod basename;
 pub mod bash;
@@ -116,6 +117,8 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         // Escape hatch.
         Arc::new(bash::Bash),
         Arc::new(bash_kill::BashKill),
+        // Ask the user (1.8): a questionnaire that ends the turn.
+        Arc::new(ask_user::AskUser),
     ];
     tools.extend(browser::tools());
     tools

@@ -1,8 +1,9 @@
-import { Component, input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 
 import { Part } from '../../../core/engine.dtos';
 import { ImagePartComponent } from './image-part';
 import { StatusPartComponent } from './status-part';
+import { SurveyPartComponent, surveyOf } from './survey-part';
 import { TextPartComponent } from './text-part';
 import { ThinkingPartComponent } from './thinking-part';
 import { ToolPartComponent } from './tool-part';
@@ -18,6 +19,7 @@ import { UsagePartComponent } from './usage-part';
     UsagePartComponent,
     ImagePartComponent,
     StatusPartComponent,
+    SurveyPartComponent,
   ],
   template: `
     @switch (part().type) {
@@ -28,7 +30,11 @@ import { UsagePartComponent } from './usage-part';
         <app-thinking-part [part]="part()" />
       }
       @case ('tool') {
-        <app-tool-part [part]="part()" [toolIndex]="toolIndex()" [taskLinks]="taskLinks()" />
+        @if (isSurvey()) {
+          <app-survey-part [part]="part()" />
+        } @else {
+          <app-tool-part [part]="part()" [toolIndex]="toolIndex()" [taskLinks]="taskLinks()" />
+        }
       }
       @case ('usage') {
         <app-usage-part [part]="part()" />
@@ -47,4 +53,6 @@ export class PartRendererComponent {
   /** Ordinal of this tool part within its message (-1 for non-tool parts). */
   readonly toolIndex = input(-1);
   readonly taskLinks = input<Map<string, string>>(new Map());
+  /** A completed `ask_user` call renders as the questionnaire card (1.8). */
+  readonly isSurvey = computed(() => surveyOf(this.part()) !== null);
 }

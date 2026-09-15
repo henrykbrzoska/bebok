@@ -22,8 +22,12 @@ use uuid::Uuid;
 use super::{Message, Session};
 use crate::util::{append_line, atomic_write, hash_dir};
 
-/// Engine data root: `<dirs::data_dir()>/bebok`.
+/// Engine data root: `$BEBOK_HOME`, else `<dirs::data_dir()>/bebok`
+/// (see `config::global_config_dir` for why the override exists).
 pub fn data_root() -> PathBuf {
+    if let Some(home) = std::env::var_os("BEBOK_HOME").filter(|v| !v.is_empty()) {
+        return PathBuf::from(home);
+    }
     dirs::data_dir()
         .map(|d| d.join("bebok"))
         .unwrap_or_else(|| PathBuf::from(".bebok-data"))

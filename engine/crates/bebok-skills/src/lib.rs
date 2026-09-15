@@ -43,8 +43,13 @@ pub struct Discovered {
     pub skills: Vec<Skill>,
 }
 
-/// Global config root: `<dirs::config_dir()>/bebok`.
+/// Global config root: `$BEBOK_HOME`, else `<dirs::config_dir()>/bebok`
+/// (mirrors `bebok_core::config::global_config_dir`; this crate has no
+/// dependency on core).
 pub fn global_config_dir() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("BEBOK_HOME").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
     dirs::config_dir().map(|d| d.join("bebok"))
 }
 

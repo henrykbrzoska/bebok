@@ -29,8 +29,9 @@ pub use model::{
 
 // --- loader (load/load_with_global/apply/apply_file/merge_providers/...) ---
 pub use loader::{
-    apply, apply_delegation, apply_file, global_config_path, load, load_with_global,
-    merge_providers, parse_thinking, project_config_path, provider_from_model, read_layer_json,
+    apply, apply_delegation, apply_file, global_config_dir, global_config_path, load,
+    load_with_global, merge_providers, parse_thinking, project_config_path, provider_from_model,
+    read_layer_json,
 };
 
 // --- writer (deltas + full, JSONC round-trip only) ---

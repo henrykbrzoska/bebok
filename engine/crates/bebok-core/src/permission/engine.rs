@@ -170,7 +170,7 @@ impl PermissionEngine {
     /// Build the engine for a project directory using the platform global
     /// config file.
     pub fn load(root: &Path) -> Self {
-        let global = dirs::config_dir().map(|d| d.join("bebok").join("config.json"));
+        let global = crate::config::global_config_dir().map(|d| d.join("config.json"));
         Self::load_with_global(root, global.as_deref())
     }
 

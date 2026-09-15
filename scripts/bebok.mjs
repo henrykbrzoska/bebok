@@ -376,7 +376,19 @@ function engineEnv(flags, clientPort) {
   };
   if (flags['no-auth']) env.BEBOK_NO_AUTH = '1';
   if (flags.diagnostic) env.BEBOK_DIAGNOSTIC = '1';
+  // A dev engine gets its own home (config, install id, sessions): sharing
+  // the installed app's root makes the two fight over the relay tunnel.
+  // `BEBOK_HOME=` (empty) or `--shared-home` opts back into the shared root.
+  if (!('BEBOK_HOME' in process.env) && !flags['shared-home']) env.BEBOK_HOME = devHome();
   return env;
+}
+
+/** `<platform data dir>/bebok-dev` - next to the installed app's `bebok`. */
+function devHome() {
+  const home = os.homedir();
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'bebok-dev');
+  if (process.platform === 'win32') return path.join(process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming'), 'bebok-dev');
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(home, '.local', 'share'), 'bebok-dev');
 }
 
 /** Start the engine and resolve with its `BEBOK_READY` URL (token included). */
@@ -453,7 +465,7 @@ async function cmdFullBuildDev(flags) {
 
   const bin = await buildEngine({ release: false });
   const env = engineEnv(flags, clientPort);
-  log(`starting engine on :${port}${flags['no-auth'] ? ' (BEBOK_NO_AUTH=1)' : ''}${flags.diagnostic ? ' (BEBOK_DIAGNOSTIC=1)' : ''}`);
+  log(`starting engine on :${port}${flags['no-auth'] ? ' (BEBOK_NO_AUTH=1)' : ''}${flags.diagnostic ? ' (BEBOK_DIAGNOSTIC=1)' : ''}${env.BEBOK_HOME ? ` (BEBOK_HOME=${env.BEBOK_HOME})` : ''}`);
   const { url: engineUrl } = await startEngine(bin, port, env);
   log(`engine ready: ${c.bold(engineUrl)}`);
 

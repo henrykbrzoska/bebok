@@ -14,7 +14,7 @@ use super::model::{DelegationConfig, DelegationMode, FleetConfig, ResolvedConfig
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
-    let global = dirs::config_dir().map(|d| d.join("bebok").join("config.json"));
+    let global = global_config_dir().map(|d| d.join("config.json"));
     load_with_global(directory, global.as_deref())
 }
 
@@ -288,10 +288,21 @@ pub fn project_config_path(directory: &Path) -> PathBuf {
     directory.join(".bebok").join("config.json")
 }
 
-/// The global config file path (`~/.config/bebok/config.json`).
+/// Global config root: `$BEBOK_HOME`, else `<dirs::config_dir()>/bebok`.
+/// `BEBOK_HOME` keeps a dev engine (`npm run full-build-dev`) away from the
+/// installed app's config, install id and sessions - two engines sharing one
+/// root fight over the relay tunnel.
+pub fn global_config_dir() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("BEBOK_HOME").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
+    dirs::config_dir().map(|d| d.join("bebok"))
+}
+
+/// The global config file path (`<global root>/config.json`).
 pub fn global_config_path() -> PathBuf {
-    dirs::config_dir()
-        .map(|d| d.join("bebok").join("config.json"))
+    global_config_dir()
+        .map(|d| d.join("config.json"))
         .unwrap_or_else(|| PathBuf::from("bebok-config.json"))
 }
 

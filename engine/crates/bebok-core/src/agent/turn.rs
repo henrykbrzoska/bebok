@@ -27,7 +27,7 @@ use crate::event::{Event, EventBus};
 use crate::llm_trace::{begin_llm_call, complete_llm_call};
 use crate::permission::{CompiledLayer, PermissionEngine};
 use crate::plugin::{Hook, PluginHost, TurnHook};
-use crate::session::{Message, Role};
+use crate::session::{Message, Part, Role};
 use crate::store::SessionState;
 
 /// Orchestrates one full turn (owns everything `run_turn` took as args).
@@ -461,6 +461,12 @@ impl TurnRunner {
             if stop {
                 close_open_tool_calls(&state, &bus, assistant_idx, "aborted").await;
             }
+
+            // `ask_user` (1.8): the questionnaire is on screen, the answers
+            // come back as the next user message - nothing to do until then.
+            if awaits_user(&state, assistant_idx).await {
+                break;
+            }
         }
 
         state.touch().await;
@@ -553,6 +559,25 @@ pub fn schedule_tool_calls(
 /// Close all tool calls in the assistant message that are still Pending or
 /// Running. This prevents orphaned open tool parts when a turn is aborted
 /// mid-execution or interrupted before all batches complete.
+/// True when a completed tool call of the assistant message asked the
+/// client to wait for the user (`structured.awaitUser`, the `ask_user` tool).
+async fn awaits_user(state: &SessionState, assistant_idx: usize) -> bool {
+    let messages = state.messages.read().await;
+    messages
+        .get(assistant_idx)
+        .map(|m| {
+            m.parts.iter().any(|p| match p {
+                Part::Tool { state, .. } => state
+                    .structured()
+                    .and_then(|s| s.get("awaitUser"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                _ => false,
+            })
+        })
+        .unwrap_or(false)
+}
+
 async fn close_open_tool_calls(
     state: &Arc<SessionState>,
     bus: &EventBus,

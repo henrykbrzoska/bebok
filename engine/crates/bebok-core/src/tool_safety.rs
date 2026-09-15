@@ -82,6 +82,7 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("tail", SafetyCategory::Safe),
     ("wc", SafetyCategory::Safe),
     ("list_dir", SafetyCategory::Safe),
+    ("ask_user", SafetyCategory::Safe),
     ("ls", SafetyCategory::Safe),
     ("tree", SafetyCategory::Safe),
     ("pwd", SafetyCategory::Safe),

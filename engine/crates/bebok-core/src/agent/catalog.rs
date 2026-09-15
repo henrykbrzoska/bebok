@@ -35,7 +35,7 @@ impl AgentCatalog {
             builtins: Agent::builtins(),
             custom: BTreeMap::new(),
         };
-        if let Some(dir) = dirs::config_dir().map(|d| d.join("bebok").join("agent")) {
+        if let Some(dir) = crate::config::global_config_dir().map(|d| d.join("agent")) {
             catalog.load_dir(&dir);
         }
         catalog.load_dir(&project.join(".bebok").join("agent"));
@@ -116,7 +116,7 @@ pub fn spawn_agent_watcher(
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
     use notify::{RecursiveMode, Watcher};
 
-    let global_dir = dirs::config_dir().map(|d| d.join("bebok").join("agent"));
+    let global_dir = crate::config::global_config_dir().map(|d| d.join("agent"));
     let project_dir = project.join(".bebok").join("agent");
     // The project agent dir is created eagerly so it can be watched.
     if !project_dir.exists() {

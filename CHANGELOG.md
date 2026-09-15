@@ -11,6 +11,17 @@
   "+ New chat" skips the session dialog. The phone's quick sessions use the
   same directory, so a paired phone sees the desktop's chats.
 
+### Ask the user (questionnaire)
+- New built-in tool `ask_user`: when a decision is unclear the model poses
+  numbered questions (single- or multi-select, lettered options, always a
+  free-text slot) and the turn ends. The chat renders them as a card; one
+  "Send answers" posts `1A, 2BC, 3E(own words)` as the next user message.
+
+### Dev
+- `BEBOK_HOME` overrides the engine's config + data root; `npm run
+  full-build-dev` uses `<data dir>/bebok-dev` by default so a dev engine no
+  longer shares (and steals the relay tunnel of) the installed app.
+
 ### Mobile, relay and cloud chats
 - The 1.6 mobile work lands: engine remote module (second listener on
   Tailscale/LAN, device tokens with an exhaustive route allowlist, QR
