@@ -18,6 +18,7 @@ client/tsconfig.tsbuildinfo
 
 # ---- Local bebok project config (per-user) ----
 .bebok/
+index/
 client/.bebok/
 
 # ---- IDE / editor (IntelliJ) ----
