@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const ko: Record<MessageKey, string> = {
   'nav.directory': '디렉터리',
+  'nav.chat': 'Chat',
   'nav.settings': '설정',
   'nav.terminal': '터미널',
 
@@ -29,6 +30,10 @@ export const ko: Record<MessageKey, string> = {
   'start.agent': '에이전트',
   'start.creating': '생성 중…',
   'start.newSession': '새 세션',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': '설정 (모델, API 키, MCP, 스킬) →',
   'start.deleteSession': "세션 삭제",
   'start.deleteConfirm': "삭제할까요?",
@@ -371,6 +376,13 @@ export const ko: Record<MessageKey, string> = {
   'sidebar.searchSessions': '세션 검색…',
   'sidebar.newSession': '+ 새로 만들기',
   'sidebar.newSessionTitle': '새 세션 만들기',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': '고정됨',
   'sidebar.today': '오늘',
   'sidebar.older': '이전',

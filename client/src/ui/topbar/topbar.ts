@@ -20,6 +20,7 @@ import { SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engi
 import { EventsStore } from '../../core/events.store';
 import { RemoteDesktopStore } from '../../core/remote-desktop.store';
 import { UpdateStore } from '../../core/update.store';
+import { WorkspaceModeStore, type WorkspaceMode } from '../../core/workspace-mode.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { NavIcon } from '../sidebar/nav-icon';
@@ -44,6 +45,7 @@ export interface SubAgentCrumb {
 export class Topbar {
   readonly shell = inject(ShellStore);
   readonly update = inject(UpdateStore);
+  readonly workspace = inject(WorkspaceModeStore);
   private readonly i18n = inject(I18nService);
   private readonly chat = inject(ChatSessionStore);
   private readonly project = inject(ProjectSessionsStore);
@@ -56,6 +58,10 @@ export class Topbar {
 
   readonly isChat = this.shell.isChat;
   readonly sessionId = this.shell.currentSessionId;
+
+  setMode(mode: WorkspaceMode): void {
+    void this.workspace.setMode(mode);
+  }
 
   /** F10-14: names of the currently paired devices, for the pill's tooltip. */
   readonly remoteTooltip = computed(() => {

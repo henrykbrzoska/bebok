@@ -12,7 +12,7 @@
 
   <div class="pill-row">
     <span class="pill-label">{{ t('drawer.panels') }}</span>
-    @for (pill of pills; track pill.id) {
+    @for (pill of visiblePills(); track pill.id) {
       <button
         type="button"
         class="pill"
@@ -27,7 +27,7 @@
 
   <!-- F9-2: one scroll container for the whole stack; headers stick to its top. -->
   <div class="panels" data-testid="drawer-panels">
-    @for (pill of pills; track pill.id) {
+    @for (pill of visiblePills(); track pill.id) {
       @if (isOpen(pill.id)) {
         <section
           class="panel"

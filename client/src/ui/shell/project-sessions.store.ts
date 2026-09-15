@@ -53,8 +53,17 @@ export class ProjectSessionsStore {
     });
   }
 
-  /** Point the store at a directory and load it (no-op when unchanged). */
-  async select(directory: string | null, force = false): Promise<void> {
+  /**
+   * Point the store at a directory and load it (no-op when unchanged).
+   * `persist: false` keeps it out of `bebok.lastDirectory` - chat mode's
+   * scratch directory is selected this way so code mode still reopens the
+   * user's real project.
+   */
+  async select(
+    directory: string | null,
+    force = false,
+    { persist = true }: { persist?: boolean } = {},
+  ): Promise<void> {
     if (!force && directory === this.directory() && this.lastLoaded === directory) {
       return;
     }
@@ -71,7 +80,9 @@ export class ProjectSessionsStore {
     }
     this.directory.set(directory);
     if (directory) {
-      this.engine.saveDirectory(directory);
+      if (persist) {
+        this.engine.saveDirectory(directory);
+      }
     } else {
       this.sessions.set([]);
       this.agents.set([]);

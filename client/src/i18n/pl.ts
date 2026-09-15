@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const pl: Record<MessageKey, string> = {
   'nav.directory': 'Katalog',
+  'nav.chat': 'Czat',
   'nav.settings': 'Ustawienia',
   'nav.terminal': 'Terminal',
 
@@ -29,6 +30,10 @@ export const pl: Record<MessageKey, string> = {
   'start.agent': 'Agent',
   'start.creating': 'Tworzenie…',
   'start.newSession': 'Nowa sesja',
+  'start.chatTitle': 'Czat',
+  'start.chatHint': 'Rozmawiaj z modelem bez wybierania projektu. Pliki tworzone przez model trafiają do prywatnego katalogu roboczego; przełącz na tryb kodu (ikona </> na górnym pasku), żeby pracować w projekcie.',
+  'start.chatSessions': 'Czaty',
+  'start.newChat': 'Nowy czat',
   'start.settingsLink': 'Ustawienia (model, klucz API, MCP, skille) →',
   'start.deleteSession': "Usuń sesję",
   'start.deleteConfirm': "Usunąć?",
@@ -372,6 +377,13 @@ export const pl: Record<MessageKey, string> = {
   'sidebar.searchSessions': 'Szukaj sesji…',
   'sidebar.newSession': '+ Nowa',
   'sidebar.newSessionTitle': 'Utwórz nową sesję',
+  'topbar.mode': 'Tryb pracy',
+  'topbar.modeChat': 'Tryb czatu - rozmowa z modelem, bez katalogu projektu',
+  'topbar.modeCode': 'Tryb kodu - katalog projektu, pliki, zmiany, terminal',
+  'sidebar.chatMode': 'Czat',
+  'sidebar.chatModeHint': 'Bez projektu - prywatny katalog roboczy',
+  'sidebar.newChat': '+ Nowy czat',
+  'sidebar.newChatTitle': 'Zacznij nowy czat',
   'sidebar.pinned': 'Przypięte',
   'sidebar.today': 'Dzisiaj',
   'sidebar.older': 'Starsze',

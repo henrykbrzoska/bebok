@@ -84,6 +84,7 @@ pub const TABLE: &[(&str, &str, Access)] = &[
     ("GET", "/projects/{id}/git", Access::Local),
     ("POST", "/projects/{id}/git/worktree/remove", Access::Local),
     ("GET", "/version", Access::Remote),
+    ("GET", "/workspace/chat", Access::Remote),
     ("GET", "/plugins", Access::Local),
     ("GET", "/tools/safety", Access::Local),
     ("PUT", "/tools/safety", Access::Local),

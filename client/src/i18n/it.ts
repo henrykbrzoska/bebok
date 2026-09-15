@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const it: Record<MessageKey, string> = {
   'nav.directory': 'Directory',
+  'nav.chat': 'Chat',
   'nav.settings': 'Impostazioni',
   'nav.terminal': 'Terminale',
 
@@ -29,6 +30,10 @@ export const it: Record<MessageKey, string> = {
   'start.agent': 'Agente',
   'start.creating': 'Creazione…',
   'start.newSession': 'Nuova sessione',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': 'Impostazioni (modello, chiave API, MCP, skill) →',
   'start.deleteSession': "Elimina sessione",
   'start.deleteConfirm': "Eliminare?",
@@ -372,6 +377,13 @@ export const it: Record<MessageKey, string> = {
   'sidebar.searchSessions': 'Cerca sessioni…',
   'sidebar.newSession': '+ Nuova',
   'sidebar.newSessionTitle': 'Crea una nuova sessione',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': 'Fissate',
   'sidebar.today': 'Oggi',
   'sidebar.older': 'Meno recenti',

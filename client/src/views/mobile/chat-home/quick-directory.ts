@@ -41,7 +41,8 @@ export function quickDirFromHome(home: string): string {
 }
 
 export async function resolveQuickDirectory(
-  engine: Pick<EngineApi, 'browseDirectory' | 'readLastDirectory'>,
+  engine: Pick<EngineApi, 'browseDirectory' | 'readLastDirectory'> &
+    Partial<Pick<EngineApi, 'chatWorkspace'>>,
   targetId: string | null,
   projects: readonly ProjectEntry[] = [],
 ): Promise<string | null> {
@@ -49,6 +50,18 @@ export async function resolveQuickDirectory(
   const cached = readCachedQuickDir(key);
   if (cached) {
     return cached;
+  }
+  // 1.8: engines with chat mode own the scratch directory (`<data dir>/chat`)
+  // - the same one the desktop's chat mode uses, so a paired phone sees the
+  // desktop's chats and vice versa. Older engines fall through to `<home>/.bebok/quick`.
+  try {
+    const workspace = await engine.chatWorkspace?.();
+    if (workspace?.directory) {
+      writeCachedQuickDir(key, workspace.directory);
+      return workspace.directory;
+    }
+  } catch {
+    /* route absent (older engine) or remote scope - try the home root */
   }
   try {
     const roots = await engine.browseDirectory(null);

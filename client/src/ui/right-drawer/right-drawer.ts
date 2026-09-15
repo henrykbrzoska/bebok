@@ -28,6 +28,7 @@ import {
   DestroyRef,
   ElementRef,
   afterRenderEffect,
+  computed,
   inject,
   untracked,
 } from '@angular/core';
@@ -35,6 +36,7 @@ import {
 import { RightDrawerPanelId } from '../../core/ui-prefs.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ShellStore } from '../shell/shell.store';
+import { WorkspaceModeStore } from '../../core/workspace-mode.store';
 import { AgentsPanel } from './panels/agents-panel';
 import { BrowserPanel } from './panels/browser-panel';
 import { ChangesPanel } from './panels/changes-panel';
@@ -67,6 +69,7 @@ const REVEAL_SETTLE_MS = 2000;
 })
 export class RightDrawer {
   readonly shell = inject(ShellStore);
+  private readonly workspace = inject(WorkspaceModeStore);
   private readonly i18n = inject(I18nService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
@@ -94,6 +97,13 @@ export class RightDrawer {
     { id: 'preview', labelKey: 'drawer.preview' },
     { id: 'browser', labelKey: 'drawer.browser' },
   ];
+
+  /** 1.8 chat mode: only the panels that make sense without a project. */
+  readonly visiblePills = computed(() =>
+    this.workspace.isChat()
+      ? this.pills.filter((p) => p.id === 'session' || p.id === 'agents' || p.id === 'preview')
+      : this.pills,
+  );
 
   private dragPointerId: number | null = null;
   private dragStartX = 0;

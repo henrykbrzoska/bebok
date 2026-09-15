@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Chat mode / code mode
+- Two icons in the topbar switch the workspace mode. **Code** is the app as
+  before: a project directory, explorer, terminal, changes. **Chat** talks
+  to a model without picking a directory: sessions live in an engine-owned
+  scratch directory (`GET /workspace/chat`, `<data dir>/chat`) where the
+  model may still write files; explorer/terminal/changes are hidden and
+  "+ New chat" skips the session dialog. The phone's quick sessions use the
+  same directory, so a paired phone sees the desktop's chats.
+
 ### Mobile, relay and cloud chats
 - The 1.6 mobile work lands: engine remote module (second listener on
   Tailscale/LAN, device tokens with an exhaustive route allowlist, QR

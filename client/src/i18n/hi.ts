@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const hi: Record<MessageKey, string> = {
   'nav.directory': 'निर्देशिका',
+  'nav.chat': 'Chat',
   'nav.settings': 'सेटिंग्स',
   'nav.terminal': 'टर्मिनल',
 
@@ -29,6 +30,10 @@ export const hi: Record<MessageKey, string> = {
   'start.agent': 'एजेंट',
   'start.creating': 'बनाया जा रहा है…',
   'start.newSession': 'नया सत्र',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': 'सेटिंग्स (मॉडल, API कुंजी, MCP, स्किल) →',
   'start.deleteSession': "सत्र हटाएँ",
   'start.deleteConfirm': "हटाएँ?",
@@ -371,6 +376,13 @@ export const hi: Record<MessageKey, string> = {
   'sidebar.searchSessions': 'सत्र खोजें…',
   'sidebar.newSession': '+ नया',
   'sidebar.newSessionTitle': 'नया सत्र बनाएँ',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': 'पिन किए गए',
   'sidebar.today': 'आज',
   'sidebar.older': 'पुराने',

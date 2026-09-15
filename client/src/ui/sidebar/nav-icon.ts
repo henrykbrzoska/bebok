@@ -11,7 +11,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 
-export type NavIconName = 'explorer' | 'terminal' | 'debug' | 'stats' | 'settings' | 'subagent';
+export type NavIconName =
+  'explorer' | 'terminal' | 'debug' | 'stats' | 'settings' | 'subagent' | 'chat' | 'code';
 
 /** Path data per icon (Feather icons, MIT). */
 const PATHS: Record<NavIconName, string> = {
@@ -31,6 +32,10 @@ const PATHS: Record<NavIconName, string> = {
     '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
   // corner-down-right (↳) - sub-agent marker in session lists (F9-12)
   subagent: '<polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
+  // message-circle - chat mode (1.8 workspace modes)
+  chat: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  // code - code mode
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
 };
 
 @Component({

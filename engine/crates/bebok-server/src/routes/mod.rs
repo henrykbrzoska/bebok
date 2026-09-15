@@ -106,6 +106,7 @@ pub fn build_api_router() -> Router<AppState> {
             post(git::remove_worktree),
         )
         .route("/version", get(meta::version))
+        .route("/workspace/chat", get(meta::chat_workspace))
         .route("/plugins", get(meta::list_plugins))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(

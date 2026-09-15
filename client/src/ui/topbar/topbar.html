@@ -1,6 +1,35 @@
 <header class="topbar">
-  <nav class="crumbs" [attr.aria-label]="t('nav.directory')">
-    <a class="crumb-link" routerLink="/">{{ t('nav.directory') }}</a>
+  <!-- 1.8 workspace modes: chat (no directory) / code (a project). -->
+  <div class="mode-switch" role="radiogroup" [attr.aria-label]="t('topbar.mode')">
+    <button
+      type="button"
+      class="mode-btn"
+      role="radio"
+      [class.on]="workspace.isChat()"
+      [attr.aria-checked]="workspace.isChat()"
+      (click)="setMode('chat')"
+      [title]="t('topbar.modeChat')"
+      data-testid="mode-chat"
+    >
+      <app-nav-icon name="chat" [size]="15" />
+    </button>
+    <button
+      type="button"
+      class="mode-btn"
+      role="radio"
+      [class.on]="!workspace.isChat()"
+      [attr.aria-checked]="!workspace.isChat()"
+      (click)="setMode('code')"
+      [title]="t('topbar.modeCode')"
+      data-testid="mode-code"
+    >
+      <app-nav-icon name="code" [size]="15" />
+    </button>
+  </div>
+  <nav class="crumbs" [attr.aria-label]="workspace.isChat() ? t('nav.chat') : t('nav.directory')">
+    <a class="crumb-link" routerLink="/">{{
+      workspace.isChat() ? t('nav.chat') : t('nav.directory')
+    }}</a>
     @if (isChat() && subAgentCrumb(); as crumb) {
       <!-- F9-12: sub-agent chat - parent (clickable) ↳ child label -->
       <span class="crumb-sep" aria-hidden="true"> / </span>

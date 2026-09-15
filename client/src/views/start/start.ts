@@ -10,7 +10,7 @@
  * shown after a failed attempt, never by default.
  */
 
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 
@@ -24,6 +24,7 @@ import { I18nService } from '../../i18n/i18n.service';
 import { BranchBadge } from '../../ui/new-session-dialog/branch-badge';
 import { NewSessionDialogStore } from '../../ui/new-session-dialog/new-session-dialog.store';
 import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
+import { WorkspaceModeStore } from '../../core/workspace-mode.store';
 import { StatusDot, type StatusTone } from '../../ui/status-dot/status-dot';
 
 export type ConnectionPhase = 'connecting' | 'live' | 'error';
@@ -41,6 +42,7 @@ export class StartView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly openSessions = inject(OpenSessionsStore);
   private readonly project = inject(ProjectSessionsStore);
+  readonly workspace = inject(WorkspaceModeStore);
   private readonly projects = inject(ProjectsStore);
   private readonly picker = inject(DirectoryPicker);
   private readonly newSessionDialog = inject(NewSessionDialogStore);
@@ -117,6 +119,18 @@ export class StartView implements OnInit, OnDestroy {
   /** The address the last attempt used (shown in the error message). */
   readonly attemptedUrl = signal('');
 
+  constructor() {
+    // A mode switch (topbar) re-selects the shell directory while this view
+    // may already be on screen: follow it so the chat / project card shows
+    // the right session list without a navigation.
+    effect(() => {
+      const selected = this.project.directory();
+      if (selected) {
+        this.directory.set(selected);
+      }
+    });
+  }
+
   async ngOnInit(): Promise<void> {
     const defaults = this.engine.remoteDefaults();
     this.remoteBaseUrl.set(defaults.baseUrl);
@@ -151,7 +165,11 @@ export class StartView implements OnInit, OnDestroy {
       // The registry powers the recent-project chips (and migrates the single
       // remembered `bebok.lastDirectory` on first run).
       await this.projects.refresh();
-      if (this.directory()) {
+      if (this.workspace.isChat()) {
+        // Chat mode: the engine's scratch directory, never the remembered project.
+        await this.workspace.applySelection();
+        this.directory.set(this.project.directory());
+      } else if (this.directory()) {
         await this.project.select(this.directory(), true);
       }
     } catch (err) {
@@ -235,7 +253,24 @@ export class StartView implements OnInit, OnDestroy {
       return;
     }
     this.error.set(null);
+    if (this.workspace.isChat()) {
+      void this.startChat(dir);
+      return;
+    }
     this.newSessionDialog.openFor(dir, { agent: this.selectedAgent() });
+  }
+
+  /** Chat mode: no dialog, the session is created in the scratch directory and opened. */
+  private async startChat(dir: string): Promise<void> {
+    this.creating.set(true);
+    try {
+      const created = await this.engine.createSession(dir, this.selectedAgent());
+      await this.router.navigate(['/chat', created.sessionID]);
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.creating.set(false);
+    }
   }
 
   async openSession(session: SessionMeta): Promise<void> {
@@ -298,7 +333,9 @@ export class StartView implements OnInit, OnDestroy {
   private async removeWorktree(root: string | null, path: string): Promise<void> {
     const entry = this.projects.findByPath(root) ?? this.projects.findByPath(this.directory());
     if (!entry) {
-      this.error.set(this.t('start.worktreeRemoveFailed', { error: this.t('newSession.worktreeNoProject') }));
+      this.error.set(
+        this.t('start.worktreeRemoveFailed', { error: this.t('newSession.worktreeNoProject') }),
+      );
       return;
     }
     try {

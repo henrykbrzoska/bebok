@@ -26,18 +26,27 @@
 
   @if (expanded()) {
     <div class="project-block">
-      <button
-        type="button"
-        class="project-row"
-        (click)="switchProject()"
-        [title]="t('sidebar.switchProject')"
-      >
-        <span class="project-text">
-          <span class="micro-label">{{ t('sidebar.project') }}</span>
-          <span class="project-path">{{ directory() || t('sidebar.noProject') }}</span>
-        </span>
-        <span class="chevron" aria-hidden="true">▾</span>
-      </button>
+      @if (workspace.isChat()) {
+        <div class="project-row chat-row" data-testid="sidebar-chat-workspace">
+          <span class="project-text">
+            <span class="micro-label">{{ t('sidebar.chatMode') }}</span>
+            <span class="project-path">{{ t('sidebar.chatModeHint') }}</span>
+          </span>
+        </div>
+      } @else {
+        <button
+          type="button"
+          class="project-row"
+          (click)="switchProject()"
+          [title]="t('sidebar.switchProject')"
+        >
+          <span class="project-text">
+            <span class="micro-label">{{ t('sidebar.project') }}</span>
+            <span class="project-path">{{ directory() || t('sidebar.noProject') }}</span>
+          </span>
+          <span class="chevron" aria-hidden="true">▾</span>
+        </button>
+      }
     </div>
 
     <div class="search-block">
@@ -71,9 +80,9 @@
         class="new-btn"
         (click)="newSession()"
         [disabled]="creating() || !directory()"
-        [title]="t('sidebar.newSessionTitle')"
+        [title]="workspace.isChat() ? t('sidebar.newChatTitle') : t('sidebar.newSessionTitle')"
       >
-        {{ t('sidebar.newSession') }}
+        {{ workspace.isChat() ? t('sidebar.newChat') : t('sidebar.newSession') }}
       </button>
     </div>
 
@@ -187,7 +196,7 @@
     <!-- F9-13: icon rail (horizontal in the expanded sidebar). Tooltip: a
          small CSS tooltip after ~300ms (`data-tip`) + aria-label. -->
     <nav class="nav-rail" [attr.aria-label]="t('sidebar.navLabel')">
-      @for (item of navItems; track item.screen) {
+      @for (item of visibleNavItems(); track item.screen) {
         <button
           type="button"
           class="nav-btn"
@@ -227,7 +236,7 @@
 
   @if (!expanded()) {
     <nav class="rail" [attr.aria-label]="t('sidebar.navLabel')">
-      @for (item of navItems; track item.screen) {
+      @for (item of visibleNavItems(); track item.screen) {
         <button
           type="button"
           class="rail-btn"

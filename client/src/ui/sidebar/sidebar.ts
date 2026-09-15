@@ -22,6 +22,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
+import { ENGINE_API } from '../../core/engine-api';
 import { AgentInfo, SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
@@ -29,6 +30,7 @@ import { SessionActivityStore } from '../../core/session-activity.store';
 import { EngineTargetStore } from '../../core/engine-target.store';
 import { ShareStore } from '../../core/remote/share.store';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
+import { WorkspaceModeStore } from '../../core/workspace-mode.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { LANGUAGES, type Language } from '../../i18n';
 import { BranchBadge } from '../new-session-dialog/branch-badge';
@@ -60,6 +62,7 @@ export class Sidebar {
   readonly tabs = inject(OpenSessionsStore);
   readonly activity = inject(SessionActivityStore);
   readonly share = inject(ShareStore);
+  readonly workspace = inject(WorkspaceModeStore);
   private readonly targets = inject(EngineTargetStore);
 
   // 1.8 share links: paste box under "Shared sessions".
@@ -79,6 +82,7 @@ export class Sidebar {
       this.joinOpen.set(false);
     }
   }
+  private readonly engine = inject(ENGINE_API);
   private readonly toolSafety = inject(ToolSafetyStore);
   private readonly newSessionDialog = inject(NewSessionDialogStore);
   private readonly i18n = inject(I18nService);
@@ -117,8 +121,34 @@ export class Sidebar {
     if (!dir) {
       return;
     }
+    if (this.workspace.isChat()) {
+      void this.newChat(dir);
+      return;
+    }
     this.newSessionDialog.openFor(dir, { agent: this.selectedAgent() });
   }
+
+  /** Chat mode: no dialog (nothing to pick - no worktree, no project), straight to the chat. */
+  private async newChat(dir: string): Promise<void> {
+    if (this.creating()) {
+      return;
+    }
+    this.creating.set(true);
+    try {
+      const created = await this.engine.createSession(dir, this.selectedAgent());
+      await this.project.refresh();
+      await this.router.navigate(['/chat', created.sessionID]);
+    } finally {
+      this.creating.set(false);
+    }
+  }
+
+  /** Chat mode hides the project-only screens (explorer, terminal). */
+  readonly visibleNavItems = computed(() =>
+    this.workspace.isChat()
+      ? this.navItems.filter((item) => item.screen !== 'explorer' && item.screen !== 'terminal')
+      : this.navItems,
+  );
 
   /** Bottom nav rail entries (F9-13: one SVG icon each, see `nav-icon.ts`). */
   readonly navItems: { screen: Screen; path: string; labelKey: NavLabelKey; icon: NavIconName }[] =

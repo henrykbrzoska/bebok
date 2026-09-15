@@ -1,6 +1,10 @@
 <section class="start">
   <div class="card connect-card" [class.error]="phase() === 'error'">
-    <h2 class="branded-title"><img src="/logo.svg" alt="" aria-hidden="true" />{{ isTauri() ? t('start.localEngine') : t('start.connectTitle') }}</h2>
+    <h2 class="branded-title">
+      <img src="/logo.svg" alt="" aria-hidden="true" />{{
+        isTauri() ? t('start.localEngine') : t('start.connectTitle')
+      }}
+    </h2>
     @if (isTauri()) {
       <p class="card-hint">{{ t('start.localHint') }}</p>
     } @else {
@@ -53,41 +57,48 @@
   </div>
 
   @if (connected()) {
-    <div class="card directory-card">
-      <h2>{{ t('start.projectDir') }}</h2>
+    <div class="card directory-card" [class.chat-card]="workspace.isChat()">
+      @if (workspace.isChat()) {
+        <h2>{{ t('start.chatTitle') }}</h2>
+        <p class="card-hint">{{ t('start.chatHint') }}</p>
+      } @else {
+        <h2>{{ t('start.projectDir') }}</h2>
 
-      <div class="row">
-        <input
-          type="text"
-          class="mono-input"
-          [ngModel]="directory() ?? ''"
-          (ngModelChange)="directory.set($event || null)"
-          [placeholder]="t('start.dirPlaceholder')"
-          spellcheck="false"
-        />
-        <button (click)="browse()">{{ t('start.browse') }}</button>
-        <button (click)="applyDirectory()" [disabled]="!directory()">
-          {{ t('start.loadSessions') }}
-        </button>
-      </div>
-
-      @if (recentProjects().length > 0) {
-        <div class="recent-row">
-          <span class="micro-label">{{ t('start.recentProjects') }}</span>
-          <div class="chips">
-            @for (entry of recentProjects(); track entry.id) {
-              <button type="button" class="chip" [title]="entry.path" (click)="openRecent(entry)">
-                {{ chipLabel(entry) }}
-              </button>
-            }
-          </div>
+        <div class="row">
+          <input
+            type="text"
+            class="mono-input"
+            [ngModel]="directory() ?? ''"
+            (ngModelChange)="directory.set($event || null)"
+            [placeholder]="t('start.dirPlaceholder')"
+            spellcheck="false"
+          />
+          <button (click)="browse()">{{ t('start.browse') }}</button>
+          <button (click)="applyDirectory()" [disabled]="!directory()">
+            {{ t('start.loadSessions') }}
+          </button>
         </div>
+
+        @if (recentProjects().length > 0) {
+          <div class="recent-row">
+            <span class="micro-label">{{ t('start.recentProjects') }}</span>
+            <div class="chips">
+              @for (entry of recentProjects(); track entry.id) {
+                <button type="button" class="chip" [title]="entry.path" (click)="openRecent(entry)">
+                  {{ chipLabel(entry) }}
+                </button>
+              }
+            </div>
+          </div>
+        }
       }
 
       @if (directory()) {
         <div class="sessions-block">
           <div class="sessions-head">
-            <h3 class="micro-label">{{ t('start.sessionsInDir') }}</h3>
+            <h3 class="micro-label">
+              {{ workspace.isChat() ? t('start.chatSessions') : t('start.sessionsInDir') }}
+            </h3>
             @if (loadingSessions()) {
               <span class="muted">{{ t('start.loading') }}</span>
             }
@@ -134,9 +145,16 @@
                         (click)="confirmDeleteSession(session, $event)"
                         [disabled]="deletingId() !== null"
                       >
-                        {{ deletingId() === session.id ? t('start.deleting') : t('start.deleteConfirm') }}
+                        {{
+                          deletingId() === session.id
+                            ? t('start.deleting')
+                            : t('start.deleteConfirm')
+                        }}
                       </button>
-                      <button class="delete-btn cancel" (click)="$event.stopPropagation(); cancelDelete()">
+                      <button
+                        class="delete-btn cancel"
+                        (click)="$event.stopPropagation(); cancelDelete()"
+                      >
                         {{ t('start.deleteCancel') }}
                       </button>
                     </span>
@@ -169,16 +187,28 @@
                 <option value="code">code</option>
               }
             </select>
-            <button class="primary" (click)="startSession()" [disabled]="creating() || !directory()">
-              {{ creating() ? t('start.creating') : t('start.newSession') }}
+            <button
+              class="primary"
+              (click)="startSession()"
+              [disabled]="creating() || !directory()"
+            >
+              {{
+                creating()
+                  ? t('start.creating')
+                  : workspace.isChat()
+                    ? t('start.newChat')
+                    : t('start.newSession')
+              }}
             </button>
           </div>
 
-          <div class="settings-link">
-            <a routerLink="/settings" [queryParams]="{ directory: directory() }">
-              {{ t('start.settingsLink') }}
-            </a>
-          </div>
+          @if (!workspace.isChat()) {
+            <div class="settings-link">
+              <a routerLink="/settings" [queryParams]="{ directory: directory() }">
+                {{ t('start.settingsLink') }}
+              </a>
+            </div>
+          }
         </div>
       }
     </div>

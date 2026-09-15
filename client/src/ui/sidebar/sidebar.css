@@ -580,3 +580,13 @@
   font-size: var(--fs-12);
   margin-right: var(--space-4);
 }
+
+/* 1.8 chat mode: the project row becomes a static label (no switcher). */
+.project-row.chat-row {
+  cursor: default;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.project-row.chat-row:hover {
+  background: var(--surface-2);
+}

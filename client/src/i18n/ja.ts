@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const ja: Record<MessageKey, string> = {
   'nav.directory': 'ディレクトリ',
+  'nav.chat': 'Chat',
   'nav.settings': '設定',
   'nav.terminal': 'ターミナル',
 
@@ -29,6 +30,10 @@ export const ja: Record<MessageKey, string> = {
   'start.agent': 'エージェント',
   'start.creating': '作成中…',
   'start.newSession': '新しいセッション',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': '設定（モデル、API キー、MCP、スキル）→',
   'start.deleteSession': "セッションを削除",
   'start.deleteConfirm': "削除しますか？",
@@ -371,6 +376,13 @@ export const ja: Record<MessageKey, string> = {
   'sidebar.searchSessions': 'セッションを検索…',
   'sidebar.newSession': '+ 新規',
   'sidebar.newSessionTitle': '新しいセッションを作成',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': 'ピン留め',
   'sidebar.today': '今日',
   'sidebar.older': '以前',

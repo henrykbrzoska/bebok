@@ -341,6 +341,11 @@ export class EngineClient implements EngineApi {
     return this.request<{ version: string }>('GET', '/version');
   }
 
+  /** `GET /workspace/chat` -> `<engine data dir>/chat`, created on demand. */
+  chatWorkspace(): Promise<{ directory: string }> {
+    return this.request<{ directory: string }>('GET', '/workspace/chat');
+  }
+
   /** Tauri native directory picker; null in browser/http mode. */
   pickDirectory(title: string): Promise<string | null> {
     return this.transport.pickDirectory(title);

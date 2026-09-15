@@ -154,3 +154,39 @@
 .chip.remote-pill:hover {
   background: color-mix(in srgb, var(--success) 12%, var(--surface-2));
 }
+
+/* 1.8 workspace modes: a two-icon segmented control before the crumbs. */
+.mode-switch {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  overflow: hidden;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mode-btn + .mode-btn {
+  border-left: 1px solid var(--border);
+}
+
+.mode-btn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.mode-btn.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+}

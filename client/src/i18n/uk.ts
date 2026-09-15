@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const uk: Record<MessageKey, string> = {
   'nav.directory': 'Каталог',
+  'nav.chat': 'Chat',
   'nav.settings': 'Налаштування',
   'nav.terminal': 'Термінал',
 
@@ -29,6 +30,10 @@ export const uk: Record<MessageKey, string> = {
   'start.agent': 'Агент',
   'start.creating': 'Створення…',
   'start.newSession': 'Нова сесія',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': 'Налаштування (модель, ключ API, MCP, навички) →',
   'start.deleteSession': "Видалити сесію",
   'start.deleteConfirm': "Видалити?",
@@ -372,6 +377,13 @@ export const uk: Record<MessageKey, string> = {
   'sidebar.searchSessions': 'Пошук сесій…',
   'sidebar.newSession': '+ Нова',
   'sidebar.newSessionTitle': 'Створити нову сесію',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': 'Закріплені',
   'sidebar.today': 'Сьогодні',
   'sidebar.older': 'Давніші',

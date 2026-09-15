@@ -2,6 +2,7 @@ import type { MessageKey } from './en';
 
 export const zh: Record<MessageKey, string> = {
   'nav.directory': '目录',
+  'nav.chat': 'Chat',
   'nav.settings': '设置',
   'nav.terminal': '终端',
 
@@ -29,6 +30,10 @@ export const zh: Record<MessageKey, string> = {
   'start.agent': '代理',
   'start.creating': '创建中…',
   'start.newSession': '新建会话',
+  'start.chatTitle': 'Chat',
+  'start.chatHint': 'Talk to a model without picking a project. Files the model creates land in a private scratch directory; switch to code mode (the </> icon in the topbar) to work in a project.',
+  'start.chatSessions': 'Chats',
+  'start.newChat': 'New chat',
   'start.settingsLink': '设置（模型、API 密钥、MCP、技能）→',
   'start.deleteSession': "删除会话",
   'start.deleteConfirm': "确定删除？",
@@ -371,6 +376,13 @@ export const zh: Record<MessageKey, string> = {
   'sidebar.searchSessions': '搜索会话…',
   'sidebar.newSession': '+ 新建',
   'sidebar.newSessionTitle': '创建新会话',
+  'topbar.mode': 'Workspace mode',
+  'topbar.modeChat': 'Chat mode - talk to a model, no project directory',
+  'topbar.modeCode': 'Code mode - a project directory, files, changes, terminal',
+  'sidebar.chatMode': 'Chat',
+  'sidebar.chatModeHint': 'No project - a private scratch space',
+  'sidebar.newChat': '+ New chat',
+  'sidebar.newChatTitle': 'Start a new chat',
   'sidebar.pinned': '已固定',
   'sidebar.today': '今天',
   'sidebar.older': '更早',

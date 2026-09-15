@@ -108,6 +108,8 @@ export interface EngineConnectionApi {
   remoteDefaults(): { baseUrl: string };
   saveDirectory(directory: string): void;
   readLastDirectory(): string | null;
+  /** `GET /workspace/chat` -> the engine-owned scratch directory of chat mode (1.8). */
+  chatWorkspace(): Promise<{ directory: string }>;
   /** Absolute URL of the global SSE stream (used by `EventsStore`). */
   eventUrl(): string;
 }
