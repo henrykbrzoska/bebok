@@ -17,6 +17,18 @@
   free-text slot) and the turn ends. The chat renders them as a card; one
   "Send answers" posts `1A, 2BC, 3E(own words)` as the next user message.
 
+### Agent CLIs as providers (subscriptions, no API key)
+- New provider kind `cli`: Claude Code, Codex, Cursor agent, Grok Build,
+  Antigravity (`agy`) and Gemini CLI, driven headlessly (NDJSON streaming).
+  Settings > Providers detects what is installed (`GET /providers/cli`),
+  one click enables a CLI as `cli-<name>`; per-provider permission mode
+  (plan / edits / everything) and model list. The CLI runs the turn with
+  its own tools; Bebok records them as closed tool parts (new
+  `StreamEvent::ToolActivity`), streams text/thinking, shows usage/cost and
+  resumes the CLI's conversation on the next message.
+- Provider errors mid-stream now land in the transcript instead of an
+  empty assistant message.
+
 ### Diagrams and images in chat
 - ```mermaid fences render as diagrams (lazy-loaded renderer, bundled -
   nothing to install); `![alt](https://…)` markdown images render inline.

@@ -14,7 +14,12 @@ import { FormsModule } from '@angular/forms';
 
 import { I18nService } from '../../i18n/i18n.service';
 import { EngineClient } from '../../core/engine-client.service';
-import { ProviderCatalog, ProviderDraft, ProviderExtraField } from './provider-catalog';
+import {
+  ProviderCatalog,
+  ProviderDraft,
+  ProviderExtraField,
+  CliAgentProbe,
+} from './provider-catalog';
 import { SettingsStore } from './settings.store';
 
 @Component({
@@ -67,7 +72,9 @@ export class ProvidersTab {
     if (!saved) {
       return true;
     }
-    return JSON.stringify({ ...saved, api_key: null }) !== JSON.stringify({ ...provider, api_key: null });
+    return (
+      JSON.stringify({ ...saved, api_key: null }) !== JSON.stringify({ ...provider, api_key: null })
+    );
   });
 
   /** Models discovered by the last successful "Test connection". */
@@ -82,7 +89,49 @@ export class ProvidersTab {
   }
 
   /** True when the provider is usable: keyless, or a key is resolvable. */
+  /** 1.8 CLI providers: enable/disable straight from the detected-agents card. */
+  cliEnabled(agent: CliAgentProbe): boolean {
+    return this.store.providers().some((p) => p.name === agent.provider);
+  }
+
+  enableCli(agent: CliAgentProbe): void {
+    this.store.addProvider({
+      name: agent.provider,
+      kind: 'cli',
+      models: agent.defaultModels.length ? [...agent.defaultModels] : ['default'],
+      extra: { cli: agent.id, permission: 'edits' },
+    });
+  }
+
+  disableCli(agent: CliAgentProbe): void {
+    this.store.removeProvider(agent.provider);
+  }
+
+  setModels(provider: ProviderDraft, raw: string): void {
+    const models = raw
+      .split(/[,\n]/)
+      .map((m) => m.trim())
+      .filter((m) => m.length > 0);
+    this.store.updateProvider(provider.name, { models: models.length ? models : ['default'] });
+  }
+
+  cliPaneSub(provider: ProviderDraft): string {
+    const agent = this.catalog.cliAgentFor(provider.name);
+    if (!agent) {
+      return this.t('settings.cliPaneUnknown');
+    }
+    return agent.installed
+      ? this.t('settings.cliPaneInstalled', {
+          version: agent.version ?? agent.command,
+          path: agent.path ?? '',
+        })
+      : this.t('settings.cliNotInstalled', { command: agent.command });
+  }
+
   isConfigured(provider: ProviderDraft): boolean {
+    if (provider.kind === 'cli') {
+      return this.catalog.cliAgentFor(provider.name)?.installed ?? false;
+    }
     if (!this.catalog.needsApiKey(provider.name)) {
       return true;
     }
@@ -90,6 +139,11 @@ export class ProvidersTab {
   }
 
   statusLabel(provider: ProviderDraft): string {
+    if (provider.kind === 'cli') {
+      return this.isConfigured(provider)
+        ? this.t('settings.cliStatusReady')
+        : this.t('settings.cliStatusMissing');
+    }
     if (!this.catalog.needsApiKey(provider.name)) {
       return this.t('settings.providerKeyless');
     }
@@ -120,7 +174,7 @@ export class ProvidersTab {
   }
 
   /** Kinds offered by the select (always including the configured one). */
-  allowedKinds(provider: ProviderDraft): Array<'openai' | 'anthropic'> {
+  allowedKinds(provider: ProviderDraft): Array<'openai' | 'anthropic' | 'cli'> {
     const kinds = this.catalog.allowedKinds(provider.name);
     return kinds.includes(provider.kind) ? kinds : [...kinds, provider.kind];
   }

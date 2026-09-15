@@ -266,3 +266,13 @@ select:disabled {
     transform: rotate(360deg);
   }
 }
+
+button.danger-ghost {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: transparent;
+}
+
+button.danger-ghost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}

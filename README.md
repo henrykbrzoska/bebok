@@ -132,6 +132,30 @@ The API key comes from the provider entry in config, else `<NAME>_API_KEY`
 Any other OpenAI-compatible or Anthropic-compatible server can be added as a
 custom provider (name, kind, endpoint, key) in Settings > Providers.
 
+### Agent CLIs instead of API keys (subscriptions)
+
+A CLI you are already logged into can be a provider (kind `cli`) - no API
+key, your subscription pays. Settings > Providers lists the CLIs found on
+the machine; **Enable** registers one as `cli-<name>` and its models show up
+in the chat picker as `cli-claude/sonnet`, `cli-codex/gpt-5.5`, …
+
+| CLI | Provider | Headless run |
+|---|---|---|
+| Claude Code (`claude`) | `cli-claude` | `claude -p --output-format stream-json --resume …` |
+| Codex (`codex`) | `cli-codex` | `codex exec --json [resume …]` |
+| Cursor agent (`cursor-agent`) | `cli-cursor` | `cursor-agent -p --output-format stream-json` |
+| Grok Build (`grok`) | `cli-grok` | `grok -p --output-format streaming-messages-json` |
+| Antigravity (`agy`) | `cli-agy` | `agy --print --output-format stream-json` |
+| Gemini CLI (`gemini`) | `cli-gemini` | `gemini -p -o stream-json` |
+
+On such a turn **the CLI is the agent**: it runs its own tools in the session
+directory under the permission mode you pick (plan / edits / everything),
+Bebok streams its text, thinking and tool activity into the transcript and
+resumes the CLI's own conversation on the next message. Bebok's tools,
+permission prompts, `ask_user` and delegation are not available on CLI turns.
+Config: `{"name":"cli-claude","kind":"cli","models":["default","sonnet"],
+"extra":{"cli":"claude","permission":"edits","command":"/optional/path"}}`.
+
 ## Downloads (1.5.0)
 
 Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.5.0>

@@ -32,6 +32,23 @@ export interface ProviderExtraField {
   placeholder?: string | null;
 }
 
+/** `GET /providers/cli` entry (engine `CliProbe`, camelCase): one agent CLI. */
+export interface CliAgentProbe {
+  id: string;
+  label: string;
+  command: string;
+  path: string | null;
+  installed: boolean;
+  version: string | null;
+  /** Provider name it registers as (`cli-<id>`); also the model prefix. */
+  provider: string;
+  defaultModels: string[];
+}
+
+/** Permission modes of a CLI provider (`extra.permission`). */
+export const CLI_PERMISSIONS = ['plan', 'edits', 'all'] as const;
+export type CliPermission = (typeof CLI_PERMISSIONS)[number];
+
 /** `GET /providers/catalog` entry (engine `ProviderUiSpec`, camelCase). */
 export interface ProviderUiSpec {
   id: string;
@@ -75,6 +92,9 @@ export class ProviderCatalog {
 
   /** Catalog entries, empty until `load()` succeeds. */
   readonly entries = signal<ProviderUiSpec[]>([]);
+  /** 1.8: the agent CLIs the engine can drive, with their install state. */
+  readonly cliAgents = signal<CliAgentProbe[]>([]);
+  readonly cliLoading = signal(false);
   /** True once a load attempt finished (successfully or not). */
   readonly loaded = signal(false);
 
@@ -89,6 +109,33 @@ export class ProviderCatalog {
       this.loaded.set(true);
     });
     return this.inFlight;
+  }
+
+  /** Probe the machine for agent CLIs (`GET /providers/cli`); refreshable. */
+  async loadCli(): Promise<void> {
+    const conn = this.engine.connection();
+    if (!conn || this.cliLoading()) {
+      return;
+    }
+    this.cliLoading.set(true);
+    try {
+      const res = await authFetch(`${conn.baseUrl}/providers/cli`);
+      if (res.ok) {
+        const body = (await res.json()) as { agents?: CliAgentProbe[] };
+        if (Array.isArray(body?.agents)) {
+          this.cliAgents.set(body.agents);
+        }
+      }
+    } catch {
+      /* old engine: no CLI providers */
+    } finally {
+      this.cliLoading.set(false);
+    }
+  }
+
+  /** The probe behind a `cli-*` provider, if the engine reported one. */
+  cliAgentFor(providerName: string): CliAgentProbe | null {
+    return this.cliAgents().find((a) => a.provider === providerName) ?? null;
   }
 
   /** Catalog entry for a provider id, or null for a genuinely custom one. */
@@ -109,7 +156,10 @@ export class ProviderCatalog {
   }
 
   /** Allowed `kind` values for a provider: one fixed value for built-ins. */
-  allowedKinds(id: string): Array<'openai' | 'anthropic'> {
+  allowedKinds(id: string): Array<'openai' | 'anthropic' | 'cli'> {
+    if (id.startsWith('cli-')) {
+      return ['cli'];
+    }
     const entry = this.find(id);
     if (entry) {
       return [entry.kind];
@@ -129,6 +179,9 @@ export class ProviderCatalog {
 
   /** True when the provider needs no credential at all (`auth: "none"`). */
   needsApiKey(id: string): boolean {
+    if (id.startsWith('cli-')) {
+      return false;
+    }
     const entry = this.find(id);
     return entry ? entry.auth !== 'none' : true;
   }

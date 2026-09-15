@@ -635,8 +635,9 @@ export class ChatView implements OnInit, OnDestroy {
         );
         const models: string[] = [];
         for (const provider of cfg.providers ?? []) {
-          // Only show models whose provider has a resolvable API key.
-          if (!provider.has_key) {
+          // Only show models whose provider has a resolvable API key; CLI
+          // agents (1.8) need none - the CLI's own login is the credential.
+          if (!provider.has_key && provider.kind !== 'cli') {
             continue;
           }
           for (const model of provider.models ?? []) {

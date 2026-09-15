@@ -3,6 +3,62 @@
   <p>{{ t('settings.providersHint') }}</p>
 </div>
 
+<!-- 1.8: agent CLIs installed on this machine (subscription models, no API key). -->
+<div class="card cli-card" data-testid="cli-agents">
+  <div class="cli-head">
+    <div>
+      <h3>{{ t('settings.cliTitle') }}</h3>
+      <p class="card-sub">{{ t('settings.cliHint') }}</p>
+    </div>
+    <button type="button" (click)="catalog.loadCli()" [disabled]="catalog.cliLoading()">
+      {{ catalog.cliLoading() ? t('settings.cliScanning') : t('settings.cliRescan') }}
+    </button>
+  </div>
+  @if (catalog.cliAgents().length === 0) {
+    <p class="small faint">
+      {{ catalog.cliLoading() ? t('settings.cliScanning') : t('settings.cliNone') }}
+    </p>
+  }
+  @for (agent of catalog.cliAgents(); track agent.id) {
+    <div class="cli-row" [class.enabled]="cliEnabled(agent)" [attr.data-cli]="agent.id">
+      <span
+        class="dot"
+        [class.ok]="agent.installed"
+        [class.idle]="!agent.installed"
+        aria-hidden="true"
+      ></span>
+      <span class="cli-name">
+        <span>{{ agent.label }}</span>
+        <span class="small faint mono">{{
+          agent.installed
+            ? agent.version || agent.command
+            : t('settings.cliNotInstalled', { command: agent.command })
+        }}</span>
+      </span>
+      @if (cliEnabled(agent)) {
+        <span class="small muted">{{
+          t('settings.cliEnabledAs', { provider: agent.provider })
+        }}</span>
+        <button type="button" (click)="select(agent.provider)">
+          {{ t('settings.cliConfigure') }}
+        </button>
+        <button type="button" class="danger-ghost" (click)="disableCli(agent)">
+          {{ t('settings.cliDisable') }}
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="primary"
+          (click)="enableCli(agent)"
+          [disabled]="!agent.installed"
+        >
+          {{ t('settings.cliEnable') }}
+        </button>
+      }
+    </div>
+  }
+</div>
+
 <div class="split">
   <div class="side">
     @for (provider of store.providers(); track provider.name) {
@@ -12,7 +68,12 @@
         [class.selected]="store.selectedProvider() === provider.name"
         (click)="select(provider.name)"
       >
-        <span class="dot" [class.ok]="isConfigured(provider)" [class.idle]="!isConfigured(provider)" aria-hidden="true"></span>
+        <span
+          class="dot"
+          [class.ok]="isConfigured(provider)"
+          [class.idle]="!isConfigured(provider)"
+          aria-hidden="true"
+        ></span>
         <span class="row-name mono">{{ provider.name }}</span>
         <span class="row-status small faint">{{ statusLabel(provider) }}</span>
       </button>
@@ -45,7 +106,12 @@
           </select>
         </label>
         <div class="actions">
-          <button type="button" class="primary" (click)="addProvider()" [disabled]="!draftName().trim()">
+          <button
+            type="button"
+            class="primary"
+            (click)="addProvider()"
+            [disabled]="!draftName().trim()"
+          >
             {{ t('settings.addCustomProvider') }}
           </button>
           <button type="button" (click)="adding.set(false)">{{ t('settings.cancel') }}</button>
@@ -54,94 +120,170 @@
     }
 
     @if (selected(); as provider) {
-      <div class="card">
-        <h3 class="mono">{{ provider.name }}</h3>
-        <p class="card-sub">{{ statusLabel(provider) }}</p>
-
-        <label class="field">
-          <span class="micro-label">{{ t('settings.providerKind') }}</span>
-          <select
-            class="kind-select"
-            [ngModel]="provider.kind"
-            (ngModelChange)="store.updateProvider(provider.name, { kind: $event })"
-            [disabled]="isBuiltin(provider)"
-            [attr.aria-readonly]="isBuiltin(provider)"
-          >
-            @for (kind of allowedKinds(provider); track kind) {
-              <option [value]="kind">{{ kind }}</option>
-            }
-          </select>
-          @if (isBuiltin(provider)) {
-            <span class="small faint">{{ t('settings.kindFixed') }}</span>
-          }
-        </label>
-
-        <label class="field">
-          <span class="micro-label">{{ t('settings.endpoint') }}</span>
-          <input
-            type="text"
-            class="mono"
-            [ngModel]="provider.endpoint ?? ''"
-            (ngModelChange)="store.updateProvider(provider.name, { endpoint: $event })"
-            [attr.placeholder]="endpointPlaceholder(provider)"
-            spellcheck="false"
-          />
-        </label>
-
-        @if (catalog.needsApiKey(provider.name)) {
+      @if (provider.kind === 'cli') {
+        <div class="card" data-testid="cli-provider-pane">
+          <h3 class="mono">{{ provider.name }}</h3>
+          <p class="card-sub">{{ cliPaneSub(provider) }}</p>
           <label class="field">
-            <span class="micro-label">{{ t('settings.providerKey') }}</span>
-            <input
-              type="password"
-              [ngModel]="keyDraft(provider.name)"
-              (ngModelChange)="store.setKeyDraft(provider.name, $event)"
-              [attr.placeholder]="provider.has_key ? t('settings.providerKeyKeep') : t('settings.providerKeyPlaceholder')"
-              spellcheck="false"
-              autocomplete="off"
-            />
-            <span class="small faint">{{ t('settings.providerKeyEnv', { env: envVar(provider) }) }}</span>
+            <span class="micro-label">{{ t('settings.cliPermission') }}</span>
+            <select
+              [ngModel]="extraValue(provider, 'permission') || 'edits'"
+              (ngModelChange)="store.updateProviderExtra(provider.name, 'permission', $event)"
+            >
+              <option value="plan">{{ t('settings.cliPermissionPlan') }}</option>
+              <option value="edits">{{ t('settings.cliPermissionEdits') }}</option>
+              <option value="all">{{ t('settings.cliPermissionAll') }}</option>
+            </select>
+            <span class="small faint">{{ t('settings.cliPermissionHint') }}</span>
           </label>
-        }
-
-        @for (field of extraFields(); track field.key) {
           <label class="field">
-            <span class="micro-label">{{ field.label }}</span>
+            <span class="micro-label">{{ t('settings.cliModels') }}</span>
             <input
-              [attr.type]="inputType(field)"
+              type="text"
               class="mono"
-              [ngModel]="extraValue(provider, field.key)"
-              (ngModelChange)="store.updateProviderExtra(provider.name, field.key, $event)"
-              [attr.placeholder]="field.placeholder ?? ''"
+              [ngModel]="provider.models.join(', ')"
+              (ngModelChange)="setModels(provider, $event)"
+              spellcheck="false"
+            />
+            <span class="small faint">{{
+              t('settings.cliModelsHint', { prefix: provider.name })
+            }}</span>
+          </label>
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliCommand') }}</span>
+            <input
+              type="text"
+              class="mono"
+              [ngModel]="extraValue(provider, 'command')"
+              (ngModelChange)="store.updateProviderExtra(provider.name, 'command', $event)"
+              [attr.placeholder]="
+                catalog.cliAgentFor(provider.name)?.path ||
+                catalog.cliAgentFor(provider.name)?.command ||
+                ''
+              "
               spellcheck="false"
             />
           </label>
-        }
-
-        <div class="actions spread">
-          <button
-            type="button"
-            (click)="checkModels(provider)"
-            [disabled]="store.checkingProvider() !== null"
-          >
-            @if (store.checkingProvider() === provider.name) {
-              <span class="spinner" aria-hidden="true"></span>{{ t('settings.checking') }}
-            } @else {
-              {{ t('settings.testConnection') }}
-            }
-          </button>
-          <button type="button" class="primary" (click)="store.saveProviders()" [disabled]="store.saving()">
-            {{ t('settings.saveProviders') }}
-          </button>
+          <div class="actions spread">
+            <button
+              type="button"
+              class="danger-ghost"
+              (click)="store.removeProvider(provider.name)"
+            >
+              {{ t('settings.cliDisable') }}
+            </button>
+            <button
+              type="button"
+              class="primary"
+              (click)="store.saveProviders()"
+              [disabled]="store.saving()"
+            >
+              {{ t('settings.saveProviders') }}
+            </button>
+          </div>
+          <div class="note">{{ t('settings.cliTurnNote') }}</div>
         </div>
+      } @else {
+        <div class="card">
+          <h3 class="mono">{{ provider.name }}</h3>
+          <p class="card-sub">{{ statusLabel(provider) }}</p>
 
-        @if (dirty()) {
-          <div class="note">{{ t('settings.testUnsavedHint') }}</div>
-        }
+          <label class="field">
+            <span class="micro-label">{{ t('settings.providerKind') }}</span>
+            <select
+              class="kind-select"
+              [ngModel]="provider.kind"
+              (ngModelChange)="store.updateProvider(provider.name, { kind: $event })"
+              [disabled]="isBuiltin(provider)"
+              [attr.aria-readonly]="isBuiltin(provider)"
+            >
+              @for (kind of allowedKinds(provider); track kind) {
+                <option [value]="kind">{{ kind }}</option>
+              }
+            </select>
+            @if (isBuiltin(provider)) {
+              <span class="small faint">{{ t('settings.kindFixed') }}</span>
+            }
+          </label>
 
-        @if (store.providerModelsError()) {
-          <div class="inline-error">{{ store.providerModelsError() }}</div>
-        }
-      </div>
+          <label class="field">
+            <span class="micro-label">{{ t('settings.endpoint') }}</span>
+            <input
+              type="text"
+              class="mono"
+              [ngModel]="provider.endpoint ?? ''"
+              (ngModelChange)="store.updateProvider(provider.name, { endpoint: $event })"
+              [attr.placeholder]="endpointPlaceholder(provider)"
+              spellcheck="false"
+            />
+          </label>
+
+          @if (catalog.needsApiKey(provider.name)) {
+            <label class="field">
+              <span class="micro-label">{{ t('settings.providerKey') }}</span>
+              <input
+                type="password"
+                [ngModel]="keyDraft(provider.name)"
+                (ngModelChange)="store.setKeyDraft(provider.name, $event)"
+                [attr.placeholder]="
+                  provider.has_key
+                    ? t('settings.providerKeyKeep')
+                    : t('settings.providerKeyPlaceholder')
+                "
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <span class="small faint">{{
+                t('settings.providerKeyEnv', { env: envVar(provider) })
+              }}</span>
+            </label>
+          }
+
+          @for (field of extraFields(); track field.key) {
+            <label class="field">
+              <span class="micro-label">{{ field.label }}</span>
+              <input
+                [attr.type]="inputType(field)"
+                class="mono"
+                [ngModel]="extraValue(provider, field.key)"
+                (ngModelChange)="store.updateProviderExtra(provider.name, field.key, $event)"
+                [attr.placeholder]="field.placeholder ?? ''"
+                spellcheck="false"
+              />
+            </label>
+          }
+
+          <div class="actions spread">
+            <button
+              type="button"
+              (click)="checkModels(provider)"
+              [disabled]="store.checkingProvider() !== null"
+            >
+              @if (store.checkingProvider() === provider.name) {
+                <span class="spinner" aria-hidden="true"></span>{{ t('settings.checking') }}
+              } @else {
+                {{ t('settings.testConnection') }}
+              }
+            </button>
+            <button
+              type="button"
+              class="primary"
+              (click)="store.saveProviders()"
+              [disabled]="store.saving()"
+            >
+              {{ t('settings.saveProviders') }}
+            </button>
+          </div>
+
+          @if (dirty()) {
+            <div class="note">{{ t('settings.testUnsavedHint') }}</div>
+          }
+
+          @if (store.providerModelsError()) {
+            <div class="inline-error">{{ store.providerModelsError() }}</div>
+          }
+        </div>
+      }
 
       @if (discovered().length > 0) {
         <div class="card">
@@ -152,7 +294,11 @@
             }
           </ul>
           <div class="assign-row">
-            <select [ngModel]="assignModel()" (ngModelChange)="assignModel.set($event)" class="mono">
+            <select
+              [ngModel]="assignModel()"
+              (ngModelChange)="assignModel.set($event)"
+              class="mono"
+            >
               @for (model of discovered(); track model) {
                 <option [value]="model">{{ model }}</option>
               }

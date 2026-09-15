@@ -88,6 +88,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
         .route("/providers/catalog", get(providers::provider_catalog))
+        .route("/providers/cli", get(providers::cli_agents))
         .route("/fs/browse", get(fs_browse::fs_browse))
         .route("/fs/tree", get(fs::fs_tree))
         .route("/fs/file", get(fs::fs_file).put(fs::fs_file_write))

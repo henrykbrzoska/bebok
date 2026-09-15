@@ -583,9 +583,7 @@ export type FrontendVerify = 'auto' | 'ask' | 'off';
 export const FRONTEND_VERIFY_MODES: readonly FrontendVerify[] = ['auto', 'ask', 'off'];
 
 export function isFrontendVerify(value: unknown): value is FrontendVerify {
-  return (
-    typeof value === 'string' && (FRONTEND_VERIFY_MODES as readonly string[]).includes(value)
-  );
+  return typeof value === 'string' && (FRONTEND_VERIFY_MODES as readonly string[]).includes(value);
 }
 
 export interface VerifyConfig {
@@ -665,7 +663,8 @@ export interface UiConfig {
 /** One provider (name, endpoint, API key, known models). */
 export interface ProviderSpec {
   name: string;
-  kind: 'openai' | 'anthropic';
+  /** `cli` (1.8): a locally installed agent CLI driven headlessly, no API key. */
+  kind: 'openai' | 'anthropic' | 'cli';
   endpoint?: string | null;
   api_key?: string | null;
   models: string[];

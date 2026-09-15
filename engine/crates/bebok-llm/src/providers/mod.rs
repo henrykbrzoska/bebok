@@ -66,7 +66,7 @@ mod tests {
             .map(|name| {
                 let spec = specs.iter().find(|spec| spec.name == *name).unwrap();
                 (
-                    crate::adapter_for(spec.kind).type_name(),
+                    crate::adapter_for(spec.kind).unwrap().type_name(),
                     adapter_config(spec, Some(format!("{name}-key"))),
                 )
             })

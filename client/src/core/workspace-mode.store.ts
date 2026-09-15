@@ -45,6 +45,26 @@ export class WorkspaceModeStore {
   readonly chatDirectory = signal<string | null>(this.readCachedDir());
   readonly error = signal<string | null>(null);
 
+  /**
+   * The directory a screen should work on right now: the chat scratch
+   * directory in chat mode, else the remembered project. Screens that took
+   * `readLastDirectory()` directly use this so Settings/Stats follow the mode.
+   */
+  currentDirectory(): string | null {
+    if (this.isChat()) {
+      return this.chatDirectory() ?? this.project.directory() ?? this.engine.readLastDirectory();
+    }
+    return this.engine.readLastDirectory();
+  }
+
+  /** `currentDirectory()`, resolving the chat scratch directory first if needed. */
+  async ensureDirectory(): Promise<string | null> {
+    if (this.isChat() && !this.chatDirectory()) {
+      await this.resolveChatDirectory();
+    }
+    return this.currentDirectory();
+  }
+
   /** True when `directory` is the chat scratch directory (sidebar/topbar labels). */
   isChatDirectory(directory: string | null | undefined): boolean {
     const chat = this.chatDirectory();

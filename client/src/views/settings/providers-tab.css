@@ -40,3 +40,42 @@
 .assign-row select {
   max-width: 220px;
 }
+
+/* 1.8: agent CLIs card */
+.cli-card {
+  margin-bottom: var(--space-12);
+}
+
+.cli-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-10);
+  margin-bottom: var(--space-8);
+}
+
+.cli-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--border);
+}
+
+.cli-row.enabled .cli-name > span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cli-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.cli-name .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

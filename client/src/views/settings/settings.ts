@@ -21,6 +21,7 @@ import { I18nService } from '../../i18n/i18n.service';
 import { MessageKey } from '../../i18n';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { ProviderCatalog } from './provider-catalog';
+import { WorkspaceModeStore } from '../../core/workspace-mode.store';
 import { SETTINGS_TABS, SettingsStore, SettingsTab } from './settings.store';
 import { ProvidersTab } from './providers-tab';
 import { AgentsTab } from './agents-tab';
@@ -67,6 +68,7 @@ export class SettingsView implements OnInit {
   private readonly events = inject(EventsStore);
   private readonly i18n = inject(I18nService);
   private readonly catalog = inject(ProviderCatalog);
+  private readonly workspace = inject(WorkspaceModeStore);
 
   readonly store = inject(SettingsStore);
   /** F7-7: the Permissions rail entry carries an uncategorized-tools badge. */
@@ -95,8 +97,6 @@ export class SettingsView implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    const directory =
-      this.route.snapshot.queryParamMap.get('directory') ?? this.engine.readLastDirectory();
     if (!this.engine.connected()) {
       try {
         await this.engine.connect();
@@ -105,8 +105,12 @@ export class SettingsView implements OnInit {
         return;
       }
     }
+    const directory =
+      this.route.snapshot.queryParamMap.get('directory') ??
+      (await this.workspace.ensureDirectory());
     this.events.start();
     void this.catalog.load();
+    void this.catalog.loadCli();
     void this.toolSafety.ensure(directory);
     await this.store.load(directory);
   }

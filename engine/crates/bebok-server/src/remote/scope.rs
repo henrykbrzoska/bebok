@@ -70,6 +70,7 @@ pub const TABLE: &[(&str, &str, Access)] = &[
     ("GET", "/docker", Access::Local),
     ("GET", "/models", Access::Remote),
     ("GET", "/providers/catalog", Access::Local),
+    ("GET", "/providers/cli", Access::Local),
     // -- filesystem ---------------------------------------------------------
     ("GET", "/fs/browse", Access::Local),
     ("GET", "/fs/tree", Access::Local),

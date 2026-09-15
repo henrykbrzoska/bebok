@@ -24,6 +24,13 @@ pub enum ProviderKind {
     Openai,
     /// Anthropic Messages API (Anthropic, Z.ai's Anthropic endpoint).
     Anthropic,
+    /// A locally installed agent CLI driven headlessly (Claude Code, Codex,
+    /// Cursor agent, Grok, Antigravity, Gemini): subscription models with no
+    /// API key. `extra.cli` names the CLI, `extra.command` optionally the
+    /// binary, `extra.permission` its permission mode. Such a provider runs
+    /// the whole turn itself (own tools, own approvals) - see
+    /// `bebok_core::provider_cli`.
+    Cli,
 }
 
 /// One named provider. `api_key` is intentionally plain (empty = not given /
@@ -66,6 +73,7 @@ impl ProviderSpec {
         match self.kind {
             ProviderKind::Openai => format!("{base}/chat/completions"),
             ProviderKind::Anthropic => format!("{base}/messages"),
+            ProviderKind::Cli => String::new(),
         }
     }
 
@@ -116,6 +124,7 @@ fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
             "zai" => "https://api.z.ai/api/anthropic/v1",
             _ => "https://api.anthropic.com/v1",
         },
+        ProviderKind::Cli => "",
         ProviderKind::Openai => match name {
             "xai" => "https://api.x.ai/v1",
             "deepseek" => "https://api.deepseek.com/v1",
@@ -355,6 +364,12 @@ fn provider_label(name: &str) -> String {
         "qwen" => "Qwen (DashScope)",
         "openrouter" => "OpenRouter",
         "ollama" => "Ollama",
+        "cli-claude" => "Claude Code (CLI)",
+        "cli-codex" => "Codex (CLI)",
+        "cli-cursor" => "Cursor agent (CLI)",
+        "cli-grok" => "Grok Build (CLI)",
+        "cli-agy" => "Antigravity (CLI)",
+        "cli-gemini" => "Gemini (CLI)",
         other => return other.to_string(),
     }
     .to_string()
@@ -368,6 +383,7 @@ fn provider_auth(name: &str, kind: ProviderKind) -> ProviderAuth {
         _ => match kind {
             ProviderKind::Anthropic => ProviderAuth::XApiKey,
             ProviderKind::Openai => ProviderAuth::Bearer,
+            ProviderKind::Cli => ProviderAuth::None,
         },
     }
 }

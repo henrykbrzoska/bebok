@@ -16,7 +16,15 @@
  * (providers with a resolvable key only).
  */
 
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -28,7 +36,8 @@ import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { NewSessionDialogStore } from './new-session-dialog.store';
 
 /** Mirrors `bebok_core::git::validate_branch` closely enough to catch typos before the round trip. */
-export const BRANCH_PATTERN = /^(?![-./])(?!.*(\.\.|\/\/|@\{))[A-Za-z0-9._/-]+(?<![./])(?<!\.lock)$/;
+export const BRANCH_PATTERN =
+  /^(?![-./])(?!.*(\.\.|\/\/|@\{))[A-Za-z0-9._/-]+(?<![./])(?<!\.lock)$/;
 
 export function isValidBranch(branch: string): boolean {
   if (!BRANCH_PATTERN.test(branch)) {
@@ -79,7 +88,9 @@ export class NewSessionDialog {
   readonly projectEntry = computed(() => this.projects.findByPath(this.directory()));
   readonly git = signal<ProjectGitInfo | null>(null);
   readonly gitLoading = signal(false);
-  readonly worktreeAvailable = computed(() => this.projectEntry() !== null && this.git()?.is_repo === true);
+  readonly worktreeAvailable = computed(
+    () => this.projectEntry() !== null && this.git()?.is_repo === true,
+  );
   readonly worktreeHint = computed(() => {
     if (!this.projectEntry()) {
       return this.t('newSession.worktreeNoProject');
@@ -201,7 +212,7 @@ export class NewSessionDialog {
       const cfg = await this.engine.getConfig(directory);
       const models: string[] = [];
       for (const provider of cfg.providers ?? []) {
-        if (!provider.has_key) {
+        if (!provider.has_key && provider.kind !== 'cli') {
           continue;
         }
         for (const model of provider.models ?? []) {

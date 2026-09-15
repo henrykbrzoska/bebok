@@ -274,6 +274,29 @@ compromised worker can at most refuse service. Deploying it is manual
 (`relay/README.md`: `wrangler login` + `npm run deploy`), outside
 `release.yml`.
 
+## 5c. Chat mode, `ask_user`, CLI providers (1.8)
+
+- **Workspace modes**: `client/src/core/workspace-mode.store.ts` - `code`
+  (project directory) vs `chat` (engine scratch dir from `GET /workspace/chat`,
+  `<data dir>/chat`, never written to `bebok.lastDirectory`). Screens that
+  need "the current directory" ask `WorkspaceModeStore.currentDirectory()` /
+  `ensureDirectory()`, not `readLastDirectory()` directly.
+- **`ask_user`** (`engine/crates/bebok-tools/src/ask_user.rs`): a questionnaire
+  tool that ends the turn (`structured.awaitUser`, checked in the turn loop);
+  the client renders `structured.survey` (`views/chat/parts/survey-part.ts`)
+  and posts `1A, 2BC, 3E(own words)` as the next user message.
+- **CLI providers** (`engine/crates/bebok-core/src/provider_cli.rs`,
+  `ProviderKind::Cli`): one adapter per CLI (args + NDJSON parser). The CLI
+  runs its own tools; they arrive as `StreamEvent::ToolActivity` and become
+  closed tool parts - never gated, never executed by the engine. CLI
+  conversation ids live in `<data dir>/cli-sessions/<cli>-<session>`.
+  `GET /providers/cli` probes the machine (`which` + `--version`). When a CLI
+  changes its flags or stream shape, fix `build_args` / `CliParser` and the
+  contract table in `~/projects/ai/analyses/2026-09-15-bebok-cli-providers.md`.
+- **Dev engine home**: `npm run full-build-dev` sets `BEBOK_HOME=<data
+  dir>/bebok-dev`; never point a dev engine at the installed app's home (they
+  would fight over the relay tunnel).
+
 ## 6. Conventions
 
 - **Branches / merges**: `main` receives PR-only merges (no direct pushes). Work

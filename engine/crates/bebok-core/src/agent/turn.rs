@@ -29,6 +29,7 @@ use crate::permission::{CompiledLayer, PermissionEngine};
 use crate::plugin::{Hook, PluginHost, TurnHook};
 use crate::session::{Message, Part, Role};
 use crate::store::SessionState;
+use crate::util::now_ms;
 
 /// Orchestrates one full turn (owns everything `run_turn` took as args).
 pub struct TurnRunner {
@@ -240,6 +241,37 @@ impl TurnRunner {
                             .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                     }
+                    // CLI agents (1.8): the provider ran the tool itself. Record
+                    // it as a closed part - no gate, no execution - so the
+                    // transcript shows what happened without ever re-running it.
+                    StreamEvent::ToolActivity(activity) => {
+                        saw_any = true;
+                        state
+                            .append_to_part(assistant_idx, |m| {
+                                if m.tool_part_index(&activity.id).is_none() {
+                                    m.add_tool_call(
+                                        activity.id.clone(),
+                                        activity.name.clone(),
+                                        activity.input.clone(),
+                                    );
+                                    m.mark_tool_running(&activity.id, now_ms());
+                                }
+                                if let Some(output) = &activity.output {
+                                    if activity.is_error {
+                                        m.mark_tool_error(&activity.id, output.clone());
+                                    } else {
+                                        m.mark_tool_completed(
+                                            &activity.id,
+                                            output.clone(),
+                                            activity.name.clone(),
+                                            Some(serde_json::json!({ "cliAgent": true })),
+                                        );
+                                    }
+                                }
+                            })
+                            .await;
+                        emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
+                    }
                     StreamEvent::Done(usage) => {
                         let cost = bebok_llm::compute_cost(
                             &model,
@@ -309,7 +341,7 @@ impl TurnRunner {
             // last request/response pair is never missing from the trace).
             {
                 let messages = state.messages.read().await;
-                if let Some(err) = stream_err {
+                if let Some(err) = stream_err.as_deref() {
                     complete_llm_call(
                         trace_id,
                         serde_json::json!({ "model": model, "error": err }),
@@ -346,6 +378,21 @@ impl TurnRunner {
                 // then add a clear abort marker.
                 state.persist_message_at(assistant_idx).await;
                 persist_abort_message(&state, &bus, &agent.name, &model).await;
+                break;
+            }
+
+            // A stream that died mid-turn (a CLI agent exiting with an error,
+            // a dropped connection) leaves the failure in the transcript
+            // instead of an empty assistant bubble.
+            if let Some(err) = stream_err.as_deref() {
+                state
+                    .append_to_part(assistant_idx, |m| {
+                        m.append_text(&format!("\n\n[Provider error: {err}]"))
+                    })
+                    .await;
+                state.persist_message_at(assistant_idx).await;
+                emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
+                emit_message(&bus, &state, "message.updated", assistant_idx);
                 break;
             }
 
@@ -1434,6 +1481,8 @@ mod retry_tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking: Thinking::Off,
+            session_id: None,
+            directory: None,
         }
     }
 

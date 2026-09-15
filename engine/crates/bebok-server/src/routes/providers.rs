@@ -21,9 +21,43 @@ pub async fn provider_catalog() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "providers": providers }))
 }
 
+/// `GET /providers/cli` -> `{ "agents": [CliProbe, ...] }`: the agent CLIs
+/// the engine can drive (1.8), each with whether it is installed here, its
+/// version, the provider name it would register as and its default models.
+/// Probing runs `<cli> --version` for every known CLI in parallel.
+pub async fn cli_agents() -> Json<serde_json::Value> {
+    let probes = futures::future::join_all(
+        bebok_core::provider_cli::CliAgent::ALL
+            .iter()
+            .map(|agent| agent.probe(None)),
+    )
+    .await;
+    Json(serde_json::json!({ "agents": probes }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cli_agents_lists_every_known_cli_with_install_state() {
+        let Json(body) = cli_agents().await;
+        let agents = body["agents"].as_array().expect("agents array");
+        assert_eq!(agents.len(), 6);
+        for a in agents {
+            for key in [
+                "id",
+                "label",
+                "command",
+                "installed",
+                "provider",
+                "defaultModels",
+            ] {
+                assert!(a.get(key).is_some(), "missing {key}");
+            }
+            assert!(a["provider"].as_str().unwrap().starts_with("cli-"));
+        }
+    }
 
     /// The endpoint returns every built-in provider in the documented shape.
     #[tokio::test]

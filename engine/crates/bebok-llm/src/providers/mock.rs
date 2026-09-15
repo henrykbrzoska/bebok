@@ -167,6 +167,8 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 100,
             thinking: crate::Thinking::Off,
+            session_id: None,
+            directory: None,
         }
     }
 

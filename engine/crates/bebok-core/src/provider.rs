@@ -26,6 +26,13 @@ pub fn build_provider(
         .provider_spec(&name)
         .ok_or_else(|| CoreError::ProviderConfig(format!("unknown provider '{name}'")))?;
 
+    if spec.kind == bebok_llm::ProviderKind::Cli {
+        return crate::provider_cli::build_cli_provider(
+            &spec,
+            crate::session::persist::data_root(),
+        )
+        .map_err(CoreError::ProviderConfig);
+    }
     bebok_llm::build_provider(
         &spec,
         config.api_key.clone().filter(|s| !s.trim().is_empty()),

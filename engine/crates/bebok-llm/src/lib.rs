@@ -24,8 +24,9 @@ pub use openai::{
 pub use protocols::{AnthropicMessagesAdapter, OpenAiChatAdapter};
 pub use provider::{
     AdapterConfig, ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider,
-    ProviderAdapter, ProviderErrorKind, StreamEvent, StreamResult, Thinking, ToolCall, ToolDef,
-    ToolResult, Usage, adapter_for, build_provider, classify_http, retry_after_from_headers,
+    ProviderAdapter, ProviderErrorKind, StreamEvent, StreamResult, Thinking, ToolActivity,
+    ToolCall, ToolDef, ToolResult, Usage, adapter_for, build_provider, classify_http,
+    retry_after_from_headers,
 };
 pub use providers::adapter_config;
 pub use providers::mock::MockProvider;

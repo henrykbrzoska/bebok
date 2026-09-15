@@ -598,6 +598,8 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking,
+            session_id: None,
+            directory: None,
         }
     }
 

@@ -232,6 +232,8 @@ impl<'a> RequestBuilder<'a> {
             tools: tool_defs,
             max_tokens: self.max_tokens,
             thinking: self.thinking,
+            session_id: Some(self.state.id().to_string()),
+            directory: Some(self.state.directory().to_string()),
         })
     }
 

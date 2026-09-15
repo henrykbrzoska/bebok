@@ -26,10 +26,13 @@ static OPENAI_CHAT_ADAPTER: crate::OpenAiChatAdapter = crate::OpenAiChatAdapter;
 static ANTHROPIC_MESSAGES_ADAPTER: crate::AnthropicMessagesAdapter =
     crate::AnthropicMessagesAdapter;
 
-pub fn adapter_for(kind: crate::ProviderKind) -> &'static dyn ProviderAdapter {
+pub fn adapter_for(kind: crate::ProviderKind) -> Option<&'static dyn ProviderAdapter> {
     match kind {
-        crate::ProviderKind::Openai => &OPENAI_CHAT_ADAPTER,
-        crate::ProviderKind::Anthropic => &ANTHROPIC_MESSAGES_ADAPTER,
+        crate::ProviderKind::Openai => Some(&OPENAI_CHAT_ADAPTER),
+        crate::ProviderKind::Anthropic => Some(&ANTHROPIC_MESSAGES_ADAPTER),
+        // Built by the core (`provider_cli`): it needs the data dir and a
+        // process, not an HTTP adapter.
+        crate::ProviderKind::Cli => None,
     }
 }
 
@@ -44,7 +47,12 @@ pub fn build_provider(
     }
     let api_key = crate::resolve_api_key(spec).or(fallback_api_key);
     let config = crate::adapter_config(spec, api_key);
-    let adapter = adapter_for(spec.kind);
+    let Some(adapter) = adapter_for(spec.kind) else {
+        return Err(format!(
+            "provider '{}' is a CLI agent; it is built by the engine, not the HTTP adapters",
+            spec.name
+        ));
+    };
     adapter.build(config)
 }
 
@@ -411,6 +419,13 @@ pub struct ChatRequest {
     pub max_tokens: u32,
     /// Requested reasoning/thinking effort (provider-mapped; `Off` = default).
     pub thinking: Thinking,
+    /// The engine session this request belongs to (CLI providers key their
+    /// own conversation ids on it); HTTP providers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Working directory of the session (CLI providers run there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
 }
 
 /// Token/cost usage reported by a provider.
@@ -436,7 +451,22 @@ pub enum StreamEvent {
     Text(String),
     Thinking(String),
     ToolCall(ToolCall),
+    /// A tool the provider ran *itself* (CLI agents): recorded in the
+    /// transcript as an already-closed tool part, never gated or executed by
+    /// the engine. `output: None` = started; `Some` = finished.
+    ToolActivity(ToolActivity),
     Done(Usage),
+}
+
+/// One tool call executed inside a CLI agent's own loop.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolActivity {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+    pub output: Option<String>,
+    #[serde(default)]
+    pub is_error: bool,
 }
 
 /// The streaming interface the agent loop consumes.
