@@ -1,0 +1,24 @@
+[package]
+name = "bebok-code-index"
+version = "1.6.0"
+edition = "2024"
+rust-version = "1.85"
+license = "UNLICENSED"
+repository = "https://github.com/henrykbrzoska/bebok-index"
+description = "Per-instance code index for Bebok: file scan, tantivy full-text search, background orchestrator and filesystem watcher."
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+blake3 = "1"
+ignore = "0.4"
+notify = "8"
+tantivy = "0.22"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
