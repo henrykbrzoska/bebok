@@ -40,8 +40,9 @@ pub struct ProviderSpec {
     /// API key; empty means "not set".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    /// Known model ids (used by the GUI's model picker; a subset, not
-    /// authoritative - `list_models` can refresh it).
+    /// Known model ids (populated exclusively by the connection test,
+    /// `GET /models`, which persists live results into the project config;
+    /// built-ins ship empty lists).
     #[serde(default)]
     pub models: Vec<String>,
     /// Provider-specific settings that do not deserve a column of their own:
@@ -132,6 +133,10 @@ fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
 }
 
 /// Built-in provider defaults (the GUI can override/extend them via config).
+/// The `models` lists stay empty on purpose: the only source of available
+/// models is the connection test (`GET /models`), which persists live results
+/// into the project config. Capabilities/pricing/context still come from the
+/// vendored model catalog (`ModelCatalog::get`/`pricing`).
 pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
     vec![
         ProviderSpec {
@@ -139,7 +144,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Anthropic,
             endpoint: Some("https://api.z.ai/api/anthropic/v1".into()),
             api_key: None,
-            models: catalog_models("zai"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -147,7 +152,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.openai.com/v1".into()),
             api_key: None,
-            models: catalog_models("openai"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -155,7 +160,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Anthropic,
             endpoint: Some("https://api.anthropic.com/v1".into()),
             api_key: None,
-            models: catalog_models("anthropic"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -163,7 +168,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.x.ai/v1".into()),
             api_key: None,
-            models: catalog_models("xai"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -171,7 +176,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.deepseek.com/v1".into()),
             api_key: None,
-            models: catalog_models("deepseek"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -179,7 +184,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://generativelanguage.googleapis.com/v1beta/openai".into()),
             api_key: None,
-            models: catalog_models("google"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -187,7 +192,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.mistral.ai/v1".into()),
             api_key: None,
-            models: catalog_models("mistralai"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -195,7 +200,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://api.groq.com/openai/v1".into()),
             api_key: None,
-            models: catalog_models("groq"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -203,7 +208,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1".into()),
             api_key: None,
-            models: catalog_models("qwen"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -211,7 +216,7 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("https://openrouter.ai/api/v1".into()),
             api_key: None,
-            models: catalog_models("openrouter"),
+            models: Vec::new(),
             extra: Map::new(),
         },
         ProviderSpec {
@@ -219,14 +224,10 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             kind: ProviderKind::Openai,
             endpoint: Some("http://localhost:11434/v1".into()),
             api_key: None,
-            models: catalog_models("ollama"),
+            models: Vec::new(),
             extra: Map::new(),
         },
     ]
-}
-
-fn catalog_models(provider: &str) -> Vec<String> {
-    crate::ModelCatalog::global().provider_models(provider)
 }
 
 /// How a provider authenticates. Separate from [`ProviderKind`] (the wire
@@ -395,7 +396,9 @@ pub fn provider_catalog() -> Vec<ProviderUiSpec> {
 }
 
 /// Resolve the effective provider specs: config entries override built-ins by
-/// name; unknown names are appended (custom/self-hosted providers).
+/// name; unknown names are appended (custom/self-hosted providers). Built-in
+/// model lists are empty (only the connection test fills them), so this rule
+/// stays neutral until a config entry sets models explicitly.
 pub fn resolve_provider_specs(config_specs: &[ProviderSpec]) -> Vec<ProviderSpec> {
     let mut out = builtin_provider_specs();
     for spec in config_specs {
@@ -536,6 +539,23 @@ pub fn parse_models(value: &serde_json::Value) -> Result<Vec<String>, LlmError> 
 #[cfg(test)]
 mod catalog_tests {
     use super::*;
+
+    #[test]
+    fn builtin_model_lists_come_only_from_the_connection_test() {
+        for spec in builtin_provider_specs() {
+            assert!(
+                spec.models.is_empty(),
+                "{} ships no models; GET /models fills them",
+                spec.name
+            );
+        }
+        // Pricing/capabilities still resolve from the vendored catalog.
+        let catalog = crate::ModelCatalog::global();
+        let caps = catalog.get("openai/gpt-4.1");
+        assert!(caps.supports_tools);
+        assert!(catalog.pricing("openai/gpt-4.1").is_some());
+        assert!(!catalog.provider_models("openai").is_empty());
+    }
 
     /// Every built-in provider is described, in registry order.
     #[test]
@@ -808,6 +828,21 @@ mod extra_tests {
 
         let json = serde_json::to_value(&spec).unwrap();
         assert!(json.get("extra").is_none(), "empty extra must be omitted");
+    }
+
+    #[test]
+    fn resolve_adopts_config_models_onto_empty_builtins() {
+        let override_spec = ProviderSpec {
+            name: "openai".into(),
+            kind: ProviderKind::Openai,
+            models: vec!["gpt-4.1".into()],
+            ..Default::default()
+        };
+        let resolved = resolve_provider_specs(&[override_spec]);
+        let openai = find_provider_spec(&resolved, "openai").unwrap();
+        assert_eq!(openai.models, vec!["gpt-4.1".to_string()]);
+        let untouched = find_provider_spec(&resolved, "groq").unwrap();
+        assert!(untouched.models.is_empty());
     }
 
     /// Config layers merge extras key-by-key instead of replacing the map.

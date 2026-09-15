@@ -40,6 +40,13 @@ pub struct TurnRunner {
     pub bus: EventBus,
     pub abort: CancellationToken,
     pub model: String,
+    /// PR1-część 2: notify seam for code-index invalidation after a
+    /// successful file mutation. `None` when the turn runs without an
+    /// instance (unit tests, delegation children without a store handle).
+    pub code_index_changed: Option<crate::index::CodeIndexChangedCallback>,
+    /// Code-index query adapter for tool construction. `None` when no
+    /// instance is attached (unit tests).
+    pub code_index_query_adapter: Option<Arc<dyn bebok_tools::CodeIndexQuery>>,
 }
 
 impl TurnRunner {
@@ -63,7 +70,28 @@ impl TurnRunner {
             bus,
             abort,
             model: model.to_string(),
+            code_index_changed: None,
+            code_index_query_adapter: None,
         }
+    }
+
+    /// Attach the code-index invalidation seam (the caller keeps the
+    /// `Instance` alive; typically `Instance::notify_code_index_changed`).
+    pub fn with_code_index_changed(
+        mut self,
+        notify: crate::index::CodeIndexChangedCallback,
+    ) -> Self {
+        self.code_index_changed = Some(notify);
+        self
+    }
+
+    /// Attach the code-index query adapter for the `code_search` tool.
+    pub fn code_index_query_adapter(
+        mut self,
+        adapter: Option<Arc<dyn bebok_tools::CodeIndexQuery>>,
+    ) -> Self {
+        self.code_index_query_adapter = adapter;
+        self
     }
 
     /// Run a full turn: build request -> stream SSE -> append parts -> pending
@@ -80,6 +108,8 @@ impl TurnRunner {
             bus,
             abort,
             model,
+            code_index_changed,
+            code_index_query_adapter,
         } = self;
         let config = state.config_snapshot();
         let hooks = PluginHost::global();
@@ -431,6 +461,9 @@ impl TurnRunner {
                     abort: &abort,
                     assistant_idx,
                     tool_output_cap: config.tool_output_cap,
+                    // Cloned `Arc`: cheap, keeps the seam alive for the turn.
+                    code_index_changed: code_index_changed.clone(),
+                    code_index_query_adapter: code_index_query_adapter.clone(),
                 };
                 if runnable.len() == 1 {
                     let (call_id, tool_name, input) = &runnable[0];

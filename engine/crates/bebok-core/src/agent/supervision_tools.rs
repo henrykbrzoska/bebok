@@ -671,6 +671,7 @@ mod tests {
                 started_at: 0,
                 status: "running".into(),
                 background: true,
+                prompt_hash: None,
             },
             progress: TaskProgress {
                 last_tool: Some("write_file".into()),

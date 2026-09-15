@@ -24,7 +24,7 @@ pub use model::{
     DEFAULT_CONTEXT_BUDGET, DEFAULT_DELEGATION_MAX_CONCURRENT, DEFAULT_MAX_TOKENS, DEFAULT_MODEL,
     DEFAULT_TOOL_OUTPUT_CAP, DelegationConfig, DelegationMode, DelegationModelPolicy, FleetConfig,
     FleetMember, MAX_CUSTOM_CSS_FILES, MAX_CUSTOM_CSS_LEN, MAX_DELEGATION_MAX_CONCURRENT,
-    ResolvedConfig, ResolvedConfigBuilder, UiConfig,
+    ResolvedConfig, ResolvedConfigBuilder, UiConfig, code_index_enabled,
 };
 
 // --- loader (load/load_with_global/apply/apply_file/merge_providers/...) ---

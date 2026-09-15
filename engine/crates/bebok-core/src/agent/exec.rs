@@ -9,14 +9,14 @@
 use std::sync::Arc;
 
 use bebok_llm::Provider;
-use bebok_tools::{ToolCtx, ToolRegistry};
+use bebok_tools::ToolRegistry;
 use tokio_util::sync::CancellationToken;
 
 use super::observe::{emit_message, emit_part};
 use super::preset::Agent;
 use crate::event::{Event, EventBus};
 use crate::permission::PermissionEngine;
-use crate::plugin::{Hook, PluginHost, ToolCallHook, ToolResultHook};
+use crate::plugin::{FileWriteHook, Hook, PluginHost, ToolCallHook, ToolResultHook};
 use crate::store::SessionState;
 use crate::util::{compress_tool_output, now_ms, truncate_output};
 
@@ -41,6 +41,22 @@ pub struct ExecCtx<'a> {
     pub abort: &'a CancellationToken,
     pub assistant_idx: usize,
     pub tool_output_cap: usize,
+    /// PR1-część 2: notify seam for code-index invalidation after a
+    /// successful file mutation (`Instance::notify_code_index_changed`).
+    /// `None` when the turn runs without an instance (unit tests).
+    pub code_index_changed: Option<crate::index::CodeIndexChangedCallback>,
+    /// Code-index backend adapter for the tool context (`code_search`).
+    /// `None` when no instance is attached (unit tests, disabled backend).
+    pub code_index_query_adapter: Option<Arc<dyn bebok_tools::CodeIndexQuery>>,
+}
+
+/// True when a completed tool call mutated files and should invalidate the
+/// code index. Uses the contract-owned [`INDEX_INVALIDATING_TOOLS`](crate::index::INDEX_INVALIDATING_TOOLS)
+/// list; `rm`/`mv` report via stderr-style text, so success is judged by the
+/// absence of an `error:` prefix rather than tool-specific parsing.
+fn ok_tool_mutation(tool_name: &str, output_text: &str) -> bool {
+    crate::index::INDEX_INVALIDATING_TOOLS.contains(&tool_name)
+        && !output_text.trim_start().starts_with("error:")
 }
 
 /// Execute one permission-gated tool call (the `Run` arm of the turn loop).
@@ -82,6 +98,7 @@ pub async fn exec_gated_call(
 
     // Allowed: mark running, persist, execute, complete.
     let Some(tool) = ctx.tools.get(tool_name) else {
+        let _ = &ctx.code_index_query_adapter;
         // The model called a tool that is not registered: note it in the
         // project config (de-duplicated) so it can be implemented later.
         crate::config::record_unknown_tool(std::path::Path::new(ctx.state.directory()), tool_name);
@@ -127,12 +144,27 @@ pub async fn exec_gated_call(
         }
     }
 
-    let tool_ctx = ToolCtx {
+    let tool_ctx = bebok_tools::ToolCtx {
         root: ctx.state.directory().into(),
         session_id: ctx.state.id().to_string(),
         abort: ctx.abort.clone(),
+        index: ctx.code_index_query_adapter.clone(),
     };
     let output = tool.execute(tool_ctx, input.clone()).await;
+
+    // PR1-część 2: a successful file mutation invalidates (parts of) the
+    // code index. `ExecCtx.code_index_changed` is the store-facing seam
+    // (wired by the turn services to `Instance::notify_code_index_changed`);
+    // `None` in unit tests that run turns without an instance.
+    if ok_tool_mutation(tool_name, &output.text)
+        && let Some(notify) = ctx.code_index_changed.as_ref()
+    {
+        let rel = input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        notify(rel.as_deref());
+    }
 
     // Token-saving pipeline: compress first (strip ANSI, collapse whitespace),
     // then truncate against the configured static cap. The full output is
@@ -173,6 +205,21 @@ pub async fn exec_gated_call(
             output: text.clone(),
         };
         hooks.run_hook(Hook::AFTER_TOOL, &mut payload).await;
+    }
+
+    // PR1-część 2: emit `after.file_write` after a successful file
+    // mutation so the code-index backend (and any observer plugin) can
+    // invalidate/rescan. Mirrors the `ok_tool_mutation` gate above; the
+    // hook itself never fails the turn (logged and skipped on error).
+    if ok && ok_tool_mutation(tool_name, &text) && hooks.has_plugins().await {
+        let mut payload = FileWriteHook {
+            tool: tool_name.to_string(),
+            path: input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        };
+        hooks.run_hook(Hook::AFTER_FILE_WRITE, &mut payload).await;
     }
 
     ctx.state.persist_message_at(ctx.assistant_idx).await;

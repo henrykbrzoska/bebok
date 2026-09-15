@@ -32,7 +32,6 @@ use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use super::turn::run_turn;
 use crate::event::{Event, EventBus};
 use crate::session::{Message, Part, Role, ToolState};
 use crate::store::{ChildTask, InstanceStore, SessionState, TaskResult};
@@ -541,15 +540,24 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
     let slot_now = spec.parent.child_slots().try_acquire(spec.max_concurrent);
     let status = if slot_now { "running" } else { "queued" };
 
+    // Only `task` spawns carry the prompt hash used for duplicate
+    // detection (`fleet` broadcast fans one prompt out to N members by
+    // design; `spec.origin` is "task" or "fleet").
+    let prompt_for_hash = if spec.origin == "task" {
+        Some(spec.prompt.as_str())
+    } else {
+        None
+    };
     let info = spec
         .parent
-        .register_child_task_full(
+        .register_child_task_full_with_prompt(
             &task_id,
             &description,
             &child_session_id,
             &spec.name,
             &spec.agent_name,
             Some(&spec.model),
+            prompt_for_hash,
             status,
             spec.background,
             abort.clone(),
@@ -623,7 +631,12 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
             info.clone(),
             stop.clone(),
         );
-        let result = run_turn(
+        // PR1-część 2: the child's file mutations invalidate the same
+        // instance index as a normal turn.
+        let inst_c = spec.instance.clone();
+        let notify: crate::index::CodeIndexChangedCallback =
+            std::sync::Arc::new(move |rel| inst_c.notify_code_index_changed(rel));
+        let result = super::turn::TurnRunner::new(
             child.clone(),
             spec.agent,
             spec.instance.tools.clone(),
@@ -633,6 +646,9 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
             abort.clone(),
             &spec.model,
         )
+        .with_code_index_changed(notify)
+        .code_index_query_adapter(spec.instance.code_index_query_adapter())
+        .run()
         .await;
         stop.cancel();
         let _ = reporter.await;

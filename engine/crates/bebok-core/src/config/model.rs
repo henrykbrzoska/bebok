@@ -138,15 +138,17 @@ pub const DEFAULT_DELEGATION_MAX_CONCURRENT: usize = 3;
 pub const MAX_DELEGATION_MAX_CONCURRENT: usize = 16;
 
 /// F9-10: `delegation.model_policy` — which model sub-agents run on.
-/// Serialised as a plain string: `"inherit"`, `"cheaper"` or an explicit
-/// `provider/model` id.
+/// Serialised as a plain string: `"inherit"` (default), `"cheaper"` or an
+/// explicit `provider/model` id.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DelegationModelPolicy {
-    /// The parent's model.
+    /// What the config says for the child: an explicit per-call model wins;
+    /// otherwise `models.<child-agent>` when set, otherwise the parent's
+    /// effective model.
+    #[default]
     Inherit,
     /// A lighter sibling of the parent's model (same provider, via the model
-    /// catalog); inherit when there is none.
-    #[default]
+    /// catalog); inherit when there is none. Opt-in: set explicitly.
     Cheaper,
     /// Always this model.
     Explicit(String),
@@ -154,12 +156,12 @@ pub enum DelegationModelPolicy {
 
 impl DelegationModelPolicy {
     /// Parse the config string (`inherit` / `cheaper` / anything else = an
-    /// explicit model id; empty = the default `cheaper`).
+    /// explicit model id; empty = the default `inherit`).
     pub fn parse(s: &str) -> Self {
         let t = s.trim();
         match t.to_ascii_lowercase().as_str() {
-            "" | "cheaper" => DelegationModelPolicy::Cheaper,
-            "inherit" => DelegationModelPolicy::Inherit,
+            "cheaper" => DelegationModelPolicy::Cheaper,
+            "" | "inherit" => DelegationModelPolicy::Inherit,
             _ => DelegationModelPolicy::Explicit(t.to_string()),
         }
     }
@@ -200,7 +202,7 @@ pub struct DelegationConfig {
     /// `model_policy` means `Explicit(model)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// F9-10: `inherit` | `cheaper` (default) | explicit `provider/model`.
+    /// F9-10: `inherit` | `cheaper` (opt-in) | explicit `provider/model`.
     pub model_policy: DelegationModelPolicy,
 }
 
@@ -210,7 +212,7 @@ impl Default for DelegationConfig {
             mode: DelegationMode::Auto,
             max_concurrent: DEFAULT_DELEGATION_MAX_CONCURRENT,
             model: None,
-            model_policy: DelegationModelPolicy::Cheaper,
+            model_policy: DelegationModelPolicy::Inherit,
         }
     }
 }
@@ -231,9 +233,9 @@ impl DelegationConfig {
     }
 
     /// The policy in force: `model_policy`, except that a legacy non-empty
-    /// `model` with the default policy means "explicit that model".
+    /// `model` with no explicit `model_policy` means "explicit that model".
     pub fn effective_model_policy(&self) -> DelegationModelPolicy {
-        if self.model_policy == DelegationModelPolicy::Cheaper
+        if self.model_policy == DelegationModelPolicy::Inherit
             && let Some(m) = self
                 .model
                 .as_deref()
@@ -244,6 +246,58 @@ impl DelegationConfig {
         }
         self.model_policy.clone()
     }
+}
+
+/// Default cap on the number of files the Phase 0 code index tracks.
+pub const DEFAULT_CODE_INDEX_MAX_FILES: usize = 20_000;
+/// Hard ceiling for `code_index.max_files` (guards against typos).
+pub const MAX_CODE_INDEX_MAX_FILES: usize = 100_000;
+/// Max number of entries in `code_index.exclude`.
+pub const MAX_CODE_INDEX_EXCLUDES: usize = 100;
+/// Max length (chars) of a single `code_index.exclude` entry.
+pub const MAX_CODE_INDEX_EXCLUDE_LEN: usize = 200;
+
+fn default_code_index_enabled() -> bool {
+    true
+}
+
+fn default_code_index_max_files() -> usize {
+    DEFAULT_CODE_INDEX_MAX_FILES
+}
+
+/// Phase 0 code index configuration (`code_index` section). Global config
+/// with a per-key project override (a project that sets only `max_files`
+/// keeps the global `enabled` / `exclude`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CodeIndexConfig {
+    /// Whether the code index runs at all (default `true`).
+    #[serde(default = "default_code_index_enabled")]
+    pub enabled: bool,
+    /// Glob patterns excluded from indexing (`exclude`, also `excludes`).
+    /// A layer that sets the key replaces the previous list wholesale.
+    #[serde(default, alias = "excludes")]
+    pub exclude: Vec<String>,
+    /// Max number of indexed files (`maxFiles`, also `max_files`).
+    #[serde(default = "default_code_index_max_files", alias = "max_files")]
+    pub max_files: usize,
+}
+
+impl Default for CodeIndexConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            exclude: Vec::new(),
+            max_files: DEFAULT_CODE_INDEX_MAX_FILES,
+        }
+    }
+}
+
+/// Kill-switch for the code index: the config flag ANDed with the
+/// `BEBOK_NO_INDEX` environment variable (`BEBOK_NO_INDEX=1` disables
+/// indexing regardless of config).
+pub fn code_index_enabled(cfg: &ResolvedConfig) -> bool {
+    cfg.code_index.enabled && std::env::var("BEBOK_NO_INDEX").as_deref() != Ok("1")
 }
 
 /// Fully resolved configuration for one instance.
@@ -294,6 +348,9 @@ pub struct ResolvedConfig {
     /// WP-DELEGATION (F8-2): sub-agent delegation policy + concurrency cap.
     #[serde(default)]
     pub delegation: DelegationConfig,
+    /// Phase 0 code index: on/off flag, excluded globs, file cap.
+    #[serde(default)]
+    pub code_index: CodeIndexConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -320,6 +377,7 @@ impl Default for ResolvedConfig {
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
             delegation: DelegationConfig::default(),
+            code_index: CodeIndexConfig::default(),
         }
     }
 }
@@ -484,6 +542,11 @@ impl ResolvedConfigBuilder {
 
     pub fn delegation(mut self, d: DelegationConfig) -> Self {
         self.inner.delegation = d;
+        self
+    }
+
+    pub fn code_index(mut self, c: CodeIndexConfig) -> Self {
+        self.inner.code_index = c;
         self
     }
 

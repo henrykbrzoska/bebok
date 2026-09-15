@@ -206,6 +206,9 @@ pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> O
          results) to collect results; use `task_status` to see what each child is doing \
          (last tool, last line, tokens) and `task_cancel` to stop one that went off-track. \
          Never end your turn with children still running - always `task_wait` first.\n\
+         - Never spawn the same audit twice: before delegating, check `task_status` for a \
+         live child covering the same scope — spawning a duplicate is refused, collect the \
+         existing task with `task_wait` instead.\n\
          - Integrate: read the reports, resolve overlaps, run the project's build/tests once \
          if that is cheap, and give the user one consolidated summary (what each sub-agent \
          did, files touched, anything left open). NEVER redo work a sub-agent already \
@@ -235,8 +238,9 @@ pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> O
     ))
 }
 
-/// F9-10: how to ask for the parent's (heavier) model for one sub-task
-/// under the `cheaper` policy; empty for the other policies.
+/// How to ask for the parent's (heavier) model for one sub-task under an
+/// explicit `cheaper` policy; empty for the other policies (under the default
+/// policy sub-agents already run on what the config says).
 fn heavy_model_line(cfg: &DelegationConfig) -> String {
     match cfg.effective_model_policy() {
         crate::config::DelegationModelPolicy::Cheaper => "- Sub-agents run on a cheaper sibling \
@@ -285,7 +289,7 @@ mod tests {
             mode,
             max_concurrent: 3,
             model: None,
-            model_policy: crate::config::DelegationModelPolicy::Cheaper,
+            model_policy: crate::config::DelegationModelPolicy::Inherit,
         }
     }
 
@@ -595,19 +599,20 @@ mod tests {
     }
 
     /// F9-7b / F9-10: narration per phase, verifying children's claims,
-    /// and the `heavy` escape hatch under the `cheaper` policy only.
+    /// and the `heavy` escape hatch under an explicit `cheaper` policy only
+    /// (the default policy already runs children on the configured model).
     #[test]
     fn narration_claim_checks_and_heavy_hint() {
-        let note = note_with(&cfg(DelegationMode::Auto), &FleetContext::default());
+        let mut c = cfg(DelegationMode::Auto);
+        c.model_policy = crate::config::DelegationModelPolicy::Cheaper;
+        let note = note_with(&c, &FleetContext::default());
         assert!(note.contains("Narrate as you go"), "{note}");
         assert!(note.contains("before every new phase"), "{note}");
         assert!(note.contains("after each sub-agent completes"), "{note}");
         assert!(note.contains("claim, not a fact"), "{note}");
         assert!(note.contains("`model: \"heavy\"`"), "{note}");
         assert!(note.contains("policy `cheaper`"), "{note}");
-        let mut c = cfg(DelegationMode::Auto);
-        c.model_policy = crate::config::DelegationModelPolicy::Inherit;
-        let note = note_with(&c, &FleetContext::default());
+        let note = note_with(&cfg(DelegationMode::Auto), &FleetContext::default());
         assert!(!note.contains("`model: \"heavy\"`"), "{note}");
         let n = subagent_note();
         assert!(n.contains("`Status: PASS`") && n.contains("`Status: FAIL`"));

@@ -1,7 +1,9 @@
-//! F9-10: `delegation.model_policy` — which model a sub-agent runs on.
+//! `delegation.model_policy` — which model a sub-agent runs on.
 //!
-//! * `inherit` — the parent's model.
-//! * `cheaper` (default) — a lighter sibling of the parent's model from the
+//! * `inherit` (default) — what the config says: an explicit per-call model
+//!   (`task.model`, fleet `member.model`) wins; otherwise `models.<child-agent>`
+//!   when set, otherwise the parent's effective model.
+//! * `cheaper` (opt-in) — a lighter sibling of the parent's model from the
 //!   same provider, found in the model catalog: same family/version, tools
 //!   supported, strictly cheaper (blended input+output list price), and the
 //!   *closest* such price (opus → sonnet, not haiku; gpt-5.4 → gpt-5.4-mini,
@@ -191,12 +193,16 @@ pub fn cheaper_sibling(catalog: &ModelCatalog, model: &str) -> Option<String> {
     })
 }
 
-/// The model a sub-agent gets, given the policy, the parent's model and the
-/// `model` argument of the `task` call (`"heavy"` = the parent's model).
+/// The model a sub-agent gets: an explicit per-call request wins outright;
+/// otherwise the delegation policy decides. `child_agent` selects the
+/// `models.<agent>` config entry consulted under the default (`inherit`)
+/// policy; `model_for_child` resolves it (pass `cfg.model_for`).
 pub fn resolve_subagent_model(
     catalog: &ModelCatalog,
     cfg: &DelegationConfig,
     parent_model: &str,
+    child_agent: &str,
+    model_for_child: impl Fn(&str) -> String,
     requested: Option<&str>,
 ) -> String {
     let requested = requested.map(str::trim).filter(|m| !m.is_empty());
@@ -207,7 +213,14 @@ pub fn resolve_subagent_model(
     }
     match cfg.effective_model_policy() {
         DelegationModelPolicy::Explicit(m) => m,
-        DelegationModelPolicy::Inherit => parent_model.to_string(),
+        DelegationModelPolicy::Inherit => {
+            let configured = model_for_child(child_agent);
+            if configured.trim().is_empty() {
+                parent_model.to_string()
+            } else {
+                configured
+            }
+        }
         DelegationModelPolicy::Cheaper => {
             cheaper_sibling(catalog, parent_model).unwrap_or_else(|| parent_model.to_string())
         }
@@ -340,38 +353,61 @@ mod tests {
     #[test]
     fn resolve_honours_policy_heavy_and_explicit_requests() {
         let c = cat();
+        let inherit = |agent: &str| match agent {
+            "ask" => "x/cp".to_string(),
+            _ => "x/parent".to_string(),
+        };
         let mut cfg = DelegationConfig::default();
-        assert_eq!(cfg.effective_model_policy(), DelegationModelPolicy::Cheaper);
+        // Default is inherit-from-config: `models.<child>` wins, else parent.
+        assert_eq!(cfg.effective_model_policy(), DelegationModelPolicy::Inherit);
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", None),
-            "anthropic/claude-sonnet-5"
+            resolve_subagent_model(c, &cfg, "x/parent", "ask", inherit, None),
+            "x/cp"
+        );
+        assert_eq!(
+            resolve_subagent_model(c, &cfg, "x/parent", "code", inherit, None),
+            "x/parent"
         );
         // `heavy` -> the parent's model, whatever the policy.
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", Some("heavy")),
+            resolve_subagent_model(
+                c,
+                &cfg,
+                "anthropic/claude-opus-5",
+                "code",
+                inherit,
+                Some("heavy")
+            ),
             "anthropic/claude-opus-5"
         );
         // An explicit request wins.
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", Some("openai/o3")),
+            resolve_subagent_model(
+                c,
+                &cfg,
+                "anthropic/claude-opus-5",
+                "code",
+                inherit,
+                Some("openai/o3")
+            ),
             "openai/o3"
         );
-        // No cheaper sibling -> inherit.
+        // Explicit `cheaper` keeps the old semantics (sibling or inherit).
+        cfg.model_policy = DelegationModelPolicy::Cheaper;
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "openai/gpt-5.4-nano", None),
-            "openai/gpt-5.4-nano"
+            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", "code", inherit, None),
+            "anthropic/claude-sonnet-5"
         );
-        cfg.model_policy = DelegationModelPolicy::Inherit;
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", None),
-            "anthropic/claude-opus-5"
+            resolve_subagent_model(c, &cfg, "openai/gpt-5.4-nano", "code", inherit, None),
+            "openai/gpt-5.4-nano"
         );
         cfg.model_policy = DelegationModelPolicy::Explicit("zai/glm-5.3-flash".into());
         assert_eq!(
-            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", None),
+            resolve_subagent_model(c, &cfg, "anthropic/claude-opus-5", "code", inherit, None),
             "zai/glm-5.3-flash"
         );
-        // Legacy `model` alone means explicit.
+        // Legacy `model` alone means explicit (whatever the default policy).
         let legacy = DelegationConfig {
             model: Some("openai/gpt-5.4-mini".into()),
             ..DelegationConfig::default()
@@ -419,6 +455,10 @@ mod tests {
         );
         assert_eq!(
             DelegationModelPolicy::parse(""),
+            DelegationModelPolicy::Inherit
+        );
+        assert_eq!(
+            DelegationModelPolicy::parse("cheaper"),
             DelegationModelPolicy::Cheaper
         );
     }

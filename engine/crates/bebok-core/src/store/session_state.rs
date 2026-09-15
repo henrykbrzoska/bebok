@@ -31,12 +31,42 @@ pub struct ChildTask {
     /// Unix ms when the child turn was registered (F6-12).
     #[serde(rename = "startedAt")]
     pub started_at: i64,
+    /// Hash of the normalised `task` prompt + agent (`None` for children
+    /// spawned through `fleet` broadcast or by older callers). Used to refuse
+    /// a duplicate live `task` instead of spawning the same audit twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_hash: Option<u64>,
     /// WP-DELEGATION: `queued` while waiting for a concurrency slot
     /// (`delegation.max_concurrent`), `running` once its turn loop started.
     pub status: String,
     /// WP-DELEGATION: `true` when spawned with `background: true` (the parent
     /// collects the result later via `task_wait`).
     pub background: bool,
+}
+
+/// Normalise a `task` prompt for duplicate detection: trim, collapse
+/// whitespace runs, lowercase.
+fn normalize_prompt(prompt: &str) -> String {
+    prompt
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+/// Hash identifying one `task` spawn intent (normalised prompt + agent).
+/// A plain FNV-1a over UTF-8 bytes: deterministic, no new dependencies.
+pub fn task_prompt_hash(prompt: &str, agent: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in normalize_prompt(prompt).bytes().chain([0xFF]) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    for b in agent.trim().to_ascii_lowercase().bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 /// WP-DELEGATION: outcome of one finished child task, kept on the parent so
@@ -555,6 +585,7 @@ impl SessionState {
             agent: agent.to_string(),
             model: model.map(str::to_string),
             started_at: crate::util::now_ms(),
+            prompt_hash: None,
             status: "running".to_string(),
             background: false,
         };
@@ -580,6 +611,40 @@ impl SessionState {
         background: bool,
         token: CancellationToken,
     ) -> ChildTask {
+        self.register_child_task_full_with_prompt(
+            task_id,
+            description,
+            child_session_id,
+            name,
+            agent,
+            model,
+            None,
+            status,
+            background,
+            token,
+        )
+        .await
+    }
+
+    /// Same as [`register_child_task_full`](Self::register_child_task_full)
+    /// but also records the spawn intent (`prompt` + `agent`) as a hash so a
+    /// duplicate live `task` can be refused instead of spawned twice.
+    /// `prompt` is `None` for `fleet` broadcast children (fan-out of one
+    /// prompt to N members is legitimate) and legacy callers.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_child_task_full_with_prompt(
+        &self,
+        task_id: &str,
+        description: &str,
+        child_session_id: &str,
+        name: &str,
+        agent: &str,
+        model: Option<&str>,
+        prompt: Option<&str>,
+        status: &str,
+        background: bool,
+        token: CancellationToken,
+    ) -> ChildTask {
         let info = ChildTask {
             task_id: task_id.to_string(),
             description: description.to_string(),
@@ -588,6 +653,7 @@ impl SessionState {
             agent: agent.to_string(),
             model: model.map(str::to_string),
             started_at: crate::util::now_ms(),
+            prompt_hash: prompt.map(|p| task_prompt_hash(p, agent)),
             status: status.to_string(),
             background,
         };
@@ -616,6 +682,24 @@ impl SessionState {
             .values()
             .find(|(_, info)| info.name == id_or_name)
             .map(|(_, info)| info.clone())
+    }
+
+    /// Find a live (`queued` | `running`) child spawned by `task` for the
+    /// same prompt + agent. Finished children do not match (a re-audit after
+    /// `completed` / `error` / `aborted` is legitimate); `fleet` broadcast
+    /// children carry no prompt hash and never match.
+    pub async fn find_live_child_by_prompt(&self, prompt: &str, agent: &str) -> Option<ChildTask> {
+        let want = task_prompt_hash(prompt, agent);
+        let tasks = self.child_tasks.lock().await;
+        tasks
+            .values()
+            .map(|(_, info)| info)
+            .filter(|info| {
+                info.prompt_hash == Some(want)
+                    && (info.status == "queued" || info.status == "running")
+            })
+            .cloned()
+            .next()
     }
 
     /// WP-DELEGATION: the per-session gate that caps concurrently running
@@ -765,5 +849,87 @@ impl SessionState {
     /// Remember a decision for the rest of the session.
     pub async fn remember_decision(&self, key: DecisionKey, decision: CachedDecision) {
         self.decision_cache.lock().await.insert(key, decision);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_hash_ignores_case_and_whitespace() {
+        let a = task_prompt_hash("Audit  the  auth\nflow", "ask");
+        let b = task_prompt_hash("audit the auth flow", "ASK");
+        assert_eq!(a, b);
+        assert_ne!(a, task_prompt_hash("audit the auth flow", "code"));
+        assert_ne!(a, task_prompt_hash("audit the payments flow", "ask"));
+    }
+
+    #[tokio::test]
+    async fn live_child_matches_by_prompt_only_while_live() {
+        use crate::session::Session;
+        use tokio_util::sync::CancellationToken;
+        let dir = std::env::temp_dir().join(format!("bebok-dedup-{}", uuid::Uuid::new_v4()));
+        let state = SessionState::new(
+            Session::new("/tmp/x", "code"),
+            dir.clone(),
+            dir,
+            crate::config::ResolvedConfig::default(),
+        );
+        // A queued child matches.
+        state
+            .register_child_task_full_with_prompt(
+                "t1",
+                "audit auth",
+                "child-1",
+                "audit",
+                "ask",
+                None,
+                Some("Audit the auth flow"),
+                "queued",
+                false,
+                CancellationToken::new(),
+            )
+            .await;
+        let hit = state
+            .find_live_child_by_prompt("  audit   THE auth FLOW ", "ask")
+            .await
+            .expect("live duplicate must match");
+        assert_eq!(hit.task_id, "t1");
+        // Different agent does not match.
+        assert!(
+            state
+                .find_live_child_by_prompt("audit the auth flow", "code")
+                .await
+                .is_none()
+        );
+        // After finishing (unregistered) it no longer blocks a re-audit.
+        state.unregister_child_task("t1").await;
+        assert!(
+            state
+                .find_live_child_by_prompt("audit the auth flow", "ask")
+                .await
+                .is_none()
+        );
+        // Fleet children (no prompt hash) never match.
+        state
+            .register_child_task_full(
+                "t2",
+                "audit auth",
+                "child-2",
+                "audit",
+                "ask",
+                None,
+                "running",
+                false,
+                CancellationToken::new(),
+            )
+            .await;
+        assert!(
+            state
+                .find_live_child_by_prompt("audit auth", "ask")
+                .await
+                .is_none()
+        );
     }
 }

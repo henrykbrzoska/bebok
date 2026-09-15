@@ -152,6 +152,7 @@ mod tests {
             started_at: 0,
             status: status.into(),
             background: true,
+            prompt_hash: None,
         }
     }
 

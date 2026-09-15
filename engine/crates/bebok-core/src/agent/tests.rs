@@ -1224,6 +1224,7 @@ if __name__ == "__main__":
             agent: "code".to_string(),
             model: None,
             started_at: 0,
+            prompt_hash: None,
             status: "running".to_string(),
             background: false,
         };

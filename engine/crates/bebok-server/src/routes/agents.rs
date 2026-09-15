@@ -102,8 +102,14 @@ pub async fn delegation_models(
     let cfg = instance.config_snapshot();
     let catalog = bebok_llm::ModelCatalog::global();
     let parent_model = cfg.model.clone();
-    let resolved =
-        bebok_core::agent::resolve_subagent_model(catalog, &cfg.delegation, &parent_model, None);
+    let resolved = bebok_core::agent::resolve_subagent_model(
+        catalog,
+        &cfg.delegation,
+        &parent_model,
+        "code",
+        |a| cfg.model_for(a),
+        None,
+    );
     let mut models: Vec<String> = vec![parent_model.clone()];
     if let Some(map) = cfg.models.as_object() {
         models.extend(map.values().filter_map(|v| v.as_str().map(str::to_string)));
