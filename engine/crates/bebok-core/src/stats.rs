@@ -76,6 +76,8 @@ pub struct SessionDigest {
     pub title: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Parent session UUID (delegated sub-agent sessions have one).
+    pub parent: Option<String>,
     /// `created_at` of every user prompt (summary/marker notes excluded).
     pub prompts: Vec<i64>,
     pub calls: Vec<CallDigest>,
@@ -93,6 +95,7 @@ pub fn digest_session(session: &Session, messages: &[Message]) -> SessionDigest 
         title: session.title.clone().or_else(|| session.alias.clone()),
         created_at: session.created_at,
         updated_at: session.updated_at,
+        parent: session.parent.map(|(uuid, _)| uuid.to_string()),
         prompts: Vec::new(),
         calls: Vec::new(),
         tools: Vec::new(),
@@ -318,6 +321,7 @@ pub struct SessionRow {
     pub directory: String,
     pub agent: String,
     pub updated_at: i64,
+    pub parent: Option<String>,
     #[serde(flatten)]
     pub totals: Totals,
 }
@@ -359,6 +363,14 @@ pub struct Stats {
     pub top_sessions: Vec<SessionRow>,
     pub tools: Vec<ToolRow>,
     pub compaction: Compaction,
+    /// Cost/token split between direct and delegated (sub-agent) sessions.
+    pub delegation: DelegationStats,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DelegationStats {
+    pub direct: Totals,
+    pub delegated: Totals,
 }
 
 /// Provider part of a `provider/model` id (`unknown` when absent).
@@ -404,6 +416,8 @@ impl Grouped {
 /// when the filter has no upper bound.
 pub fn aggregate(digests: &[SessionDigest], filter: &StatsFilter, now_ms: i64) -> Stats {
     let mut totals = Totals::default();
+    let mut delegation_direct = Totals::default();
+    let mut delegation_delegated = Totals::default();
     let mut by_model = Grouped::default();
     let mut by_provider = Grouped::default();
     let mut by_agent = Grouped::default();
@@ -454,6 +468,14 @@ pub fn aggregate(digests: &[SessionDigest], filter: &StatsFilter, now_ms: i64) -
         totals.sessions += 1;
         totals.turns += prompts;
         totals.tool_calls += tool_calls.len();
+        let delegation = if s.parent.is_some() {
+            &mut delegation_delegated
+        } else {
+            &mut delegation_direct
+        };
+        delegation.sessions += 1;
+        delegation.turns += prompts;
+        delegation.tool_calls += tool_calls.len();
         by_project.entry(&s.directory, s.id).turns += prompts;
         by_project.entry(&s.directory, s.id).tool_calls += tool_calls.len();
         by_agent.entry(&s.agent, s.id).turns += prompts;
@@ -466,6 +488,7 @@ pub fn aggregate(digests: &[SessionDigest], filter: &StatsFilter, now_ms: i64) -
         };
         for c in &calls {
             totals.add_call(c);
+            delegation.add_call(c);
             session_totals.add_call(c);
             by_model.entry(&c.model, s.id).add_call(c);
             by_provider.entry(provider_of(&c.model), s.id).add_call(c);
@@ -503,6 +526,7 @@ pub fn aggregate(digests: &[SessionDigest], filter: &StatsFilter, now_ms: i64) -
             directory: s.directory.clone(),
             agent: s.agent.clone(),
             updated_at: s.updated_at,
+            parent: s.parent.clone(),
             totals: session_totals,
         });
     }
@@ -543,6 +567,10 @@ pub fn aggregate(digests: &[SessionDigest], filter: &StatsFilter, now_ms: i64) -
         top_sessions: top,
         tools: tool_rows,
         compaction,
+        delegation: DelegationStats {
+            direct: delegation_direct,
+            delegated: delegation_delegated,
+        },
     }
 }
 
@@ -800,6 +828,7 @@ mod tests {
         assert_eq!(d.calls[0].cost, None);
         assert_eq!(d.tools.len(), 1);
         assert_eq!(d.compactions, vec![(NOW - 10 * DAY + 3000, 120_000)]);
+        assert_eq!(d.parent, None, "no parent on a top-level session");
     }
 
     #[test]
@@ -903,8 +932,11 @@ mod tests {
         // A: 1000+200+500 + 2000+300+1500 = 5500 > B: 4100 > C: 15.
         assert_eq!(stats.top_sessions[0].directory, "/p1");
         assert_eq!(stats.top_sessions[0].totals.total_tokens(), 5500);
+        assert_eq!(stats.top_sessions[0].parent, None);
         assert_eq!(stats.top_sessions[1].directory, "/p2");
+        assert_eq!(stats.top_sessions[1].parent, None);
         assert_eq!(stats.top_sessions[2].totals.total_tokens(), 15);
+        assert_eq!(stats.top_sessions[2].parent, None);
         assert!(
             stats.top_sessions[0]
                 .title
@@ -922,6 +954,78 @@ mod tests {
     }
 
     #[test]
+    fn delegation_splits_direct_and_child_sessions() {
+        // Session P: parent, project /p1.
+        let mut parent = session("/p1", "orchestrator", NOW - DAY / 2);
+        parent.parent = None;
+        let parent_msgs = vec![
+            user_at("do stuff", NOW - DAY / 2),
+            call_at(
+                "orchestrator",
+                "anthropic/claude-sonnet",
+                NOW - DAY / 2 + 1000,
+                500,
+                100,
+                None,
+                Some(0.005),
+                &[],
+            ),
+        ];
+        // Session D: child of P, same project.
+        let mut child = session("/p1", "code", NOW - DAY / 2 + 2000);
+        child.parent = Some((parent.id, 0));
+        let child_msgs = vec![
+            user_at("working", NOW - DAY / 2 + 2000),
+            call_at(
+                "code",
+                "anthropic/claude-sonnet",
+                NOW - DAY / 2 + 3000,
+                3000,
+                500,
+                Some(1000),
+                Some(0.03),
+                &[("bash", false)],
+            ),
+        ];
+
+        let digests = vec![
+            digest_session(&parent, &parent_msgs),
+            digest_session(&child, &child_msgs),
+        ];
+        let stats = aggregate(&digests, &StatsFilter::default(), NOW);
+
+        // Totals include both sessions.
+        assert_eq!(stats.totals.sessions, 2);
+        assert_eq!(stats.totals.llm_calls, 2);
+        assert_eq!(stats.totals.input_tokens, 3500);
+        assert!((stats.totals.cost.unwrap() - 0.035).abs() < 1e-9);
+
+        // Direct = parent only.
+        assert_eq!(stats.delegation.direct.sessions, 1);
+        assert_eq!(stats.delegation.direct.llm_calls, 1);
+        assert_eq!(stats.delegation.direct.input_tokens, 500);
+        assert_eq!(stats.delegation.direct.tool_calls, 0);
+        assert!((stats.delegation.direct.cost.unwrap() - 0.005).abs() < 1e-9);
+
+        // Delegated = child only.
+        assert_eq!(stats.delegation.delegated.sessions, 1);
+        assert_eq!(stats.delegation.delegated.llm_calls, 1);
+        assert_eq!(stats.delegation.delegated.input_tokens, 3000);
+        assert_eq!(stats.delegation.delegated.tool_calls, 1);
+        assert!((stats.delegation.delegated.cost.unwrap() - 0.03).abs() < 1e-9);
+
+        // Session rows carry parent.
+        let mut rows: Vec<_> = stats.top_sessions.iter().collect();
+        rows.sort_by_key(|r| r.totals.input_tokens);
+        // child row
+        assert_eq!(rows[1].parent, Some(parent.id.to_string()));
+        assert_eq!(rows[1].agent, "code");
+        // parent row
+        assert_eq!(rows[0].parent, None);
+        assert_eq!(rows[0].agent, "orchestrator");
+    }
+
+    #[test]
     fn compaction_average_uses_the_marker_before_figure() {
         let stats = aggregate(&fixtures(), &StatsFilter::default(), NOW);
         assert_eq!(stats.compaction.count, 2);
@@ -932,6 +1036,8 @@ mod tests {
     fn empty_corpus_yields_zeroes_and_a_full_day_axis() {
         let stats = aggregate(&[], &StatsFilter::default(), NOW);
         assert_eq!(stats.totals, Totals::default());
+        assert_eq!(stats.delegation.direct, Totals::default());
+        assert_eq!(stats.delegation.delegated, Totals::default());
         assert_eq!(stats.by_day.len(), DAYS_WINDOW);
         assert!(stats.by_model.is_empty());
         assert!(stats.top_sessions.is_empty());

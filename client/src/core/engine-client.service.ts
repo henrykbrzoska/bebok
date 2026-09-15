@@ -506,25 +506,26 @@ export class EngineClient {
   }
 
   /**
-   * `GET /index/status?directory=` -> live code-index snapshot
-   * (`{ status, files, symbols }`).
+   * `GET /plugins/bebok-index/status?directory=` -> live code-index snapshot
+   * (`{ ok, status, files, symbols }`).
    */
   getIndexStatus(directory: string): Promise<IndexStatusResponse> {
     return this.request<IndexStatusResponse>(
       'GET',
-      `/index/status?directory=${encodeURIComponent(directory)}`,
+      `/plugins/bebok-index/status?directory=${encodeURIComponent(directory)}`,
     );
   }
 
   /**
-   * `POST /index/rebuild?directory=` -> enqueue a full rebuild; returns the
-   * snapshot taken right after enqueueing (`{ status, files, symbols, rebuild }`).
-   * 409 when the index is disabled for this instance.
+   * `POST /plugins/bebok-index/rebuild?directory=` -> enqueue a full rebuild;
+   * returns the snapshot taken right after enqueueing (`{ status, files, symbols,
+   * rebuild }`). 409 when the index is disabled for this instance.
    */
   rebuildIndex(directory: string): Promise<IndexRebuildResponse> {
     return this.request<IndexRebuildResponse>(
       'POST',
-      `/index/rebuild?directory=${encodeURIComponent(directory)}`,
+      `/plugins/bebok-index/rebuild?directory=${encodeURIComponent(directory)}`,
+      {},
     );
   }
 

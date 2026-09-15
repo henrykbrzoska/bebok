@@ -230,7 +230,10 @@ impl<'a> RequestBuilder<'a> {
 
     /// Fire the `before.request` plugin hook and apply the (possibly mutated)
     /// system prompt back. Only the system prompt is applied back (messages
-    /// stay canonical on disk).
+    /// stay canonical on disk). When the `bebok-index` plugin is available,
+    /// a "code index first" section is appended so every prompt (user
+    /// sessions and delegated sub-agents) instructs the model to query the
+    /// local code index before falling back to grep/glob.
     pub async fn apply_request_hook(&self, req: &mut ChatRequest) {
         let hooks = PluginHost::global();
         if hooks.has_plugins().await {
@@ -241,6 +244,16 @@ impl<'a> RequestBuilder<'a> {
             );
             hooks.run_hook(Hook::BEFORE_REQUEST, &mut payload).await;
             req.system = payload.system;
+        }
+
+        // Central enforcement: inject the code-index-first section when the
+        // plugin is available at this project's root.
+        let root = std::path::Path::new(self.state.directory());
+        if let Some(section) = super::index_section(root) {
+            if !req.system.is_empty() {
+                req.system.push_str("\n\n");
+            }
+            req.system.push_str(&section);
         }
     }
 }

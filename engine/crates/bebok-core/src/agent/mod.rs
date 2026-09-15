@@ -25,6 +25,7 @@ pub mod exec;
 pub mod fleet_tool;
 pub mod gate;
 pub mod images;
+pub mod index_prompt;
 pub mod model_policy;
 pub mod observe;
 pub mod preset;
@@ -56,6 +57,7 @@ pub use images::{
     ALLOWED_IMAGE_TYPES, AgentImageInput, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES,
     MAX_IMAGES_PER_PROMPT, model_supports_images, validate_agent_images,
 };
+pub use index_prompt::index_section;
 pub use model_policy::{HEAVY, resolve_subagent_model};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;

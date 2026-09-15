@@ -48,6 +48,16 @@ Answer questions about the codebase. Read and search with native tools; do not
 modify files or run shell commands. Prefer quoting the relevant code over
 describing it; cite file paths. Verify path existence with `stat` or `list_dir`
 instead of guessing from a shell error.
+
+Code-index: use `fetch` to query the local code index.
+- Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
+- Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
+  {"query": "<terms>", "limit": N} and header Content-Type: application/json.
+- Retry: if the search replies {"ok": false, "error": "query is required and must not be empty"}
+  (the client lost the JSON body), retry once with the query as a raw JSON string in the `body`
+  parameter with header Content-Type: application/json, e.g. body='{"query": "<terms>", "limit": N}',
+  and fall back to grep/glob only when that retry also returns ok:false.
+Prefer the index for "where is X?" over grep/glob.
 "#;
 
 pub(crate) const PLAN_PROMPT: &str = r#"You are Bebok in "plan" mode.
@@ -55,6 +65,16 @@ Produce a clear, step-by-step implementation plan for the user's goal. Read and
 search the codebase to ground the plan in the actual code. Do not modify files;
 return the plan in your answer. Use native `stat` or `list_dir` to verify paths;
 do not run shell commands or infer that a path is absent from a command error.
+
+Code-index: use `fetch` to query the local code index.
+- Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
+- Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
+  {"query": "<terms>", "limit": N} and header Content-Type: application/json.
+- Retry: if the search replies {"ok": false, "error": "query is required and must not be empty"}
+  (the client lost the JSON body), retry once with the query as a raw JSON string in the `body`
+  parameter with header Content-Type: application/json, e.g. body='{"query": "<terms>", "limit": N}',
+  and fall back to grep/glob only when that retry also returns ok:false.
+Prefer the index for "where is X?" over grep/glob.
 "#;
 
 pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
@@ -182,6 +202,7 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
+                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -195,6 +216,10 @@ impl Agent {
                 Rule {
                     pattern: "edit(*)".to_string(),
                     action: Action::Deny,
+                },
+                Rule {
+                    pattern: "fetch(*)".to_string(),
+                    action: Action::Allow,
                 },
                 Rule {
                     pattern: "mcp__*".to_string(),
@@ -233,6 +258,7 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
+                "fetch".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -242,6 +268,10 @@ impl Agent {
                 Rule {
                     pattern: "edit_file(*)".to_string(),
                     action: Action::Deny,
+                },
+                Rule {
+                    pattern: "fetch(*)".to_string(),
+                    action: Action::Allow,
                 },
                 Rule {
                     pattern: "mcp__*".to_string(),
@@ -349,5 +379,90 @@ impl Agent {
             builtin: false,
             source: Some(path.to_path_buf()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permission::engine::CompiledLayer;
+    use crate::permission::rule::Action;
+    use serde_json::json;
+
+    #[test]
+    fn ask_and_plan_contain_fetch() {
+        let ask = Agent::ask();
+        let plan = Agent::plan();
+        assert!(
+            ask.tools.contains(&"fetch".to_string()),
+            "ask preset must whitelist fetch"
+        );
+        assert!(
+            plan.tools.contains(&"fetch".to_string()),
+            "plan preset must whitelist fetch"
+        );
+    }
+
+    #[test]
+    fn ask_permissions_allow_fetch_deny_write() {
+        let layer = CompiledLayer::compile(&Agent::ask().permissions);
+        // fetch GET → Allow
+        let (pat, action) = layer
+            .first_match(&crate::permission::matcher::call_string(
+                "fetch",
+                &json!("http://127.0.0.1:8787/plugins/bebok-index/status?directory=/tmp"),
+            ))
+            .expect("fetch GET should match");
+        assert_eq!(pat, "fetch(*)");
+        assert_eq!(action, Action::Allow);
+
+        // fetch POST → Allow (same pattern)
+        let (pat, action) = layer
+            .first_match(&crate::permission::matcher::call_string(
+                "fetch",
+                &json!({"url": "http://127.0.0.1:8787/plugins/bebok-index/search", "method": "POST"}),
+            ))
+            .expect("fetch POST should match");
+        assert_eq!(pat, "fetch(*)");
+        assert_eq!(action, Action::Allow);
+
+        // write_file → Deny
+        let (_, action) = layer
+            .first_match(&crate::permission::matcher::call_string(
+                "write_file",
+                &json!({"path": "src/main.rs", "content": "x"}),
+            ))
+            .expect("write_file should match");
+        assert_eq!(action, Action::Deny);
+    }
+
+    #[test]
+    fn plan_permissions_allow_fetch_deny_write() {
+        let layer = CompiledLayer::compile(&Agent::plan().permissions);
+
+        let (_, action) = layer
+            .first_match(&crate::permission::matcher::call_string(
+                "fetch",
+                &json!("http://example.com"),
+            ))
+            .expect("fetch should match");
+        assert_eq!(action, Action::Allow);
+
+        let (_, action) = layer
+            .first_match(&crate::permission::matcher::call_string(
+                "write_file",
+                &json!({"path": "foo.rs", "content": "y"}),
+            ))
+            .expect("write_file should match");
+        assert_eq!(action, Action::Deny);
+    }
+
+    #[test]
+    fn code_preset_has_empty_tools() {
+        let code = Agent::code();
+        assert!(
+            code.tools.is_empty(),
+            "code preset tools must be empty (all tools)"
+        );
     }
 }

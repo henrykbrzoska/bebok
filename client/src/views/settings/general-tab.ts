@@ -49,7 +49,7 @@ export class GeneralTab implements OnInit, OnDestroy {
   readonly pluginsError = signal<string | null>(null);
   readonly busyName = signal<string | null>(null);
 
-  /** Code index snapshot (`GET /index/status?directory=`). */
+  /** Code index snapshot (`GET /plugins/bebok-index/status?directory=`). */
   readonly indexStatus = signal<IndexStatusResponse | null>(null);
   readonly indexLoading = signal(false);
   readonly indexRebuilding = signal(false);

@@ -1114,14 +1114,14 @@ export interface ProcessLogResponse {
   size: number;
 }
 
-/** `GET /index/status?directory=` payload: live code-index snapshot. */
+/** `GET /plugins/bebok-index/status?directory=` payload: live code-index snapshot. */
 export interface IndexStatusResponse {
   status: string;
   files: number;
   symbols: number;
 }
 
-/** `POST /index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
+/** `POST /plugins/bebok-index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
 export interface IndexRebuildResponse {
   status: string;
   files: number;

@@ -118,7 +118,16 @@ impl PluginProcess {
             }
         }
 
-        let child = Command::new(&self.command)
+        // Spawn via the resolved absolute path when the binary lives in the
+        // slot dir: a bare command (`bebok-index`) resolves via PATH, not via
+        // `current_dir`, so spawning it bare fails with ENOENT even though
+        // the binary sits right next to us. `invoke` already verified
+        // `resolved_binary().is_some()`, so this is guaranteed to find it.
+        let program = self
+            .resolved_binary()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.command.clone());
+        let child = Command::new(&program)
             .args(&self.args)
             .current_dir(&self.slot_dir)
             .stdin(Stdio::piped())

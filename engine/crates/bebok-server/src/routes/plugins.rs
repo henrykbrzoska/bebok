@@ -14,6 +14,53 @@ use crate::error::{ApiError, err_response};
 use crate::routes::common::DirectoryQuery;
 use crate::state::AppState;
 
+/// Lazily register a declared, enabled, installed dynamic plugin on the
+/// global [`PluginHost`](bebok_core::PluginHost) if it is not already
+/// registered. This is idempotent: a plugin that is already known is
+/// skipped, and an undeclared / disabled / missing plugin is silently
+/// left unregistered (the caller will still get a 404).
+async fn ensure_plugin_registered(root: &std::path::Path, name: &str) {
+    let host = bebok_core::PluginHost::global();
+
+    // Fast path: already registered.
+    if host.names().await.iter().any(|n| n == name) {
+        return;
+    }
+
+    // Read the declaration file.
+    let decl_path = bebok_core::plugin_decl::decl_path(root, name);
+    let decl = match bebok_core::plugin_decl::read_decl(&decl_path) {
+        Ok(d) => d,
+        Err(_) => return, // no declaration → caller returns 404
+    };
+    if !decl.enabled {
+        return; // disabled → caller returns 404
+    }
+
+    // Check that the slot directory exists.
+    let slot_dir = bebok_core::plugin_decl::install_dir(root, name);
+    if !slot_dir.is_dir() {
+        return;
+    }
+
+    // Load the dynamic plugin from the slot dir.
+    match bebok_core::load_dynamic_plugin(&slot_dir) {
+        Ok(dyn_plugin) => {
+            tracing::info!(
+                "lazy-registering plugin '{name}' from {}",
+                slot_dir.display()
+            );
+            host.register(std::sync::Arc::new(dyn_plugin)).await;
+        }
+        Err(e) => {
+            tracing::warn!(
+                "failed to load plugin '{name}' from {}: {e}",
+                slot_dir.display()
+            );
+        }
+    }
+}
+
 /// `POST /plugins/{name}/toggle` body.
 #[derive(Deserialize)]
 pub struct PluginToggleBody {
@@ -120,11 +167,12 @@ pub async fn plugin_status(
     Path(name): Path<String>,
     Query(q): Query<DirectoryQuery>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let _instance = state
+    let instance = state
         .store
         .get_or_create_instance(&q.directory)
         .await
         .map_err(|e| err_response(&e))?;
+    ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
     let input = serde_json::json!({});
     match host.invoke(&name, "status", &input).await {
@@ -145,11 +193,12 @@ pub async fn plugin_invoke(
     Query(q): Query<DirectoryQuery>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let _instance = state
+    let instance = state
         .store
         .get_or_create_instance(&q.directory)
         .await
         .map_err(|e| err_response(&e))?;
+    ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
     match host.invoke(&name, &action, &body).await {
         Some(resp) => Ok(Json(resp)),
@@ -422,6 +471,167 @@ done
 
         // Cleanup.
         host.unregister("dyn-test").await;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Lazy registration: `ensure_plugin_registered` picks up a declared,
+    /// enabled, installed plugin from disk and registers it on the host so
+    /// that subsequent `plugin_status` / `plugin_invoke` calls succeed
+    /// instead of returning 404.
+    #[tokio::test]
+    async fn lazy_registration_ensures_plugin_available() {
+        let base = temp_base("lazy");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+        let plugin_name = "lazy-test";
+
+        // 1. Create declaration (enabled = true).
+        let decl = bebok_core::PluginDecl {
+            name: plugin_name.to_string(),
+            repo: "test/repo".to_string(),
+            url: "https://example.com/test/repo".to_string(),
+            enabled: true,
+        };
+        let plugins_dir = project.join(".bebok").join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join(format!("{plugin_name}.json")),
+            serde_json::to_string_pretty(&decl).unwrap(),
+        )
+        .unwrap();
+
+        // 2. Create slot dir with manifest + stub binary.
+        let slot_dir = plugins_dir.join(plugin_name);
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let stub = slot_dir.join("stub.sh");
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  action=$(echo "$line" | awk -F'"action"' '{split($2,a,"\""); print a[2]}')
+  [ -z "$action" ] && action="unknown"
+  printf '{"ok":true,"action":"%s","plugin":"lazy-test"}\n' "$action"
+done
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let manifest = serde_json::json!({
+            "name": plugin_name,
+            "entrypoint": format!("sh {} --plugin-server", stub.display())
+        });
+        std::fs::write(
+            slot_dir.join("bebok-plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        // 3. Verify plugin is NOT registered yet.
+        let host = bebok_core::PluginHost::global();
+        assert!(
+            !host.names().await.iter().any(|n| n == plugin_name),
+            "plugin must not be registered before lazy ensure"
+        );
+
+        // 4. Call ensure_plugin_registered — it should discover and register.
+        let root = project.clone();
+        let name = plugin_name.to_string();
+        ensure_plugin_registered(&root, &name).await;
+        assert!(
+            host.names().await.iter().any(|n| n == plugin_name),
+            "plugin should now be registered after lazy ensure"
+        );
+
+        // 5. plugin_status via the handler should return ok (not 404).
+        let resp = plugin_status(
+            State(state.clone()),
+            Path(plugin_name.to_string()),
+            Query(query(&dir)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.0["ok"], true);
+        assert_eq!(resp.0["plugin"], "lazy-test");
+
+        // 6. plugin_invoke via the handler should also succeed.
+        let resp = plugin_invoke(
+            State(state.clone()),
+            Path((plugin_name.to_string(), "search".to_string())),
+            Query(query(&dir)),
+            Json(serde_json::json!({"query": "fn main"})),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.0["ok"], true);
+        assert_eq!(resp.0["action"], "search");
+
+        // Cleanup.
+        host.unregister(plugin_name).await;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Lazy registration does NOT register a disabled plugin (still 404).
+    #[tokio::test]
+    async fn lazy_registration_skips_disabled_plugin() {
+        let base = temp_base("lazy-disabled");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+        let plugin_name = "lazy-disabled";
+
+        // Declaration with enabled = false.
+        let decl = bebok_core::PluginDecl {
+            name: plugin_name.to_string(),
+            repo: "test/repo".to_string(),
+            url: "https://example.com/test/repo".to_string(),
+            enabled: false,
+        };
+        let plugins_dir = project.join(".bebok").join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join(format!("{plugin_name}.json")),
+            serde_json::to_string_pretty(&decl).unwrap(),
+        )
+        .unwrap();
+
+        // Slot dir exists but enabled = false — must stay 404.
+        let slot_dir = plugins_dir.join(plugin_name);
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let manifest = serde_json::json!({"name": plugin_name});
+        std::fs::write(
+            slot_dir.join("bebok-plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let root = project.clone();
+        let name = plugin_name.to_string();
+        ensure_plugin_registered(&root, &name).await;
+
+        let host = bebok_core::PluginHost::global();
+        assert!(
+            !host.names().await.iter().any(|n| n == plugin_name),
+            "disabled plugin must not be registered"
+        );
+
+        // Handler still returns 404.
+        let err = plugin_status(
+            State(state.clone()),
+            Path(plugin_name.to_string()),
+            Query(query(&dir)),
+        )
+        .await
+        .expect_err("disabled plugin must 404");
+        let (parts, _) = err.into_parts();
+        assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
+
         let _ = std::fs::remove_dir_all(&base);
     }
 }
