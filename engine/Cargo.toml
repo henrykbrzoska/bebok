@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = [
+    "crates/bebok-core",
+    "crates/bebok-server",
+    "crates/bebok-tools",
+    "crates/bebok-llm",
+    "crates/bebok-mcp",
+    "crates/bebok-skills",
+    "crates/bebok-pty",
+]
 default-members = ["crates/bebok-server"]
 
 [workspace.package]
@@ -34,8 +42,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 thiserror = "2"
-tantivy = "0.22"
-rusqlite = { version = "0.31", features = ["bundled"] }
 blake3 = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"

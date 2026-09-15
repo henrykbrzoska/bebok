@@ -57,7 +57,15 @@ pub fn started_text(task: &ChildTask) -> String {
     }
 }
 
-/// `api-orders: edit_file · 12 calls · 41k tok` (or `… thinking · …`).
+/// `api-orders: edit_file · 12 calls · 41k tok` (or `… thinking · …`),
+/// with a ` ⚠ looping` / ` ⚠ wandering` suffix when the detector flagged it.
+pub fn flagged_text(task: &ChildTask, progress: &TaskProgress, tokens: u64) -> String {
+    let base = progress_text(task, progress, tokens);
+    match super::supervision_tools::flag_marker(progress) {
+        Some(flag) => format!("{base} {flag}"),
+        None => base,
+    }
+}
 pub fn progress_text(task: &ChildTask, progress: &TaskProgress, tokens: u64) -> String {
     let tool = progress.last_tool.as_deref().unwrap_or("thinking");
     let calls = match progress.tool_calls {
@@ -185,6 +193,7 @@ mod tests {
             summary: String::new(),
             tool_calls: 12,
             steps: 3,
+            ..TaskProgress::default()
         };
         assert_eq!(
             progress_text(&task("running", None), &progress, 41_300),
@@ -195,6 +204,28 @@ mod tests {
             progress_text(&task("running", None), &thinking, 0),
             "api-orders: thinking · 0 calls · 0 tok"
         );
+    }
+
+    #[test]
+    fn flagged_text_appends_detector_flag() {
+        use super::super::delegation::TaskProgress;
+        let t = task("running", None);
+        let mut p = TaskProgress {
+            last_tool: Some("edit_file".into()),
+            last_tool_state: Some("completed".into()),
+            summary: String::new(),
+            tool_calls: 3,
+            steps: 2,
+            ..TaskProgress::default()
+        };
+        assert_eq!(flagged_text(&t, &p, 1000), progress_text(&t, &p, 1000));
+        p.verdict = "looping".to_string();
+        assert_eq!(
+            flagged_text(&t, &p, 1000),
+            format!("{} ⚠ looping", progress_text(&t, &p, 1000))
+        );
+        p.verdict = "wandering".to_string();
+        assert!(flagged_text(&t, &p, 1000).ends_with("⚠ wandering"));
     }
 
     #[test]

@@ -147,33 +147,6 @@ mod tests {
     }
 
     #[test]
-    fn write_code_index_delta_round_trips() {
-        let base = std::env::temp_dir().join(format!("bebok-cidxw-{}", uuid::Uuid::new_v4()));
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        let path = project_config_path(&project_dir);
-        std::fs::write(&path, "{\n  // keep me\n  \"model\": \"zai/glm-4.5\"\n}\n").unwrap();
-
-        write_project_delta(
-            &project_dir,
-            &serde_json::json!({ "code_index": { "enabled": false, "maxFiles": 100, "exclude": ["target/**"] } }),
-        )
-        .unwrap();
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("// keep me"), "comment must survive: {text}");
-        assert!(jsonc::parse(&text).is_ok(), "still valid JSONC: {text}");
-
-        let cfg = load_with_global(&project_dir, None);
-        assert_eq!(cfg.model, "zai/glm-4.5");
-        assert!(!cfg.code_index.enabled);
-        assert_eq!(cfg.code_index.max_files, 100);
-        assert_eq!(cfg.code_index.exclude, vec!["target/**"]);
-
-        std::fs::remove_dir_all(&base).ok();
-    }
-
-    #[test]
     fn write_ui_delta_preserves_comments() {
         let base = std::env::temp_dir().join(format!("bebok-cssw-{}", uuid::Uuid::new_v4()));
         let project_dir = base.join("project");

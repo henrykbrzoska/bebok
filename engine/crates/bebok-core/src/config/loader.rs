@@ -10,9 +10,7 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{
-    CodeIndexConfig, DelegationConfig, DelegationMode, FleetConfig, ResolvedConfig, UiConfig,
-};
+use super::model::{DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -123,29 +121,26 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(fleet) = v.get("fleet") {
         cfg.fleet = parse_fleet(fleet);
     }
-    // WP-DELEGATION: `delegation` merges per key (project overrides only the
-    // keys it sets).
+    // `delegation` carries only `max_concurrent` (project overrides global).
     if let Some(d) = v.get("delegation") {
         apply_delegation(&mut cfg.delegation, d);
-    }
-    // Phase 0 code index: `code_index` merges per key like `delegation`.
-    if let Some(c) = v.get("code_index") {
-        apply_code_index(&mut cfg.code_index, c);
     }
 }
 
 /// Apply one layer's `delegation` section on top of the current value.
-/// Malformed values are ignored key by key (`mode` must be one of
-/// `off|auto|always`, `max_concurrent` a positive integer, `model` a string;
-/// an empty/`null` `model` clears the override).
+/// Only `max_concurrent` (`maxConcurrent`) is honoured; the removed legacy
+/// keys `mode`, `model_policy`/`modelPolicy` are ignored with a warning.
 pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
     let Some(obj) = v.as_object() else {
         return;
     };
-    if let Some(mode) = obj.get("mode").and_then(|x| x.as_str())
-        && let Some(m) = DelegationMode::parse(mode)
+    if obj.contains_key("mode")
+        || obj.contains_key("model_policy")
+        || obj.contains_key("modelPolicy")
     {
-        cfg.mode = m;
+        tracing::warn!(
+            "ignoring legacy `delegation.mode`/`delegation.model_policy` keys: sub-agents are now chosen only from the fleet list"
+        );
     }
     if let Some(n) = obj
         .get("max_concurrent")
@@ -154,74 +149,6 @@ pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
         && n > 0
     {
         cfg.max_concurrent = (n as usize).min(super::model::MAX_DELEGATION_MAX_CONCURRENT);
-    }
-    if let Some(model) = obj.get("model") {
-        cfg.model = model
-            .as_str()
-            .map(str::trim)
-            .filter(|m| !m.is_empty())
-            .map(str::to_string);
-    }
-    // F9-10: `model_policy` (also `modelPolicy`); an explicit policy string
-    // also clears the legacy `model` so the two never disagree.
-    if let Some(policy) = obj
-        .get("model_policy")
-        .or_else(|| obj.get("modelPolicy"))
-        .and_then(|x| x.as_str())
-    {
-        cfg.model_policy = super::model::DelegationModelPolicy::parse(policy);
-        if !policy.trim().is_empty() {
-            cfg.model = None;
-        }
-    }
-}
-
-/// Apply one layer's `code_index` section on top of the current value.
-/// Malformed values are ignored key by key (`enabled` must be a bool,
-/// `max_files`/`maxFiles` a positive integer clamped to
-/// `1..=MAX_CODE_INDEX_MAX_FILES`, `exclude`/`excludes` an array of strings
-/// that replaces the previous list wholesale; entries are trimmed, empties
-/// dropped, each capped at `MAX_CODE_INDEX_EXCLUDE_LEN` chars and the list
-/// at `MAX_CODE_INDEX_EXCLUDES` entries).
-pub fn apply_code_index(cfg: &mut CodeIndexConfig, v: &Value) {
-    let Some(obj) = v.as_object() else {
-        return;
-    };
-    if let Some(enabled) = obj.get("enabled").and_then(|x| x.as_bool()) {
-        cfg.enabled = enabled;
-    }
-    if let Some(n) = obj
-        .get("max_files")
-        .or_else(|| obj.get("maxFiles"))
-        .and_then(|x| x.as_u64())
-        && n > 0
-    {
-        cfg.max_files = (n as usize).clamp(1, super::model::MAX_CODE_INDEX_MAX_FILES);
-    }
-    if let Some(arr) = obj
-        .get("exclude")
-        .or_else(|| obj.get("excludes"))
-        .and_then(|x| x.as_array())
-    {
-        let mut out: Vec<String> = Vec::new();
-        for entry in arr {
-            let Some(s) = entry.as_str() else { continue };
-            let t = s.trim();
-            if t.is_empty() {
-                continue;
-            }
-            let t: String = t
-                .chars()
-                .take(super::model::MAX_CODE_INDEX_EXCLUDE_LEN)
-                .collect();
-            if !out.contains(&t) {
-                out.push(t);
-            }
-            if out.len() >= super::model::MAX_CODE_INDEX_EXCLUDES {
-                break;
-            }
-        }
-        cfg.exclude = out;
     }
 }
 
@@ -537,108 +464,47 @@ mod tests {
     // -- WP-DELEGATION (F8-2) -------------------------------------------------
 
     #[test]
-    fn delegation_defaults_auto_three_no_model() {
+    fn delegation_defaults_three_and_legacy_ignored() {
         let cfg = ResolvedConfig::default();
-        assert_eq!(cfg.delegation.mode, DelegationMode::Auto);
         assert_eq!(cfg.delegation.max_concurrent, 3);
-        assert!(cfg.delegation.model.is_none());
         assert_eq!(cfg.delegation.effective_max_concurrent(), 3);
     }
 
     #[test]
-    fn delegation_project_overrides_per_key() {
+    fn delegation_max_concurrent_layers() {
         let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
         let global = base.join("global.json");
         let project_dir = base.join("project");
         std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(
-            &global,
-            r#"{ "delegation": { "mode": "always", "max_concurrent": 5, "model": "openai/gpt-4o" } }"#,
-        )
-        .unwrap();
+        std::fs::write(&global, r#"{ "delegation": { "max_concurrent": 5 } }"#).unwrap();
         // No project key: global wins entirely.
         let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
         assert_eq!(cfg.delegation.max_concurrent, 5);
-        assert_eq!(cfg.delegation.model.as_deref(), Some("openai/gpt-4o"));
 
-        // Project sets only `mode`: the other keys stay global.
+        // Project max_concurrent overrides the global one.
         std::fs::write(
             project_dir.join(".bebok").join("config.json"),
-            r#"{ "delegation": { "mode": "off" } }"#,
+            r#"{ "delegation": { "max_concurrent": 7 } }"#,
         )
         .unwrap();
         let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.delegation.mode, DelegationMode::Off);
-        assert_eq!(cfg.delegation.max_concurrent, 5);
-        assert_eq!(cfg.delegation.model.as_deref(), Some("openai/gpt-4o"));
-
-        // Project clears the model with an empty string.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "delegation": { "model": "" } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
-        assert!(cfg.delegation.model.is_none());
+        assert_eq!(cfg.delegation.max_concurrent, 7);
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// F9-10: `model_policy` parses, defaults to `inherit` (the configured
-    /// model), `cheaper` is opt-in, a legacy `model` alone means explicit,
-    /// and an explicit policy clears the legacy key.
     #[test]
-    fn delegation_model_policy_layers() {
-        use super::super::model::DelegationModelPolicy;
-        let cfg = ResolvedConfig::default();
-        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Inherit);
-        assert_eq!(
-            cfg.delegation.effective_model_policy(),
-            DelegationModelPolicy::Inherit
-        );
-
+    fn delegation_legacy_keys_are_ignored() {
         let mut cfg = ResolvedConfig::default();
+        // Legacy `mode` / `model_policy` keys are ignored, max_concurrent applies.
         apply(
             &mut cfg,
-            &serde_json::json!({ "delegation": { "model": "openai/gpt-4o" } }),
+            &serde_json::json!({ "delegation": { "mode": "off", "model_policy": "cheaper", "max_concurrent": 5 } }),
         );
-        assert_eq!(
-            cfg.delegation.effective_model_policy(),
-            DelegationModelPolicy::Explicit("openai/gpt-4o".into())
-        );
-        assert_eq!(
-            cfg.delegation.model_override().as_deref(),
-            Some("openai/gpt-4o")
-        );
-
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "delegation": { "model_policy": "inherit" } }),
-        );
-        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Inherit);
-        assert!(
-            cfg.delegation.model.is_none(),
-            "explicit policy clears legacy model"
-        );
-        assert_eq!(cfg.delegation.model_override(), None);
-
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "delegation": { "modelPolicy": "zai/glm-5.3-flash" } }),
-        );
-        assert_eq!(
-            cfg.delegation.effective_model_policy(),
-            DelegationModelPolicy::Explicit("zai/glm-5.3-flash".into())
-        );
-        // Serialised as a plain string for the client.
+        assert_eq!(cfg.delegation.max_concurrent, 5);
+        // Serialised shape holds only max_concurrent.
         let json = serde_json::to_value(&cfg.delegation).unwrap();
-        assert_eq!(json["model_policy"], "zai/glm-5.3-flash");
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "delegation": { "model_policy": "cheaper" } }),
-        );
-        assert_eq!(cfg.delegation.model_policy, DelegationModelPolicy::Cheaper);
+        assert!(json.get("mode").is_none());
+        assert!(json.get("model_policy").is_none());
     }
 
     #[test]
@@ -646,170 +512,23 @@ mod tests {
         let mut cfg = ResolvedConfig::default();
         apply(
             &mut cfg,
-            &serde_json::json!({ "delegation": { "mode": "sometimes", "max_concurrent": 0, "model": 7 } }),
+            &serde_json::json!({ "delegation": { "mode": "sometimes", "max_concurrent": 0 } }),
         );
-        assert_eq!(cfg.delegation.mode, DelegationMode::Auto);
         assert_eq!(cfg.delegation.max_concurrent, 3);
-        assert!(cfg.delegation.model.is_none());
         // camelCase accepted, huge values clamped.
         apply(
             &mut cfg,
-            &serde_json::json!({ "delegation": { "maxConcurrent": 999, "mode": "ALWAYS" } }),
+            &serde_json::json!({ "delegation": { "maxConcurrent": 999 } }),
         );
-        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
         assert_eq!(
             cfg.delegation.max_concurrent,
             super::super::model::MAX_DELEGATION_MAX_CONCURRENT
         );
         // Non-object section: no-op.
         apply(&mut cfg, &serde_json::json!({ "delegation": "off" }));
-        assert_eq!(cfg.delegation.mode, DelegationMode::Always);
-    }
-
-    // -- Phase 0 code index ----------------------------------------------------
-
-    #[test]
-    fn code_index_defaults_enabled_empty_exclude_20k() {
-        let cfg = ResolvedConfig::default();
-        assert!(cfg.code_index.enabled);
-        assert!(cfg.code_index.exclude.is_empty());
         assert_eq!(
-            cfg.code_index.max_files,
-            super::super::model::DEFAULT_CODE_INDEX_MAX_FILES
+            cfg.delegation.max_concurrent,
+            super::super::model::MAX_DELEGATION_MAX_CONCURRENT
         );
-        assert!(super::super::model::code_index_enabled(&cfg));
-    }
-
-    #[test]
-    fn code_index_project_overrides_global_per_key() {
-        let base = std::env::temp_dir().join(format!("bebok-cidx-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(
-            &global,
-            r#"{ "code_index": { "enabled": true, "max_files": 5000, "exclude": ["target/**"] } }"#,
-        )
-        .unwrap();
-        // No project key: global wins entirely.
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert!(cfg.code_index.enabled);
-        assert_eq!(cfg.code_index.max_files, 5000);
-        assert_eq!(cfg.code_index.exclude, vec!["target/**"]);
-
-        // Project sets only `max_files` (camelCase): other keys stay global.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "code_index": { "maxFiles": 100 } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert!(cfg.code_index.enabled);
-        assert_eq!(cfg.code_index.max_files, 100);
-        assert_eq!(cfg.code_index.exclude, vec!["target/**"]);
-
-        // Project `excludes` alias replaces the list wholesale.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "code_index": { "enabled": false, "excludes": ["dist/**"] } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert!(!cfg.code_index.enabled);
-        assert_eq!(cfg.code_index.max_files, 5000);
-        assert_eq!(cfg.code_index.exclude, vec!["dist/**"]);
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn code_index_malformed_values_are_ignored_key_by_key() {
-        let mut cfg = ResolvedConfig::default();
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "code_index": { "enabled": "yes", "max_files": 0, "exclude": "nope" } }),
-        );
-        assert!(cfg.code_index.enabled, "string enabled must be ignored");
-        assert_eq!(
-            cfg.code_index.max_files,
-            super::super::model::DEFAULT_CODE_INDEX_MAX_FILES,
-            "zero max_files must be ignored"
-        );
-        assert!(cfg.code_index.exclude.is_empty());
-
-        // Huge values clamp; over-long entries truncate; empties dropped;
-        // non-strings skipped; list capped.
-        let long = "x".repeat(250);
-        let mut arr: Vec<serde_json::Value> = vec![
-            serde_json::json!("  "),
-            serde_json::json!(42),
-            serde_json::json!("a/**"),
-            serde_json::json!("a/**"),
-            serde_json::json!(long),
-        ];
-        for i in 0..200 {
-            arr.push(serde_json::json!(format!("p{i}/**")));
-        }
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "code_index": { "max_files": 999_999_999, "exclude": arr } }),
-        );
-        assert_eq!(
-            cfg.code_index.max_files,
-            super::super::model::MAX_CODE_INDEX_MAX_FILES
-        );
-        assert_eq!(
-            cfg.code_index.exclude.len(),
-            super::super::model::MAX_CODE_INDEX_EXCLUDES
-        );
-        assert_eq!(cfg.code_index.exclude[0], "a/**");
-        assert_eq!(
-            cfg.code_index.exclude[1].len(),
-            super::super::model::MAX_CODE_INDEX_EXCLUDE_LEN
-        );
-
-        // Non-object section: no-op.
-        apply(&mut cfg, &serde_json::json!({ "code_index": false }));
-        assert_eq!(
-            cfg.code_index.max_files,
-            super::super::model::MAX_CODE_INDEX_MAX_FILES
-        );
-    }
-
-    #[test]
-    fn code_index_env_kill_switch() {
-        let enabled = ResolvedConfig::builder()
-            .code_index(super::super::model::CodeIndexConfig {
-                enabled: true,
-                exclude: Vec::new(),
-                max_files: 100,
-            })
-            .build();
-        let disabled = ResolvedConfig::builder()
-            .code_index(super::super::model::CodeIndexConfig {
-                enabled: false,
-                exclude: Vec::new(),
-                max_files: 100,
-            })
-            .build();
-
-        let prev = std::env::var("BEBOK_NO_INDEX").ok();
-        unsafe { std::env::remove_var("BEBOK_NO_INDEX") };
-        assert!(super::super::model::code_index_enabled(&enabled));
-        assert!(!super::super::model::code_index_enabled(&disabled));
-
-        unsafe { std::env::set_var("BEBOK_NO_INDEX", "1") };
-        assert!(
-            !super::super::model::code_index_enabled(&enabled),
-            "BEBOK_NO_INDEX=1 must disable indexing even when configured on"
-        );
-        assert!(!super::super::model::code_index_enabled(&disabled));
-
-        unsafe { std::env::set_var("BEBOK_NO_INDEX", "0") };
-        assert!(super::super::model::code_index_enabled(&enabled));
-
-        match prev {
-            Some(v) => unsafe { std::env::set_var("BEBOK_NO_INDEX", v) },
-            None => unsafe { std::env::remove_var("BEBOK_NO_INDEX") },
-        }
     }
 }

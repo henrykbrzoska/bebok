@@ -252,7 +252,6 @@ pub async fn browser_action(
         root: instance.root.clone(),
         session_id: sid.clone(),
         abort: CancellationToken::new(),
-        index: instance.code_index_query_adapter(),
     };
     let output = tool.execute(ctx, args).await;
     Ok(Json(output_json(&sid, &action, output)))

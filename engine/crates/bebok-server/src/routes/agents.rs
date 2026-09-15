@@ -78,58 +78,10 @@ pub struct AgentEntry {
     pub background: bool,
 }
 
-/// `?directory=` query of `GET /delegation/models` and `POST /fleet/generate`.
+/// `?directory=` query of `POST /fleet/generate`.
 #[derive(Debug, serde::Deserialize)]
-pub struct DelegationModelsQuery {
+pub struct FleetGenerateQuery {
     pub directory: String,
-}
-
-/// F9-10: `GET /delegation/models?directory=` -> `{ policy, parent_model,
-/// resolved, mappings: [{ provider, model, cheaper }] }` — what the
-/// `delegation.model_policy` gives a sub-agent right now, plus the cheaper
-/// sibling of the directory's default model, of every `models.<agent>`
-/// entry, of each configured provider's models (first three) and of a
-/// representative per known provider, so Settings can show the mapping.
-pub async fn delegation_models(
-    State(state): State<AppState>,
-    Query(q): Query<DelegationModelsQuery>,
-) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let instance = state
-        .store
-        .get_or_create_instance(&q.directory)
-        .await
-        .map_err(|e| err_response(&e))?;
-    let cfg = instance.config_snapshot();
-    let catalog = bebok_llm::ModelCatalog::global();
-    let parent_model = cfg.model.clone();
-    let resolved = bebok_core::agent::resolve_subagent_model(
-        catalog,
-        &cfg.delegation,
-        &parent_model,
-        "code",
-        |a| cfg.model_for(a),
-        None,
-    );
-    let mut models: Vec<String> = vec![parent_model.clone()];
-    if let Some(map) = cfg.models.as_object() {
-        models.extend(map.values().filter_map(|v| v.as_str().map(str::to_string)));
-    }
-    for spec in cfg.resolved_providers() {
-        for m in spec.models.iter().take(3) {
-            if m.contains('/') {
-                models.push(m.clone());
-            } else {
-                models.push(format!("{}/{m}", spec.name));
-            }
-        }
-    }
-    let mappings = bebok_core::agent::mappings_for(catalog, &models);
-    Ok(Json(serde_json::json!({
-        "policy": cfg.delegation.effective_model_policy().as_str(),
-        "parent_model": parent_model,
-        "resolved": resolved,
-        "mappings": mappings,
-    })))
 }
 
 /// `POST /fleet/generate?directory=` — ask a cheap configured LLM to plan a
@@ -142,7 +94,7 @@ pub async fn delegation_models(
 /// Body (all optional): `{ "minPerType": 3, "types": ["code","ask","plan","debug"] }`.
 pub async fn generate_fleet(
     State(state): State<AppState>,
-    Query(q): Query<DelegationModelsQuery>,
+    Query(q): Query<FleetGenerateQuery>,
     body: Option<Json<serde_json::Value>>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let opts: bebok_core::fleet_gen::FleetGenOptions = match body {

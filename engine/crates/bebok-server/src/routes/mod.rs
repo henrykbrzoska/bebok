@@ -19,7 +19,6 @@ pub mod events;
 pub mod fs;
 pub mod fs_browse;
 pub mod git;
-pub mod index;
 pub mod mcp;
 pub mod meta;
 pub mod plugins;
@@ -54,8 +53,6 @@ pub fn build_api_router() -> Router<AppState> {
             post(session::abort_task),
         )
         .route("/session/{id}/agents", get(agents::list_agents))
-        // F9-10: what `delegation.model_policy` resolves to.
-        .route("/delegation/models", get(agents::delegation_models))
         // Fleet generation via LLM (min 3 members per agent type).
         .route("/fleet/generate", post(agents::generate_fleet))
         .route("/session/{id}/export", get(session::export_session))
@@ -80,9 +77,6 @@ pub fn build_api_router() -> Router<AppState> {
             post(browser::browser_action),
         )
         .route("/agent", get(meta::list_agents))
-        // Faza 1: per-instance code index (status + manual rebuild).
-        .route("/index/status", get(index::get_index_status))
-        .route("/index/rebuild", post(index::post_index_rebuild))
         .route("/mcp", get(mcp::list_mcp))
         .route("/mcp/{name}/toggle", post(mcp::toggle_mcp))
         .route("/config", get(config::get_config).put(config::put_config))
@@ -111,6 +105,8 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/plugins/registry", get(plugins::plugin_registry))
         .route("/plugins/{name}/install", post(plugins::install_plugin))
         .route("/plugins/{name}/toggle", post(plugins::toggle_plugin))
+        .route("/plugins/{name}/status", get(plugins::plugin_status))
+        .route("/plugins/{name}/{action}", post(plugins::plugin_invoke))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(
             "/tools/safety",

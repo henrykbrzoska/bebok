@@ -112,6 +112,54 @@ pub async fn toggle_plugin(
     Ok(Json(serde_json::json!({ "plugin": plugin })))
 }
 
+/// `GET /plugins/{name}/status?directory=` — query the status of a dynamic
+/// plugin subprocess. Returns `{"ok":true,...}` from the plugin's `status`
+/// action, or 404 when no plugin with that name is registered.
+pub async fn plugin_status(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<DirectoryQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let _instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let host = bebok_core::PluginHost::global();
+    let input = serde_json::json!({});
+    match host.invoke(&name, "status", &input).await {
+        Some(resp) => Ok(Json(resp)),
+        None => Err(
+            ApiError::not_found(format!("no plugin registered with name '{name}'")).into_response(),
+        ),
+    }
+}
+
+/// `POST /plugins/{name}/{action}?directory=` — invoke an action on a
+/// dynamic plugin subprocess. The request body is forwarded as the action
+/// input. Returns the plugin's JSON response, or 404 when no plugin with
+/// that name is registered.
+pub async fn plugin_invoke(
+    State(state): State<AppState>,
+    Path((name, action)): Path<(String, String)>,
+    Query(q): Query<DirectoryQuery>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let _instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let host = bebok_core::PluginHost::global();
+    match host.invoke(&name, &action, &body).await {
+        Some(resp) => Ok(Json(resp)),
+        None => Err(ApiError::not_found(format!(
+            "no plugin registered with name '{name}' (or action '{action}' not handled)"
+        ))
+        .into_response()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +323,105 @@ mod tests {
         assert_eq!(parts.status, axum::http::StatusCode::BAD_REQUEST);
         assert!(String::from_utf8_lossy(&text).contains("nope"));
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Unregistered plugin name -> 404 on both status and invoke routes.
+    #[tokio::test]
+    async fn plugin_status_and_invoke_404_for_unregistered() {
+        let base = temp_base("unregistered");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+
+        let err = plugin_status(
+            State(state.clone()),
+            Path("no-such-plugin".to_string()),
+            Query(query(&dir)),
+        )
+        .await
+        .expect_err("unregistered plugin must 404");
+        let (parts, body) = err.into_parts();
+        let text = axum::body::to_bytes(body, 64 * 1024).await.unwrap();
+        assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
+        assert!(String::from_utf8_lossy(&text).contains("no-such-plugin"));
+
+        let err = plugin_invoke(
+            State(state.clone()),
+            Path(("no-such-plugin".to_string(), "search".to_string())),
+            Query(query(&dir)),
+            Json(serde_json::json!({"query": "test"})),
+        )
+        .await
+        .expect_err("invoke on unregistered plugin must 404");
+        let (parts, body) = err.into_parts();
+        let text = axum::body::to_bytes(body, 64 * 1024).await.unwrap();
+        assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
+        assert!(String::from_utf8_lossy(&text).contains("no-such-plugin"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// DynamicPlugin roundtrip via PluginHost::invoke with a stub process.
+    #[tokio::test]
+    async fn dynamic_plugin_invoke_roundtrip() {
+        let base = temp_base("dynamic");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        // Create a stub plugin binary.
+        let slot_dir = project.join(".bebok").join("plugins").join("dyn-test");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let stub = slot_dir.join("dyn-stub.sh");
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  action=$(echo "$line" | awk -F'"action"' '{split($2,a,"\""); print a[2]}')
+  [ -z "$action" ] && action="unknown"
+  printf '{"ok":true,"action":"%s","plugin":"dyn-test"}\n' "$action"
+done
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // Create and register a DynamicPlugin.
+        let dyn_plugin = bebok_core::DynamicPlugin::new(
+            "dyn-test",
+            slot_dir.clone(),
+            Some(format!("sh {} --plugin-server", stub.display())),
+        );
+        let host = bebok_core::PluginHost::global();
+        host.register(std::sync::Arc::new(dyn_plugin)).await;
+
+        // Invoke "status" via the host.
+        let resp = host
+            .invoke("dyn-test", "status", &serde_json::json!({}))
+            .await
+            .expect("expected response from dynamic plugin");
+        assert_eq!(resp["ok"], true);
+        assert_eq!(resp["action"], "status");
+        assert_eq!(resp["plugin"], "dyn-test");
+
+        // Invoke "search".
+        let resp = host
+            .invoke(
+                "dyn-test",
+                "search",
+                &serde_json::json!({"query": "fn main"}),
+            )
+            .await
+            .expect("expected response from dynamic plugin");
+        assert_eq!(resp["action"], "search");
+
+        // Cleanup.
+        host.unregister("dyn-test").await;
         let _ = std::fs::remove_dir_all(&base);
     }
 }

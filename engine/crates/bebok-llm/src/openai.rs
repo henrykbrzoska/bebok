@@ -179,9 +179,9 @@ impl OpenAiProvider {
 fn needs_tools_without_reasoning_retry(status: u16, response: &str, request: &Value) -> bool {
     if status != 400
         || request["reasoning_effort"] == "none"
-        || !request["tools"]
+        || request["tools"]
             .as_array()
-            .is_some_and(|tools| !tools.is_empty())
+            .is_none_or(|tools| tools.is_empty())
     {
         return false;
     }

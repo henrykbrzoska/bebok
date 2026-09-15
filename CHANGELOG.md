@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Dynamic plugin loading: the engine can now spawn external plugin binaries
+  as subprocesses (JSON-lines over stdio). `PluginProcess` manages the
+  child lifecycle, `DynamicPlugin` wraps it behind `BebokPlugin`, and
+  `PluginHost::invoke(name, action, input)` dispatches to the matching
+  plugin. New HTTP routes `GET /plugins/{name}/status` and
+  `POST /plugins/{name}/{action}` expose the protocol. Manifest
+  `bebok-plugin.json` gains an optional `entrypoint` field (backward
+  compatible). When the binary is missing, invocation returns `None`
+  (graceful degradation, no panic).
+- Orchestrator supervision: the orchestrator watches sub-agents for looping /
+  wandering, cancels a stray child with `task_cancel` and re-delegates it with
+  a corrective brief.
+
+### Other
+- BREAKING: removed the delegation mode / model_policy configuration —
+  sub-agents spawn only from the fleet list, `delegation` keeps just
+  `max_concurrent`, and `GET /delegation/models` is gone.
+
+### Fixes
+- Fix: `code_search` no longer appears twice in the tool list sent to the
+  provider (DeepSeek rejected it with 400 "Tool names must be unique").
+  `ToolRegistry::list()` now skips a built-in shadowed by a dynamic tool,
+  same as `list_with_source()` already did.
+
 ## 1.7.0 — 2026-09-14
 
 ### Auto-update

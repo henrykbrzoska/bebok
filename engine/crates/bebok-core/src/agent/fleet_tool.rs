@@ -637,7 +637,6 @@ async fn run_member(
     let parent_model =
         crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
     let model = crate::agent::resolve_subagent_model(
-        bebok_llm::ModelCatalog::global(),
         &cfg.delegation,
         &parent_model,
         agent_name,

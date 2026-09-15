@@ -694,12 +694,11 @@ impl SessionState {
         tasks
             .values()
             .map(|(_, info)| info)
-            .filter(|info| {
+            .find(|info| {
                 info.prompt_hash == Some(want)
                     && (info.status == "queued" || info.status == "running")
             })
             .cloned()
-            .next()
     }
 
     /// WP-DELEGATION: the per-session gate that caps concurrently running

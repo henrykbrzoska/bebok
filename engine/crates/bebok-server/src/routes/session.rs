@@ -66,11 +66,6 @@ pub struct PromptBody {
     /// Optional image attachments (raw base64, no `data:` URL prefix required).
     #[serde(default)]
     pub images: Vec<ImageInput>,
-    /// Per-prompt "Run as fleet" switch, kept for back-compat (missing =
-    /// `false`). The flag is recorded on the session but no longer gates
-    /// fan-out: a usable fleet is preferred regardless of it.
-    #[serde(default)]
-    pub fleet: bool,
 }
 
 /// One image attached to a prompt: raw base64 payload + MIME type.

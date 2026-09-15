@@ -7,13 +7,10 @@
 //! Known event types include `session.*`, `message.updated`,
 //! `message.part.updated`, `permission.asked` / `permission.resolved`,
 //! `task.started` / `task.progress` / `task.ended`, `browser.frame`,
-//! `agent.list.changed`, `config.changed`, `pty.exited`,
+//! `agent.list.changed`, `config.changed`, `pty.exited` and
 //! `plugin.changed` (plugin declaration installed / enabled / disabled:
 //! `properties` carries `{ name, change }` with `change` one of
-//! `installed` / `enabled` / `disabled`) and
-//! `code.index.updated` (Phase 0 code-index wiring: `properties` carries
-//! `{ status, files, symbols }`; `symbols` is 0 until the index engine
-//! lands).
+//! `installed` / `enabled` / `disabled`).
 
 use tokio::sync::broadcast;
 
@@ -51,18 +48,6 @@ impl Event {
         Self::new("plugin.changed", directory, "").with_properties(serde_json::json!({
             "name": name,
             "change": change,
-        }))
-    }
-
-    /// Phase 0 code-index wiring: `code.index.updated` for an instance
-    /// directory, with `properties = { status, files, symbols }`.
-    /// `status` is one of `ready` / `indexing` / `disabled`; `symbols` is 0
-    /// in Phase 0 (no index engine yet).
-    pub fn code_index_updated(directory: &str, status: &str, files: usize, symbols: usize) -> Self {
-        Self::new("code.index.updated", directory, "").with_properties(serde_json::json!({
-            "status": status,
-            "files": files,
-            "symbols": symbols,
         }))
     }
 }
@@ -108,15 +93,5 @@ mod tests {
         assert_eq!(event.directory, "/projects/acme");
         assert_eq!(event.properties["name"], "bebok-index");
         assert_eq!(event.properties["change"], "installed");
-    }
-
-    #[test]
-    fn code_index_updated_has_correct_kind_and_properties() {
-        let event = Event::code_index_updated("/projects/acme", "indexing", 12, 0);
-        assert_eq!(event.kind, "code.index.updated");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.properties["status"], "indexing");
-        assert_eq!(event.properties["files"], 12);
-        assert_eq!(event.properties["symbols"], 0);
     }
 }

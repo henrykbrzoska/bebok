@@ -116,6 +116,10 @@ this run and descriptive of the subtask (e.g. `auth-flow-audit`,
 `fix-ci-pipeline`). If you omit `name` the engine assigns `<agent>-<n>`.
 Reference the returned `name` when reporting results so the user can track
 which subtask produced what.
+
+Supervision: keep children on-task — check `task_status` periodically, and if
+a child is looping or wandering, `task_cancel` it and re-delegate the part
+with a tighter brief.
 "#;
 
 /// An agent preset: pure configuration (name, prompt, tool whitelist, model).
@@ -178,7 +182,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "code_search".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -230,7 +233,6 @@ impl Agent {
                 "sha256sum".to_string(),
                 "glob".to_string(),
                 "grep".to_string(),
-                "code_search".to_string(),
             ],
             permissions: vec![
                 Rule {

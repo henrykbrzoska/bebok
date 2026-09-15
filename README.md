@@ -51,10 +51,10 @@ Roadmap: 1.6.0 adds an Android app (chat + remote follow).
 ### Agents & verification
 - Presets `code`, `ask`, `plan`, `debug`, `orchestrator` plus your own
   `<config dir>/bebok/agent/*.md` and `<project>/.bebok/agent/*.md` (hot reload).
-- Delegation with supervision: `delegation.mode` `off` | `auto` | `always`,
-  `max_concurrent`, `model_policy` `inherit` | `cheaper` (default; catalog-based
-  cheaper sibling) | explicit model; background tasks via `task`, `task_status`,
-  `task_wait`, `task_cancel`; token-free progress rows in the parent transcript.
+- Delegation with supervision: sub-agents spawn only via `fleet` from the
+  configured fleet roster, capped by `delegation.max_concurrent`; supervised
+  with `task_status`, `task_wait`, `task_cancel`; token-free progress rows in
+  the parent transcript.
 - Autonomous frontend verification (`verify.frontend`): the sub-agent starts every
   dependency on its own non-default port, waits for readiness, screenshots the
   loaded page, checks the API, fixes and re-verifies, and must report
@@ -243,7 +243,7 @@ Main sections (all editable in Settings; the GUI writes deltas atomically):
   "tool_output_cap": 32768,                  // per-tool-output truncation (bytes)
   "yolo": false,                             // auto-allow every tool call (dangerous)
 
-  "delegation": { "mode": "auto", "max_concurrent": 3, "model_policy": "cheaper" },
+  "delegation": { "max_concurrent": 3 },
   "verify": { "frontend": "auto" },          // auto | ask | off
   "tool_safety": { "fetch": "safe", "mcp__github__*": "caution" },     // per-tool overrides
   "permission": { "rules": [

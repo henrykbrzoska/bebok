@@ -24,7 +24,7 @@ import { prettyJson } from '../../core/format';
 import { DebugEntry, DebugLlmCall } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 
-const MAX_JSON_CHARS = 50000;
+const MAX_JSON_CHARS = 111150000;
 
 export type LogTone = 'danger' | 'success' | 'accent' | 'muted';
 

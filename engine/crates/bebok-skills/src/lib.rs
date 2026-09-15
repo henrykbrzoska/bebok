@@ -206,9 +206,15 @@ mod tests {
 
         let disc = discover(&project);
         assert_eq!(disc.agents_project.as_deref(), Some("project instructions"));
-        assert_eq!(disc.skills.len(), 1);
-        let skill = &disc.skills[0];
-        assert_eq!(skill.name, "commit-helper");
+        // Global skills from the developer's own ~/.config/bebok/skill may
+        // also appear (the test env is not hermetic for the global dir), so
+        // assert on *this* project's skill, not on the total count.
+        let skill = disc
+            .skills
+            .iter()
+            .find(|s| s.name == "commit-helper")
+            .expect("project skill discovered");
+        assert_eq!(skill.source, Source::Project);
         assert_eq!(skill.description.as_deref(), Some("writes commits"));
         assert!(skill.content.contains("Body of the skill."));
         assert!(skill.enabled);

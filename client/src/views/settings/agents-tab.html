@@ -102,22 +102,25 @@
             {{ t('settings.fleetEnabled') }}
           </label>
 
-          <ul class="fleet-list">
+          <ul class="fleet-list" data-testid="fleet-list">
             @for (member of store.fleetMembers(); track $index; let i = $index) {
-              <li class="fleet-row">
+              <li class="fleet-row" data-testid="fleet-row">
                 <input
                   type="text"
                   class="mono"
                   [ngModel]="member.name"
                   (ngModelChange)="store.updateFleetMember(i, 'name', $event)"
                   [attr.placeholder]="t('settings.fleetName')"
+                  [attr.data-testid]="'fleet-name-' + i"
                   spellcheck="false"
                 />
                 <select
                   [ngModel]="member.agent"
                   (ngModelChange)="store.updateFleetMember(i, 'agent', $event)"
                   class="mono"
+                  [attr.data-testid]="'fleet-agent-' + i"
                 >
+                  <option value="">{{ t('settings.defaultOption') }}</option>
                   @for (a of agents(); track a.name) {
                     <option [value]="a.name">{{ a.name }}</option>
                   }
@@ -126,6 +129,8 @@
                   [ngModel]="member.model"
                   (ngModelChange)="store.updateFleetMember(i, 'model', $event)"
                   class="mono"
+                  [attr.data-testid]="'fleet-model-' + i"
+                  [title]="t('settings.fleetModel')"
                 >
                   <option value="">{{ t('settings.defaultOption') }}</option>
                   @if (member.model && !store.availableModels().includes(member.model)) {
@@ -142,6 +147,10 @@
             }
           </ul>
 
+          @if (store.fleetError()) {
+            <p class="inline-error" data-testid="fleet-error">{{ store.fleetError() }}</p>
+          }
+
           <div class="actions spread">
             <button type="button" (click)="store.addFleetMember()">{{ t('settings.fleetAdd') }}</button>
             <button type="button" class="primary" (click)="store.saveFleet()" [disabled]="store.saving()">
@@ -156,6 +165,9 @@
 
     <!-- WP-AUTOVERIFY (F8-1): applies to every agent, so it sits below the preset card. -->
     <app-settings-frontend-verify />
+
+    <!-- Build & test policy: same scope as frontend verify. -->
+    <app-settings-build-test-policy />
   </div>
 </div>
 

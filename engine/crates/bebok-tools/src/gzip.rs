@@ -137,7 +137,6 @@ mod tests {
             root: base.clone(),
             session_id: "gzip-test".to_string(),
             abort: CancellationToken::new(),
-            index: None,
         };
 
         let c = Gzip

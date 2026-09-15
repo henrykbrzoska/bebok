@@ -41,22 +41,25 @@ pub struct ExecCtx<'a> {
     pub abort: &'a CancellationToken,
     pub assistant_idx: usize,
     pub tool_output_cap: usize,
-    /// PR1-część 2: notify seam for code-index invalidation after a
-    /// successful file mutation (`Instance::notify_code_index_changed`).
-    /// `None` when the turn runs without an instance (unit tests).
-    pub code_index_changed: Option<crate::index::CodeIndexChangedCallback>,
-    /// Code-index backend adapter for the tool context (`code_search`).
-    /// `None` when no instance is attached (unit tests, disabled backend).
-    pub code_index_query_adapter: Option<Arc<dyn bebok_tools::CodeIndexQuery>>,
 }
 
-/// True when a completed tool call mutated files and should invalidate the
-/// code index. Uses the contract-owned [`INDEX_INVALIDATING_TOOLS`](crate::index::INDEX_INVALIDATING_TOOLS)
-/// list; `rm`/`mv` report via stderr-style text, so success is judged by the
-/// absence of an `error:` prefix rather than tool-specific parsing.
+/// True when a completed tool call mutated files. `rm`/`mv` report via
+/// stderr-style text, so success is judged by the absence of an `error:`
+/// prefix rather than tool-specific parsing.
 fn ok_tool_mutation(tool_name: &str, output_text: &str) -> bool {
-    crate::index::INDEX_INVALIDATING_TOOLS.contains(&tool_name)
-        && !output_text.trim_start().starts_with("error:")
+    const FILE_MUTATING_TOOLS: &[&str] = &[
+        "write_file",
+        "append_file",
+        "edit_file",
+        "rm",
+        "mv",
+        "cp",
+        "ln",
+        "touch",
+        "mkdir",
+        "chmod",
+    ];
+    FILE_MUTATING_TOOLS.contains(&tool_name) && !output_text.trim_start().starts_with("error:")
 }
 
 /// Execute one permission-gated tool call (the `Run` arm of the turn loop).
@@ -98,7 +101,6 @@ pub async fn exec_gated_call(
 
     // Allowed: mark running, persist, execute, complete.
     let Some(tool) = ctx.tools.get(tool_name) else {
-        let _ = &ctx.code_index_query_adapter;
         // The model called a tool that is not registered: note it in the
         // project config (de-duplicated) so it can be implemented later.
         crate::config::record_unknown_tool(std::path::Path::new(ctx.state.directory()), tool_name);
@@ -148,23 +150,11 @@ pub async fn exec_gated_call(
         root: ctx.state.directory().into(),
         session_id: ctx.state.id().to_string(),
         abort: ctx.abort.clone(),
-        index: ctx.code_index_query_adapter.clone(),
     };
     let output = tool.execute(tool_ctx, input.clone()).await;
 
-    // PR1-część 2: a successful file mutation invalidates (parts of) the
-    // code index. `ExecCtx.code_index_changed` is the store-facing seam
-    // (wired by the turn services to `Instance::notify_code_index_changed`);
-    // `None` in unit tests that run turns without an instance.
-    if ok_tool_mutation(tool_name, &output.text)
-        && let Some(notify) = ctx.code_index_changed.as_ref()
-    {
-        let rel = input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-        notify(rel.as_deref());
-    }
+    // A successful file mutation is observed by plugins through the
+    // `AFTER_FILE_WRITE` hook below (the index plugin rescan lives there).
 
     // Token-saving pipeline: compress first (strip ANSI, collapse whitespace),
     // then truncate against the configured static cap. The full output is
@@ -207,10 +197,9 @@ pub async fn exec_gated_call(
         hooks.run_hook(Hook::AFTER_TOOL, &mut payload).await;
     }
 
-    // PR1-część 2: emit `after.file_write` after a successful file
-    // mutation so the code-index backend (and any observer plugin) can
-    // invalidate/rescan. Mirrors the `ok_tool_mutation` gate above; the
-    // hook itself never fails the turn (logged and skipped on error).
+    // Emit `after.file_write` after a successful file mutation so
+    // observer plugins (e.g. the index plugin) can invalidate/rescan.
+    // The hook itself never fails the turn (logged and skipped on error).
     if ok && ok_tool_mutation(tool_name, &text) && hooks.has_plugins().await {
         let mut payload = FileWriteHook {
             tool: tool_name.to_string(),

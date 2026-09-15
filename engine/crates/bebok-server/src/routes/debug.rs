@@ -3,8 +3,8 @@
 //! `GET /debug/log` returns both the structured debug entries and the last 2
 //! full LLM request/response payloads (`calls` array). `DELETE` clears both.
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 
 use crate::state::AppState;
 

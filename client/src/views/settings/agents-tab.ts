@@ -21,11 +21,12 @@ import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
 import { FrontendVerifyCard } from './frontend-verify';
 import { DelegationBlock } from './delegation-block';
+import { BuildTestPolicyCard } from './build-test-policy';
 import { SettingsStore } from './settings.store';
 
 @Component({
   selector: 'app-settings-agents',
-  imports: [FormsModule, FrontendVerifyCard, DelegationBlock],
+  imports: [FormsModule, FrontendVerifyCard, DelegationBlock, BuildTestPolicyCard],
   templateUrl: './agents-tab.html',
   styleUrls: ['./settings-shared.css', './agents-tab.css'],
 })

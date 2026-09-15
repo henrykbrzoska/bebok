@@ -9,8 +9,16 @@ use serde_json::{Map, Value};
 use crate::provider::LlmError;
 
 /// Strip an optional provider prefix from a model identifier.
+///
+/// Only the FIRST segment is the Bebok provider (`provider/model`); the rest
+/// is the upstream id and must be sent verbatim. Using `rsplit` here broke
+/// providers whose own ids contain slashes (Cloudflare `@cf/vendor/name`,
+/// OpenRouter `vendor/name`).
 pub(crate) fn model_name(model: &str) -> &str {
-    model.rsplit('/').next().unwrap_or(model)
+    match model.split_once('/') {
+        Some((_, rest)) => rest,
+        None => model,
+    }
 }
 
 /// How a provider speaks to its models.
@@ -759,6 +767,15 @@ mod extra_tests {
     fn model_name_strips_provider_prefix() {
         assert_eq!(model_name("openai/gpt-4o"), "gpt-4o");
         assert_eq!(model_name("gpt-4o"), "gpt-4o");
+        // Upstream ids with slashes survive verbatim.
+        assert_eq!(
+            model_name("cloudflare/@cf/qwen/qwen3.8-27b"),
+            "@cf/qwen/qwen3.8-27b"
+        );
+        assert_eq!(
+            model_name("openrouter/deepseek/deepseek-chat"),
+            "deepseek/deepseek-chat"
+        );
     }
 
     fn spec_with_extra() -> ProviderSpec {

@@ -121,6 +121,11 @@ pub struct PluginManifest {
     /// Human-readable blurb.
     #[serde(default)]
     pub description: String,
+    /// Optional entrypoint command (e.g. `"bebok-index --plugin-server"`).
+    /// When absent, the engine defaults to `<slot_dir>/<name> --plugin-server`.
+    /// Backward-compatible: old manifests without this field still work.
+    #[serde(default)]
+    pub entrypoint: Option<String>,
 }
 
 impl PluginManifest {
@@ -420,6 +425,7 @@ mod tests {
             version: "1.6.0".to_string(),
             min_engine_version: "1.5.0".to_string(),
             description: "x".to_string(),
+            entrypoint: None,
         };
         ok.validate().unwrap();
         assert!(ok.engine_compatible("1.6.0"));
@@ -432,6 +438,7 @@ mod tests {
             version: String::new(),
             min_engine_version: String::new(),
             description: String::new(),
+            entrypoint: None,
         };
         assert!(bad.validate().is_err());
 
@@ -440,6 +447,7 @@ mod tests {
             version: String::new(),
             min_engine_version: "1.5".to_string(),
             description: String::new(),
+            entrypoint: None,
         };
         assert!(bad_ver.validate().is_err());
 
@@ -448,6 +456,7 @@ mod tests {
             version: String::new(),
             min_engine_version: String::new(),
             description: String::new(),
+            entrypoint: None,
         };
         assert!(no_min.engine_compatible("0.0.1"));
     }

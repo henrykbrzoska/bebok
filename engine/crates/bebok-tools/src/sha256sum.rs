@@ -89,7 +89,6 @@ mod tests {
             root: std::env::temp_dir(),
             session_id: "sha-test".to_string(),
             abort: CancellationToken::new(),
-            index: None,
         };
         let out = Sha256Sum.execute(ctx, json!({ "text": "abc" })).await;
         assert_eq!(

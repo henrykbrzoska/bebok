@@ -50,7 +50,6 @@ mod tests {
             root: root.clone(),
             session_id: "pwd-test".to_string(),
             abort: CancellationToken::new(),
-            index: None,
         };
         let out = Pwd.execute(ctx, serde_json::json!({})).await;
         assert_eq!(out.text, root.to_string_lossy().to_string());

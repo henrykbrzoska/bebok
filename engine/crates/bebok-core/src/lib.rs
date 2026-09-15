@@ -10,11 +10,11 @@ pub mod error;
 pub mod event;
 pub mod fleet_gen;
 pub mod git;
-pub mod index;
 pub mod llm_trace;
 pub mod permission;
 pub mod plugin;
 pub mod plugin_decl;
+pub mod plugin_process;
 pub mod plugin_registry;
 pub mod provider;
 pub mod session;
@@ -36,10 +36,6 @@ pub use provider::build_provider;
 pub use store::{Instance, InstanceStore, SessionState};
 pub use tool_safety::{SafetyCategory, SafetyOverrides, ToolSafetyEntry};
 
-/// Adapter from the core's [`index::CodeIndexBackend`] to the
-/// tool-facing [`bebok_tools::CodeIndexQuery`] contract.
-pub mod code_index_query_adapter;
-
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{
     BebokPlugin, Hook, HookResult, PermissionHook, PluginHost, RequestHook, RequestMessage,
@@ -50,6 +46,9 @@ pub use plugin::{
 pub use plugin_decl::{
     DeclaredPlugin, KNOWN_PLUGIN_NAME, KNOWN_PLUGIN_REPO, KNOWN_PLUGIN_URL, PluginDecl,
 };
+
+/// Subprocess-based dynamic plugin driver (JSON-lines over stdio).
+pub use plugin_process::{DynamicPlugin, PluginProcess, load_dynamic_plugin};
 
 /// Central plugin registry (remote catalogue + manifest validation).
 pub use plugin_registry::{

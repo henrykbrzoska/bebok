@@ -537,37 +537,9 @@ export interface FleetGenResponse {
   warning: string | null;
 }
 
-/** WP-DELEGATION (F8-2): `delegation.mode`. */
-export type DelegationMode = 'off' | 'auto' | 'always';
-
-/** WP-DELEGATION (F8-2): `delegation` section of the config. */
+/** `delegation` section of the config: only `max_concurrent` (1..16, default 3). */
 export interface DelegationConfig {
-  mode: DelegationMode;
   max_concurrent: number;
-  /** Legacy optional model override for every sub-agent (`provider/model`); == explicit policy. */
-  model?: string | null;
-  /**
-   * F9-10: `"inherit"` | `"cheaper"` (default) | `"<provider/model>"` (explicit).
-   * Absent on older engines (treat as `cheaper` unless `model` is set).
-   */
-  model_policy?: string;
-}
-
-/** F9-10: one row of `GET /delegation/models` `mappings`. */
-export interface DelegationModelMapping {
-  provider: string;
-  model: string;
-  /** Cheaper sibling from the catalog; `null` = none (falls back to inherit). */
-  cheaper: string | null;
-}
-
-/** F9-10: `GET /delegation/models?directory=`. */
-export interface DelegationModelsResponse {
-  policy: string;
-  parent_model: string;
-  /** The model a sub-agent would get right now. */
-  resolved: string;
-  mappings: DelegationModelMapping[];
 }
 
 /** Parallel-agents fleet config (`fleet` section of the config). */
@@ -621,9 +593,19 @@ export function isFrontendVerify(value: unknown): value is FrontendVerify {
   );
 }
 
+export type BuildTestMode = 'auto' | 'ask' | 'off';
+
+export const BUILD_TEST_MODES: readonly BuildTestMode[] = ['auto', 'ask', 'off'];
+
+export function isBuildTestMode(value: unknown): value is BuildTestMode {
+  return typeof value === 'string' && (BUILD_TEST_MODES as readonly string[]).includes(value);
+}
+
 export interface VerifyConfig {
   /** `auto` (default): verify without asking; `ask`: ask once; `off`: no policy. */
   frontend?: FrontendVerify;
+  /** `auto` (default): agent runs builds/tests; `ask`: ask first; `off`: no policy. */
+  buildTest?: BuildTestMode;
 }
 
 /** `browser` config section (WP-BROWSER2 / F7-6). */

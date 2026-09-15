@@ -23,7 +23,6 @@ import {
   CreateSessionResponse,
   CreateSessionResult,
   DebugLogResponse,
-  DelegationModelsResponse,
   PluginRegistryResponse,
   PluginResponse,
   PluginsResponse,
@@ -546,14 +545,6 @@ export class EngineClient {
       (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '') +
       (opts?.replace ? '&replace=true' : '');
     return this.request<ConfigResponse>('PUT', `/config?${query}`, delta);
-  }
-
-  /** F9-10: `GET /delegation/models?directory=` -> the sub-agent model policy resolved right now. */
-  delegationModels(directory: string): Promise<DelegationModelsResponse> {
-    return this.request<DelegationModelsResponse>(
-      'GET',
-      `/delegation/models?directory=${encodeURIComponent(directory)}`,
-    );
   }
 
   /**

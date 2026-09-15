@@ -145,7 +145,6 @@ mod tests {
             root: std::env::temp_dir(),
             session_id: "base64-test".to_string(),
             abort: CancellationToken::new(),
-            index: None,
         };
         Base64.execute(ctx, args).await
     }

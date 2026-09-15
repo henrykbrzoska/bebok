@@ -18,11 +18,9 @@ use crate::agent::{AgentCatalog, spawn_agent_watcher};
 use crate::config;
 use crate::error::{CoreError, Result};
 use crate::event::EventBus;
-use crate::index::BackendRegistry;
 use crate::permission::PermissionEngine;
 use crate::session::persist::{self, data_root};
 use crate::session::{Part, Session, ToolState};
-use crate::store::CodeIndexStatus;
 use crate::util::normalize_path;
 
 /// Global store: instances keyed by normalized directory, sessions by id.
@@ -33,10 +31,6 @@ pub struct InstanceStore {
     pub(crate) sessions: RwLock<HashMap<Uuid, Arc<SessionState>>>,
     /// Metadata of every known session (startup scan + created).
     pub(crate) meta: RwLock<HashMap<Uuid, Session>>,
-    /// Code-index backend registry (one active slot + disabled fallback).
-    /// `Instance::attach_code_index` is fed by `backends.spawn(..)`, so the
-    /// store never references a concrete backend implementation.
-    pub(crate) backends: Arc<BackendRegistry>,
     /// Weak self-reference, set once via `Arc::new_cyclic`. Lets the per-instance
     /// `task` tool reach the store (child sessions, bus) without an ownership
     /// cycle (store -> instance -> tools -> task tool -> store).
@@ -54,24 +48,16 @@ impl InstanceStore {
     }
 
     /// Create the shared store rooted at a custom data directory.
-    /// Uses the process-wide [`BackendRegistry::global`].
     pub fn with_data_dir(data_dir: PathBuf) -> Arc<Self> {
-        Self::with_backend_registry(data_dir, BackendRegistry::global())
-    }
-
-    /// Create the shared store with an explicit code-index backend registry
-    /// (injection point for tests: an empty registry exercises the disabled
-    /// fallback path).
-    pub fn with_backend_registry(data_dir: PathBuf, backends: Arc<BackendRegistry>) -> Arc<Self> {
         Arc::new_cyclic(|weak| {
-            let store = Self::build_with(data_dir, backends);
+            let store = Self::build_with(data_dir);
             let _ = store.self_weak.set(weak.clone());
             store
         })
     }
 
     /// Build the store value (shared constructors wrap it in `Arc`).
-    fn build_with(data_dir: PathBuf, backends: Arc<BackendRegistry>) -> Self {
+    fn build_with(data_dir: PathBuf) -> Self {
         let recovered = persist::repair(&data_dir);
         let meta: HashMap<Uuid, Session> = recovered.into_iter().map(|s| (s.id, s)).collect();
         tracing::info!("recovered {} session(s) from disk", meta.len());
@@ -83,7 +69,6 @@ impl InstanceStore {
             instances: RwLock::new(HashMap::new()),
             sessions: RwLock::new(HashMap::new()),
             meta: RwLock::new(meta),
-            backends,
             self_weak: std::sync::OnceLock::new(),
         }
     }
@@ -92,25 +77,8 @@ impl InstanceStore {
         self.bus.clone()
     }
 
-    /// The code-index backend registry this store spawns backends from.
-    pub fn backend_registry(&self) -> Arc<BackendRegistry> {
-        self.backends.clone()
-    }
-
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
-    }
-
-    /// Phase 0 code-index wiring: `<data_dir>/instances/<hash>/index` for a
-    /// directory (same hash/data_dir mechanism as session persistence).
-    pub fn code_index_dir_for(&self, directory: &str) -> PathBuf {
-        super::code_index::code_index_dir(&self.data_dir, directory)
-    }
-
-    /// Idempotently create the per-instance code-index directory
-    /// (`create_dir_all`); returns the directory path.
-    pub fn ensure_code_index_dir(&self, directory: &str) -> Result<PathBuf> {
-        super::code_index::ensure_code_index_dir(&self.code_index_dir_for(directory))
     }
 
     /// TOR B plugin declarations: list `<root>/.bebok/plugins/*.json` for a
@@ -194,12 +162,6 @@ impl InstanceStore {
         crate::git::ensure_plugin_slots_ignored(root)?;
         let installed = crate::plugin_decl::install_dir(root, name).exists();
         let decl_out = crate::DeclaredPlugin::from((decl, installed));
-        if name == crate::plugin_decl::KNOWN_PLUGIN_NAME && decl_out.enabled {
-            // Fresh install with the switch on: (re)attach the backend now so
-            // indexing starts without waiting for a server restart. Installs
-            // into an already-running instance (the route resolves it first).
-            self.attach_code_index_backend(instance, true);
-        }
         self.bus.publish(crate::event::Event::plugin_changed(
             &instance.directory,
             name,
@@ -247,20 +209,9 @@ impl InstanceStore {
     }
 
     /// TOR B: flip the `enabled` switch of a declared plugin
-    /// (read-modify-write of `<root>/.bebok/plugins/<name>.json`),
-    /// hot-swap the per-instance code-index backend and publish
+    /// (read-modify-write of `<root>/.bebok/plugins/<name>.json`) and publish
     /// `plugin.changed` (`enabled` / `disabled`). Errors with
     /// `BadRequest` when the declaration does not exist.
-    ///
-    /// For the known `bebok-index` plugin this starts/stops indexing
-    /// **without a server restart**: `enabled=true` spawns a fresh backend
-    /// from the registry slot and attaches it to the instance;
-    /// `enabled=false` attaches the inert [`DisabledBackend`](crate::index::DisabledBackend)
-    /// instead. The dropped backend's worker is aborted on drop
-    /// (`IndexOrchestrator` owns an `AbortHandle`); status transitions flow
-    /// through the existing `code_index_updated` SSE event (the status
-    /// callback is reinstalled on every swap, same as at instance creation).
-    /// Unknown plugin names only flip the declaration flag (no backend).
     pub fn set_plugin_enabled(
         &self,
         instance: &Arc<Instance>,
@@ -268,90 +219,12 @@ impl InstanceStore {
         enabled: bool,
     ) -> Result<crate::DeclaredPlugin> {
         let out = crate::plugin_decl::set_enabled(&instance.root, name, enabled)?;
-        if name == crate::plugin_decl::KNOWN_PLUGIN_NAME {
-            self.attach_code_index_backend(instance, enabled);
-        }
         self.bus.publish(crate::event::Event::plugin_changed(
             &instance.directory,
             name,
             if enabled { "enabled" } else { "disabled" },
         ));
         Ok(out)
-    }
-
-    /// The plugin declaration's `enabled` switch for `bebok-index`
-    /// (default on when undeclared — a fresh project has no declaration
-    /// file yet but indexes by default).
-    fn plugin_decl_enabled(root: &Path) -> bool {
-        crate::plugin_decl::list_declared(root)
-            .into_iter()
-            .find(|p| p.name == crate::plugin_decl::KNOWN_PLUGIN_NAME)
-            .map(|p| p.enabled)
-            .unwrap_or(true)
-    }
-
-    /// Effective code-index switch: the plugin declaration ANDed with the
-    /// config flag. `config code_index.enabled=false` (or `BEBOK_NO_INDEX=1`)
-    /// keeps the index off even when the plugin is enabled — the declaration
-    /// is the user-facing on/off switch, the config stays the policy floor.
-    fn plugin_index_enabled(instance: &Instance, cfg: &config::ResolvedConfig) -> bool {
-        Self::plugin_decl_enabled(&instance.root) && config::code_index_enabled(cfg)
-    }
-
-    /// Spawn (or park) the code-index backend for `instance` and attach it.
-    /// `plugin_on=false` forces the disabled fallback regardless of config.
-    /// Status transitions republish onto the instance snapshot and the SSE
-    /// bus through a fresh callback (same shape as at instance creation).
-    /// The `code_search` tool needs no re-registration: it reads the live
-    /// backend from `ToolCtx.index` on every call.
-    ///
-    /// Design note: a disabled plugin forces the fallback **even when the
-    /// registry slot holds the built-in tantivy factory** (the slot is a
-    /// process-wide capability; the declaration is the per-project switch).
-    /// `enabled=true` respawns from the slot (config + `BEBOK_NO_INDEX`
-    /// still apply inside `spawn`).
-    fn attach_code_index_backend(&self, instance: &Arc<Instance>, plugin_on: bool) {
-        let cfg = instance.config_snapshot();
-        let enabled = plugin_on && config::code_index_enabled(&cfg);
-        let index_dir = instance.code_index_dir();
-        let directory = instance.directory.clone();
-        let inst_weak = Arc::downgrade(instance);
-        let bus = self.bus.clone();
-        let on_status: crate::index::StatusCallback =
-            Arc::new(move |dto: crate::index::CodeIndexStatusDto| {
-                if let Some(inst) = inst_weak.upgrade() {
-                    *inst.code_index_status.write().unwrap() = CodeIndexStatus::from(dto.clone());
-                }
-                bus.publish(crate::event::Event::code_index_updated(
-                    &directory,
-                    &dto.status,
-                    dto.files,
-                    dto.symbols,
-                ));
-            });
-        let request = crate::index::BackendRequest {
-            root: instance.root.clone(),
-            index_dir,
-            excludes: cfg.code_index.exclude.clone(),
-            max_files: cfg.code_index.max_files,
-            enabled,
-            on_status,
-        };
-        let backend = if plugin_on {
-            self.backends.spawn(request)
-        } else {
-            // Hot-stop: bypass the slot so the tantivy worker is dropped
-            // (aborted on drop) even though the factory stays installed
-            // for other projects / the next toggle-on. `with_callback`
-            // publishes the initial `disabled` snapshot onto our fresh
-            // callback, and `attach_code_index` syncs the instance
-            // snapshot from `backend.status()`.
-            let root = request.root.clone();
-            let cb = request.on_status.clone();
-            std::sync::Arc::new(crate::index::DisabledBackend::with_callback(root, cb))
-                as std::sync::Arc<dyn crate::index::CodeIndexBackend>
-        };
-        instance.attach_code_index(backend);
     }
 
     /// Get or lazily create the instance for a directory.
@@ -394,62 +267,7 @@ impl InstanceStore {
             agents,
             mcp,
             context_notes: std::sync::RwLock::new(Vec::new()),
-            index_dir: super::code_index::code_index_dir(&self.data_dir, &normalized),
-            code_index_status: std::sync::RwLock::new(CodeIndexStatus::default()),
-            code_index: std::sync::RwLock::new(None),
         });
-
-        // PR1-część 2: attach a code-index backend. The store names no
-        // concrete backend: it asks the registry (one active slot) for one.
-        // An empty slot yields the disabled fallback, so instance creation —
-        // and with it server startup — never depends on an index plugin.
-        // The backend reads `code_index.*` from the resolved config, starts
-        // the first build in the background and republishes status
-        // transitions both onto the instance snapshot and the SSE bus.
-        {
-            let cfg = instance.config_snapshot();
-            let enabled = Self::plugin_index_enabled(&instance, &cfg);
-            let index_dir = instance.code_index_dir();
-            let directory = instance.directory.clone();
-            let inst_weak = Arc::downgrade(&instance);
-            let bus = self.bus.clone();
-            let on_status: crate::index::StatusCallback =
-                Arc::new(move |dto: crate::index::CodeIndexStatusDto| {
-                    if let Some(inst) = inst_weak.upgrade() {
-                        *inst.code_index_status.write().unwrap() =
-                            CodeIndexStatus::from(dto.clone());
-                    }
-                    bus.publish(crate::event::Event::code_index_updated(
-                        &directory,
-                        &dto.status,
-                        dto.files,
-                        dto.symbols,
-                    ));
-                });
-            let backend = self.backends.spawn(crate::index::BackendRequest {
-                root: root.clone(),
-                index_dir,
-                excludes: cfg.code_index.exclude.clone(),
-                max_files: cfg.code_index.max_files,
-                enabled,
-                on_status,
-            });
-            instance.attach_code_index(backend.clone());
-            // Tool-facing index adapter (core -> tools, no
-            // `use bebok_core` in bebok-tools by construction).
-            // Installed into the `code_search` tool slot right after
-            // the backend is attached; when no backend is available
-            // (empty registry -> disabled fallback, or no instance),
-            // the tool keeps its `None` slot and answers with a
-            // graceful message.
-            let adapter: Arc<dyn bebok_tools::CodeIndexQuery> =
-                crate::code_index_query_adapter::CodeIndexQueryAdapter::from_backend(backend);
-            instance
-                .tools
-                .register_tool(Arc::new(bebok_tools::code_search::CodeSearch::new(Some(
-                    adapter,
-                ))));
-        }
 
         // Insert under the write lock (double-check to avoid a race).
         {
@@ -460,17 +278,12 @@ impl InstanceStore {
             instances.insert(normalized.clone(), instance.clone());
         }
 
-        // PR1-część 2: announce the new instance (backend attached above)
-        // on the `instance.created` hook. Never fails instance creation:
-        // plugin errors are logged and skipped inside `run_hook`.
+        // Announce the new instance on the `instance.created` hook.
+        // Never fails instance creation: plugin errors are logged and
+        // skipped inside `run_hook`.
         {
-            let backend_on = instance
-                .code_index_backend()
-                .map(|b| b.enabled())
-                .unwrap_or(false);
             let mut payload = crate::plugin::InstanceCreatedHook {
                 directory: normalized.clone(),
-                index_enabled: backend_on,
             };
             crate::plugin::PluginHost::global()
                 .run_hook(crate::plugin::Hook::INSTANCE_CREATED, &mut payload)
@@ -517,48 +330,6 @@ impl InstanceStore {
         // lifetime). In tests set `BEBOK_NO_WATCH=1` to skip spawning it —
         // otherwise every test instance leaks a task + inotify FD and the
         // runtime never goes idle.
-
-        // FS watcher -> code-index rescan: external edits (editor save, git
-        // checkout, another process) nudge the backend through the same
-        // debounced seam the tool-mutation hook in `agent/exec.rs` uses
-        // (`Instance::notify_code_index_changed` -> orchestrator, 1500 ms
-        // debounce). Only spawned when the backend is enabled; construction
-        // failure is logged, never fatal to instance creation or a turn.
-        // The notify callback runs on a plain (non-tokio) thread, so it only
-        // filters + forwards over an unbounded channel — the detached task
-        // below owns the `RecommendedWatcher` (keeps events flowing) and
-        // calls into the backend from runtime context (`notify_changed`
-        // uses `tokio::spawn` and would panic off-runtime). Instances live
-        // for the process lifetime and reload mutates in place, so there is
-        // no per-reload restart and nothing to shut down on session delete.
-        if std::env::var("BEBOK_NO_WATCH").as_deref() != Ok("1")
-            && instance.code_index_backend().is_some_and(|b| b.enabled())
-        {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<String>>();
-            let excludes = instance.config_snapshot().code_index.exclude.clone();
-            match bebok_code_index::watcher::spawn_index_watcher(
-                root.clone(),
-                excludes,
-                move |rel| {
-                    let _ = tx.send(rel);
-                },
-            ) {
-                Ok(watcher) => {
-                    let inst_weak = Arc::downgrade(&instance);
-                    tokio::spawn(async move {
-                        let _watcher = watcher;
-                        while let Some(rel) = rx.recv().await {
-                            if let Some(inst) = inst_weak.upgrade() {
-                                inst.notify_code_index_changed(rel.as_deref());
-                            } else {
-                                break;
-                            }
-                        }
-                    });
-                }
-                Err(e) => tracing::warn!("code-index FS watcher failed to start: {e}"),
-            }
-        }
 
         Ok(instance)
     }
@@ -907,7 +678,7 @@ impl InstanceStore {
 
 impl Default for InstanceStore {
     fn default() -> Self {
-        Self::build_with(data_root(), BackendRegistry::global())
+        Self::build_with(data_root())
     }
 }
 
@@ -939,192 +710,6 @@ fn install_browser_frame_sink(bus: EventBus) {
 mod tests {
     use super::InstanceStore;
     use crate::permission::{PermissionAnswer, ResolveOutcome};
-
-    /// Code-index wiring: `Instance::code_index_dir()` points at
-    /// `<data>/instances/<hash>/index`, the store helper creates it on disk
-    /// and the default backend (tantivy, `code_index.enabled` defaults to
-    /// `true`) is attached and indexing.
-    #[tokio::test]
-    async fn code_index_wiring_points_at_instances_hash_index_and_creates_it() {
-        let base = std::env::temp_dir().join(format!("bebok-code-index-{}", uuid::Uuid::new_v4()));
-        let project = base.join("project");
-        std::fs::create_dir_all(&project).unwrap();
-        let store = InstanceStore::with_data_dir(base.join("data"));
-        let dir = project.to_str().unwrap();
-
-        let instance = store.get_or_create_instance(dir).await.unwrap();
-        let expected = base
-            .join("data")
-            .join("instances")
-            .join(crate::util::hash_dir(&instance.directory))
-            .join("index");
-        assert_eq!(instance.code_index_dir(), expected);
-        assert_eq!(store.code_index_dir_for(dir), expected);
-
-        // Backend attached from the registry: enabled by default, so the
-        // status is `indexing` (build running) or already `ready`.
-        let backend = instance.code_index_backend().expect("backend attached");
-        assert_eq!(backend.name(), crate::index::factory::TANTIVY_BACKEND_NAME);
-        assert!(backend.enabled());
-        let status = instance.code_index_status().status;
-        assert!(
-            status == crate::store::code_index::CODE_INDEX_INDEXING
-                || status == crate::store::code_index::CODE_INDEX_READY,
-            "unexpected status {status}"
-        );
-
-        // The enabled backend creates its index directory at spawn time;
-        // the store helper returns the same path idempotently.
-        assert!(expected.is_dir());
-        let created = store.ensure_code_index_dir(dir).unwrap();
-        assert_eq!(created, expected);
-        assert!(expected.is_dir());
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    /// Plugin toggle hot-swaps the code-index backend without a server
-    /// restart: `enabled=false` parks the tantivy worker and attaches the
-    /// disabled fallback; `enabled=true` respawns and reattaches it (build
-    /// restarts in the background). Unknown plugin names only flip the
-    /// declaration flag and leave the backend alone.
-    #[tokio::test]
-    async fn plugin_toggle_hot_swaps_code_index_backend() {
-        let base =
-            std::env::temp_dir().join(format!("bebok-plugin-toggle-{}", uuid::Uuid::new_v4()));
-        let project = base.join("project");
-        std::fs::create_dir_all(&project).unwrap();
-        let store = InstanceStore::with_data_dir(base.join("data"));
-        let dir = project.to_str().unwrap();
-
-        let instance = store.get_or_create_instance(dir).await.unwrap();
-        assert!(instance.code_index_backend().expect("attached").enabled());
-
-        // A declaration file is required for the toggle (unknown = 400).
-        crate::plugin_decl::write_decl(
-            &project,
-            &crate::plugin_decl::PluginDecl::bebok_index(true),
-        )
-        .unwrap();
-
-        let off = store
-            .set_plugin_enabled(&instance, "bebok-index", false)
-            .expect("toggle off");
-        assert!(!off.enabled);
-        let backend = instance.code_index_backend().expect("fallback attached");
-        assert_eq!(backend.name(), crate::index::DISABLED_BACKEND_NAME);
-        assert!(!backend.enabled());
-        assert_eq!(
-            instance.code_index_status().status,
-            crate::store::code_index::CODE_INDEX_DISABLED
-        );
-        // The tool-facing adapter follows the swap (fresh per call).
-        let adapter = instance.code_index_query_adapter().expect("adapter");
-        assert!(!adapter.is_available());
-
-        let on = store
-            .set_plugin_enabled(&instance, "bebok-index", true)
-            .expect("toggle on");
-        assert!(on.enabled);
-        let backend = instance.code_index_backend().expect("respawned");
-        assert_eq!(backend.name(), crate::index::factory::TANTIVY_BACKEND_NAME);
-        assert!(backend.enabled());
-        let status = instance.code_index_status().status;
-        assert!(
-            status == crate::store::code_index::CODE_INDEX_INDEXING
-                || status == crate::store::code_index::CODE_INDEX_READY,
-            "unexpected status {status}"
-        );
-        let adapter = instance.code_index_query_adapter().expect("adapter");
-        assert!(adapter.is_available());
-
-        // Unknown plugins flip only the flag: an existing declaration for
-        // another name leaves the index backend untouched.
-        crate::plugin_decl::write_decl(
-            &project,
-            &crate::plugin_decl::PluginDecl {
-                name: "other".to_string(),
-                repo: String::new(),
-                url: String::new(),
-                enabled: true,
-            },
-        )
-        .unwrap();
-        let other = store.set_plugin_enabled(&instance, "other", false).unwrap();
-        assert!(!other.enabled);
-        assert!(instance.code_index_backend().expect("attached").enabled());
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    /// A `bebok-index` declaration with `enabled=false` is honoured at
-    /// instance creation: the backend spawns parked (disabled fallback
-    /// semantics — `code_search` degrades gracefully from the start).
-    #[tokio::test]
-    async fn disabled_declaration_parks_backend_at_creation() {
-        let base = std::env::temp_dir().join(format!("bebok-plugin-decl-{}", uuid::Uuid::new_v4()));
-        let project = base.join("project");
-        std::fs::create_dir_all(&project).unwrap();
-        crate::plugin_decl::write_decl(
-            &project,
-            &crate::plugin_decl::PluginDecl::bebok_index(false),
-        )
-        .unwrap();
-        let store = InstanceStore::with_data_dir(base.join("data"));
-
-        let instance = store
-            .get_or_create_instance(project.to_str().unwrap())
-            .await
-            .unwrap();
-        let backend = instance.code_index_backend().expect("fallback attached");
-        assert!(!backend.enabled());
-        assert_eq!(
-            instance.code_index_status().status,
-            crate::store::code_index::CODE_INDEX_DISABLED
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    /// An empty backend registry (no index plugin installed) still yields a
-    /// usable instance: the disabled fallback is attached, so the server
-    /// starts and `/index/status` answers `disabled`.
-    #[tokio::test]
-    async fn empty_backend_registry_falls_back_to_disabled() {
-        let base = std::env::temp_dir().join(format!("bebok-code-index-{}", uuid::Uuid::new_v4()));
-        let project = base.join("project");
-        std::fs::create_dir_all(&project).unwrap();
-        let registry = std::sync::Arc::new(crate::index::BackendRegistry::new());
-        assert!(!registry.is_installed());
-        let store = InstanceStore::with_backend_registry(base.join("data"), registry);
-
-        let instance = store
-            .get_or_create_instance(project.to_str().unwrap())
-            .await
-            .unwrap();
-        let backend = instance.code_index_backend().expect("fallback attached");
-        assert_eq!(backend.name(), crate::index::DISABLED_BACKEND_NAME);
-        assert!(!backend.enabled());
-        assert_eq!(
-            instance.code_index_status().status,
-            crate::store::code_index::CODE_INDEX_DISABLED
-        );
-        assert_eq!(instance.code_index_status_dto().status, "disabled");
-
-        // The fallback never touches the filesystem; the store helper is what
-        // creates the index directory on demand.
-        let index_dir = store.code_index_dir_for(project.to_str().unwrap());
-        assert!(!index_dir.exists());
-        assert_eq!(
-            store
-                .ensure_code_index_dir(project.to_str().unwrap())
-                .unwrap(),
-            index_dir
-        );
-        assert!(index_dir.is_dir());
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
 
     #[tokio::test]
     async fn list_sessions_uses_current_metadata_and_survives_restart() {

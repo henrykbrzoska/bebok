@@ -17,6 +17,8 @@ Read order: [`README.md`](./README.md) (features, quick start, config shape)
 single route table), `engine/crates/bebok-core/src/agent/mod.rs`,
 `engine/crates/bebok-core/src/store/mod.rs`, `client/src/app/app.routes.ts`.
 There is no `SPEC.md`; the code is the specification.
+For how the orchestrator decomposes, spawns and supervises sub-agents see
+[`docs/orchestrator.md`](./docs/orchestrator.md).
 
 ## 2. Build, run, test
 
@@ -145,13 +147,13 @@ runner retries transient ones (3 attempts, backoff, `retry-after` honoured).
 `orchestrator` (+ file agents with hot reload); `request.rs` builds the request
 and prunes for `context_budget` (tool outputs first, then images); `exec.rs`
 runs tools, caps output, snapshots files for change tracking; `turn.rs` streams.
-Delegation: `task_tool.rs` (`task`) spawns child sessions through
-`delegation.rs` (`SlotGate` = `max_concurrent`, throttled `task.progress`),
-`supervision_tools.rs` adds `task_status` / `task_wait` / `task_cancel`,
-`model_policy.rs` picks the child model, `status_rows.rs` emits token-free
-progress rows, `delegation_policy.rs` + `verify_prompt.rs` inject the
-supervision and frontend-verification prompt sections (`Status: PASS|FAIL` gate).
-Sub-agents never receive delegation tools under a policy.
+Delegation: the orchestrator spawns sub-agents only via `fleet`, fanning out to
+roster members named in the prompt's `Fleet:` roster (copied from the resolved
+`fleet` config); children run under a per-session `SlotGate` capped by
+`delegation.max_concurrent` (the only remaining `delegation` key — `mode` and
+`model_policy` are gone) and are supervised with `task_status` / `task_wait` /
+`task_cancel`. `verify_prompt.rs` injects the frontend-verification prompt
+section (`Status: PASS|FAIL` gate). Sub-agents never receive delegation tools.
 
 **Permissions** (`bebok-core/src/permission/`): rules are `globset` patterns
 over `tool(arg-text)` with `allow` / `ask` / `deny`; order YOLO → agent →

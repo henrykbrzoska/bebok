@@ -177,7 +177,7 @@ impl ProgressThrottle {
 
 /// One-line view of what a child is doing right now (also the payload of
 /// `task.progress` and of `AgentEntry.progress`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct TaskProgress {
     /// Name of the most recent tool call in the child's transcript.
     #[serde(rename = "lastTool", skip_serializing_if = "Option::is_none")]
@@ -192,6 +192,218 @@ pub struct TaskProgress {
     pub tool_calls: usize,
     /// Assistant messages so far (LLM round-trips).
     pub steps: usize,
+    /// Set when the last [`LOOP_WINDOW`] closed calls repeat one
+    /// normalized call [`LOOP_MIN_REPEAT`] or more times.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub looping: Option<LoopHit>,
+    /// Set when the child reads a lot of distinct paths without advancing
+    /// (no write/edit/bash in the tail).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wandering: Option<WanderHit>,
+    /// `looping` / `wandering` markers, in detection order. Empty when clean.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<String>,
+    /// `ok` | `looping` | `wandering`. Skipped when `ok` so clean payloads
+    /// stay byte-identical to before supervision signals existed.
+    #[serde(default = "default_verdict", skip_serializing_if = "is_ok_verdict")]
+    pub verdict: String,
+}
+
+impl Default for TaskProgress {
+    fn default() -> Self {
+        Self {
+            last_tool: None,
+            last_tool_state: None,
+            summary: String::new(),
+            tool_calls: 0,
+            steps: 0,
+            looping: None,
+            wandering: None,
+            flags: Vec::new(),
+            verdict: default_verdict(),
+        }
+    }
+}
+
+fn default_verdict() -> String {
+    "ok".to_string()
+}
+
+fn is_ok_verdict(v: &str) -> bool {
+    v == "ok"
+}
+
+/// Window of recent closed tool calls scanned for looping.
+pub const LOOP_WINDOW: usize = 8;
+/// Repeats of one normalized call inside [`LOOP_WINDOW`] that count as a loop.
+pub const LOOP_MIN_REPEAT: usize = 3;
+/// Distinct paths read that (with a high read ratio and no recent advance)
+/// count as wandering.
+pub const WANDER_MIN_DISTINCT_READS: usize = 12;
+/// Minimum fraction of closed calls that are reads for wandering.
+pub const WANDER_READ_RATIO: f64 = 0.6;
+/// Tail of closed calls that must contain no write/edit/bash for wandering.
+pub const WANDER_NO_ADVANCE_WINDOW: usize = 5;
+
+/// One normalized tool call repeated [`LOOP_MIN_REPEAT`]+ times.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LoopHit {
+    pub tool: String,
+    pub repeats: usize,
+    pub sample: String,
+}
+
+/// Many distinct paths read without any advancing (mutating) call.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct WanderHit {
+    #[serde(rename = "distinctReads")]
+    pub distinct_reads: usize,
+    #[serde(rename = "totalCalls")]
+    pub total_calls: usize,
+    #[serde(rename = "readRatio")]
+    pub read_ratio: f32,
+}
+
+/// Tools whose calls count as *reads* (inspection) for wandering.
+const READ_TOOLS: &[&str] = &[
+    "read_file",
+    "head",
+    "tail",
+    "wc",
+    "list_dir",
+    "tree",
+    "stat",
+    "du",
+    "sort",
+    "uniq",
+    "diff",
+    "find",
+    "realpath",
+    "basename",
+    "dirname",
+    "glob",
+    "grep",
+];
+
+/// Tools whose calls count as *advancing* (mutating) for wandering.
+const ADVANCE_TOOLS: &[&str] = &["write_file", "edit_file", "append_file", "sed", "bash"];
+
+fn str_field(input: &Value, key: &str) -> Option<String> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|s| s.to_string())
+}
+
+/// Normalize one tool call to a grouping key: path tools collapse to their
+/// path/file (`read_file` also pins the offset, `bash` to its command);
+/// anything else falls back to canonical JSON of the input.
+fn normalize_call(name: &str, input: &Value) -> String {
+    if name == "bash" {
+        let cmd = input
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return format!("bash:{cmd}");
+    }
+    if let Some(path) = str_field(input, "path").or_else(|| str_field(input, "file")) {
+        if name == "read_file" {
+            let offset = input
+                .get("offset")
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            return format!("read_file:{path}@{offset}");
+        }
+        return format!("{name}:{path}");
+    }
+    match serde_json::to_string(input) {
+        Ok(json) => format!("{name}:{json}"),
+        Err(_) => name.to_string(),
+    }
+}
+
+/// Pure supervision detector over closed `(tool name, input)` calls in
+/// transcript order. Single pass, O(n). Returns
+/// `(looping, wandering, flags, verdict)`.
+fn analyze_supervision(
+    calls: &[(String, Value)],
+) -> (Option<LoopHit>, Option<WanderHit>, Vec<String>, String) {
+    // Looping: group the last LOOP_WINDOW calls by normalized key.
+    let mut looping = None;
+    let window_start = calls.len().saturating_sub(LOOP_WINDOW);
+    {
+        // Small fixed scan: at most LOOP_WINDOW distinct keys, each counted
+        // by one pass over the window - O(LOOP_WINDOW^2) worst case on a
+        // tiny constant, no allocation beyond the keys.
+        let mut keys: Vec<(String, String, usize)> = Vec::new();
+        for (name, input) in &calls[window_start..] {
+            let key = normalize_call(name, input);
+            match keys.iter_mut().find(|(k, _, _)| *k == key) {
+                Some(entry) => entry.2 += 1,
+                None => keys.push((key, name.clone(), 1)),
+            }
+        }
+        if let Some((key, tool, repeats)) = keys.into_iter().max_by_key(|(_, _, n)| *n)
+            && repeats >= LOOP_MIN_REPEAT
+        {
+            looping = Some(LoopHit {
+                tool,
+                repeats,
+                sample: key,
+            });
+        }
+    }
+
+    // Wandering: distinct normalized paths read vs. all closed calls, plus
+    // no advancing call in the tail.
+    let mut wandering = None;
+    {
+        let total = calls.len();
+        if total > 0 {
+            let mut reads = 0usize;
+            let mut distinct: Vec<String> = Vec::new();
+            for (name, input) in calls.iter() {
+                if READ_TOOLS.contains(&name.as_str()) {
+                    reads += 1;
+                    let key = normalize_call(name, input);
+                    if !distinct.contains(&key) {
+                        distinct.push(key);
+                    }
+                }
+            }
+            let ratio = reads as f64 / total as f64;
+            let tail_start = total.saturating_sub(WANDER_NO_ADVANCE_WINDOW);
+            let advanced = calls[tail_start..]
+                .iter()
+                .any(|(name, _)| ADVANCE_TOOLS.contains(&name.as_str()));
+            if !advanced
+                && distinct.len() >= WANDER_MIN_DISTINCT_READS
+                && ratio >= WANDER_READ_RATIO
+            {
+                wandering = Some(WanderHit {
+                    distinct_reads: distinct.len(),
+                    total_calls: total,
+                    read_ratio: ratio as f32,
+                });
+            }
+        }
+    }
+
+    let mut flags = Vec::new();
+    if looping.is_some() {
+        flags.push("looping".to_string());
+    }
+    if wandering.is_some() {
+        flags.push("wandering".to_string());
+    }
+    let verdict = if looping.is_some() {
+        "looping".to_string()
+    } else if wandering.is_some() {
+        "wandering".to_string()
+    } else {
+        default_verdict()
+    };
+    (looping, wandering, flags, verdict)
 }
 
 /// Maximum length of `TaskProgress::summary`.
@@ -202,6 +414,7 @@ pub fn summarize_progress(messages: &[Message]) -> TaskProgress {
     let mut progress = TaskProgress::default();
     let mut last_tool: Option<(String, String)> = None;
     let mut last_text = String::new();
+    let mut closed: Vec<(String, Value)> = Vec::new();
     for m in messages.iter().filter(|m| m.role == Role::Assistant) {
         progress.steps += 1;
         for part in &m.parts {
@@ -214,6 +427,9 @@ pub fn summarize_progress(messages: &[Message]) -> TaskProgress {
                     ToolState::Error { .. } => "error",
                 };
                 last_tool = Some((name.clone(), kind.to_string()));
+                if state.is_closed() {
+                    closed.push((name.clone(), state.input().clone()));
+                }
             }
         }
         let text = m.text_content();
@@ -226,6 +442,11 @@ pub fn summarize_progress(messages: &[Message]) -> TaskProgress {
         progress.last_tool_state = Some(state);
     }
     progress.summary = truncate_chars(&last_text, SUMMARY_MAX_CHARS);
+    let (looping, wandering, flags, verdict) = analyze_supervision(&closed);
+    progress.looping = looping;
+    progress.wandering = wandering;
+    progress.flags = flags;
+    progress.verdict = verdict;
     progress
 }
 
@@ -631,11 +852,6 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
             info.clone(),
             stop.clone(),
         );
-        // PR1-część 2: the child's file mutations invalidate the same
-        // instance index as a normal turn.
-        let inst_c = spec.instance.clone();
-        let notify: crate::index::CodeIndexChangedCallback =
-            std::sync::Arc::new(move |rel| inst_c.notify_code_index_changed(rel));
         let result = super::turn::TurnRunner::new(
             child.clone(),
             spec.agent,
@@ -644,10 +860,8 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
             spec.instance.permission.clone(),
             bus.clone(),
             abort.clone(),
-            &spec.model,
+            spec.model.clone(),
         )
-        .with_code_index_changed(notify)
-        .code_index_query_adapter(spec.instance.code_index_query_adapter())
         .run()
         .await;
         stop.cancel();
@@ -876,6 +1090,86 @@ mod tests {
         assert_eq!(p.summary.chars().count(), SUMMARY_MAX_CHARS);
         assert!(p.summary.ends_with('\u{2026}'));
         assert!(p.last_tool.is_none());
+    }
+
+    fn closed_call(id: &str, name: &str, input: Value) -> Message {
+        let mut m = Message::assistant_with("code", "m");
+        m.add_tool_call(id.into(), name.into(), input.clone());
+        assert!(m.mark_tool_completed(id, "ok".into(), name.into(), None));
+        m
+    }
+
+    #[test]
+    fn supervise_repeated_same_call_flags_looping() {
+        let msgs: Vec<Message> = (0..3)
+            .map(|i| closed_call(&format!("c{i}"), "read_file", json!({"path": "a.ts"})))
+            .collect();
+        let p = summarize_progress(&msgs);
+        let hit = p.looping.as_ref().expect("looping");
+        assert_eq!(hit.tool, "read_file");
+        assert_eq!(hit.repeats, 3);
+        assert!(!hit.sample.is_empty());
+        assert_eq!(p.verdict, "looping");
+        assert!(p.flags.contains(&"looping".to_string()));
+    }
+
+    #[test]
+    fn supervise_many_distinct_reads_flags_wandering() {
+        let msgs: Vec<Message> = (0..WANDER_MIN_DISTINCT_READS)
+            .map(|i| {
+                closed_call(
+                    &format!("c{i}"),
+                    "read_file",
+                    json!({"path": format!("f{i}.ts")}),
+                )
+            })
+            .collect();
+        let p = summarize_progress(&msgs);
+        let hit = p.wandering.as_ref().expect("wandering");
+        assert_eq!(hit.distinct_reads, WANDER_MIN_DISTINCT_READS);
+        assert_eq!(hit.total_calls, WANDER_MIN_DISTINCT_READS);
+        assert!(hit.read_ratio >= WANDER_READ_RATIO as f32);
+        assert!(p.looping.is_none());
+        assert_eq!(p.verdict, "wandering");
+        assert!(p.flags.contains(&"wandering".to_string()));
+    }
+
+    #[test]
+    fn supervise_healthy_mixed_stays_ok() {
+        let msgs = vec![
+            closed_call("c0", "read_file", json!({"path": "a.ts"})),
+            closed_call("c1", "grep", json!({"path": "b.ts"})),
+            closed_call("c2", "write_file", json!({"path": "c.ts"})),
+            closed_call("c3", "bash", json!({"command": "cargo test"})),
+        ];
+        let p = summarize_progress(&msgs);
+        assert!(p.looping.is_none());
+        assert!(p.wandering.is_none());
+        assert!(p.flags.is_empty());
+        assert_eq!(p.verdict, "ok");
+        // Clean payloads skip the new fields entirely.
+        let v = serde_json::to_value(&p).expect("serialize");
+        assert!(v.get("looping").is_none());
+        assert!(v.get("wandering").is_none());
+        assert!(v.get("flags").is_none());
+        assert!(v.get("verdict").is_none());
+    }
+
+    #[test]
+    fn supervise_reads_then_writes_not_wandering() {
+        let mut msgs: Vec<Message> = (0..WANDER_MIN_DISTINCT_READS)
+            .map(|i| {
+                closed_call(
+                    &format!("c{i}"),
+                    "read_file",
+                    json!({"path": format!("f{i}.ts")}),
+                )
+            })
+            .collect();
+        msgs.push(closed_call("w", "write_file", json!({"path": "out.ts"})));
+        let p = summarize_progress(&msgs);
+        assert!(p.wandering.is_none());
+        assert_eq!(p.verdict, "ok");
     }
 
     #[tokio::test]

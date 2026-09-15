@@ -12,11 +12,8 @@ futures.workspace = true
 globset.workspace = true
 ignore.workspace = true
 notify.workspace = true
-rusqlite.workspace = true
-tantivy.workspace = true
 
 bebok-llm = { path = "../bebok-llm" }
-bebok-code-index = { path = "../bebok-code-index" }
 bebok-mcp = { path = "../bebok-mcp" }
 bebok-skills = { path = "../bebok-skills" }
 bebok-tools = { path = "../bebok-tools" }
