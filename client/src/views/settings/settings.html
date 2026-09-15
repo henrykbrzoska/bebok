@@ -32,6 +32,9 @@
       }
 
       @switch (store.tab()) {
+        @case ('general') {
+          <app-settings-general />
+        }
         @case ('providers') {
           <app-settings-providers />
         }

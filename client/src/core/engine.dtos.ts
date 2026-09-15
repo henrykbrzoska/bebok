@@ -473,6 +473,41 @@ export interface McpListResponse {
   servers: McpStatus[];
 }
 
+/** TOR C: one declared plugin from `GET /plugins?directory=` (`declared` array). */
+export interface DeclaredPlugin {
+  name: string;
+  repo: string;
+  url: string;
+  enabled: boolean;
+  installed: boolean;
+}
+
+/** TOR C: `GET /plugins?directory=` payload (plus legacy host introspection). */
+export interface PluginsResponse {
+  declared: DeclaredPlugin[];
+  plugins?: string[];
+  hooks?: string[];
+  attached?: boolean;
+}
+
+/** TOR C: `POST /plugins/{name}/install|toggle` payload. */
+export interface PluginResponse {
+  plugin: DeclaredPlugin;
+}
+
+/** Central registry entry from `GET /plugins/registry` (installable plugin). */
+export interface RegistryPlugin {
+  name: string;
+  repo: string;
+  url: string;
+  description: string;
+}
+
+/** `GET /plugins/registry` payload: the installable-plugin catalogue. */
+export interface PluginRegistryResponse {
+  plugins: RegistryPlugin[];
+}
+
 export interface ResolvedSkill {
   name: string;
   description?: string | null;
@@ -1095,6 +1130,21 @@ export interface ProcessLogResponse {
   log: string;
   /** Total size of the log file in bytes (before the tail cut). */
   size: number;
+}
+
+/** `GET /index/status?directory=` payload: live code-index snapshot. */
+export interface IndexStatusResponse {
+  status: string;
+  files: number;
+  symbols: number;
+}
+
+/** `POST /index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
+export interface IndexRebuildResponse {
+  status: string;
+  files: number;
+  symbols: number;
+  rebuild: boolean;
 }
 
 /** `process.output` event properties (coalesced, at most ~3/s per process). */

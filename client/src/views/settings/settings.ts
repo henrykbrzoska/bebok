@@ -1,7 +1,7 @@
 /**
  * Settings screen (WP-SETTINGS / F2-22): one full-screen list+detail view.
  *
- * A 210px left rail lists the seven tabs of the design handoff (§8) -
+ * A 210px left rail lists the eight tabs of the design handoff (§8) -
  * Providers, Agents, MCP, Skills, Permissions, Appearance, Raw JSON - and the
  * detail pane swaps one component per tab. The old standalone Config page is
  * folded in as the Raw JSON tab; `/config` redirects here (WP-SHELL / F1-11).
@@ -22,6 +22,7 @@ import { MessageKey } from '../../i18n';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { ProviderCatalog } from './provider-catalog';
 import { SETTINGS_TABS, SettingsStore, SettingsTab } from './settings.store';
+import { GeneralTab } from './general-tab';
 import { ProvidersTab } from './providers-tab';
 import { AgentsTab } from './agents-tab';
 import { McpTab } from './mcp-tab';
@@ -32,6 +33,9 @@ import { RawJsonTab } from './raw-json-tab';
 
 /** Query-param aliases accepted for `?tab=` (the command palette uses these). */
 const TAB_ALIASES: Record<string, SettingsTab> = {
+  general: 'general',
+  ogolne: 'general',
+  'ogólne': 'general',
   providers: 'providers',
   agents: 'agents',
   mcp: 'mcp',
@@ -47,6 +51,7 @@ const TAB_ALIASES: Record<string, SettingsTab> = {
 @Component({
   selector: 'app-settings',
   imports: [
+    GeneralTab,
     ProvidersTab,
     AgentsTab,
     McpTab,

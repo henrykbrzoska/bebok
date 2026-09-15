@@ -25,8 +25,9 @@ import {
 import { I18nService } from '../../i18n/i18n.service';
 import { ProviderDraft } from './provider-catalog';
 
-/** The seven tabs of the redesigned Settings screen (design handoff §8). */
+/** The eight tabs of the redesigned Settings screen (design handoff §8). */
 export type SettingsTab =
+  | 'general'
   | 'providers'
   | 'agents'
   | 'mcp'
@@ -36,6 +37,7 @@ export type SettingsTab =
   | 'rawJson';
 
 export const SETTINGS_TABS: readonly SettingsTab[] = [
+  'general',
   'providers',
   'agents',
   'mcp',

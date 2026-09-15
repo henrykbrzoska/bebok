@@ -24,6 +24,9 @@ import {
   CreateSessionResult,
   DebugLogResponse,
   DelegationModelsResponse,
+  PluginRegistryResponse,
+  PluginResponse,
+  PluginsResponse,
   DeleteSessionResponse,
   DockerStatus,
   ExportResponse,
@@ -63,6 +66,8 @@ import {
   BrowserActionResult,
   BrowserFrame,
   BrowserState,
+  IndexRebuildResponse,
+  IndexStatusResponse,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -457,6 +462,71 @@ export class EngineClient {
       `/mcp/${encodeURIComponent(name)}/toggle?directory=${encodeURIComponent(directory)}`,
       { enabled },
     ).then((d) => d.servers);
+  }
+
+  /**
+   * TOR C: `GET /plugins?directory=` -> declared plugins from
+   * `<project>/.bebok/plugins/*.json`. Requires `?directory=` (422 without).
+   */
+  listPlugins(directory: string): Promise<PluginsResponse> {
+    return this.request<PluginsResponse>(
+      'GET',
+      `/plugins?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * `GET /plugins/registry` -> the installable-plugin catalogue from the
+   * central registry (no `?directory=`; engine-wide, cached server-side).
+   */
+  pluginRegistry(): Promise<PluginRegistryResponse> {
+    return this.request<PluginRegistryResponse>('GET', '/plugins/registry');
+  }
+
+  /**
+   * TOR C: `POST /plugins/{name}/install?directory=` -> the created
+   * declaration (`{plugin: {name, repo, url, enabled, installed}}`).
+   */
+  installPlugin(directory: string, name: string): Promise<PluginResponse> {
+    return this.request<PluginResponse>(
+      'POST',
+      `/plugins/${encodeURIComponent(name)}/install?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * TOR C: `POST /plugins/{name}/toggle?directory=` with `{enabled}` ->
+   * the parsed plugin object (at least `{enabled, installed}`).
+   */
+  togglePlugin(directory: string, name: string, enabled: boolean): Promise<PluginResponse> {
+    return this.request<PluginResponse>(
+      'POST',
+      `/plugins/${encodeURIComponent(name)}/toggle?directory=${encodeURIComponent(directory)}`,
+      { enabled },
+    );
+  }
+
+  /**
+   * `GET /index/status?directory=` -> live code-index snapshot
+   * (`{ status, files, symbols }`).
+   */
+  getIndexStatus(directory: string): Promise<IndexStatusResponse> {
+    return this.request<IndexStatusResponse>(
+      'GET',
+      `/index/status?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * `POST /index/rebuild?directory=` -> enqueue a full rebuild; returns the
+   * snapshot taken right after enqueueing (`{ status, files, symbols, rebuild }`).
+   * 409 when the index is disabled for this instance.
+   */
+  rebuildIndex(directory: string): Promise<IndexRebuildResponse> {
+    return this.request<IndexRebuildResponse>(
+      'POST',
+      `/index/rebuild?directory=${encodeURIComponent(directory)}`,
+    );
   }
 
   getConfig(directory: string): Promise<ConfigResponse> {
