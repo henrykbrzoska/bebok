@@ -58,12 +58,25 @@ impl<'a> RequestBuilder<'a> {
         for msg in messages.iter() {
             match msg.role {
                 Role::User => {
-                    let text = msg.text_content();
-                    let content_parts: Vec<ContentPart> = msg
-                        .image_parts()
-                        .into_iter()
-                        .map(|(media_type, data, _name)| ContentPart::Image { media_type, data })
-                        .collect();
+                    let mut text = msg.text_content();
+                    let images = msg.image_parts();
+                    // A model that cannot see images gets a note instead of the
+                    // bytes: it must ask for a description rather than answer as
+                    // if it had looked (the transcript keeps the image for the UI).
+                    let content_parts: Vec<ContentPart> = if images.is_empty() {
+                        Vec::new()
+                    } else if !super::model_supports_images(self.model) {
+                        text = blind_image_note(&text, &images);
+                        Vec::new()
+                    } else {
+                        images
+                            .into_iter()
+                            .map(|(media_type, data, _name)| ContentPart::Image {
+                                media_type,
+                                data,
+                            })
+                            .collect()
+                    };
                     // A user message may carry tool results produced right before
                     // it in the same turn; normally results are attached below.
                     chat.push(ChatMessage {
@@ -241,6 +254,27 @@ impl<'a> RequestBuilder<'a> {
 
 /// Build the provider request from the session transcript (compat shim over
 /// `RequestBuilder::build`; the turn loop calls the builder directly).
+/// The text a non-vision model sees in place of the user's attachments.
+pub fn blind_image_note(text: &str, images: &[(String, String, Option<String>)]) -> String {
+    let names: Vec<String> = images
+        .iter()
+        .enumerate()
+        .map(|(i, (media_type, _, name))| {
+            name.clone()
+                .unwrap_or_else(|| format!("image {} ({media_type})", i + 1))
+        })
+        .collect();
+    let note = format!(
+        "[Attached: {}. You cannot view images with this model, so the picture did not reach you.          Before answering anything that depends on it, first ask the user to describe the image          (what it shows, any text, numbers, labels or errors visible), then continue with the rest          of the message. Never guess or invent what the image contains.]",
+        names.join(", ")
+    );
+    if text.trim().is_empty() {
+        note
+    } else {
+        format!("{note}\n\n{text}")
+    }
+}
+
 pub async fn build_request(
     state: &SessionState,
     agent: &Agent,
@@ -369,6 +403,20 @@ pub(crate) fn hook_request_message(m: &ChatMessage) -> RequestMessage {
 #[cfg(test)]
 mod image_tests {
     use super::*;
+
+    #[test]
+    fn blind_image_note_names_the_attachment_and_keeps_the_text() {
+        let note = blind_image_note(
+            "what does the error say?",
+            &[("image/png".into(), "AAAA".into(), Some("shot.png".into()))],
+        );
+        assert!(note.starts_with("[Attached: shot.png."));
+        assert!(note.contains("ask the user to describe the image"));
+        assert!(note.ends_with("what does the error say?"));
+        let unnamed = blind_image_note("", &[("image/jpeg".into(), "AAAA".into(), None)]);
+        assert!(unnamed.contains("image 1 (image/jpeg)"));
+        assert!(!unnamed.contains("\n\n"));
+    }
     use crate::session::{Message, Part};
     use bebok_tools::ToolRegistry;
 
@@ -417,6 +465,49 @@ mod image_tests {
                 data: "aGVsbG8=".to_string()
             }
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 1.8: a model the catalog marks as blind gets the note instead of the
+    /// bytes, so it asks for a description rather than guessing.
+    #[tokio::test]
+    async fn builder_swaps_images_for_a_note_on_a_non_vision_model() {
+        let base = std::env::temp_dir().join(format!("bebok-img-blind-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session
+            .append_user_message_with_images(
+                "what is this?",
+                vec![Part::Image {
+                    media_type: "image/png".to_string(),
+                    data: "aGVsbG8=".to_string(),
+                    name: Some("shot.png".to_string()),
+                }],
+            )
+            .await
+            .unwrap();
+
+        let (_s, agent, tools) = test_state(&store, &session);
+        assert!(!super::super::model_supports_images(
+            "deepseek/deepseek-chat"
+        ));
+        let builder = RequestBuilder::new(
+            &session,
+            &agent,
+            &tools,
+            "deepseek/deepseek-chat",
+            128,
+            Thinking::Off,
+        );
+        let req = builder.build().await.unwrap();
+        assert!(req.messages[0].content_parts.is_empty());
+        assert!(req.messages[0].content.starts_with("[Attached: shot.png."));
+        assert!(req.messages[0].content.ends_with("what is this?"));
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -1,9 +1,19 @@
-import { Component, ViewEncapsulation, computed, inject, input, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  ViewEncapsulation,
+  afterRenderEffect,
+  computed,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 
 import { Part, TextPart } from '../../../core/engine.dtos';
 import { renderMarkdown } from '../../../core/markdown';
 import { I18nService } from '../../../i18n/i18n.service';
 import { HtmlPreviewComponent } from '../../../ui/html-preview/html-preview';
+import { MermaidService } from '../../../ui/mermaid/mermaid.service';
 import { ExplorerSelectionStore } from '../../../ui/right-drawer/panels/explorer-selection.store';
 import { ShellStore } from '../../../ui/shell/shell.store';
 import { ChatSessionStore } from '../chat-session.store';
@@ -116,6 +126,44 @@ function extractHtmlBlocks(source: string): string[] {
     app-text-part .md a {
       color: var(--accent);
     }
+    app-text-part .md .md-image {
+      display: block;
+      max-width: 100%;
+      max-height: 420px;
+      margin: 6px 0;
+      border-radius: var(--radius-panel);
+      border: 1px solid var(--border);
+      background: var(--bg-raised);
+      object-fit: contain;
+    }
+    app-text-part .md .mermaid-block {
+      margin: 6px 0;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      background: var(--terminal-bg);
+      overflow-x: auto;
+    }
+    app-text-part .md .mermaid-block[data-rendered='ok'] {
+      background: var(--surface);
+    }
+    app-text-part .md .mermaid-svg svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+    app-text-part .md .mermaid-src {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    app-text-part .md .mermaid-error {
+      margin-top: 6px;
+      font-size: var(--fs-12);
+      color: var(--danger);
+    }
     app-text-part .md blockquote {
       margin: 4px 0;
       padding: 1px 10px;
@@ -155,9 +203,22 @@ export class TextPartComponent {
   private readonly shell = inject(ShellStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly mermaid = inject(MermaidService);
+
   readonly part = input.required<Part>();
   private readonly textPart = computed(() => this.part() as TextPart);
   readonly html = computed(() => renderMarkdown(this.textPart().text));
+
+  constructor() {
+    // Diagrams (1.8): once the markdown is in the DOM, swap ```mermaid
+    // sources for SVGs. Re-runs on every text change (streaming), rendering
+    // only blocks not done yet.
+    afterRenderEffect(() => {
+      this.html();
+      void this.mermaid.renderIn(this.host.nativeElement);
+    });
+  }
 
   /** Sandboxed preview of the first ```html block (right-click to open). */
   readonly previewHtml = signal<string | null>(null);

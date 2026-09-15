@@ -54,7 +54,7 @@ pub use images::{
 pub use model_policy::{CheaperMapping, cheaper_sibling, mappings_for, resolve_subagent_model};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
-pub use prompt_env::host_os_note;
+pub use prompt_env::{MEDIA_NOTE, host_os_note};
 pub use request::{RequestBuilder, build_request, prune_for_budget};
 pub use status_rows::{format_duration, format_tokens};
 pub use supervision_tools::{TaskCancelTool, TaskStatusTool, TaskWaitTool};

@@ -34,6 +34,14 @@ pub fn host_os_note() -> String {
     )
 }
 
+/// System-prompt note for attachments and diagrams (1.8). The image rule
+/// covers providers that silently drop image parts: the model must never
+/// answer as if it had seen a picture it did not receive.
+pub const MEDIA_NOTE: &str = "Images and diagrams:\n\
+- If the user refers to an attached image, screenshot or photo and no image content actually reached you, say so first and ask them to describe it (what it shows, any visible text, numbers, labels or errors). Answer the rest of the message only after that. Never guess or invent what an image contains.\n\
+- The chat renders Mermaid: when a diagram explains something better than prose (architecture, flows, sequences, state machines, ER models), emit a fenced ```mermaid block. Markdown images (`![alt](https://…)`) are rendered too.\n\
+- When a decision is genuinely unclear (which fields, which approach, which of several files), use the `ask_user` tool instead of guessing.";
+
 #[cfg(test)]
 mod tests {
     use super::*;

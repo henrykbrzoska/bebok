@@ -17,6 +17,16 @@
   free-text slot) and the turn ends. The chat renders them as a card; one
   "Send answers" posts `1A, 2BC, 3E(own words)` as the next user message.
 
+### Diagrams and images in chat
+- ```mermaid fences render as diagrams (lazy-loaded renderer, bundled -
+  nothing to install); `![alt](https://…)` markdown images render inline.
+  The system prompt tells the model both are available.
+- A model that cannot see images no longer gets a 400 on an attachment:
+  the image stays in the transcript and the model receives a note telling
+  it to ask for a description first instead of guessing what the picture
+  shows. Providers that silently drop images are covered by the same
+  system-prompt rule.
+
 ### Dev
 - `BEBOK_HOME` overrides the engine's config + data root; `npm run
   full-build-dev` uses `<data dir>/bebok-dev` by default so a dev engine no

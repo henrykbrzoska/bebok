@@ -172,14 +172,15 @@ pub async fn prompt_turn(
     session.set_fleet_requested(fleet_requested);
     assemble_prompt(&instance, &mut agent, &cfg, fleet_requested);
 
-    // Pre-flight vision capability check: a model known to reject image input
-    // fails fast with a 400 *before* the user message is appended, so the
-    // transcript never ends up with an orphaned, unanswerable attachment.
-    // Unknown models are assumed capable (conservative deny-list).
+    // A model known to reject image input still takes the prompt: the
+    // request builder swaps the bytes for a note telling the model to ask
+    // for a description first (`agent::request::blind_image_note`), so the
+    // attachment stays in the transcript for the UI and nothing gets
+    // hallucinated. Unknown models are assumed capable.
     if !image_parts.is_empty() && !bebok_core::agent::model_supports_images(&model) {
-        return Err(ApiError::bad_request(format!(
-            "model '{model}' does not support image input: remove the attachment or switch to a vision-capable model"
-        )));
+        tracing::info!(
+            "model '{model}' cannot view images: attachments passed as a describe-it-first note"
+        );
     }
 
     let provider = build_provider(&cfg, &model).map_err(ApiError::from)?;
@@ -313,7 +314,12 @@ fn assemble_prompt(
 
     // Tell the model which host OS / shell dialect the `bash` tool uses so it
     // emits syntax that actually runs (matters most on Windows).
-    agent.prompt = format!("{}\n\n{}", agent.prompt, bebok_core::agent::host_os_note());
+    agent.prompt = format!(
+        "{}\n\n{}\n\n{}",
+        agent.prompt,
+        bebok_core::agent::host_os_note(),
+        bebok_core::agent::MEDIA_NOTE
+    );
 
     // WP-AUTOVERIFY (F8-1): "Verification capabilities" section (browser,
     // dev servers, `verify.frontend` policy); built in its own module.

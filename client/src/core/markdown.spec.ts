@@ -25,7 +25,9 @@ describe('renderMarkdown', () => {
     // F8-3: none of these classify as anything special, so they keep the
     // plain fallback chip (`class="ic"`, no kind modifier).
     const html = renderMarkdown('- uses a real `<main>`, `<header>`\n- and `<nav>`');
-    expect(html).toContain('<ul><li>uses a real <code class="ic">&lt;main&gt;</code>, <code class="ic">&lt;header&gt;</code></li>');
+    expect(html).toContain(
+      '<ul><li>uses a real <code class="ic">&lt;main&gt;</code>, <code class="ic">&lt;header&gt;</code></li>',
+    );
     expect(html).toContain('<li>and <code class="ic">&lt;nav&gt;</code></li></ul>');
     expect(html).not.toMatch(/<(main|header|nav)>/);
   });
@@ -44,7 +46,9 @@ describe('renderMarkdown', () => {
   it('keeps bold, links and bare .md paths working on escaped text', () => {
     const html = renderMarkdown('**bold** [site](https://example.com/?a=1&b=2) see docs/plan.md');
     expect(html).toContain('<strong>bold</strong>');
-    expect(html).toContain('<a href="https://example.com/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">site</a>');
+    expect(html).toContain(
+      '<a href="https://example.com/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">site</a>',
+    );
     expect(html).toContain('<a href="docs/plan.md" class="preview-link">docs/plan.md</a>');
   });
 
@@ -66,7 +70,9 @@ describe('renderMarkdown', () => {
   });
 
   it('renders ATX headings (B4), never as h1', () => {
-    const html = renderMarkdown('## Positive aspects\n- one\n\n### High priority\ntext <x>\n\n# Top');
+    const html = renderMarkdown(
+      '## Positive aspects\n- one\n\n### High priority\ntext <x>\n\n# Top',
+    );
     expect(html).toContain('<h2>Positive aspects</h2><ul><li>one</li></ul>');
     expect(html).toContain('<h3>High priority</h3><p>text &lt;x&gt;</p>');
     expect(html).toContain('<h2>Top</h2>');
@@ -99,7 +105,9 @@ describe('renderMarkdown', () => {
 
     it('renders a shell command as a terminal-like chip', () => {
       const html = renderMarkdown('run `npm exec nx -- generate lib`');
-      expect(html).toContain('<code class="ic ic-shell"><span class="ic-shell-glyph">$</span>npm exec nx -- generate lib</code>');
+      expect(html).toContain(
+        '<code class="ic ic-shell"><span class="ic-shell-glyph">$</span>npm exec nx -- generate lib</code>',
+      );
     });
 
     it('tokenizes an inline JSON object', () => {
@@ -111,7 +119,9 @@ describe('renderMarkdown', () => {
 
     it('splits a package@version chip into name and faint version', () => {
       const html = renderMarkdown('needs `@nx/angular@23.2.1`');
-      expect(html).toContain('<code class="ic ic-package">@nx/angular<span class="ic-pkg-version">@23.2.1</span></code>');
+      expect(html).toContain(
+        '<code class="ic ic-package">@nx/angular<span class="ic-pkg-version">@23.2.1</span></code>',
+      );
     });
 
     it('keeps everything HTML-escaped no matter the classified kind', () => {
@@ -170,5 +180,28 @@ describe('renderMarkdown', () => {
         '<a href="http://localhost:4200" target="_blank" rel="noopener noreferrer">http://localhost:4200</a>',
       );
     });
+  });
+});
+
+describe('renderMarkdown: diagrams and images (1.8)', () => {
+  it('turns a ```mermaid fence into a mermaid block that keeps the escaped source', () => {
+    const html = renderMarkdown('Flow:\n```mermaid\ngraph TD\n  A-->B\n```\ndone');
+    expect(html).toContain(
+      '<div class="mermaid-block"><pre class="mermaid-src"><code>graph TD\n  A--&gt;B</code></pre>',
+    );
+    expect(html).not.toContain('<svg');
+  });
+
+  it('renders ![alt](src) as an image for http(s) and data URLs only', () => {
+    expect(renderMarkdown('![shot](https://x.test/a.png)')).toContain(
+      '<img class="md-image" src="https://x.test/a.png" alt="shot" loading="lazy">',
+    );
+    expect(renderMarkdown('![](data:image/png;base64,AAAA)')).toContain(
+      '<img class="md-image" src="data:image/png;base64,AAAA"',
+    );
+    const local = renderMarkdown('![diagram](docs/diagram.png)');
+    expect(local).not.toContain('<img');
+    expect(local).toContain('diagram');
+    expect(renderMarkdown('![x](javascript:alert(1))')).not.toContain('<img');
   });
 });

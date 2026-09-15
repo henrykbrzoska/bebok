@@ -113,7 +113,8 @@ function linkifyBarePaths(html: string): string {
       }
       return segment.replace(
         BARE_MD_PATH,
-        (_, pre: string, path: string) => `${pre}<a href="${path}" class="preview-link">${path}</a>`,
+        (_, pre: string, path: string) =>
+          `${pre}<a href="${path}" class="preview-link">${path}</a>`,
       );
     })
     .join('');
@@ -124,7 +125,16 @@ function renderInline(value: string): string {
   // model text such as `<main>` or `Array<string>` arrives as `&lt;main&gt;`
   // and only the markup produced here is real HTML.
   let html = value
-    .replace(/`([^`\n]+)`/g, (_, code: string) => renderClassifiedInlineCode(code, { pathLinkClass: 'preview-link' }))
+    .replace(/`([^`\n]+)`/g, (_, code: string) =>
+      renderClassifiedInlineCode(code, { pathLinkClass: 'preview-link' }),
+    )
+    // `![alt](src)` (1.8): an inline image for http(s)/data URLs; anything
+    // else falls through to the link rule below (so it stays clickable).
+    .replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (match, alt: string, src: string) =>
+      isSafeImageSrc(src)
+        ? `<img class="md-image" src="${src}" alt="${alt}" loading="lazy">`
+        : match.slice(1),
+    )
     .replace(/\*\*([^*]+)\*\*/g, (_, strong: string) => `<strong>${strong}</strong>`)
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label: string, href: string) =>
       renderSchemeLink(label, href, 'preview-link', hasUriScheme(href)),
@@ -177,18 +187,31 @@ function renderLines(lines: string[]): string {
   const bullets = /^[-*+]\s+/;
   const numbers = /^\d+[.)]\s+/;
   if (lines.length > 0 && lines.every((l) => bullets.test(l))) {
-    const items = lines
-      .map((l) => `<li>${renderInline(l.replace(bullets, ''))}</li>`)
-      .join('');
+    const items = lines.map((l) => `<li>${renderInline(l.replace(bullets, ''))}</li>`).join('');
     return `<ul>${items}</ul>`;
   }
   if (lines.length > 0 && lines.every((l) => numbers.test(l))) {
-    const items = lines
-      .map((l) => `<li>${renderInline(l.replace(numbers, ''))}</li>`)
-      .join('');
+    const items = lines.map((l) => `<li>${renderInline(l.replace(numbers, ''))}</li>`).join('');
     return `<ol>${items}</ol>`;
   }
   return `<p>${renderInline(lines.join('\n'))}</p>`;
+}
+
+/**
+ * A ```mermaid fence (1.8): the source stays visible (escaped) until the
+ * text part swaps it for the rendered SVG - `ui/mermaid` does that lazily
+ * from the `<code>` text (Angular's innerHTML sanitizer strips `data-*`
+ * attributes), so the renderer never loads for plain chats.
+ */
+function renderMermaidBlock(source: string): string {
+  return `<div class="mermaid-block"><pre class="mermaid-src"><code>${escapeHtml(source)}</code></pre></div>`;
+}
+
+/** Only web and inline-data images: nothing that could reach the local filesystem. */
+function isSafeImageSrc(src: string): boolean {
+  return (
+    /^https?:\/\//i.test(src) || /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,/i.test(src)
+  );
 }
 
 export function renderMarkdown(source: string): string {
@@ -196,6 +219,9 @@ export function renderMarkdown(source: string): string {
   return blocks
     .map((block) => {
       if (block.kind === 'code') {
+        if ((block.lang ?? '').toLowerCase() === 'mermaid') {
+          return renderMermaidBlock(block.code ?? '');
+        }
         return highlightBlockHtml(block.code ?? '', { language: block.lang || null });
       }
       // Escape once, up front: every transform below only ever sees
