@@ -160,8 +160,9 @@ pub async fn toggle_plugin(
 }
 
 /// `GET /plugins/{name}/status?directory=` — query the status of a dynamic
-/// plugin subprocess. Returns `{"ok":true,...}` from the plugin's `status`
-/// action, or 404 when no plugin with that name is registered.
+/// plugin subprocess. The plugin receives `{"directory": <project dir>}` as
+/// the input. Returns `{"ok":true,...}` from the plugin's `status` action,
+/// or 404 when no plugin with that name is registered.
 pub async fn plugin_status(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -174,7 +175,7 @@ pub async fn plugin_status(
         .map_err(|e| err_response(&e))?;
     ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
-    let input = serde_json::json!({});
+    let input = serde_json::json!({ "directory": q.directory });
     match host.invoke(&name, "status", &input).await {
         Some(resp) => Ok(Json(resp)),
         None => Err(
@@ -185,8 +186,10 @@ pub async fn plugin_status(
 
 /// `POST /plugins/{name}/{action}?directory=` — invoke an action on a
 /// dynamic plugin subprocess. The request body is forwarded as the action
-/// input. Returns the plugin's JSON response, or 404 when no plugin with
-/// that name is registered.
+/// input; when the body is a JSON object without a `directory` field, the
+/// request's project directory is added (an explicitly provided `directory`
+/// is never overwritten). Returns the plugin's JSON response, or 404 when
+/// no plugin with that name is registered.
 pub async fn plugin_invoke(
     State(state): State<AppState>,
     Path((name, action)): Path<(String, String)>,
@@ -200,7 +203,17 @@ pub async fn plugin_invoke(
         .map_err(|e| err_response(&e))?;
     ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
-    match host.invoke(&name, &action, &body).await {
+    // Ensure the plugin can locate the project: default `directory` to the
+    // request's project dir unless the caller supplied one explicitly.
+    let input = match body.as_object() {
+        Some(obj) if !obj.contains_key("directory") => {
+            let mut obj = obj.clone();
+            obj.insert("directory".to_string(), serde_json::json!(q.directory));
+            serde_json::Value::Object(obj)
+        }
+        _ => body,
+    };
+    match host.invoke(&name, &action, &input).await {
         Some(resp) => Ok(Json(resp)),
         None => Err(ApiError::not_found(format!(
             "no plugin registered with name '{name}' (or action '{action}' not handled)"
