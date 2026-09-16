@@ -522,6 +522,7 @@ pub fn parse_models(value: &serde_json::Value) -> Result<Vec<String>, LlmError> 
         let ids: Vec<String> = data
             .iter()
             .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(str::to_string))
+            .filter(|s| !s.is_empty())
             .collect();
         if !ids.is_empty() {
             return Ok(ids);
@@ -537,6 +538,7 @@ pub fn parse_models(value: &serde_json::Value) -> Result<Vec<String>, LlmError> 
                     .and_then(|x| x.as_str())
                     .map(str::to_string)
             })
+            .filter(|s| !s.is_empty())
             .collect();
         return Ok(ids);
     }
