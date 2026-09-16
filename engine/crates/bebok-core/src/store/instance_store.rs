@@ -315,6 +315,13 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::TaskCancelTool::new(weak.clone())));
+            // In-process code-index tools: delegate to the `bebok-index` plugin.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeIndexStatus));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeIndexSearch));
         }
 
         // Async side effects: connect enabled MCP servers and register their

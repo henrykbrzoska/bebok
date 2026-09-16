@@ -216,6 +216,18 @@ pub fn set_enabled(root: &Path, name: &str, enabled: bool) -> Result<DeclaredPlu
     Ok(DeclaredPlugin::from((decl, installed)))
 }
 
+/// Returns `true` **only** when the declaration file exists, is parseable,
+/// and has `enabled == false`.  In every other case (missing file, I/O error,
+/// parse error, `enabled == true`) this returns `false` — preserving the
+/// existing "assume enabled" behaviour.
+pub fn is_disabled(root: &Path, name: &str) -> bool {
+    let path = decl_path(root, name);
+    match read_decl(&path) {
+        Ok(decl) => !decl.enabled,
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +340,29 @@ mod tests {
     fn list_on_missing_dir_is_empty() {
         let root = temp_root("missing");
         assert!(list_declared(&root).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_disabled_true_when_enabled_false() {
+        let root = temp_root("is-disabled-false");
+        write_decl(&root, &PluginDecl::bebok_index(false)).unwrap();
+        assert!(is_disabled(&root, KNOWN_PLUGIN_NAME));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_disabled_false_when_enabled_true() {
+        let root = temp_root("is-disabled-true");
+        write_decl(&root, &PluginDecl::bebok_index(true)).unwrap();
+        assert!(!is_disabled(&root, KNOWN_PLUGIN_NAME));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_disabled_false_when_no_declaration() {
+        let root = temp_root("is-disabled-none");
+        assert!(!is_disabled(&root, KNOWN_PLUGIN_NAME));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

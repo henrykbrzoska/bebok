@@ -22,12 +22,9 @@ use crate::state::AppState;
 async fn ensure_plugin_registered(root: &std::path::Path, name: &str) {
     let host = bebok_core::PluginHost::global();
 
-    // Fast path: already registered.
-    if host.names().await.iter().any(|n| n == name) {
-        return;
-    }
-
-    // Read the declaration file.
+    // Read the declaration file FIRST — a disabled or missing declaration
+    // must block registration even when the plugin is already present on
+    // the host (cross-project safety).
     let decl_path = bebok_core::plugin_decl::decl_path(root, name);
     let decl = match bebok_core::plugin_decl::read_decl(&decl_path) {
         Ok(d) => d,
@@ -35,6 +32,11 @@ async fn ensure_plugin_registered(root: &std::path::Path, name: &str) {
     };
     if !decl.enabled {
         return; // disabled → caller returns 404
+    }
+
+    // Fast path: already registered.
+    if host.names().await.iter().any(|n| n == name) {
+        return;
     }
 
     // Check that the slot directory exists.
@@ -127,7 +129,8 @@ pub async fn install_plugin(
 
 /// `POST /plugins/{name}/toggle?directory=` -> flip the `enabled` switch of
 /// a declared plugin (body `{ enabled: bool }`; missing = flip the current
-/// value). Unknown names are a 400.
+/// value). Unknown names are a 400. Disabling a plugin also unregisters it
+/// from the global [`PluginHost`] so that backend tools stop immediately.
 pub async fn toggle_plugin(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -156,13 +159,22 @@ pub async fn toggle_plugin(
         .store
         .set_plugin_enabled(&instance, &name, enabled)
         .map_err(|e| ApiError::from_core(&e).into_response())?;
+
+    // When disabling, immediately unregister from the global host so that
+    // backend tools (code_index_*, plugin invoke, etc.) stop working for
+    // this plugin without waiting for a restart.
+    if !enabled {
+        bebok_core::PluginHost::global().unregister(&name).await;
+    }
+
     Ok(Json(serde_json::json!({ "plugin": plugin })))
 }
 
 /// `GET /plugins/{name}/status?directory=` — query the status of a dynamic
 /// plugin subprocess. The plugin receives `{"directory": <project dir>}` as
 /// the input. Returns `{"ok":true,...}` from the plugin's `status` action,
-/// or 404 when no plugin with that name is registered.
+/// or 404 when no plugin with that name is registered or the plugin is
+/// disabled for this project.
 pub async fn plugin_status(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -173,6 +185,15 @@ pub async fn plugin_status(
         .get_or_create_instance(&q.directory)
         .await
         .map_err(|e| err_response(&e))?;
+
+    // Cross-project safety: a disabled declaration in THIS project blocks
+    // access even if the plugin is registered globally (for another project).
+    if bebok_core::plugin_decl::is_disabled(&instance.root, &name) {
+        return Err(
+            ApiError::not_found(format!("no plugin registered with name '{name}'")).into_response(),
+        );
+    }
+
     ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
     let input = serde_json::json!({ "directory": q.directory });
@@ -189,7 +210,8 @@ pub async fn plugin_status(
 /// input; when the body is a JSON object without a `directory` field, the
 /// request's project directory is added (an explicitly provided `directory`
 /// is never overwritten). Returns the plugin's JSON response, or 404 when
-/// no plugin with that name is registered.
+/// no plugin with that name is registered or the plugin is disabled for
+/// this project.
 pub async fn plugin_invoke(
     State(state): State<AppState>,
     Path((name, action)): Path<(String, String)>,
@@ -201,6 +223,16 @@ pub async fn plugin_invoke(
         .get_or_create_instance(&q.directory)
         .await
         .map_err(|e| err_response(&e))?;
+
+    // Cross-project safety: a disabled declaration in THIS project blocks
+    // access even if the plugin is registered globally (for another project).
+    if bebok_core::plugin_decl::is_disabled(&instance.root, &name) {
+        return Err(ApiError::not_found(format!(
+            "no plugin registered with name '{name}' (or action '{action}' not handled)"
+        ))
+        .into_response());
+    }
+
     ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
     // Ensure the plugin can locate the project: default `directory` to the
@@ -645,6 +677,129 @@ done
         let (parts, _) = err.into_parts();
         assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Toggle-off unregisters a previously registered plugin from the host.
+    #[tokio::test]
+    async fn toggle_off_unregisters_plugin_from_host() {
+        let base = temp_base("toggle-unreg");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+        let plugin_name = "toggle-unreg";
+
+        // 1. Create declaration (enabled = true).
+        let decl = bebok_core::PluginDecl {
+            name: plugin_name.to_string(),
+            repo: "test/repo".to_string(),
+            url: "https://example.com/test/repo".to_string(),
+            enabled: true,
+        };
+        let plugins_dir = project.join(".bebok").join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join(format!("{plugin_name}.json")),
+            serde_json::to_string_pretty(&decl).unwrap(),
+        )
+        .unwrap();
+
+        // 2. Manually register a stub plugin on the host (DynamicPlugin
+        // construction is lazy — no process is spawned until first invoke).
+        let slot_dir = plugins_dir.join(plugin_name);
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let dyn_plugin = bebok_core::DynamicPlugin::new(plugin_name, slot_dir, None);
+        let host = bebok_core::PluginHost::global();
+        host.register(Arc::new(dyn_plugin)).await;
+        assert!(
+            host.names().await.iter().any(|n| n == plugin_name),
+            "stub must be registered before toggle"
+        );
+
+        // 3. Toggle off via the handler.
+        let resp = toggle_plugin(
+            State(state.clone()),
+            Path(plugin_name.to_string()),
+            Query(query(&dir)),
+            Json(PluginToggleBody {
+                enabled: Some(false),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["plugin"]["enabled"], false);
+
+        // 4. Plugin must no longer be on the host.
+        assert!(
+            !host.names().await.iter().any(|n| n == plugin_name),
+            "toggle-off must unregister the plugin from the host"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Disabled plugin returns 404 on status/invoke even when registered on
+    /// the host for a different project (cross-project isolation).
+    #[tokio::test]
+    async fn disabled_plugin_status_invoke_404_cross_project() {
+        let base = temp_base("cross-project");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+        let plugin_name = "cross-proj";
+
+        // 1. Declaration with enabled = false.
+        let decl = bebok_core::PluginDecl {
+            name: plugin_name.to_string(),
+            repo: "test/repo".to_string(),
+            url: "https://example.com/test/repo".to_string(),
+            enabled: false,
+        };
+        let plugins_dir = project.join(".bebok").join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join(format!("{plugin_name}.json")),
+            serde_json::to_string_pretty(&decl).unwrap(),
+        )
+        .unwrap();
+
+        // 2. Force-register the plugin on the global host (simulates
+        //    another project having enabled it). DynamicPlugin construction
+        //    is lazy — no process is spawned until first invoke.
+        let slot_dir = plugins_dir.join(plugin_name);
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let dyn_plugin = bebok_core::DynamicPlugin::new(plugin_name, slot_dir, None);
+        let host = bebok_core::PluginHost::global();
+        host.register(Arc::new(dyn_plugin)).await;
+        assert!(host.names().await.iter().any(|n| n == plugin_name));
+
+        // 3. status must 404 for THIS project (disabled).
+        let err = plugin_status(
+            State(state.clone()),
+            Path(plugin_name.to_string()),
+            Query(query(&dir)),
+        )
+        .await
+        .expect_err("disabled plugin must 404 even if registered globally");
+        let (parts, _) = err.into_parts();
+        assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
+
+        // 4. invoke must also 404 for THIS project.
+        let err = plugin_invoke(
+            State(state.clone()),
+            Path((plugin_name.to_string(), "search".to_string())),
+            Query(query(&dir)),
+            Json(serde_json::json!({"query": "test"})),
+        )
+        .await
+        .expect_err("disabled plugin invoke must 404");
+        let (parts, _) = err.into_parts();
+        assert_eq!(parts.status, axum::http::StatusCode::NOT_FOUND);
+
+        // Cleanup.
+        host.unregister(plugin_name).await;
         let _ = std::fs::remove_dir_all(&base);
     }
 }
