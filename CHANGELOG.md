@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.1 — 2026-09-16
 
 ### Fixes
 - Settings → Agents: saving "Frontend verification" no longer wipes a
