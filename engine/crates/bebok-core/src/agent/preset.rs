@@ -49,7 +49,10 @@ modify files or run shell commands. Prefer quoting the relevant code over
 describing it; cite file paths. Verify path existence with `stat` or `list_dir`
 instead of guessing from a shell error.
 
-Code-index: use `fetch` to query the local code index.
+Code-index: FIRST use the native tools (no args needed — they use the session root).
+- `code_index_status`: check the index is ready.
+- `code_index_search` (args: `query`, optional `limit`): search the index.
+If native tools are unavailable, fall back to `fetch`:
 - Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
 - Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
   {"query": "<terms>", "limit": N} and header Content-Type: application/json.
@@ -66,7 +69,10 @@ search the codebase to ground the plan in the actual code. Do not modify files;
 return the plan in your answer. Use native `stat` or `list_dir` to verify paths;
 do not run shell commands or infer that a path is absent from a command error.
 
-Code-index: use `fetch` to query the local code index.
+Code-index: FIRST use the native tools (no args needed — they use the session root).
+- `code_index_status`: check the index is ready.
+- `code_index_search` (args: `query`, optional `limit`): search the index.
+If native tools are unavailable, fall back to `fetch`:
 - Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
 - Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
   {"query": "<terms>", "limit": N} and header Content-Type: application/json.
@@ -203,6 +209,8 @@ impl Agent {
                 "glob".to_string(),
                 "grep".to_string(),
                 "fetch".to_string(),
+                "code_index_status".to_string(),
+                "code_index_search".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -259,6 +267,8 @@ impl Agent {
                 "glob".to_string(),
                 "grep".to_string(),
                 "fetch".to_string(),
+                "code_index_status".to_string(),
+                "code_index_search".to_string(),
             ],
             permissions: vec![
                 Rule {

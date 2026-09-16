@@ -19,6 +19,7 @@
 
 pub mod build_test_prompt;
 pub mod catalog;
+pub mod code_index_tools;
 pub mod delegation;
 pub mod delegation_policy;
 pub mod exec;
@@ -42,6 +43,7 @@ mod tests;
 
 pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
+pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
 pub use delegation::{
     LOOP_MIN_REPEAT, LOOP_WINDOW, LoopHit, TaskProgress, WANDER_MIN_DISTINCT_READS,
     WANDER_NO_ADVANCE_WINDOW, WANDER_READ_RATIO, WanderHit, summarize_progress,

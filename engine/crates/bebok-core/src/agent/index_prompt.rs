@@ -21,17 +21,20 @@ use crate::plugin_decl;
 /// `AGENT_INDEX.md` (or custom `prompt_file`) is found.
 pub const FALLBACK_SECTION: &str = "\
 Code index first — MANDATORY: whenever you need to find code (where is X defined, \
-who calls Y, list files matching Z), FIRST query the local code index via `fetch`: \
-GET /plugins/bebok-index/status?directory=<project-root> to check it is ready, \
-then POST /plugins/bebok-index/search?directory=<project-root> with JSON body \
+who calls Y, list files matching Z), FIRST use the native tools: \
+`code_index_status` (no args needed — uses the session root) to check the index is ready, \
+then `code_index_search` (args: `query` and optional `limit`) to search. \
+Only when the native tools are unavailable or the status reports not ready, \
+fall back to `fetch`: GET /plugins/bebok-index/status?directory=<project-root> \
+and POST /plugins/bebok-index/search?directory=<project-root> with JSON body \
 {\"query\": \"...\", \"limit\": 5} and header Content-Type: application/json. \
-Only when the index is unavailable (status not ready / fetch fails) or returns \
-no results for a well-formed query, fall back to `read_file` / `grep` / `glob`. \
-Retry rule: a reply {\"ok\": false, \"error\": \"query is required and must not be empty\"} means \
-the client dropped the JSON body (serialization bug), not an empty index — do not fall back yet; \
-retry once with the same query as a raw JSON string in the `body` parameter with header \
-Content-Type: application/json, e.g. body='{\"query\": \"...\", \"limit\": 5}', and reach for \
+If the fetch fallback replies {\"ok\": false, \"error\": \"query is required and must not be empty\"} \
+(the client dropped the JSON body), retry once with the same query as a raw JSON \
+string in the `body` parameter with header Content-Type: application/json, \
+e.g. body='{\"query\": \"...\", \"limit\": 5}', and reach for \
 `read_file` / `grep` / `glob` only when that retry also returns ok:false. \
+If the index is available but returns no results for a well-formed query, \
+fall back to `read_file` / `grep` / `glob`. \
 Never start with grep/glob when the index is available.";
 
 /// Heading grep-able in tests and other modules.
@@ -78,6 +81,9 @@ pub fn index_section(root: &Path) -> Option<String> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| FALLBACK_SECTION.to_string());
+
+    let root_display = root.to_string_lossy();
+    let text = text.replace("<project-root>", &root_display);
 
     Some(text)
 }
@@ -152,7 +158,13 @@ mod tests {
         fs::create_dir_all(slot_dir(&root)).unwrap();
 
         let section = index_section(&root).unwrap();
-        assert_eq!(section, FALLBACK_SECTION);
+        // The returned section has <project-root> replaced with the actual root path.
+        let expected = FALLBACK_SECTION.replace("<project-root>", &root.to_string_lossy());
+        assert_eq!(section, expected);
+        assert!(
+            !section.contains("<project-root>"),
+            "output must not contain unresolved <project-root>"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -240,7 +252,8 @@ mod tests {
         write_slot_file(&root, "AGENT_INDEX.md", "   \n  \n  ");
 
         let section = index_section(&root).unwrap();
-        assert_eq!(section, FALLBACK_SECTION);
+        let expected = FALLBACK_SECTION.replace("<project-root>", &root.to_string_lossy());
+        assert_eq!(section, expected);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -248,6 +261,10 @@ mod tests {
     fn fallback_section_contains_mandatory_keyword() {
         assert!(FALLBACK_SECTION.contains("MANDATORY"));
         assert!(FALLBACK_SECTION.contains(SECTION_HEADING));
+        // Native tools are mentioned first.
+        assert!(FALLBACK_SECTION.contains("code_index_status"));
+        assert!(FALLBACK_SECTION.contains("code_index_search"));
+        // Fetch fallback URLs still present.
         assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/status"));
         assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/search"));
     }
@@ -299,7 +316,66 @@ mod tests {
         fs::create_dir_all(slot_dir(&root)).unwrap();
 
         let section = index_section(&root).unwrap();
-        assert_eq!(section, FALLBACK_SECTION);
+        let expected = FALLBACK_SECTION.replace("<project-root>", &root.to_string_lossy());
+        assert_eq!(section, expected);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // --- New tests for <project-root> substitution ---
+
+    #[test]
+    fn index_section_substitutes_project_root_in_fallback() {
+        let root = temp_root("substitution");
+        write_decl(
+            &root,
+            r#"{"name":"bebok-index","repo":"a/b","enabled":true}"#,
+        );
+        fs::create_dir_all(slot_dir(&root)).unwrap();
+
+        let section = index_section(&root).unwrap();
+        // No unresolved placeholder remains.
+        assert!(
+            !section.contains("<project-root>"),
+            "output must not contain unresolved <project-root>"
+        );
+        // The actual root path must appear in the fetch fallback URLs.
+        let root_str = root.to_string_lossy();
+        assert!(
+            section.contains(&*root_str),
+            "output must contain the concrete root path"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn index_section_substitutes_project_root_in_custom_file() {
+        let root = temp_root("sub-custom");
+        write_decl(
+            &root,
+            r#"{"name":"bebok-index","repo":"a/b","enabled":true}"#,
+        );
+        write_slot_file(&root, "AGENT_INDEX.md", "Search in <project-root> please.");
+
+        let section = index_section(&root).unwrap();
+        let root_str = root.to_string_lossy();
+        assert_eq!(section, format!("Search in {root_str} please."));
+        assert!(!section.contains("<project-root>"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fallback_section_mentions_native_tools() {
+        assert!(
+            FALLBACK_SECTION.contains("code_index_status"),
+            "FALLBACK_SECTION must mention native code_index_status tool"
+        );
+        assert!(
+            FALLBACK_SECTION.contains("code_index_search"),
+            "FALLBACK_SECTION must mention native code_index_search tool"
+        );
+        assert!(
+            FALLBACK_SECTION.contains("no args needed"),
+            "FALLBACK_SECTION must note native tools need no directory arg"
+        );
     }
 }
