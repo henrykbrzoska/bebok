@@ -1,8 +1,8 @@
 /**
- * Build & test policy card specs: the radio group reads
- * `config.verify.buildTest`, saves `{ verify: { buildTest } }` to the chosen
- * config layer (global by default) and keeps the selection on the value that is
- * actually in effect when another layer keeps overriding it.
+ * Build & test policy card specs: the radio group stages a pending selection,
+ * and an explicit Save button persists `{ verify: { buildTest } }` to the
+ * chosen config layer (project by default). The effective mode stays on the
+ * value actually in effect when another layer keeps overriding the save.
  */
 
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -88,8 +88,10 @@ describe('BuildTestPolicyCard', () => {
     expect(radio('auto').checked).toBeTrue();
     expect(radio('ask').checked).toBeFalse();
     expect(radio('off').checked).toBeFalse();
-    expect(component.scope()).toBe('global');
+    expect(component.scope()).toBe('project');
     expect(component.projectOverride()).toBeNull();
+    expect(component.pending()).toBeNull();
+    expect(component.hasChanges()).toBeFalse();
   });
 
   it('renders a label and help text for every mode', async () => {
@@ -111,39 +113,57 @@ describe('BuildTestPolicyCard', () => {
     expect(component.mode()).toBe('auto');
   });
 
-  it('saves the chosen mode to the global config layer by default', async () => {
+  it('stages a pending selection without saving', async () => {
     await setup();
-    await component.setMode('off');
+    component.selectMode('off');
+    expect(component.pending()).toBe('off');
+    expect(component.hasChanges()).toBeTrue();
+    expect(component.effectiveMode()).toBe('off');
+    expect(radio('off').checked).toBeTrue();
+    expect(engine.putConfig).not.toHaveBeenCalled();
+  });
+
+  it('save button is disabled when there are no changes', async () => {
+    await setup();
+    const btn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-testid="build-test-save"]',
+    )!;
+    expect(btn.disabled).toBeTrue();
+  });
+
+  it('save button is enabled when there are pending changes', async () => {
+    await setup();
+    component.selectMode('off');
+    fixture.detectChanges();
+    const btn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-testid="build-test-save"]',
+    )!;
+    expect(btn.disabled).toBeFalse();
+  });
+
+  it('save() persists the staged mode to the project config layer by default', async () => {
+    await setup();
+    component.selectMode('off');
+    await component.save();
     expect(engine.putConfig).toHaveBeenCalledWith(
       'C:/tmp/project',
       { verify: { buildTest: 'off' } },
-      { scope: 'global' },
+      { scope: 'project' },
     );
-    expect(component.mode()).toBe('off');
-    expect(radio('off').checked).toBeTrue();
+    expect(component.pending()).toBeNull();
     expect(component.store.saved()).toBeTruthy();
   });
 
-  it('saves to the project layer when that scope is selected', async () => {
+  it('save() persists to the global layer when that scope is selected', async () => {
     await setup();
-    component.setScope('project');
-    await component.setMode('ask');
+    component.setScope('global');
+    component.selectMode('ask');
+    await component.save();
     expect(engine.putConfig).toHaveBeenCalledWith(
       'C:/tmp/project',
       { verify: { buildTest: 'ask' } },
-      { scope: 'project' },
+      { scope: 'global' },
     );
-    component.setScope('nonsense');
-    expect(component.scope()).toBe('global');
-  });
-
-  it('clicking a radio saves that mode', async () => {
-    await setup();
-    radio('ask').click();
-    await fixture.whenStable();
-    expect((engine.putConfig as jasmine.Spy).calls.mostRecent().args[1]).toEqual({
-      verify: { buildTest: 'ask' },
-    });
   });
 
   it('shows the project override when the project layer sets a value', async () => {
@@ -162,7 +182,9 @@ describe('BuildTestPolicyCard', () => {
     (engine.putConfig as jasmine.Spy).and.returnValue(
       Promise.resolve(configResponse({ buildTest: 'off' })),
     );
-    await component.setMode('auto');
+    component.setScope('global');
+    component.selectMode('auto');
+    await component.save();
     fixture.detectChanges();
     expect(component.mode()).toBe('off');
     expect(radio('off').checked).toBeTrue();
@@ -172,7 +194,8 @@ describe('BuildTestPolicyCard', () => {
   it('falls back to auto for an unknown value and reports engine errors', async () => {
     await setup({ buildTest: 'ask' });
     (engine.putConfig as jasmine.Spy).and.returnValue(Promise.reject(new Error('boom')));
-    await component.setMode('nonsense');
+    component.selectMode('nonsense');
+    await component.save();
     expect((engine.putConfig as jasmine.Spy).calls.mostRecent().args[1]).toEqual({
       verify: { buildTest: 'auto' },
     });
@@ -182,8 +205,16 @@ describe('BuildTestPolicyCard', () => {
 
   it('is a no-op while another save is running', async () => {
     await setup();
+    component.selectMode('off');
     component.store.saving.set(true);
-    await component.setMode('off');
+    await component.save();
     expect(engine.putConfig).not.toHaveBeenCalled();
+  });
+
+  it('scope change does not trigger hasChanges', async () => {
+    await setup();
+    expect(component.hasChanges()).toBeFalse();
+    component.setScope('global');
+    expect(component.hasChanges()).toBeFalse();
   });
 });

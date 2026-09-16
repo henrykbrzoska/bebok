@@ -11,13 +11,23 @@
  *
  * A separate component (not inlined into `agents-tab.*`) so concurrent work on
  * the Agents tab merges without conflicts.
+ *
+ * The radio group stages a pending selection; an explicit Save button persists
+ * the change to the chosen config layer (project by default).
  */
 
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { BUILD_TEST_MODES, BuildTestMode, isBuildTestMode } from '../../core/engine.dtos';
+import {
+  BUILD_TEST_MODES,
+  BuildTestMode,
+  FRONTEND_VERIFY_MODES,
+  FrontendVerify,
+  isBuildTestMode,
+  isFrontendVerify,
+} from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { SettingsStore } from './settings.store';
 
@@ -59,8 +69,8 @@ export class BuildTestPolicyCard {
 
   readonly modes = BUILD_TEST_MODES;
 
-  /** Where the next save goes. */
-  readonly scope = signal<BuildTestScope>('global');
+  /** Where the next save goes ("This project only" by default). */
+  readonly scope = signal<BuildTestScope>('project');
 
   /** Effective policy of the loaded (resolved) config. */
   readonly mode = computed<BuildTestMode>(() => {
@@ -68,10 +78,25 @@ export class BuildTestPolicyCard {
     return isBuildTestMode(raw) ? raw : DEFAULT_BUILD_TEST_MODE;
   });
 
+  /**
+   * Staged (unsaved) selection. When non-null the radio shows this value
+   * instead of the persisted `mode()`. Reset to null after a successful save.
+   */
+  readonly pending = signal<BuildTestMode | null>(null);
+
+  /** True when the user has staged a value different from the persisted one. */
+  readonly hasChanges = computed(() => {
+    const p = this.pending();
+    return p !== null && p !== this.mode();
+  });
+
   /** The project layer sets its own value (overriding the global one). */
   readonly projectOverride = computed<BuildTestMode | null>(() =>
     layerBuildTest(this.store.config()?.files?.project?.content),
   );
+
+  /** The mode currently shown on the radio group (pending or persisted). */
+  readonly effectiveMode = computed<BuildTestMode>(() => this.pending() ?? this.mode());
 
   modeLabel(mode: BuildTestMode): string {
     switch (mode) {
@@ -96,12 +121,18 @@ export class BuildTestPolicyCard {
   }
 
   setScope(raw: string): void {
-    this.scope.set(raw === 'project' ? 'project' : 'global');
+    this.scope.set(raw === 'global' ? 'global' : 'project');
   }
 
-  /** Persist the chosen policy to the selected config layer. */
-  async setMode(raw: string): Promise<void> {
+  /** Stage a mode selection (does not persist). */
+  selectMode(raw: string): void {
     const mode = isBuildTestMode(raw) ? raw : DEFAULT_BUILD_TEST_MODE;
+    this.pending.set(mode);
+  }
+
+  /** Persist the staged policy to the selected config layer. */
+  async save(): Promise<void> {
+    const mode = this.pending() ?? this.mode();
     const dir = this.store.directory();
     if (!dir || this.store.saving()) {
       return;
@@ -110,12 +141,19 @@ export class BuildTestPolicyCard {
     this.store.error.set(null);
     this.store.saved.set(null);
     try {
-      const cfg = await this.engine.putConfig(
-        dir,
-        { verify: { buildTest: mode } },
-        { scope: this.scope() },
-      );
+      // Merge the sibling key (`frontend`) into the delta: `PUT /config`
+      // replaces the whole top-level `verify` section, so sending only
+      // `{ verify: { buildTest } }` would wipe a previously saved `frontend`.
+      const sibling = this.store.config()?.config.verify?.frontend;
+      const verify: { buildTest: BuildTestMode; frontend?: FrontendVerify } = {
+        buildTest: mode,
+      };
+      if (isFrontendVerify(sibling)) {
+        verify.frontend = sibling;
+      }
+      const cfg = await this.engine.putConfig(dir, { verify }, { scope: this.scope() });
       this.store.applyConfig(cfg);
+      this.pending.set(null);
       this.store.saved.set(this.t('settings.buildTestSaved'));
     } catch (err) {
       this.store.error.set(this.store.describe(err));

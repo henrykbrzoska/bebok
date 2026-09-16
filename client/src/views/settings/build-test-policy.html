@@ -5,13 +5,13 @@
   <fieldset class="modes" [disabled]="store.saving()">
     <legend class="micro-label">{{ t('settings.buildTestLabel') }}</legend>
     @for (m of modes; track m) {
-      <label class="mode" [class.selected]="mode() === m">
+      <label class="mode" [class.selected]="effectiveMode() === m">
         <input
           type="radio"
           name="build-test"
           [value]="m"
-          [checked]="mode() === m"
-          (change)="setMode(m)"
+          [checked]="effectiveMode() === m"
+          (change)="selectMode(m)"
           [attr.data-testid]="'build-test-' + m"
         />
         <span class="mode-text">
@@ -40,4 +40,25 @@
       </span>
     }
   </label>
+
+  <div class="actions">
+    <button
+      type="button"
+      class="primary"
+      (click)="save()"
+      [disabled]="!hasChanges() || store.saving()"
+      data-testid="build-test-save"
+    >
+      {{ t('settings.buildTestSave') }}
+    </button>
+    @if (store.saving()) {
+      <span class="spinner"></span>
+    }
+    @if (store.saved(); as msg) {
+      <span class="small saved-msg">{{ msg }}</span>
+    }
+    @if (store.error(); as err) {
+      <span class="inline-error">{{ err }}</span>
+    }
+  </div>
 </div>

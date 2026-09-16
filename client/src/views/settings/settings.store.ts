@@ -23,6 +23,7 @@ import {
   ResolvedSkill,
 } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { selectableModels } from '../../core/model-list';
 import { ProviderDraft } from './provider-catalog';
 
 /** The eight tabs of the redesigned Settings screen (design handoff §8). */
@@ -150,16 +151,13 @@ export class SettingsStore {
   readonly rawProjectPath = signal('');
   readonly rawGlobalPath = signal('');
 
-  /** Flat list of selectable models (`provider/model`) from every provider. */
-  readonly availableModels = computed<string[]>(() => {
-    const out: string[] = [];
-    for (const provider of this.providers()) {
-      for (const model of provider.models ?? []) {
-        out.push(`${provider.name}/${model}`);
-      }
-    }
-    return out;
-  });
+  /**
+   * Flat list of selectable models (`provider/model`): only usable providers
+   * (key resolvable or keyless, e.g. Ollama) and only non-blank model names.
+   */
+  readonly availableModels = computed<string[]>(() =>
+    selectableModels(this.providers()),
+  );
 
   /** MCP server entries from the raw `config.mcp` object. */
   readonly mcpConfig = computed<Record<string, McpServerConfig>>(() => {
