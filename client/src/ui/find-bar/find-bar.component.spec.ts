@@ -34,7 +34,7 @@ describe('FindBarComponent', () => {
   it('scanning "lorem lorem" reports two matches', () => {
     create('lorem lorem');
     store.setQuery('lorem');
-    TestBed.tick(0);
+    TestBed.tick();
     expect(store.total()).toBe(2);
   });
 
@@ -42,7 +42,7 @@ describe('FindBarComponent', () => {
     const bar = create('lorem');
     store.toggleUseRegex();
     store.setQuery('([');
-    TestBed.tick(0);
+    TestBed.tick();
     expect(bar.regexError()).toBeTrue();
     expect(store.total()).toBe(0);
     expect(bar.counterText()).toBe('Invalid pattern');
@@ -51,7 +51,7 @@ describe('FindBarComponent', () => {
   it('counter shows the active position and wraps with next()/prev()', () => {
     create('a a a');
     store.setQuery('a');
-    TestBed.tick(0);
+    TestBed.tick();
     expect(bar_counter(store)).toBe('1/3');
     store.next();
     expect(bar_counter(store)).toBe('2/3');
