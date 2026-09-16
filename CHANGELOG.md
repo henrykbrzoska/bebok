@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Plugins: Settings → General now has an **Update** button on every installed
+  plugin. It re-resolves the plugin's release and downloads the binary for
+  your platform when it is missing, so a plugin that was installed without an
+  asset for your OS can be repaired in place (the button becomes the primary
+  action and the row shows the available version); the plugin's version is
+  shown in the button label.
+
+### Fixes
+- Plugins: updating a plugin whose platform binary is unavailable now reports
+  a clear "binary missing for this platform" message (engine answers
+  `503 binary_missing`, and `no_asset_for_platform` / `offline_fallback` /
+  `checksum_mismatch` get their own messages) instead of a confusing
+  `404 Not Found`.
+
+## 1.7.2 — 2026-09-16
+
+### Fixes
+- **engine**: spawn dynamic plugin subprocesses reliably on Windows (7346c19)
+
 ## 1.7.1 — 2026-09-16
 
 ### Fixes

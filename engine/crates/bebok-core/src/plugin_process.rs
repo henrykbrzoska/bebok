@@ -128,40 +128,58 @@ impl PluginProcess {
     fn resolved_binary(&self) -> Option<PathBuf> {
         if Path::new(&self.command).is_absolute() {
             let p = PathBuf::from(&self.command);
-            p.exists().then_some(p)
-        } else {
-            // Try slot_dir first, then fall back to PATH.
-            let local = self.slot_dir.join(&self.command);
-            if local.exists() {
-                return Some(local);
+            if p.exists() {
+                return Some(p);
             }
-            // Try to find on PATH via `which` (`where` on Windows).
-            let probe = if cfg!(windows) { "where" } else { "which" };
-            std::process::Command::new(probe)
-                .arg(&self.command)
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        // `where` on Windows may list several matches (one
-                        // per line); take the first usable line instead of
-                        // treating the whole stdout blob as one path.
-                        let path = String::from_utf8_lossy(&o.stdout)
-                            .lines()
-                            .map(str::trim)
-                            .find(|l| !l.is_empty())
-                            .unwrap_or("")
-                            .to_string();
-                        if !path.is_empty() {
-                            Some(PathBuf::from(path))
-                        } else {
-                            None
-                        }
+            // On Windows, also try with .exe suffix.
+            #[cfg(windows)]
+            {
+                let p_exe = PathBuf::from(format!("{}.exe", self.command));
+                if p_exe.exists() {
+                    return Some(p_exe);
+                }
+            }
+            return None;
+        }
+        // Try slot_dir first, then fall back to PATH.
+        let local = self.slot_dir.join(&self.command);
+        if local.exists() {
+            return Some(local);
+        }
+        // On Windows, also try with .exe suffix in the slot dir.
+        #[cfg(windows)]
+        {
+            let local_exe = self.slot_dir.join(format!("{}.exe", self.command));
+            if local_exe.exists() {
+                return Some(local_exe);
+            }
+        }
+        // Try to find on PATH via `which` (`where` on Windows).
+        let probe = if cfg!(windows) { "where" } else { "which" };
+        std::process::Command::new(probe)
+            .arg(&self.command)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    // `where` on Windows may list several matches (one
+                    // per line); take the first usable line instead of
+                    // treating the whole stdout blob as one path.
+                    let path = String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .unwrap_or("")
+                        .to_string();
+                    if !path.is_empty() {
+                        Some(PathBuf::from(path))
                     } else {
                         None
                     }
-                })
-        }
+                } else {
+                    None
+                }
+            })
     }
 
     /// Ensure the child process is running. Returns `Ok(())` when the
@@ -338,7 +356,13 @@ pub fn load_dynamic_plugin(slot_dir: &Path) -> crate::error::Result<DynamicPlugi
     }
     let manifest = crate::plugin_registry::read_manifest(slot_dir)?;
     let name = manifest.name;
-    let entrypoint = manifest.entrypoint;
+    // Choose platform-specific entrypoint: entrypoint_windows on Windows,
+    // entrypoint_unix on Unix, else generic entrypoint.
+    let entrypoint = if cfg!(windows) {
+        manifest.entrypoint_windows.or(manifest.entrypoint)
+    } else {
+        manifest.entrypoint_unix.or(manifest.entrypoint)
+    };
     Ok(DynamicPlugin::new(
         &name,
         slot_dir.to_path_buf(),

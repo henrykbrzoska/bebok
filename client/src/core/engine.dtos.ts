@@ -480,6 +480,16 @@ export interface DeclaredPlugin {
   url: string;
   enabled: boolean;
   installed: boolean;
+  /**
+   * Plan B: version of the installed plugin (omitted by engines that predate
+   * the version-aware install/update path).
+   */
+  version?: string;
+  /**
+   * Plan B: whether the release binary for the running platform is present
+   * (`missing` = the plugin was installed without a usable build for this OS).
+   */
+  binary?: 'present' | 'missing';
 }
 
 /** TOR C: `GET /plugins?directory=` payload (plus legacy host introspection). */
@@ -501,6 +511,8 @@ export interface RegistryPlugin {
   repo: string;
   url: string;
   description: string;
+  /** Latest version advertised by the registry (absent on older engines). */
+  version?: string;
 }
 
 /** `GET /plugins/registry` payload: the installable-plugin catalogue. */

@@ -38,6 +38,21 @@
             (click)="install(row.name)"
           >{{ t('settings.pluginInstall') }}</button>
         } @else {
+          @if (isBinaryMissing(row)) {
+            <span
+              class="plugin-binary-warn small warn"
+              [attr.data-testid]="'plugin-binary-missing-' + row.name"
+            >{{ t('settings.pluginBinaryMissing') }}</span>
+          }
+          <button
+            type="button"
+            class="plugin-update"
+            [class.primary]="isBinaryMissing(row)"
+            [class.ghost]="!isBinaryMissing(row)"
+            [attr.data-testid]="'plugin-update-' + row.name"
+            [disabled]="busyName() !== null"
+            (click)="update(row)"
+          >{{ updateLabel(row) }}</button>
           <button
             type="button"
             [attr.data-testid]="'plugin-toggle-' + row.name"

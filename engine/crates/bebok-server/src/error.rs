@@ -22,6 +22,7 @@ pub enum ApiError {
     Conflict(String),
     Forbidden(String),
     BadGateway(String),
+    ServiceUnavailable(String),
     Internal(String),
 }
 
@@ -44,6 +45,10 @@ impl ApiError {
 
     pub fn bad_gateway(msg: impl Into<String>) -> Self {
         Self::BadGateway(msg.into())
+    }
+
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        Self::ServiceUnavailable(msg.into())
     }
 
     #[allow(dead_code)]
@@ -72,6 +77,7 @@ impl IntoResponse for ApiError {
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
             Self::Forbidden(m) => (StatusCode::FORBIDDEN, m),
             Self::BadGateway(m) => (StatusCode::BAD_GATEWAY, m),
+            Self::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
         };
         body.push('\n');

@@ -50,6 +50,17 @@ impl Event {
             "change": change,
         }))
     }
+
+    /// Plugin install progress: `plugin.install.progress` for an instance
+    /// directory, with `properties = { name, stage, detail }`.
+    /// `stage` is one of `download` / `verify` / `unpack` / `install`.
+    pub fn plugin_install_progress(directory: &str, name: &str, stage: &str, detail: &str) -> Self {
+        Self::new("plugin.install.progress", directory, "").with_properties(serde_json::json!({
+            "name": name,
+            "stage": stage,
+            "detail": detail,
+        }))
+    }
 }
 
 #[derive(Clone)]
@@ -93,5 +104,23 @@ mod tests {
         assert_eq!(event.directory, "/projects/acme");
         assert_eq!(event.properties["name"], "bebok-index");
         assert_eq!(event.properties["change"], "installed");
+    }
+
+    #[test]
+    fn plugin_install_progress_has_correct_kind_and_properties() {
+        let event = Event::plugin_install_progress(
+            "/projects/acme",
+            "bebok-index",
+            "download",
+            "https://example.com/bebok-index.zip",
+        );
+        assert_eq!(event.kind, "plugin.install.progress");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.properties["name"], "bebok-index");
+        assert_eq!(event.properties["stage"], "download");
+        assert_eq!(
+            event.properties["detail"],
+            "https://example.com/bebok-index.zip"
+        );
     }
 }

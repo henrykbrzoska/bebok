@@ -91,13 +91,14 @@ impl InstanceStore {
     /// Install a plugin slot from the central registry. The name must be
     /// listed in the registry catalogue (fetched + cached; bundled
     /// `bebok-index` fallback when offline) — anything else is a
-    /// `BadRequest` (no arbitrary URLs, only public repos). The installer
-    /// clones `url` into `<root>/.bebok/plugins/<name>/`, checks out the
-    /// latest tag, and validates the plugin's `bebok-plugin.json` manifest
-    /// (name match + engine compatibility). Creates the declaration file
-    /// (`enabled: true`) and publishes `plugin.changed` (`installed`).
-    /// Idempotent: an existing declaration is kept (its `enabled` switch is
-    /// preserved); a missing slot dir is re-cloned.
+    /// `BadRequest` (no arbitrary URLs, only public repos). Creates the
+    /// declaration file (`enabled: true`) and publishes `plugin.changed`
+    /// (`installed`). Idempotent: an existing declaration is kept (its
+    /// `enabled` switch is preserved); a missing slot dir is installed.
+    ///
+    /// When the registry entry carries `asset_url`, the installer downloads
+    /// the pre-built archive, verifies `asset_sha256`, and unpacks it
+    /// instead of cloning the git repo.
     pub async fn install_plugin(
         &self,
         instance: &Arc<Instance>,
@@ -129,7 +130,14 @@ impl InstanceStore {
         let path = crate::plugin_decl::decl_path(root, name);
         let slot = crate::plugin_decl::install_dir(root, name);
         if !slot.is_dir() {
-            Self::clone_plugin_slot(&slot, &entry.url).await?;
+            if entry.asset_url.is_some() {
+                // Download + verify + unpack path.
+                self.download_install_slot(&slot, entry, &instance.directory, name)
+                    .await?;
+            } else {
+                // Fallback: git clone path.
+                Self::clone_plugin_slot(&slot, &entry.url).await?;
+            }
             let manifest = crate::plugin_registry::read_manifest(&slot)?;
             if manifest.name != name {
                 let _ = std::fs::remove_dir_all(&slot);
@@ -155,19 +163,167 @@ impl InstanceStore {
                 repo: entry.repo.clone(),
                 url: entry.url.clone(),
                 enabled: true,
+                asset_url: entry.asset_url.clone(),
+                asset_sha256: entry.asset_sha256.clone(),
             };
             crate::plugin_decl::write_decl(root, &decl)?;
             decl
         };
         crate::git::ensure_plugin_slots_ignored(root)?;
         let installed = crate::plugin_decl::install_dir(root, name).exists();
-        let decl_out = crate::DeclaredPlugin::from((decl, installed));
+        let decl_out = crate::DeclaredPlugin::with_state(root, decl, installed);
         self.bus.publish(crate::event::Event::plugin_changed(
             &instance.directory,
             name,
             "installed",
         ));
         Ok(decl_out)
+    }
+
+    /// Download + verify + unpack a plugin from an asset URL into the slot.
+    /// On any error, both staging and slot dirs are cleaned up.
+    async fn download_install_slot(
+        &self,
+        slot: &std::path::Path,
+        entry: &crate::RegistryPlugin,
+        directory: &str,
+        name: &str,
+    ) -> Result<()> {
+        let asset_url = entry.asset_url.as_ref().expect("checked by caller");
+        let asset_sha256 = entry.asset_sha256.as_ref().expect("checked by caller");
+        let staging = slot.with_extension("staging");
+
+        // Clean up on error (helper closure).
+        let cleanup = |staging: &Path, slot: &Path| {
+            let _ = std::fs::remove_dir_all(staging);
+            let _ = std::fs::remove_dir_all(slot);
+        };
+
+        // Ensure staging dir exists and is clean.
+        if staging.exists() {
+            let _ = std::fs::remove_dir_all(&staging);
+        }
+        std::fs::create_dir_all(&staging).map_err(CoreError::Io)?;
+
+        // Determine archive kind from URL.
+        let kind = crate::plugin_download::kind_from_url(asset_url).ok_or_else(|| {
+            cleanup(&staging, slot);
+            CoreError::BadRequest(format!(
+                "unsupported archive format for '{name}': {asset_url}"
+            ))
+        })?;
+
+        // Download.
+        let archive_name = match kind {
+            crate::plugin_download::ArchiveKind::Zip => format!("{name}.zip"),
+            crate::plugin_download::ArchiveKind::TarGz => format!("{name}.tar.gz"),
+        };
+        let archive_path = staging.join(&archive_name);
+
+        if let Err(e) = crate::plugin_download::download_archive(
+            asset_url,
+            &archive_path,
+            Some(&self.bus),
+            directory,
+            name,
+        )
+        .await
+        {
+            cleanup(&staging, slot);
+            return Err(e);
+        }
+
+        // Verify SHA-256.
+        self.bus
+            .publish(crate::event::Event::plugin_install_progress(
+                directory,
+                name,
+                "verify",
+                asset_sha256,
+            ));
+        if let Err(e) = crate::plugin_download::verify_sha256(&archive_path, asset_sha256) {
+            cleanup(&staging, slot);
+            return Err(e);
+        }
+
+        // Unpack into staging.
+        self.bus
+            .publish(crate::event::Event::plugin_install_progress(
+                directory,
+                name,
+                "unpack",
+                "extracting",
+            ));
+        let unpack_target = staging.join(name);
+        std::fs::create_dir_all(&unpack_target).map_err(CoreError::Io)?;
+        if let Err(e) = crate::plugin_download::unpack(&archive_path, &unpack_target, kind) {
+            cleanup(&staging, slot);
+            return Err(e);
+        }
+
+        // Atomic rename staging/name → slot.
+        self.bus
+            .publish(crate::event::Event::plugin_install_progress(
+                directory,
+                name,
+                "install",
+                "finalizing",
+            ));
+        if slot.exists() {
+            let _ = std::fs::remove_dir_all(slot);
+        }
+        if let Err(e) = std::fs::rename(&unpack_target, slot) {
+            cleanup(&staging, slot);
+            return Err(CoreError::Io(e));
+        }
+
+        // Clean up staging dir (downloaded archive no longer needed).
+        let _ = std::fs::remove_dir_all(&staging);
+
+        Ok(())
+    }
+
+    /// Remove the existing slot and re-install from the registry entry.
+    /// Used by the `POST /plugins/{name}/update` route.
+    /// Fails with 409/423 when a child process is running.
+    pub async fn update_plugin(
+        &self,
+        instance: &Arc<Instance>,
+        name: &str,
+    ) -> Result<crate::DeclaredPlugin> {
+        // Validate name.
+        if name.trim().is_empty()
+            || name.contains(['/', '\\', '.'])
+            || name.contains("..")
+            || name.trim() != name
+        {
+            return Err(CoreError::BadRequest(format!(
+                "invalid plugin name '{name}'"
+            )));
+        }
+        let root = &instance.root;
+        let slot = crate::plugin_decl::install_dir(root, name);
+        let path = crate::plugin_decl::decl_path(root, name);
+
+        // Declaration must exist (404 if not).
+        if !path.is_file() {
+            return Err(CoreError::BadRequest(format!(
+                "plugin '{name}' is not declared (install it first)"
+            )));
+        }
+
+        // Check slot exists but has no binary (503 binary_missing when
+        // the slot exists but the binary is gone).
+        // (The route handler checks is_running; here we just do the
+        // re-install.)
+
+        // Remove the old slot.
+        if slot.is_dir() {
+            std::fs::remove_dir_all(&slot).map_err(CoreError::Io)?;
+        }
+
+        // Re-install from registry.
+        self.install_plugin(instance, name).await
     }
 
     /// Clone a plugin repo into its slot dir and check out the latest tag.

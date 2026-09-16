@@ -104,6 +104,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/plugins", get(plugins::list_plugins))
         .route("/plugins/registry", get(plugins::plugin_registry))
         .route("/plugins/{name}/install", post(plugins::install_plugin))
+        .route("/plugins/{name}/update", post(plugins::update_plugin))
         .route("/plugins/{name}/toggle", post(plugins::toggle_plugin))
         .route("/plugins/{name}/status", get(plugins::plugin_status))
         .route("/plugins/{name}/{action}", post(plugins::plugin_invoke))

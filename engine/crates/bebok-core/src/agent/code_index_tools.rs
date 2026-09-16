@@ -70,10 +70,11 @@ impl Tool for CodeIndexStatus {
                         ToolOutput::new(text, "code_index_status")
                     }
                     None => {
+                        let error_msg = plugin_not_registered_error("bebok-index", &ctx.root);
                         ToolOutput::new(
                             serde_json::to_string(&json!({
                                 "ok": false,
-                                "error": "bebok-index plugin is not registered"
+                                "error": error_msg
                             })).unwrap_or_default(),
                             "code_index_status",
                         )
@@ -184,10 +185,11 @@ impl Tool for CodeIndexSearch {
                         ToolOutput::new(text, "code_index_search")
                     }
                     None => {
+                        let error_msg = plugin_not_registered_error("bebok-index", &ctx.root);
                         ToolOutput::new(
                             serde_json::to_string(&json!({
                                 "ok": false,
-                                "error": "bebok-index plugin is not registered"
+                                "error": error_msg
                             })).unwrap_or_default(),
                             "code_index_search",
                         )
@@ -206,6 +208,28 @@ async fn invoke_plugin(name: &str, action: &str, input: &Value) -> Option<Value>
     crate::plugin::PluginHost::global()
         .invoke(name, action, input)
         .await
+}
+
+/// Build a smart error message when a plugin is not registered: when the
+/// plugin's slot dir exists but the binary is missing, tell the user to
+/// update; otherwise say it is not registered.
+fn plugin_not_registered_error(name: &str, root: &std::path::Path) -> String {
+    let slot = crate::plugin_decl::install_dir(root, name);
+    if slot.is_dir() {
+        // Slot exists — check if it has a manifest with an entrypoint.
+        if let Ok(manifest) = crate::plugin_registry::read_manifest(&slot) {
+            let has_ep = manifest.entrypoint.is_some()
+                || manifest.entrypoint_windows.is_some()
+                || manifest.entrypoint_unix.is_some();
+            if has_ep {
+                // Binary likely missing — point the user to update.
+                return format!("{name} plugin binary is missing — run Update in Settings");
+            }
+        }
+        format!("{name} plugin is not registered")
+    } else {
+        format!("{name} plugin is not registered")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +349,8 @@ mod tests {
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: false,
+            asset_url: None,
+            asset_sha256: None,
         };
         std::fs::write(
             plugins_dir.join(format!("{}.json", crate::plugin_decl::KNOWN_PLUGIN_NAME)),
@@ -357,6 +383,8 @@ mod tests {
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: false,
+            asset_url: None,
+            asset_sha256: None,
         };
         std::fs::write(
             plugins_dir.join(format!("{}.json", crate::plugin_decl::KNOWN_PLUGIN_NAME)),

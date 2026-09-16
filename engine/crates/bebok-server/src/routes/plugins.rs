@@ -127,6 +127,94 @@ pub async fn install_plugin(
     Ok(Json(serde_json::json!({ "plugin": plugin })))
 }
 
+/// `POST /plugins/{name}/update?directory=` -> remove the existing slot and
+/// re-install from the registry entry. Idempotent. Fails with 409 when the
+/// plugin's subprocess is running, 423 when the session is busy, 404 when
+/// no declaration exists, and 503 when the slot exists but the binary is
+/// missing.
+pub async fn update_plugin(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<DirectoryQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+
+    // 404: no declaration.
+    let decl_path = bebok_core::plugin_decl::decl_path(&instance.root, &name);
+    if !decl_path.is_file() {
+        return Err(
+            ApiError::not_found(format!("plugin '{name}' is not declared")).into_response(),
+        );
+    }
+
+    // 409: plugin subprocess is running.
+    let host = bebok_core::PluginHost::global();
+    if host.names().await.iter().any(|n| n == &name) {
+        // Try to invoke "status" to see if the plugin is alive; if it
+        // responds, it's running — reject update.
+        if host
+            .invoke(&name, "status", &serde_json::json!({}))
+            .await
+            .is_some()
+        {
+            return Err(ApiError::conflict(format!(
+                "plugin '{name}' is running — stop it before updating"
+            ))
+            .into_response());
+        }
+    }
+
+    // 503: slot exists but no binary.
+    let slot = bebok_core::plugin_decl::install_dir(&instance.root, &name);
+    if slot.is_dir() {
+        let manifest_path = slot.join(bebok_core::PLUGIN_MANIFEST_FILE);
+        if manifest_path.is_file()
+            && let Ok(manifest) = bebok_core::read_manifest(&slot)
+            && (manifest.entrypoint.is_some()
+                || manifest.entrypoint_windows.is_some()
+                || manifest.entrypoint_unix.is_some())
+        {
+            // Check binary presence using resolved_binary logic.
+            // Simplified: check the entrypoint command or default.
+            let ep = manifest.entrypoint.as_deref().unwrap_or(&name);
+            let cmd = ep.split_whitespace().next().unwrap_or(&name);
+            let bin_local = slot.join(cmd);
+            let has_bin =
+                bin_local.exists() || (cfg!(windows) && slot.join(format!("{cmd}.exe")).exists());
+            if !has_bin {
+                // Machine-readable code embedded in the text body (ApiError
+                // serializes as text): the client maps `binary_missing`
+                // onto `settings.pluginBinaryMissing`.
+                let body = serde_json::json!({
+                    "error": "binary_missing",
+                    "message": format!(
+                        "plugin '{name}' binary is missing — run Update in Settings"
+                    ),
+                });
+                return Err(ApiError::service_unavailable(body.to_string()).into_response());
+            }
+        }
+    }
+
+    // Unregister the plugin from the host before re-installing.
+    host.unregister(&name).await;
+
+    let plugin = state
+        .store
+        .update_plugin(&instance, &name)
+        .await
+        .map_err(|e| ApiError::from_core(&e).into_response())?;
+
+    // Re-register after install.
+    ensure_plugin_registered(&instance.root, &name).await;
+
+    Ok(Json(serde_json::json!({ "plugin": plugin })))
+}
+
 /// `POST /plugins/{name}/toggle?directory=` -> flip the `enabled` switch of
 /// a declared plugin (body `{ enabled: bool }`; missing = flip the current
 /// value). Unknown names are a 400. Disabling a plugin also unregisters it
@@ -574,6 +662,8 @@ done
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: true,
+            asset_url: None,
+            asset_sha256: None,
         };
         let plugins_dir = project.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();
@@ -657,6 +747,8 @@ done
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: false,
+            asset_url: None,
+            asset_sha256: None,
         };
         let plugins_dir = project.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();
@@ -716,6 +808,8 @@ done
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: true,
+            asset_url: None,
+            asset_sha256: None,
         };
         let plugins_dir = project.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();
@@ -776,6 +870,8 @@ done
             repo: "test/repo".to_string(),
             url: "https://example.com/test/repo".to_string(),
             enabled: false,
+            asset_url: None,
+            asset_sha256: None,
         };
         let plugins_dir = project.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();

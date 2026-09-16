@@ -506,6 +506,19 @@ export class EngineClient {
   }
 
   /**
+   * Plan B: `POST /plugins/{name}/update?directory=` -> re-resolve the
+   * plugin's release, download the binary for the running platform when it is
+   * absent and refresh the declaration (`{plugin: {…, version, binary}}`).
+   * The engine answers `503 binary_missing` when no asset matches the platform.
+   */
+  updatePlugin(directory: string, name: string): Promise<PluginResponse> {
+    return this.request<PluginResponse>(
+      'POST',
+      `/plugins/${encodeURIComponent(name)}/update?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
    * `GET /plugins/bebok-index/status?directory=` -> live code-index snapshot
    * (`{ ok, status, files, symbols }`).
    */
