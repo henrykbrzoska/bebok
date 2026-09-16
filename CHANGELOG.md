@@ -2,7 +2,21 @@
 
 ## Unreleased
 
+### Fixes
+- Settings → Agents: saving "Frontend verification" no longer wipes a
+  previously saved "Build & test" value (and vice versa). Each card now
+  merges the sibling `verify.*` key into its `PUT /config` delta, because
+  the engine replaces the whole top-level `verify` section.
+
 ### Features
+- Searchable model picker: every model dropdown (chat toolbar, new-session
+  dialog, agent model override, fleet members) is now a filterable combobox
+  with models grouped by provider, so long lists like OpenRouter's can be
+  searched instead of scrolled.
+- Native `code_index_status` and `code_index_search` tools: in-process tools
+  in `bebok-core` that delegate to the `bebok-index` plugin, enabling the
+  model to query the local code index (tantivy) directly from the agent loop.
+  Both tools are read-only, abort-aware, and registered for all agent presets.
 - Central enforcement of code-index-first: every prompt (user sessions and
   delegated sub-agents via task/fleet) now includes a "Code index first" section
   when the `bebok-index` plugin is available. The section instructs the model to
@@ -34,6 +48,13 @@
   `max_concurrent`, and `GET /delegation/models` is gone.
 
 ### Fixes
+- Disabling a plugin via `POST /plugins/{name}/toggle` with `enabled: false`
+  now immediately unregisters it from the global backend and blocks all access
+  to its endpoints (`/plugins/{name}/status`, `/plugins/{name}/{action}`) and
+  tools (`code_index_status`, `code_index_search`) for the project, even if
+  the plugin is still registered globally for another project. Previously
+  toggling a plugin off left the backend running and cross-project isolation
+  was broken.
 - `GET /plugins/{name}/status` and `POST /plugins/{name}/{action}` now
   automatically load and register declared, enabled, installed plugins on
   first access instead of returning 404. Previously the engine only
