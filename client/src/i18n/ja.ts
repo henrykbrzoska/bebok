@@ -238,10 +238,15 @@ export const ja: Record<MessageKey, string> = {
   'settings.testUnsavedHint': '未保存の変更があります。「接続をテスト」は保存済みの設定を使用します。これらの値でテストするには先に保存してください。',
   'settings.testConnection': '接続をテスト',
   'settings.discoveredModels': '検出されたモデル',
+  'settings.modelSearchPlaceholder': 'モデルを絞り込む…',
+  'modelSelect.search': 'モデルを検索…',
+  'modelSelect.noMatch': '一致するモデルがありません。',
   'settings.assignTo': '割り当て先',
   'settings.assign': '割り当て',
   'settings.noProviderSelected': '左側でプロバイダーを選択してください。',
   'settings.addAgentFile': '+ ファイルから追加',
+  'settings.agentFilter': 'エージェントを絞り込み…',
+  'settings.noMatch': '一致するエージェントがありません。',
   'settings.noDescription': '説明はありません。',
   'settings.modelOverride': 'モデルの上書き',
   'settings.effectiveModel': '実際: {model}',
@@ -744,6 +749,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': 'このプロジェクトのみ（グローバルを上書き）',
   'settings.frontendVerifyProjectOverride': 'このプロジェクトはグローバル設定を上書きしています: {mode}',
   'settings.frontendVerifySaved': 'フロントエンド検証を保存しました。',
+  'settings.frontendVerifySave': '保存',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -759,6 +765,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': '保存',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': '待機中',

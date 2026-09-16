@@ -238,10 +238,15 @@ export const hi: Record<MessageKey, string> = {
   'settings.testUnsavedHint': 'असहेजे बदलाव। "कनेक्शन जाँचें" सहेजी गई कॉन्फ़िगरेशन उपयोग करता है — इन मानों से जाँचने के लिए पहले प्रदाता सहेजें।',
   'settings.testConnection': 'कनेक्शन जाँचें',
   'settings.discoveredModels': 'मिले हुए मॉडल',
+  'settings.modelSearchPlaceholder': 'मॉडल फ़िल्टर करें…',
+  'modelSelect.search': 'मॉडल खोजें…',
+  'modelSelect.noMatch': 'कोई मिलता-जुलता मॉडल नहीं।',
   'settings.assignTo': 'किसे सौंपें',
   'settings.assign': 'सौंपें',
   'settings.noProviderSelected': 'बाईं ओर से एक प्रदाता चुनें।',
   'settings.addAgentFile': '+ फ़ाइल से जोड़ें',
+  'settings.agentFilter': 'एजेंट फ़िल्टर करें…',
+  'settings.noMatch': 'कोई मिलान एजेंट नहीं.',
   'settings.noDescription': 'कोई विवरण नहीं।',
   'settings.modelOverride': 'मॉडल ओवरराइड',
   'settings.effectiveModel': 'प्रभावी: {model}',
@@ -744,6 +749,7 @@ export const hi: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': 'केवल यह प्रोजेक्ट (वैश्विक को ओवरराइड करता है)',
   'settings.frontendVerifyProjectOverride': 'यह प्रोजेक्ट वैश्विक सेटिंग को ओवरराइड करता है: {mode}',
   'settings.frontendVerifySaved': 'फ़्रंटएंड सत्यापन सहेजा गया।',
+  'settings.frontendVerifySave': 'सहेजें',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -759,6 +765,7 @@ export const hi: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Save',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': 'कतार में',

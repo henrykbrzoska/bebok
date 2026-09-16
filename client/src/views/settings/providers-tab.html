@@ -146,14 +146,24 @@
       @if (discovered().length > 0) {
         <div class="card">
           <h3>{{ t('settings.discoveredModels') }}</h3>
+          <div class="model-search">
+            <input
+              type="text"
+              [ngModel]="modelSearch()"
+              (ngModelChange)="modelSearch.set($event)"
+              [attr.placeholder]="t('settings.modelSearchPlaceholder')"
+              spellcheck="false"
+            />
+            <span class="small faint">{{ filteredModels().length }} / {{ discovered().length }}</span>
+          </div>
           <ul class="model-list mono">
-            @for (model of discovered(); track model) {
+            @for (model of filteredModels(); track model) {
               <li>{{ model }}</li>
             }
           </ul>
           <div class="assign-row">
             <select [ngModel]="assignModel()" (ngModelChange)="assignModel.set($event)" class="mono">
-              @for (model of discovered(); track model) {
+              @for (model of filteredModels(); track model) {
                 <option [value]="model">{{ model }}</option>
               }
             </select>

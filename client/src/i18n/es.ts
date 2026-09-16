@@ -239,10 +239,15 @@ export const es: Record<MessageKey, string> = {
   'settings.testUnsavedHint': 'Cambios sin guardar. «Probar conexión» usa la configuración guardada: guarda el proveedor para probar estos valores.',
   'settings.testConnection': 'Probar conexión',
   'settings.discoveredModels': 'Modelos detectados',
+  'settings.modelSearchPlaceholder': 'Filtrar modelos…',
+  'modelSelect.search': 'Buscar modelos…',
+  'modelSelect.noMatch': 'Ningún modelo coincide.',
   'settings.assignTo': 'asignar a',
   'settings.assign': 'Asignar',
   'settings.noProviderSelected': 'Selecciona un proveedor a la izquierda.',
   'settings.addAgentFile': '+ Añadir desde archivo',
+  'settings.agentFilter': 'Filtrar agentes…',
+  'settings.noMatch': 'No hay agentes coincidentes.',
   'settings.noDescription': 'Sin descripción.',
   'settings.modelOverride': 'Modelo alternativo',
   'settings.effectiveModel': 'efectivo: {model}',
@@ -745,6 +750,7 @@ export const es: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': 'Solo este proyecto (anula la global)',
   'settings.frontendVerifyProjectOverride': 'Este proyecto anula el ajuste global: {mode}',
   'settings.frontendVerifySaved': 'Verificación del frontend guardada.',
+  'settings.frontendVerifySave': 'Guardar',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -760,6 +766,7 @@ export const es: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Save',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': 'en cola',

@@ -248,6 +248,10 @@ select:disabled {
   font-size: var(--fs-12);
 }
 
+.saved-msg {
+  color: var(--success);
+}
+
 /* spinner used by the "Test connection" buttons */
 .spinner {
   width: 11px;

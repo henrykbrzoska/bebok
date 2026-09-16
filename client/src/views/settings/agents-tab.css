@@ -1,5 +1,23 @@
 /* Agents tab (F2-24). */
 
+.agent-filter {
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: var(--fs-12);
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.agent-filter:focus {
+  border-color: var(--accent);
+}
+
 .row-kind {
   flex: none;
 }

@@ -17,6 +17,59 @@
 .control.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
 .control.invalid { border-color: var(--danger); }
 
+.agent-filter {
+  margin-bottom: var(--space-4, 4px);
+}
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 4px);
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: var(--space-4, 4px);
+}
+.agent-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control-sm);
+  padding: var(--space-6, 6px) var(--space-8, 8px);
+  font: inherit;
+  font-size: var(--fs-12-5);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.agent-option:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.agent-option.selected {
+  background: var(--surface-3, var(--surface-2));
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.agent-option .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-faint);
+}
+.agent-option .dot.ok {
+  background: var(--success);
+}
+.agent-option .dot.idle {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
 .check-row { display: flex; align-items: flex-start; gap: var(--space-10); padding: var(--space-10) var(--space-12); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); cursor: pointer; }
 .check-row.disabled { cursor: not-allowed; opacity: .7; }
 .check-row input { margin-top: 2px; accent-color: var(--accent); }

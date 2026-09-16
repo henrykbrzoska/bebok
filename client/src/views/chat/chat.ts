@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { selectableModels } from '../../core/model-list';
 import {
   ActiveTask,
   AgentInfo,
@@ -30,6 +31,7 @@ import { SessionActivityStore } from '../../core/session-activity.store';
 import { TaskProgressStore } from '../../core/task-progress.store';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
+import { ModelSelect } from '../../ui/model-select/model-select';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ToastHost } from '../../ui/toast/toast-host';
@@ -179,6 +181,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     CdkScrollable,
     FormsModule,
     RouterLink,
+    ModelSelect,
     PermissionPopup,
     MessageRowComponent,
     ToolRunRowComponent,
@@ -605,16 +608,7 @@ export class ChatView implements OnInit, OnDestroy {
               ? defaultModel
               : `${cfg.config.provider}/${defaultModel}`,
         );
-        const models: string[] = [];
-        for (const provider of cfg.providers ?? []) {
-          // Only show models whose provider has a resolvable API key.
-          if (!provider.has_key) {
-            continue;
-          }
-          for (const model of provider.models ?? []) {
-            models.push(`${provider.name}/${model}`);
-          }
-        }
+        const models = selectableModels(cfg.providers);
         this.availableModels.set(models);
       } catch {
         /* switcher lists are non-critical */

@@ -238,10 +238,15 @@ export const zh: Record<MessageKey, string> = {
   'settings.testUnsavedHint': '有未保存的更改。“测试连接”使用已保存的配置 — 请先保存提供商再测试这些值。',
   'settings.testConnection': '测试连接',
   'settings.discoveredModels': '已发现的模型',
+  'settings.modelSearchPlaceholder': '筛选模型…',
+  'modelSelect.search': '搜索模型…',
+  'modelSelect.noMatch': '没有匹配的模型。',
   'settings.assignTo': '分配给',
   'settings.assign': '分配',
   'settings.noProviderSelected': '请在左侧选择提供商。',
   'settings.addAgentFile': '+ 从文件添加',
+  'settings.agentFilter': '筛选代理…',
+  'settings.noMatch': '无匹配代理。',
   'settings.noDescription': '无描述。',
   'settings.modelOverride': '模型覆盖',
   'settings.effectiveModel': '实际使用：{model}',
@@ -744,6 +749,7 @@ export const zh: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': '仅此项目（覆盖全局）',
   'settings.frontendVerifyProjectOverride': '此项目覆盖了全局设置：{mode}',
   'settings.frontendVerifySaved': '前端验证已保存。',
+  'settings.frontendVerifySave': '保存',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -759,6 +765,7 @@ export const zh: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Save',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': '排队中',

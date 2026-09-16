@@ -238,10 +238,15 @@ export const ko: Record<MessageKey, string> = {
   'settings.testUnsavedHint': '저장되지 않은 변경이 있습니다. "연결 테스트"는 저장된 구성을 사용합니다 — 이 값으로 테스트하려면 먼저 저장하세요.',
   'settings.testConnection': '연결 테스트',
   'settings.discoveredModels': '발견된 모델',
+  'settings.modelSearchPlaceholder': '모델 필터링…',
+  'modelSelect.search': '모델 검색…',
+  'modelSelect.noMatch': '일치하는 모델이 없습니다.',
   'settings.assignTo': '할당 대상',
   'settings.assign': '할당',
   'settings.noProviderSelected': '왼쪽에서 공급자를 선택하세요.',
   'settings.addAgentFile': '+ 파일에서 추가',
+  'settings.agentFilter': '에이전트 필터링…',
+  'settings.noMatch': '일치하는 에이전트가 없습니다.',
   'settings.noDescription': '설명 없음.',
   'settings.modelOverride': '모델 재정의',
   'settings.effectiveModel': '실제: {model}',
@@ -744,6 +749,7 @@ export const ko: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': '이 프로젝트만(전역 설정을 덮어씀)',
   'settings.frontendVerifyProjectOverride': '이 프로젝트가 전역 설정을 덮어씁니다: {mode}',
   'settings.frontendVerifySaved': '프런트엔드 검증을 저장했습니다.',
+  'settings.frontendVerifySave': '저장',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -759,6 +765,7 @@ export const ko: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': '저장',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': '대기 중',

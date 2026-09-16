@@ -239,10 +239,15 @@ export const uk: Record<MessageKey, string> = {
   'settings.testUnsavedHint': 'Незбережені зміни. «Перевірити з’єднання» використовує збережену конфігурацію — збережіть провайдера, щоб перевірити ці значення.',
   'settings.testConnection': 'Перевірити з’єднання',
   'settings.discoveredModels': 'Знайдені моделі',
+  'settings.modelSearchPlaceholder': 'Фільтрувати моделі…',
+  'modelSelect.search': 'Пошук моделей…',
+  'modelSelect.noMatch': 'Немає відповідної моделі.',
   'settings.assignTo': 'призначити для',
   'settings.assign': 'Призначити',
   'settings.noProviderSelected': 'Оберіть провайдера ліворуч.',
   'settings.addAgentFile': '+ Додати з файлу',
+  'settings.agentFilter': 'Фільтрувати агентів…',
+  'settings.noMatch': 'Немає відповідних агентів.',
   'settings.noDescription': 'Без опису.',
   'settings.modelOverride': 'Перевизначення моделі',
   'settings.effectiveModel': 'фактична: {model}',
@@ -745,6 +750,7 @@ export const uk: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': 'Лише цей проєкт (перекриває глобальне)',
   'settings.frontendVerifyProjectOverride': 'Цей проєкт перекриває глобальне налаштування: {mode}',
   'settings.frontendVerifySaved': 'Перевірку фронтенду збережено.',
+  'settings.frontendVerifySave': 'Зберегти',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -760,6 +766,7 @@ export const uk: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Зберегти',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': 'у черзі',

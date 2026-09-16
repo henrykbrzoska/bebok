@@ -15,24 +15,46 @@
         <div class="two-col">
           <label class="field">
             <span class="field-label">{{ t('newSession.agent') }}</span>
-            <select class="control" [ngModel]="selectedAgent()" (ngModelChange)="selectedAgent.set($event)" name="agent" [disabled]="creating()">
-              @for (agent of agents(); track agent.name) {
-                <option [value]="agent.name">{{ agentLabel(agent) }}</option>
+            <input
+              type="text"
+              class="control agent-filter"
+              [ngModel]="agentFilter()"
+              (ngModelChange)="agentFilter.set($event)"
+              [placeholder]="t('settings.agentFilter')"
+              spellcheck="false"
+              autocomplete="off"
+              data-testid="agent-filter"
+            />
+            <div class="agent-list" role="listbox">
+              @for (agent of filteredAgents(); track agent.name) {
+                <button
+                  type="button"
+                  class="agent-option"
+                  [class.selected]="selectedAgent() === agent.name"
+                  role="option"
+                  [attr.aria-selected]="selectedAgent() === agent.name"
+                  (click)="selectedAgent.set(agent.name)"
+                  [attr.data-testid]="'agent-option-' + agent.name"
+                >
+                  <span class="dot" [class.ok]="agent.builtin" [class.idle]="!agent.builtin" aria-hidden="true"></span>
+                  <span class="mono">{{ agent.name }}</span>
+                </button>
               }
-              @if (agents().length === 0) {
-                <option value="code">code</option>
+              @if (filteredAgents().length === 0) {
+                <div class="empty">{{ t('settings.noMatch') }}</div>
               }
-            </select>
+            </div>
           </label>
 
           <label class="field">
             <span class="field-label">{{ t('newSession.model') }}</span>
-            <select class="control" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)" name="model" [disabled]="creating()">
-              <option value="">{{ t('newSession.modelDefault') }}</option>
-              @for (model of models(); track model) {
-                <option [value]="model">{{ model }}</option>
-              }
-            </select>
+            <app-model-select
+              [models]="models()"
+              [(value)]="selectedModel"
+              [defaultLabel]="t('newSession.modelDefault')"
+              buttonClass="control"
+              [disabled]="creating()"
+            />
           </label>
         </div>
 

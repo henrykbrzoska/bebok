@@ -1,0 +1,61 @@
+<div class="ms" [class.open]="open()">
+  <button
+    type="button"
+    class="ms-btn"
+    [class]="buttonClass()"
+    [disabled]="disabled()"
+    (click)="toggle($event)"
+    [title]="displayTitle()"
+    [attr.aria-label]="displayTitle()"
+    aria-haspopup="listbox"
+    [attr.aria-expanded]="open()"
+    [attr.data-testid]="testId()"
+  >
+    <span class="ms-value">{{ displayText() }}</span>
+    <span class="ms-caret" aria-hidden="true">▾</span>
+  </button>
+  @if (open()) {
+    <div class="ms-panel" role="listbox">
+      <input
+        #search
+        class="ms-search"
+        type="text"
+        [ngModel]="filter()"
+        (ngModelChange)="filter.set($event)"
+        (keydown)="onSearchKeydown($event)"
+        (click)="$event.stopPropagation()"
+        [placeholder]="t('modelSelect.search')"
+        spellcheck="false"
+        autocomplete="off"
+        [attr.aria-label]="t('modelSelect.search')"
+      />
+      <div class="ms-list">
+        <div
+          class="ms-option ms-default"
+          role="option"
+          [attr.aria-selected]="!value()"
+          [class.selected]="!value()"
+          [class.active]="highlight() === 0"
+          (click)="pick('')"
+        >{{ defaultLabel() }}</div>
+        @for (group of groups(); track group.provider) {
+          <div class="ms-group">{{ group.provider || '…' }}</div>
+          @for (id of group.items; track id) {
+            <div
+              class="ms-option mono"
+              role="option"
+              [attr.aria-selected]="value() === id"
+              [class.selected]="value() === id"
+              [class.active]="flatRows().indexOf(id) === highlight()"
+              (click)="pick(id)"
+              [title]="id"
+            >{{ shortName(id) }}</div>
+          }
+        }
+        @if (filtered().length === 0) {
+          <div class="ms-empty">{{ t('modelSelect.noMatch') }}</div>
+        }
+      </div>
+    </div>
+  }
+</div>

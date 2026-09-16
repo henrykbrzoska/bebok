@@ -239,10 +239,15 @@ export const pl: Record<MessageKey, string> = {
   'settings.testUnsavedHint': 'Niezapisane zmiany. „Testuj połączenie” używa zapisanej konfiguracji — zapisz dostawcę, aby przetestować te wartości.',
   'settings.testConnection': 'Testuj połączenie',
   'settings.discoveredModels': 'Wykryte modele',
+  'settings.modelSearchPlaceholder': 'Filtruj modele…',
+  'modelSelect.search': 'Szukaj modelu…',
+  'modelSelect.noMatch': 'Brak pasującego modelu.',
   'settings.assignTo': 'przypisz do',
   'settings.assign': 'Przypisz',
   'settings.noProviderSelected': 'Wybierz dostawcę po lewej.',
   'settings.addAgentFile': '+ Dodaj z pliku',
+  'settings.agentFilter': 'Filtruj agenty…',
+  'settings.noMatch': 'Brak pasujących agentów.',
   'settings.noDescription': 'Brak opisu.',
   'settings.modelOverride': 'Nadpisanie modelu',
   'settings.effectiveModel': 'efektywny: {model}',
@@ -745,6 +750,7 @@ export const pl: Record<MessageKey, string> = {
   'settings.frontendVerifyScopeProject': 'Tylko ten projekt (nadpisuje globalne)',
   'settings.frontendVerifyProjectOverride': 'Ten projekt nadpisuje ustawienie globalne: {mode}',
   'settings.frontendVerifySaved': 'Zapisano weryfikację frontendu.',
+  'settings.frontendVerifySave': 'Zapisz',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -760,6 +766,7 @@ export const pl: Record<MessageKey, string> = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Save',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': 'w kolejce',

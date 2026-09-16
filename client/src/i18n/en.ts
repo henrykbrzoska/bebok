@@ -187,10 +187,15 @@ export const en = {
   'settings.testUnsavedHint': 'Unsaved changes. "Test connection" uses the saved configuration — save the provider first to test with these values.',
   'settings.testConnection': 'Test connection',
   'settings.discoveredModels': 'Discovered models',
+  'settings.modelSearchPlaceholder': 'Filter models…',
+  'modelSelect.search': 'Search models…',
+  'modelSelect.noMatch': 'No matching model.',
   'settings.assignTo': 'assign to',
   'settings.assign': 'Assign',
   'settings.noProviderSelected': 'Select a provider on the left.',
   'settings.addAgentFile': '+ Add from file',
+  'settings.agentFilter': 'Filter agents…',
+  'settings.noMatch': 'No matching agents.',
   'settings.noDescription': 'No description.',
   'settings.modelOverride': 'Model override',
   'settings.effectiveModel': 'effective: {model}',
@@ -753,6 +758,7 @@ export const en = {
   'settings.frontendVerifyScopeProject': 'This project only (overrides global)',
   'settings.frontendVerifyProjectOverride': 'This project overrides the global setting: {mode}',
   'settings.frontendVerifySaved': 'Frontend verification saved.',
+  'settings.frontendVerifySave': 'Save',
 
   // Build & test policy
   'settings.buildTestTitle': 'Build & test policy',
@@ -768,6 +774,7 @@ export const en = {
   'settings.buildTestScopeGlobal': 'Global (all projects)',
   'settings.buildTestScopeProject': 'This project only (overrides global)',
   'settings.buildTestSaved': 'Build & test policy saved.',
+  'settings.buildTestSave': 'Save',
 
   // WP-DELEGATION (F8-2)
   'agents.queued': 'queued',
