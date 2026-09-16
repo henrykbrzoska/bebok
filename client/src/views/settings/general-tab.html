@@ -1,0 +1,99 @@
+<div class="tab-head">
+  <h2>{{ t('settings.generalTitle') }}</h2>
+  <p>{{ t('settings.generalHint') }}</p>
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.pluginsTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.pluginsHint') }}</p>
+
+  @if (pluginsLoading() && rows().length === 0) {
+    <p class="small faint">{{ t('settings.checking') }}</p>
+  }
+  @if (pluginsError()) {
+    <p class="inline-error" data-testid="plugins-error">{{ t('settings.pluginError', { msg: pluginsError() ?? '' }) }}</p>
+  }
+  @for (row of rows(); track row.name) {
+    <div class="plugin-row" [attr.data-testid]="'plugin-row-' + row.name">
+      <span
+        class="dot"
+        [class.ok]="row.enabled"
+        [class.idle]="!row.enabled"
+        aria-hidden="true"
+      ></span>
+      <span class="plugin-id mono">{{ row.name }}</span>
+      <span class="plugin-repo small muted mono">{{ row.repo }}</span>
+      @if (row.description) {
+        <span class="plugin-desc small faint">{{ row.description }}</span>
+      }
+      @if (pluginsLoading()) {
+        <span class="small faint">{{ t('settings.checking') }}</span>
+      }
+      <span class="plugin-actions">
+        @if (!row.installed) {
+          <button
+            type="button"
+            [attr.data-testid]="'plugin-install-' + row.name"
+            [disabled]="busyName() !== null"
+            (click)="install(row.name)"
+          >{{ t('settings.pluginInstall') }}</button>
+        } @else {
+          <button
+            type="button"
+            [attr.data-testid]="'plugin-toggle-' + row.name"
+            [disabled]="busyName() !== null"
+            (click)="toggle(row)"
+          >{{ row.enabled ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
+        }
+      </span>
+    </div>
+  }
+</div>
+
+<div class="card">
+  <h3>{{ t('settings.indexTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.indexHint') }}</p>
+
+  @if (indexLoading() && !indexStatus()) {
+    <p class="small faint">{{ t('settings.checking') }}</p>
+  }
+  @if (indexStatus()) {
+    <div class="index-row" data-testid="index-status-row">
+      <span
+        class="dot"
+        [class.ok]="indexStatusTone() === 'ok'"
+        [class.warn]="indexStatusTone() === 'warn'"
+        [class.err]="indexStatusTone() === 'err'"
+        [class.idle]="indexStatusTone() === 'idle'"
+        aria-hidden="true"
+      ></span>
+      <span class="index-state" data-testid="index-status-state">
+        {{ t('settings.indexStatusLabel') }}: {{ indexStatusText() }}
+      </span>
+      <span class="small muted mono" data-testid="index-status-files">
+        {{ t('settings.indexFiles', { n: indexStatus()?.files ?? 0 }) }}
+      </span>
+      <span class="small faint mono" data-testid="index-status-symbols">
+        {{ t('settings.indexSymbols', { n: indexStatus()?.symbols ?? 0 }) }}
+      </span>
+      <span class="index-actions">
+        <button
+          type="button"
+          data-testid="index-refresh"
+          [disabled]="indexLoading() || indexRebuilding()"
+          (click)="refreshIndexStatus()"
+        >{{ t('settings.indexRefresh') }}</button>
+        <button
+          type="button"
+          data-testid="index-rebuild"
+          [disabled]="indexLoading() || indexRebuilding()"
+          (click)="rebuildIndex()"
+        >{{ indexRebuilding() ? t('settings.indexRebuilding') : t('settings.indexRebuild') }}</button>
+      </span>
+    </div>
+    <p class="small faint" data-testid="index-last-rebuild">{{ indexLastRebuildText() }}</p>
+  }
+  @if (indexError()) {
+    <p class="inline-error" data-testid="index-error">{{ t('settings.indexError', { msg: indexError() ?? '' }) }}</p>
+  }
+</div>

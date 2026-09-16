@@ -5,7 +5,17 @@
 
 <div class="split">
   <div class="side">
-    @for (agent of agents(); track agent.name) {
+    <input
+      type="text"
+      class="agent-filter"
+      [ngModel]="agentFilter()"
+      (ngModelChange)="agentFilter.set($event)"
+      [placeholder]="t('settings.agentFilter')"
+      spellcheck="false"
+      autocomplete="off"
+      data-testid="agent-filter"
+    />
+    @for (agent of filteredAgents(); track agent.name) {
       <button
         type="button"
         class="row-btn"
@@ -30,15 +40,13 @@
 
         <label class="field">
           <span class="micro-label">{{ t('settings.modelOverride') }}</span>
-          <select [ngModel]="modelOverride()" (ngModelChange)="setModelOverride($event)" class="mono">
-            <option value="">{{ t('settings.defaultOption') }}</option>
-            @if (modelOverride() && !store.availableModels().includes(modelOverride())) {
-              <option [value]="modelOverride()">{{ modelOverride() }}</option>
-            }
-            @for (model of store.availableModels(); track model) {
-              <option [value]="model">{{ model }}</option>
-            }
-          </select>
+          <app-model-select
+            [models]="store.availableModels()"
+            [value]="modelOverride()"
+            (valueChange)="setModelOverride($event)"
+            [defaultLabel]="t('settings.defaultOption')"
+            buttonClass="mono"
+          />
           @if (agent.model) {
             <span class="small faint mono">{{ t('settings.effectiveModel', { model: agent.model }) }}</span>
           }
@@ -102,45 +110,47 @@
             {{ t('settings.fleetEnabled') }}
           </label>
 
-          <ul class="fleet-list">
+          <ul class="fleet-list" data-testid="fleet-list">
             @for (member of store.fleetMembers(); track $index; let i = $index) {
-              <li class="fleet-row">
+              <li class="fleet-row" data-testid="fleet-row">
                 <input
                   type="text"
                   class="mono"
                   [ngModel]="member.name"
                   (ngModelChange)="store.updateFleetMember(i, 'name', $event)"
                   [attr.placeholder]="t('settings.fleetName')"
+                  [attr.data-testid]="'fleet-name-' + i"
                   spellcheck="false"
                 />
                 <select
                   [ngModel]="member.agent"
                   (ngModelChange)="store.updateFleetMember(i, 'agent', $event)"
                   class="mono"
+                  [attr.data-testid]="'fleet-agent-' + i"
                 >
+                  <option value="">{{ t('settings.defaultOption') }}</option>
                   @for (a of agents(); track a.name) {
                     <option [value]="a.name">{{ a.name }}</option>
                   }
                 </select>
-                <select
-                  [ngModel]="member.model"
-                  (ngModelChange)="store.updateFleetMember(i, 'model', $event)"
-                  class="mono"
-                >
-                  <option value="">{{ t('settings.defaultOption') }}</option>
-                  @if (member.model && !store.availableModels().includes(member.model)) {
-                    <option [value]="member.model">{{ member.model }}</option>
-                  }
-                  @for (model of store.availableModels(); track model) {
-                    <option [value]="model">{{ model }}</option>
-                  }
-                </select>
+                <app-model-select
+                  [models]="store.availableModels()"
+                  [value]="member.model"
+                  (valueChange)="store.updateFleetMember(i, 'model', $event)"
+                  [defaultLabel]="t('settings.defaultOption')"
+                  buttonClass="mono"
+                  [testId]="'fleet-model-' + i"
+                />
                 <button type="button" (click)="store.removeFleetMember(i)">
                   {{ t('settings.fleetRemove') }}
                 </button>
               </li>
             }
           </ul>
+
+          @if (store.fleetError()) {
+            <p class="inline-error" data-testid="fleet-error">{{ store.fleetError() }}</p>
+          }
 
           <div class="actions spread">
             <button type="button" (click)="store.addFleetMember()">{{ t('settings.fleetAdd') }}</button>
@@ -156,6 +166,9 @@
 
     <!-- WP-AUTOVERIFY (F8-1): applies to every agent, so it sits below the preset card. -->
     <app-settings-frontend-verify />
+
+    <!-- Build & test policy: same scope as frontend verify. -->
+    <app-settings-build-test-policy />
   </div>
 </div>
 

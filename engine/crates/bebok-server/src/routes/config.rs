@@ -49,6 +49,12 @@ fn config_response(instance: &Instance) -> serde_json::Value {
         }
     };
 
+    // The top-level `config.api_key` is a fallback for every provider that
+    // needs a key (see `bebok_core::provider::build_provider`). Surface this
+    // so the GUI can filter providers/models correctly even when only the
+    // top-level key is set (no per-provider key or env var).
+    let config_api_key = cfg.api_key.clone().filter(|s| !s.trim().is_empty());
+
     let mut response = serde_json::json!({
         "config": cfg,
         "providers": cfg
@@ -56,7 +62,9 @@ fn config_response(instance: &Instance) -> serde_json::Value {
             .iter()
             .map(|spec| {
                 let mut v = serde_json::to_value(spec).unwrap_or(serde_json::json!({}));
-                v["has_key"] = serde_json::json!(spec.has_key());
+                v["has_key"] = serde_json::json!(
+                    spec.has_key() || config_api_key.is_some()
+                );
                 v
             })
             .collect::<Vec<_>>(),

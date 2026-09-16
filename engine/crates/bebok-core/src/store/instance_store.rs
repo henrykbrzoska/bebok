@@ -81,6 +81,152 @@ impl InstanceStore {
         &self.data_dir
     }
 
+    /// TOR B plugin declarations: list `<root>/.bebok/plugins/*.json` for a
+    /// directory (sorted by name; `installed` derived from the slot dir).
+    /// Broken declaration files are skipped, never fatal.
+    pub fn list_declared_plugins(&self, root: &Path) -> Vec<crate::plugin_decl::DeclaredPlugin> {
+        crate::plugin_decl::list_declared(root)
+    }
+
+    /// Install a plugin slot from the central registry. The name must be
+    /// listed in the registry catalogue (fetched + cached; bundled
+    /// `bebok-index` fallback when offline) — anything else is a
+    /// `BadRequest` (no arbitrary URLs, only public repos). The installer
+    /// clones `url` into `<root>/.bebok/plugins/<name>/`, checks out the
+    /// latest tag, and validates the plugin's `bebok-plugin.json` manifest
+    /// (name match + engine compatibility). Creates the declaration file
+    /// (`enabled: true`) and publishes `plugin.changed` (`installed`).
+    /// Idempotent: an existing declaration is kept (its `enabled` switch is
+    /// preserved); a missing slot dir is re-cloned.
+    pub async fn install_plugin(
+        &self,
+        instance: &Arc<Instance>,
+        name: &str,
+    ) -> Result<crate::DeclaredPlugin> {
+        if name.trim().is_empty()
+            || name.contains(['/', '\\', '.'])
+            || name.contains("..")
+            || name.trim() != name
+        {
+            return Err(CoreError::BadRequest(format!(
+                "invalid plugin name '{name}'"
+            )));
+        }
+        let data_dir = self.data_dir().to_path_buf();
+        let registry =
+            crate::plugin_registry::load_registry_or_fallback(&data_dir, crate::REGISTRY_URL).await;
+        let entry = registry.find(name).ok_or_else(|| {
+            CoreError::BadRequest(format!(
+                "unknown plugin '{name}': not listed in the plugin registry"
+            ))
+        })?;
+        if !entry.url.starts_with("https://") {
+            return Err(CoreError::BadRequest(format!(
+                "refusing non-https plugin url for '{name}'"
+            )));
+        }
+        let root = &instance.root;
+        let path = crate::plugin_decl::decl_path(root, name);
+        let slot = crate::plugin_decl::install_dir(root, name);
+        if !slot.is_dir() {
+            Self::clone_plugin_slot(&slot, &entry.url).await?;
+            let manifest = crate::plugin_registry::read_manifest(&slot)?;
+            if manifest.name != name {
+                let _ = std::fs::remove_dir_all(&slot);
+                return Err(CoreError::BadRequest(format!(
+                    "plugin manifest name '{}' does not match '{name}'",
+                    manifest.name
+                )));
+            }
+            if !manifest.engine_compatible(env!("CARGO_PKG_VERSION")) {
+                let _ = std::fs::remove_dir_all(&slot);
+                return Err(CoreError::BadRequest(format!(
+                    "plugin '{name}' needs engine >= {} (this engine is {})",
+                    manifest.min_engine_version,
+                    env!("CARGO_PKG_VERSION")
+                )));
+            }
+        }
+        let decl = if path.is_file() {
+            crate::plugin_decl::read_decl(&path)?
+        } else {
+            let decl = crate::PluginDecl {
+                name: entry.name.clone(),
+                repo: entry.repo.clone(),
+                url: entry.url.clone(),
+                enabled: true,
+            };
+            crate::plugin_decl::write_decl(root, &decl)?;
+            decl
+        };
+        crate::git::ensure_plugin_slots_ignored(root)?;
+        let installed = crate::plugin_decl::install_dir(root, name).exists();
+        let decl_out = crate::DeclaredPlugin::from((decl, installed));
+        self.bus.publish(crate::event::Event::plugin_changed(
+            &instance.directory,
+            name,
+            "installed",
+        ));
+        Ok(decl_out)
+    }
+
+    /// Clone a plugin repo into its slot dir and check out the latest tag.
+    /// A failed clone/checkout removes the partial dir and surfaces a
+    /// `BadRequest` (user-facing: bad network or bad repo).
+    async fn clone_plugin_slot(slot: &Path, url: &str) -> Result<()> {
+        let parent = slot
+            .parent()
+            .ok_or_else(|| CoreError::BadRequest("cannot resolve plugin slot dir".to_string()))?;
+        std::fs::create_dir_all(parent).map_err(CoreError::Io)?;
+        if slot.exists() {
+            let _ = std::fs::remove_dir_all(slot);
+        }
+        let slot_str = slot.to_string_lossy().to_string();
+        // Shallow clone of the default branch, then pin the latest tag.
+        let clone = crate::git::run(parent, &["clone", "--depth", "1", url, &slot_str])
+            .await
+            .filter(|o| o.success)
+            .is_some();
+        if !clone {
+            let _ = std::fs::remove_dir_all(slot);
+            return Err(CoreError::BadRequest(format!(
+                "plugin clone failed (is the repo public and reachable?): {url}"
+            )));
+        }
+        if let Some(tag) = crate::plugin_registry::latest_tag(slot).await {
+            let pinned = crate::git::run(slot, &["checkout", "--quiet", &tag])
+                .await
+                .filter(|o| o.success)
+                .is_some();
+            if !pinned {
+                let _ = std::fs::remove_dir_all(slot);
+                return Err(CoreError::BadRequest(format!(
+                    "plugin tag checkout failed: {tag}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// TOR B: flip the `enabled` switch of a declared plugin
+    /// (read-modify-write of `<root>/.bebok/plugins/<name>.json`) and publish
+    /// `plugin.changed` (`enabled` / `disabled`). Errors with
+    /// `BadRequest` when the declaration does not exist.
+    pub fn set_plugin_enabled(
+        &self,
+        instance: &Arc<Instance>,
+        name: &str,
+        enabled: bool,
+    ) -> Result<crate::DeclaredPlugin> {
+        let out = crate::plugin_decl::set_enabled(&instance.root, name, enabled)?;
+        self.bus.publish(crate::event::Event::plugin_changed(
+            &instance.directory,
+            name,
+            if enabled { "enabled" } else { "disabled" },
+        ));
+        Ok(out)
+    }
+
     /// Get or lazily create the instance for a directory.
     pub async fn get_or_create_instance(&self, directory: &str) -> Result<Arc<Instance>> {
         let normalized = normalize_path(Path::new(directory));
@@ -132,6 +278,18 @@ impl InstanceStore {
             instances.insert(normalized.clone(), instance.clone());
         }
 
+        // Announce the new instance on the `instance.created` hook.
+        // Never fails instance creation: plugin errors are logged and
+        // skipped inside `run_hook`.
+        {
+            let mut payload = crate::plugin::InstanceCreatedHook {
+                directory: normalized.clone(),
+            };
+            crate::plugin::PluginHost::global()
+                .run_hook(crate::plugin::Hook::INSTANCE_CREATED, &mut payload)
+                .await;
+        }
+
         // Register the sub-agent `task` tool. It needs the store back-reference
         // (set once via `Arc::new_cyclic`); a plain (non-shared) store skips it.
         if let Some(weak) = self.self_weak.get() {
@@ -157,6 +315,13 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::TaskCancelTool::new(weak.clone())));
+            // In-process code-index tools: delegate to the `bebok-index` plugin.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeIndexStatus));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeIndexSearch));
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -167,6 +332,11 @@ impl InstanceStore {
         instance.tools.set_mcp_tools(mcp_tools);
 
         let _ = spawn_agent_watcher(root.clone(), instance.agents.clone(), self.bus.clone());
+        // NOTE: the watcher JoinHandle is intentionally detached (engine
+        // "hot reload" semantics: one watcher per instance for the process
+        // lifetime). In tests set `BEBOK_NO_WATCH=1` to skip spawning it —
+        // otherwise every test instance leaks a task + inotify FD and the
+        // runtime never goes idle.
 
         Ok(instance)
     }

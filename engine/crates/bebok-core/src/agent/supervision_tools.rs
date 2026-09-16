@@ -88,6 +88,17 @@ pub async fn live_task_views(store: &InstanceStore, parent: &SessionState) -> Ve
     out
 }
 
+/// Marker appended to a live child line when the supervision detector has
+/// flagged it (`TaskProgress.verdict` is `looping` or `wandering`).
+/// Returns `None` for a healthy child.
+pub fn flag_marker(progress: &TaskProgress) -> Option<String> {
+    match progress.verdict.as_str() {
+        "looping" => Some("⚠ looping".to_string()),
+        "wandering" => Some("⚠ wandering".to_string()),
+        _ => None,
+    }
+}
+
 /// Human-readable status report (what the model reads).
 pub fn render_status(live: &[LiveTaskView], finished: &[TaskResult]) -> String {
     if live.is_empty() && finished.is_empty() {
@@ -107,8 +118,11 @@ pub fn render_status(live: &[LiveTaskView], finished: &[TaskResult]) -> String {
             } else {
                 v.progress.summary.clone()
             };
+            let flag = flag_marker(&v.progress)
+                .map(|f| format!(" {f}"))
+                .unwrap_or_default();
             lines.push(format!(
-                "- {name} [{agent}] {status} · taskID={id} · {secs}s · tools={calls} last={tool} · tokens in/out {ti}/{to}\n  last line: {summary}",
+                "- {name} [{agent}] {status} · taskID={id} · {secs}s · tools={calls} last={tool} · tokens in/out {ti}/{to}{flag}\n  last line: {summary}",
                 name = v.task.name,
                 agent = v.task.agent,
                 status = v.task.status,
@@ -514,7 +528,9 @@ impl Tool for TaskCancelTool {
     fn description(&self) -> &str {
         "Cancel one running or queued sub-agent of this session by task id or name. Only that \
          child stops (its result is recorded as aborted); this turn continues. Use it when a \
-         sub-agent went off-track or its work is no longer needed."
+         sub-agent went off-track or its work is no longer needed. When a live child is \
+         flagged as looping or wandering, cancel it with a matching reason and re-task with \
+         a tighter brief."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -659,6 +675,21 @@ mod tests {
     }
 
     #[test]
+    fn flag_marker_reports_verdict() {
+        let looping = TaskProgress {
+            verdict: "looping".to_string(),
+            ..TaskProgress::default()
+        };
+        assert_eq!(flag_marker(&looping).as_deref(), Some("⚠ looping"));
+        let wandering = TaskProgress {
+            verdict: "wandering".to_string(),
+            ..TaskProgress::default()
+        };
+        assert_eq!(flag_marker(&wandering).as_deref(), Some("⚠ wandering"));
+        assert_eq!(flag_marker(&TaskProgress::default()), None);
+    }
+
+    #[test]
     fn render_status_lists_live_and_finished() {
         let live = vec![LiveTaskView {
             task: ChildTask {
@@ -671,6 +702,7 @@ mod tests {
                 started_at: 0,
                 status: "running".into(),
                 background: true,
+                prompt_hash: None,
             },
             progress: TaskProgress {
                 last_tool: Some("write_file".into()),
@@ -678,6 +710,7 @@ mod tests {
                 summary: "Adding the spec".into(),
                 tool_calls: 4,
                 steps: 2,
+                ..TaskProgress::default()
             },
             input_tokens: 100,
             output_tokens: 20,

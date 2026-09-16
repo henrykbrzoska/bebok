@@ -17,13 +17,16 @@
 //! Public surface is unchanged: `crate::agent::{Agent, AgentCatalog, ...,
 //! run_turn, build_request, ...}` keep resolving here.
 
+pub mod build_test_prompt;
 pub mod catalog;
+pub mod code_index_tools;
 pub mod delegation;
 pub mod delegation_policy;
 pub mod exec;
 pub mod fleet_tool;
 pub mod gate;
 pub mod images;
+pub mod index_prompt;
 pub mod model_policy;
 pub mod observe;
 pub mod preset;
@@ -38,8 +41,13 @@ pub mod verify_prompt;
 #[cfg(test)]
 mod tests;
 
+pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
-pub use delegation::{TaskProgress, summarize_progress};
+pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
+pub use delegation::{
+    LOOP_MIN_REPEAT, LOOP_WINDOW, LoopHit, TaskProgress, WANDER_MIN_DISTINCT_READS,
+    WANDER_NO_ADVANCE_WINDOW, WANDER_READ_RATIO, WanderHit, summarize_progress,
+};
 pub use delegation_policy::{
     FLEET_AGENT, FleetContext, FleetMemberInfo, MAX_FLEET_ROSTER, delegation_policy_note,
     subagent_note,
@@ -51,7 +59,8 @@ pub use images::{
     ALLOWED_IMAGE_TYPES, AgentImageInput, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES,
     MAX_IMAGES_PER_PROMPT, model_supports_images, validate_agent_images,
 };
-pub use model_policy::{CheaperMapping, cheaper_sibling, mappings_for, resolve_subagent_model};
+pub use index_prompt::index_section;
+pub use model_policy::{HEAVY, resolve_subagent_model};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
 pub use prompt_env::host_os_note;

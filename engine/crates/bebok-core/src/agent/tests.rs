@@ -1224,6 +1224,7 @@ if __name__ == "__main__":
             agent: "code".to_string(),
             model: None,
             started_at: 0,
+            prompt_hash: None,
             status: "running".to_string(),
             background: false,
         };
@@ -1313,13 +1314,12 @@ if __name__ == "__main__":
         }
     }
 
-    /// WP-DELEGATION: under an active delegation policy a child session gets
-    /// no `task`/`fleet`/`task_*` tool definitions; the main thread keeps
-    /// them; `off` restores the old behaviour for children.
+    /// Orchestrator owns fleet fan-out + supervision; other main-thread
+    /// agents keep the plain `task` tool but never the fleet/supervision
+    /// set; every sub-agent (child of any parent) gets none of them.
     #[tokio::test]
-    async fn subagents_get_no_delegation_tools_under_a_policy() {
+    async fn orchestrator_only_gets_fleet_and_supervision_tools() {
         use crate::agent::request::{DELEGATION_TOOLS, RequestBuilder};
-        use crate::config::DelegationMode;
 
         let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
@@ -1353,15 +1353,13 @@ if __name__ == "__main__":
                 ] {
                     tools.register_tool(t);
                 }
-                let preset = Agent::code();
-                let names = |state: &Arc<SessionState>| {
+                let names = |state: &Arc<SessionState>, agent: Agent| {
                     let tools = tools.clone();
-                    let preset = preset.clone();
                     let state = state.clone();
                     async move {
                         let req = RequestBuilder::new(
                             &state,
-                            &preset,
+                            &agent,
                             &tools,
                             "test/model",
                             1024,
@@ -1373,39 +1371,37 @@ if __name__ == "__main__":
                         req.tools.into_iter().map(|t| t.name).collect::<Vec<_>>()
                     }
                 };
-                (names(&parent).await, names(&child).await)
+                let preset = if agent == "orchestrator" {
+                    Agent::orchestrator()
+                } else {
+                    Agent::code()
+                };
+                (
+                    names(&parent, preset).await,
+                    names(&child, Agent::code()).await,
+                )
             }
         };
 
-        // Default policy (auto): parent has the tools, child does not.
+        // Orchestrator parent: fleet + supervision, plus the plain task tool.
         let store = InstanceStore::with_data_dir(data.clone());
-        let (parent_tools, child_tools) = build(&store, "code").await;
-        for t in ["task", "task_wait", "task_status", "task_cancel"] {
+        let (parent_tools, child_tools) = build(&store, "orchestrator").await;
+        for t in ["fleet", "task_wait", "task_status", "task_cancel"] {
             assert!(parent_tools.iter().any(|n| n == t), "parent lacks {t}");
             assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
         }
-        assert!(
-            !parent_tools.iter().any(|n| n == "fleet"),
-            "fleet is orchestrator-only"
-        );
         assert!(child_tools.iter().any(|n| n == "read_file"));
-        assert_eq!(DELEGATION_TOOLS.len(), 5);
+        assert_eq!(DELEGATION_TOOLS.len(), 4);
 
-        // Policy off: the child gets `task` again (depth guard is the backstop).
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "delegation": { "mode": "off" } }"#,
-        )
-        .unwrap();
-        let store = InstanceStore::with_data_dir(base.join("data2"));
-        let cfg = store
-            .get_or_create_instance(project.to_str().unwrap())
-            .await
-            .unwrap()
-            .config_snapshot();
-        assert_eq!(cfg.delegation.mode, DelegationMode::Off);
-        let (_, child_tools) = build(&store, "code").await;
-        assert!(child_tools.iter().any(|n| n == "task"), "{child_tools:?}");
+        // Non-orchestrator parent: no fleet/supervision tools (plain `task`
+        // stays registered for manual use); its child gets none either.
+        let store2 = InstanceStore::with_data_dir(base.join("data2"));
+        let (code_tools, code_child) = build(&store2, "code").await;
+        for t in ["fleet", "task_wait", "task_status", "task_cancel"] {
+            assert!(!code_tools.iter().any(|n| n == t), "code got {t}");
+            assert!(!code_child.iter().any(|n| n == t), "code child got {t}");
+        }
+        assert!(code_tools.iter().any(|n| n == "task"), "{code_tools:?}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

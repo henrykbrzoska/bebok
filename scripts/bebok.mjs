@@ -351,6 +351,7 @@ function engineEnv(flags, clientPort) {
   };
   if (flags['no-auth']) env.BEBOK_NO_AUTH = '1';
   if (flags.diagnostic) env.BEBOK_DIAGNOSTIC = '1';
+  env.BEBOK_DIAGNOSTIC = '1'
   return env;
 }
 

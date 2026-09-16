@@ -74,8 +74,8 @@ struct TaskArgs {
     /// Agent preset to use (defaults to `code`; unknown names fall back too).
     #[serde(default)]
     agent: Option<String>,
-    /// Optional explicit model override for the sub-agent. Wins over the
-    /// preset's own `model` and the per-agent-type default.
+    /// Optional model override for the sub-agent: `"heavy"` lifts this
+    /// subtask onto the parent's own model.
     #[serde(default)]
     model: Option<String>,
     /// Short, kebab-case name for this subtask (e.g. `auth-flow-audit`).
@@ -127,7 +127,7 @@ impl Tool for TaskTool {
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model for the sub-agent: \"heavy\" = your own (parent) model for a demanding part (large refactor, architecture, multi-file debugging); or an explicit provider/model-id. Omit for the configured delegation.model_policy (default: a cheaper sibling of your model)."
+                    "description": "Optional model override for the sub-agent: \"heavy\" = your own (parent) model for a demanding part (large refactor, architecture, multi-file debugging). Omit for the configured model (`models.<agent>` when set, else the parent's model)."
                 },
                 "name": {
                     "type": "string",
@@ -217,18 +217,30 @@ impl Tool for TaskTool {
             }
         };
 
-        // F9-10: the sub-agent model follows `delegation.model_policy`
-        // applied to the PARENT's effective model (`model: "heavy"` lifts a
-        // sub-task back onto it; any other explicit `model` wins outright).
+        // The sub-agent model follows the fleet fallback chain: an explicit
+        // per-call `model` wins, else `models.<agent>` when set, else the
+        // parent's effective model. `model: "heavy"` lifts a heavy part onto
+        // the parent's own model. A live child with the same prompt+agent refuses
+        // the duplicate (collect it with `task_wait` instead).
         let parent_model = crate::store::parent_model_for_delegation(
             &parent.meta_snapshot().await,
             &instance,
             &cfg,
         );
+        if let Some(dup) = parent.find_live_child_by_prompt(&prompt, &agent_name).await {
+            return ToolOutput::new(
+                format!(
+                    "task: a {} child task already covers this (name `{}` taskID `{}` status `{}`); collect it with `task_wait` instead of spawning a duplicate",
+                    dup.agent, dup.name, dup.task_id, dup.status,
+                ),
+                "task",
+            );
+        }
         let model = crate::agent::resolve_subagent_model(
-            bebok_llm::ModelCatalog::global(),
             &cfg.delegation,
             &parent_model,
+            &agent_name,
+            |a| cfg.model_for(a),
             args.model.as_deref(),
         );
 

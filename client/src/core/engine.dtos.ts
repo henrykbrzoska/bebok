@@ -473,6 +473,41 @@ export interface McpListResponse {
   servers: McpStatus[];
 }
 
+/** TOR C: one declared plugin from `GET /plugins?directory=` (`declared` array). */
+export interface DeclaredPlugin {
+  name: string;
+  repo: string;
+  url: string;
+  enabled: boolean;
+  installed: boolean;
+}
+
+/** TOR C: `GET /plugins?directory=` payload (plus legacy host introspection). */
+export interface PluginsResponse {
+  declared: DeclaredPlugin[];
+  plugins?: string[];
+  hooks?: string[];
+  attached?: boolean;
+}
+
+/** TOR C: `POST /plugins/{name}/install|toggle` payload. */
+export interface PluginResponse {
+  plugin: DeclaredPlugin;
+}
+
+/** Central registry entry from `GET /plugins/registry` (installable plugin). */
+export interface RegistryPlugin {
+  name: string;
+  repo: string;
+  url: string;
+  description: string;
+}
+
+/** `GET /plugins/registry` payload: the installable-plugin catalogue. */
+export interface PluginRegistryResponse {
+  plugins: RegistryPlugin[];
+}
+
 export interface ResolvedSkill {
   name: string;
   description?: string | null;
@@ -502,37 +537,9 @@ export interface FleetGenResponse {
   warning: string | null;
 }
 
-/** WP-DELEGATION (F8-2): `delegation.mode`. */
-export type DelegationMode = 'off' | 'auto' | 'always';
-
-/** WP-DELEGATION (F8-2): `delegation` section of the config. */
+/** `delegation` section of the config: only `max_concurrent` (1..16, default 3). */
 export interface DelegationConfig {
-  mode: DelegationMode;
   max_concurrent: number;
-  /** Legacy optional model override for every sub-agent (`provider/model`); == explicit policy. */
-  model?: string | null;
-  /**
-   * F9-10: `"inherit"` | `"cheaper"` (default) | `"<provider/model>"` (explicit).
-   * Absent on older engines (treat as `cheaper` unless `model` is set).
-   */
-  model_policy?: string;
-}
-
-/** F9-10: one row of `GET /delegation/models` `mappings`. */
-export interface DelegationModelMapping {
-  provider: string;
-  model: string;
-  /** Cheaper sibling from the catalog; `null` = none (falls back to inherit). */
-  cheaper: string | null;
-}
-
-/** F9-10: `GET /delegation/models?directory=`. */
-export interface DelegationModelsResponse {
-  policy: string;
-  parent_model: string;
-  /** The model a sub-agent would get right now. */
-  resolved: string;
-  mappings: DelegationModelMapping[];
 }
 
 /** Parallel-agents fleet config (`fleet` section of the config). */
@@ -586,9 +593,19 @@ export function isFrontendVerify(value: unknown): value is FrontendVerify {
   );
 }
 
+export type BuildTestMode = 'auto' | 'ask' | 'off';
+
+export const BUILD_TEST_MODES: readonly BuildTestMode[] = ['auto', 'ask', 'off'];
+
+export function isBuildTestMode(value: unknown): value is BuildTestMode {
+  return typeof value === 'string' && (BUILD_TEST_MODES as readonly string[]).includes(value);
+}
+
 export interface VerifyConfig {
   /** `auto` (default): verify without asking; `ask`: ask once; `off`: no policy. */
   frontend?: FrontendVerify;
+  /** `auto` (default): agent runs builds/tests; `ask`: ask first; `off`: no policy. */
+  buildTest?: BuildTestMode;
 }
 
 /** `browser` config section (WP-BROWSER2 / F7-6). */
@@ -1095,6 +1112,21 @@ export interface ProcessLogResponse {
   log: string;
   /** Total size of the log file in bytes (before the tail cut). */
   size: number;
+}
+
+/** `GET /plugins/bebok-index/status?directory=` payload: live code-index snapshot. */
+export interface IndexStatusResponse {
+  status: string;
+  files: number;
+  symbols: number;
+}
+
+/** `POST /plugins/bebok-index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
+export interface IndexRebuildResponse {
+  status: string;
+  files: number;
+  symbols: number;
+  rebuild: boolean;
 }
 
 /** `process.output` event properties (coalesced, at most ~3/s per process). */

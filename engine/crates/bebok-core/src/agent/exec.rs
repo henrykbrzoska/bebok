@@ -9,14 +9,14 @@
 use std::sync::Arc;
 
 use bebok_llm::Provider;
-use bebok_tools::{ToolCtx, ToolRegistry};
+use bebok_tools::ToolRegistry;
 use tokio_util::sync::CancellationToken;
 
 use super::observe::{emit_message, emit_part};
 use super::preset::Agent;
 use crate::event::{Event, EventBus};
 use crate::permission::PermissionEngine;
-use crate::plugin::{Hook, PluginHost, ToolCallHook, ToolResultHook};
+use crate::plugin::{FileWriteHook, Hook, PluginHost, ToolCallHook, ToolResultHook};
 use crate::store::SessionState;
 use crate::util::{compress_tool_output, now_ms, truncate_output};
 
@@ -41,6 +41,25 @@ pub struct ExecCtx<'a> {
     pub abort: &'a CancellationToken,
     pub assistant_idx: usize,
     pub tool_output_cap: usize,
+}
+
+/// True when a completed tool call mutated files. `rm`/`mv` report via
+/// stderr-style text, so success is judged by the absence of an `error:`
+/// prefix rather than tool-specific parsing.
+fn ok_tool_mutation(tool_name: &str, output_text: &str) -> bool {
+    const FILE_MUTATING_TOOLS: &[&str] = &[
+        "write_file",
+        "append_file",
+        "edit_file",
+        "rm",
+        "mv",
+        "cp",
+        "ln",
+        "touch",
+        "mkdir",
+        "chmod",
+    ];
+    FILE_MUTATING_TOOLS.contains(&tool_name) && !output_text.trim_start().starts_with("error:")
 }
 
 /// Execute one permission-gated tool call (the `Run` arm of the turn loop).
@@ -127,12 +146,15 @@ pub async fn exec_gated_call(
         }
     }
 
-    let tool_ctx = ToolCtx {
+    let tool_ctx = bebok_tools::ToolCtx {
         root: ctx.state.directory().into(),
         session_id: ctx.state.id().to_string(),
         abort: ctx.abort.clone(),
     };
     let output = tool.execute(tool_ctx, input.clone()).await;
+
+    // A successful file mutation is observed by plugins through the
+    // `AFTER_FILE_WRITE` hook below (the index plugin rescan lives there).
 
     // Token-saving pipeline: compress first (strip ANSI, collapse whitespace),
     // then truncate against the configured static cap. The full output is
@@ -173,6 +195,20 @@ pub async fn exec_gated_call(
             output: text.clone(),
         };
         hooks.run_hook(Hook::AFTER_TOOL, &mut payload).await;
+    }
+
+    // Emit `after.file_write` after a successful file mutation so
+    // observer plugins (e.g. the index plugin) can invalidate/rescan.
+    // The hook itself never fails the turn (logged and skipped on error).
+    if ok && ok_tool_mutation(tool_name, &text) && hooks.has_plugins().await {
+        let mut payload = FileWriteHook {
+            tool: tool_name.to_string(),
+            path: input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        };
+        hooks.run_hook(Hook::AFTER_FILE_WRITE, &mut payload).await;
     }
 
     ctx.state.persist_message_at(ctx.assistant_idx).await;

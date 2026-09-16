@@ -19,13 +19,15 @@ import { FormsModule } from '@angular/forms';
 import { AgentInfo } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
+import { ModelSelect } from '../../ui/model-select/model-select';
 import { FrontendVerifyCard } from './frontend-verify';
 import { DelegationBlock } from './delegation-block';
+import { BuildTestPolicyCard } from './build-test-policy';
 import { SettingsStore } from './settings.store';
 
 @Component({
   selector: 'app-settings-agents',
-  imports: [FormsModule, FrontendVerifyCard, DelegationBlock],
+  imports: [FormsModule, ModelSelect, FrontendVerifyCard, DelegationBlock, BuildTestPolicyCard],
   templateUrl: './agents-tab.html',
   styleUrls: ['./settings-shared.css', './agents-tab.css'],
 })
@@ -40,7 +42,18 @@ export class AgentsTab {
   readonly promptText = signal('');
   readonly promptLoading = signal(false);
 
+  readonly agentFilter = signal('');
   readonly agents = computed<AgentInfo[]>(() => this.store.config()?.agents ?? []);
+  readonly filteredAgents = computed<AgentInfo[]>(() => {
+    const needle = this.agentFilter().trim().toLowerCase();
+    const list = this.agents();
+    if (!needle) {
+      return list;
+    }
+    return list.filter(
+      (a) => a.name.toLowerCase().includes(needle) || (a.description ?? '').toLowerCase().includes(needle),
+    );
+  });
 
   readonly selected = computed<AgentInfo | null>(
     () => this.agents().find((a) => a.name === this.store.selectedAgent()) ?? null,

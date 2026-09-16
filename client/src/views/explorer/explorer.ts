@@ -18,6 +18,8 @@ import { FsEntry } from '../../core/engine.dtos';
 import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
+import { FindStore } from '../../core/find.store';
+import { FindBarComponent } from '../../ui/find-bar/find-bar.component';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
 import { isImagePath } from '../../ui/right-drawer/panels/preview-panel';
 import { ShellStore } from '../../ui/shell/shell.store';
@@ -40,9 +42,12 @@ interface DirState {
 
 @Component({
   selector: 'app-explorer',
-  imports: [FormsModule, HtmlPreviewComponent],
+  imports: [FormsModule, HtmlPreviewComponent, FindBarComponent],
   templateUrl: './explorer.html',
   styleUrl: './explorer.css',
+  // Ctrl/Cmd+F opens the find bar for the open file instead of the
+  // browser's built-in search (the bar paints matches via `wrapMark`).
+  host: { '(document:keydown)': 'onDocumentKeydown($event)' },
 })
 export class ExplorerView implements OnInit {
   private readonly engine = inject(EngineClient);
@@ -51,6 +56,7 @@ export class ExplorerView implements OnInit {
   private readonly selection = inject(ExplorerSelectionStore);
   private readonly shell = inject(ShellStore);
   private readonly codeHighlight = inject(CodeHighlightService);
+  readonly find = inject(FindStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -261,6 +267,7 @@ export class ExplorerView implements OnInit {
       return;
     }
     this.selectedPath.set(node.path);
+    this.find.closeFind();
     this.editing.set(false);
     this.htmlPreview.set(null);
     this.fileLoading.set(true);
@@ -381,5 +388,33 @@ export class ExplorerView implements OnInit {
 
   describe(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
+  }
+
+  /**
+   * Ctrl/Cmd+F over an open plain-text file: open the find bar for this
+   * file instead of the browser's built-in search. Markdown/image/HTML
+   * previews and edit mode are out of scope (the bar paints the highlighted
+   * `<code>` block only).
+   */
+  onDocumentKeydown(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') {
+      return;
+    }
+    if (!this.selectedPath() || this.editing() || this.fileLoading()) {
+      return;
+    }
+    if (this.isHtmlSelection() || this.isImageSelection() || this.isMarkdownSelection()) {
+      return;
+    }
+    if (this.htmlPreview() !== null) {
+      return;
+    }
+    event.preventDefault();
+    this.find.openFind('explorer');
+  }
+
+  /** Element the find bar paints its matches into. */
+  findContainer(): HTMLElement | null {
+    return document.querySelector('.explorer .file-body.file-content code');
   }
 }

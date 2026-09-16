@@ -1,0 +1,64 @@
+<div class="card" data-testid="build-test-policy-card">
+  <h3>{{ t('settings.buildTestTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.buildTestHint') }}</p>
+
+  <fieldset class="modes" [disabled]="store.saving()">
+    <legend class="micro-label">{{ t('settings.buildTestLabel') }}</legend>
+    @for (m of modes; track m) {
+      <label class="mode" [class.selected]="effectiveMode() === m">
+        <input
+          type="radio"
+          name="build-test"
+          [value]="m"
+          [checked]="effectiveMode() === m"
+          (change)="selectMode(m)"
+          [attr.data-testid]="'build-test-' + m"
+        />
+        <span class="mode-text">
+          <span class="mode-name">{{ modeLabel(m) }}</span>
+          <span class="mode-help small faint">{{ modeHelp(m) }}</span>
+        </span>
+      </label>
+    }
+  </fieldset>
+
+  <label class="field scope">
+    <span class="micro-label">{{ t('settings.buildTestScope') }}</span>
+    <select
+      data-testid="build-test-scope"
+      [ngModel]="scope()"
+      (ngModelChange)="setScope($event)"
+      [disabled]="store.saving()"
+    >
+      <option value="global">{{ t('settings.buildTestScopeGlobal') }}</option>
+      <option value="project">{{ t('settings.buildTestScopeProject') }}</option>
+    </select>
+    @if (projectOverride(); as override) {
+      <!-- Language-neutral notation: the project layer's own value. -->
+      <span class="small faint mono" data-testid="build-test-override">
+        .bebok/config.json: verify.buildTest = {{ override }}
+      </span>
+    }
+  </label>
+
+  <div class="actions">
+    <button
+      type="button"
+      class="primary"
+      (click)="save()"
+      [disabled]="!hasChanges() || store.saving()"
+      data-testid="build-test-save"
+    >
+      {{ t('settings.buildTestSave') }}
+    </button>
+    @if (store.saving()) {
+      <span class="spinner"></span>
+    }
+    @if (store.saved(); as msg) {
+      <span class="small saved-msg">{{ msg }}</span>
+    }
+    @if (store.error(); as err) {
+      <span class="inline-error">{{ err }}</span>
+    }
+  </div>
+</div>

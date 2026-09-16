@@ -1,7 +1,8 @@
 /**
  * Frontend verification card specs - WP-AUTOVERIFY (F8-1): the radio group
- * reads `config.verify.frontend`, saves `{ verify: { frontend } }` to the
- * chosen config layer (global by default) and reports a project override.
+ * stages a pending selection, and an explicit Save button persists
+ * `{ verify: { frontend } }` to the chosen config layer (project by default).
+ * A project override is reported when the project layer sets its own value.
  */
 
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -91,8 +92,10 @@ describe('FrontendVerifyCard (F8-1)', () => {
     expect(radio('auto').checked).toBeTrue();
     expect(radio('ask').checked).toBeFalse();
     expect(radio('off').checked).toBeFalse();
-    expect(component.scope()).toBe('global');
+    expect(component.scope()).toBe('project');
     expect(component.projectOverride()).toBeNull();
+    expect(component.pending()).toBeNull();
+    expect(component.hasChanges()).toBeFalse();
   });
 
   it('renders a label and help text for every mode', async () => {
@@ -116,38 +119,70 @@ describe('FrontendVerifyCard (F8-1)', () => {
     expect(component.mode()).toBe('auto');
   });
 
-  it('saves the chosen mode to the global config layer by default', async () => {
+  it('stages a pending selection without saving', async () => {
     await setup();
-    await component.setMode('off');
+    component.selectMode('off');
+    expect(component.pending()).toBe('off');
+    expect(component.hasChanges()).toBeTrue();
+    expect(component.effectiveMode()).toBe('off');
+    // Radio reflects the pending selection.
+    expect(radio('off').checked).toBeTrue();
+    // No PUT was made.
+    expect(engine.putConfig).not.toHaveBeenCalled();
+  });
+
+  it('save button is disabled when there are no changes', async () => {
+    await setup();
+    const btn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-testid="frontend-verify-save"]',
+    )!;
+    expect(btn.disabled).toBeTrue();
+  });
+
+  it('save button is enabled when there are pending changes', async () => {
+    await setup();
+    component.selectMode('off');
+    fixture.detectChanges();
+    const btn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-testid="frontend-verify-save"]',
+    )!;
+    expect(btn.disabled).toBeFalse();
+  });
+
+  it('save() persists the staged mode to the project config layer by default', async () => {
+    await setup();
+    component.selectMode('off');
+    await component.save();
     expect(engine.putConfig).toHaveBeenCalledWith(
       'C:/tmp/project',
       { verify: { frontend: 'off' } },
-      { scope: 'global' },
+      { scope: 'project' },
     );
-    expect(component.mode()).toBe('off');
+    expect(component.pending()).toBeNull();
     expect(component.store.saved()).toBeTruthy();
   });
 
-  it('saves to the project layer when that scope is selected', async () => {
+  it('save() persists to the global layer when that scope is selected', async () => {
     await setup();
-    component.setScope('project');
-    await component.setMode('ask');
+    component.setScope('global');
+    component.selectMode('ask');
+    await component.save();
     expect(engine.putConfig).toHaveBeenCalledWith(
       'C:/tmp/project',
       { verify: { frontend: 'ask' } },
-      { scope: 'project' },
+      { scope: 'global' },
     );
-    component.setScope('nonsense');
-    expect(component.scope()).toBe('global');
   });
 
-  it('clicking a radio saves that mode', async () => {
+  it('selecting a different radio and saving stages correctly', async () => {
     await setup();
-    radio('ask').click();
-    await fixture.whenStable();
+    component.selectMode('ask');
+    await component.save();
     expect((engine.putConfig as jasmine.Spy).calls.mostRecent().args[1]).toEqual({
       verify: { frontend: 'ask' },
     });
+    // pending reset after save
+    expect(component.pending()).toBeNull();
   });
 
   it('shows the project override when the project layer sets a value', async () => {
@@ -163,7 +198,8 @@ describe('FrontendVerifyCard (F8-1)', () => {
   it('falls back to auto for an unknown value and reports engine errors', async () => {
     await setup({ frontend: 'ask' });
     (engine.putConfig as jasmine.Spy).and.returnValue(Promise.reject(new Error('boom')));
-    await component.setMode('nonsense');
+    component.selectMode('nonsense');
+    await component.save();
     expect((engine.putConfig as jasmine.Spy).calls.mostRecent().args[1]).toEqual({
       verify: { frontend: 'auto' },
     });
@@ -173,8 +209,16 @@ describe('FrontendVerifyCard (F8-1)', () => {
 
   it('is a no-op while another save is running', async () => {
     await setup();
+    component.selectMode('off');
     component.store.saving.set(true);
-    await component.setMode('off');
+    await component.save();
     expect(engine.putConfig).not.toHaveBeenCalled();
+  });
+
+  it('scope change does not trigger hasChanges', async () => {
+    await setup();
+    expect(component.hasChanges()).toBeFalse();
+    component.setScope('global');
+    expect(component.hasChanges()).toBeFalse();
   });
 });

@@ -55,10 +55,10 @@ impl ToolOutput {
 
 /// Execution context passed to every tool invocation.
 ///
-/// Carries the instance root, the session id, and the cancellation token bound
-/// to the current turn. Permission decisions are made by the agent loop's
-/// permission gate *before* [`Tool::execute`] is called; tools themselves never
-/// ask for permission.
+/// Carries the instance root, the session id and the cancellation token
+/// bound to the current turn. Permission decisions are made by the agent
+/// loop's permission gate *before* [`Tool::execute`] is called; tools
+/// themselves never ask for permission.
 #[derive(Clone)]
 pub struct ToolCtx {
     /// Instance root (working directory the session is bound to).

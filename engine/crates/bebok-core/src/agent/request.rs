@@ -17,9 +17,14 @@ use crate::plugin::{Hook, PluginHost, RequestHook, RequestMessage};
 use crate::session::{Role, ToolState};
 use crate::store::SessionState;
 
-/// Tools a sub-agent does not get while a delegation policy is active
-/// (WP-DELEGATION): the main thread decomposes and supervises, workers work.
-pub const DELEGATION_TOOLS: &[&str] = &["task", "fleet", "task_status", "task_wait", "task_cancel"];
+/// Delegation tool sets: the orchestrator owns fleet fan-out plus the
+/// supervision tools; every other agent (and every sub-agent) gets none of
+/// them. The plain `task` tool stays registered (it is not in these lists)
+/// so non-orchestrator agents and manual calls keep working as before.
+pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] =
+    &["fleet", "task_status", "task_wait", "task_cancel"];
+/// Back-compat alias for tests/callers iterating the full delegation set.
+pub const DELEGATION_TOOLS: &[&str] = ORCHESTRATOR_DELEGATION_TOOLS;
 
 /// Builder for provider requests (transcript + system prompt + tool defs).
 pub struct RequestBuilder<'a> {
@@ -165,12 +170,13 @@ impl<'a> RequestBuilder<'a> {
         // for unused tools (e.g. fs_tree, fs_file, debug_log, mcp list are
         // rarely needed in a simple code-editing session).
         let used_tools = collect_used_tools(&messages);
-        // WP-DELEGATION: with a delegation policy on, sub-agents are workers -
-        // the main thread owns decomposition and supervision, so a child gets
-        // no delegation/supervision tools at all (the depth guard stays as the
-        // backstop when the policy is `off`).
+        // The orchestrator owns fleet fan-out + supervision (`fleet`,
+        // `task_status`, `task_wait`, `task_cancel`); sub-agents of any
+        // parent are workers and get none of them. Every other agent keeps
+        // the plain `task` tool (registered, not gated here) but never sees
+        // the fleet/supervision set.
         let hide_delegation = self.state.meta_snapshot().await.parent.is_some()
-            && self.state.config_snapshot().delegation.mode != crate::config::DelegationMode::Off;
+            || self.agent.name != super::delegation_policy::FLEET_AGENT;
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -224,7 +230,10 @@ impl<'a> RequestBuilder<'a> {
 
     /// Fire the `before.request` plugin hook and apply the (possibly mutated)
     /// system prompt back. Only the system prompt is applied back (messages
-    /// stay canonical on disk).
+    /// stay canonical on disk). When the `bebok-index` plugin is available,
+    /// a "code index first" section is appended so every prompt (user
+    /// sessions and delegated sub-agents) instructs the model to query the
+    /// local code index before falling back to grep/glob.
     pub async fn apply_request_hook(&self, req: &mut ChatRequest) {
         let hooks = PluginHost::global();
         if hooks.has_plugins().await {
@@ -235,6 +244,16 @@ impl<'a> RequestBuilder<'a> {
             );
             hooks.run_hook(Hook::BEFORE_REQUEST, &mut payload).await;
             req.system = payload.system;
+        }
+
+        // Central enforcement: inject the code-index-first section when the
+        // plugin is available at this project's root.
+        let root = std::path::Path::new(self.state.directory());
+        if let Some(section) = super::index_section(root) {
+            if !req.system.is_empty() {
+                req.system.push_str("\n\n");
+            }
+            req.system.push_str(&section);
         }
     }
 }

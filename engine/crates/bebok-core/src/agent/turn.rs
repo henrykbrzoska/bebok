@@ -52,7 +52,7 @@ impl TurnRunner {
         permission: Arc<PermissionEngine>,
         bus: EventBus,
         abort: CancellationToken,
-        model: &str,
+        model: String,
     ) -> Self {
         Self {
             state,
@@ -62,7 +62,7 @@ impl TurnRunner {
             permission,
             bus,
             abort,
-            model: model.to_string(),
+            model,
         }
     }
 
@@ -81,6 +81,7 @@ impl TurnRunner {
             abort,
             model,
         } = self;
+        let model_ref = model.as_str();
         let config = state.config_snapshot();
         let hooks = PluginHost::global();
 
@@ -102,7 +103,7 @@ impl TurnRunner {
                 &state,
                 &agent,
                 &tools,
-                &model,
+                model_ref,
                 config.max_tokens,
                 config.thinking,
             );
@@ -172,7 +173,7 @@ impl TurnRunner {
                     // repeat offenders can be handled/filtered later.
                     crate::config::record_llm_error(
                         Path::new(state.directory()),
-                        &model,
+                        model_ref,
                         &err.to_string(),
                     );
                     bus.publish(
@@ -242,7 +243,7 @@ impl TurnRunner {
                     }
                     StreamEvent::Done(usage) => {
                         let cost = bebok_llm::compute_cost(
-                            &model,
+                            model_ref,
                             usage.input_tokens,
                             usage.output_tokens,
                             usage.cache_read_input_tokens.unwrap_or(0),
@@ -768,7 +769,7 @@ pub async fn run_turn(
         permission,
         bus,
         abort.clone(),
-        model,
+        model.to_string(),
     )
     .run()
     .await;

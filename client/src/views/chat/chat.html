@@ -11,15 +11,12 @@
       </label>
       <label class="tb-field">
         <span class="tb-label">{{ t('chat.model') }}</span>
-        <select class="tb-select" [ngModel]="selectedModel()" (ngModelChange)="selectedModel.set($event)">
-          <option value="">{{ t('settings.defaultOption') }}</option>
-          @if (selectedModel() && !availableModels().includes(selectedModel())) {
-            <option [value]="selectedModel()">{{ selectedModel() }}</option>
-          }
-          @for (model of availableModels(); track model) {
-            <option [value]="model">{{ model }}</option>
-          }
-        </select>
+        <app-model-select
+          [models]="availableModels()"
+          [(value)]="selectedModel"
+          [defaultLabel]="t('settings.defaultOption')"
+          buttonClass="tb-select"
+        />
       </label>
     }
     @if (effectiveModel().id) {

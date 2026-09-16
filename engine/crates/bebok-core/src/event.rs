@@ -3,6 +3,14 @@
 //! One stream (`GET /event`), every event carries the envelope
 //! `{ type, directory, sessionID, properties }` so clients can route by
 //! directory. No polling anywhere.
+//!
+//! Known event types include `session.*`, `message.updated`,
+//! `message.part.updated`, `permission.asked` / `permission.resolved`,
+//! `task.started` / `task.progress` / `task.ended`, `browser.frame`,
+//! `agent.list.changed`, `config.changed`, `pty.exited` and
+//! `plugin.changed` (plugin declaration installed / enabled / disabled:
+//! `properties` carries `{ name, change }` with `change` one of
+//! `installed` / `enabled` / `disabled`).
 
 use tokio::sync::broadcast;
 
@@ -30,6 +38,17 @@ impl Event {
     pub fn with_properties(mut self, properties: serde_json::Value) -> Self {
         self.properties = properties;
         self
+    }
+
+    /// TOR B plugin declarations: `plugin.changed` for an instance
+    /// directory, with `properties = { name, change }`. `change` is one of
+    /// `installed` (declaration + slot dir created) / `enabled` /
+    /// `disabled` (the `enabled` switch flipped).
+    pub fn plugin_changed(directory: &str, name: &str, change: &str) -> Self {
+        Self::new("plugin.changed", directory, "").with_properties(serde_json::json!({
+            "name": name,
+            "change": change,
+        }))
     }
 }
 
@@ -60,5 +79,19 @@ impl EventBus {
 impl Default for EventBus {
     fn default() -> Self {
         Self::new(1024)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Event;
+
+    #[test]
+    fn plugin_changed_has_correct_kind_and_properties() {
+        let event = Event::plugin_changed("/projects/acme", "bebok-index", "installed");
+        assert_eq!(event.kind, "plugin.changed");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.properties["name"], "bebok-index");
+        assert_eq!(event.properties["change"], "installed");
     }
 }

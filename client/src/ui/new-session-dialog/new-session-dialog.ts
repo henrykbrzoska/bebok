@@ -12,8 +12,8 @@
  * The worktree option needs the directory to be a *registered* project (the
  * git endpoints are id-addressed) and a git repository; otherwise the
  * checkbox is disabled with an explanatory hint. Models come from
- * `GET /config` the same way the chat header's switcher builds its list
- * (providers with a resolvable key only).
+ * `GET /config` the same way every other switcher builds its list
+ * (usable providers only, non-blank model names).
  */
 
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
@@ -22,6 +22,8 @@ import { Router } from '@angular/router';
 
 import { AgentInfo, ProjectGitInfo, WorktreeSpec } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
+import { selectableModels } from '../../core/model-list';
+import { ModelSelect } from '../model-select/model-select';
 import { ProjectsStore } from '../../core/projects.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
@@ -46,7 +48,7 @@ export function defaultBranchName(): string {
 @Component({
   selector: 'app-new-session-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule],
+  imports: [FormsModule, ModelSelect],
   templateUrl: './new-session-dialog.html',
   styleUrl: './new-session-dialog.css',
   host: { '(document:keydown)': 'onDocumentKeydown($event)' },
@@ -66,6 +68,17 @@ export class NewSessionDialog {
 
   /** Agent presets of the selected project (shared store, already loaded by the sidebar). */
   readonly agents = this.project.agents;
+  readonly agentFilter = signal('');
+  readonly filteredAgents = computed(() => {
+    const needle = this.agentFilter().trim().toLowerCase();
+    const list = this.agents();
+    if (!needle) {
+      return list;
+    }
+    return list.filter(
+      (a) => a.name.toLowerCase().includes(needle) || (a.description ?? '').toLowerCase().includes(needle),
+    );
+  });
   readonly selectedAgent = signal('code');
   /** `provider/model` strings; `''` means "agent default". */
   readonly models = signal<string[]>([]);
@@ -124,10 +137,6 @@ export class NewSessionDialog {
       return;
     }
     this.store.close();
-  }
-
-  agentLabel(agent: AgentInfo): string {
-    return agent.model ? `${agent.name} · ${agent.model}` : agent.name;
   }
 
   /** The worktree spec the Create button would send, or null when the option is off. */
@@ -195,20 +204,11 @@ export class NewSessionDialog {
     }
   }
 
-  /** Same derivation as the chat header's model switcher: keyed providers only. */
+  /** Same derivation as every other model switcher: usable providers only. */
   private async loadModels(directory: string): Promise<string[]> {
     try {
       const cfg = await this.engine.getConfig(directory);
-      const models: string[] = [];
-      for (const provider of cfg.providers ?? []) {
-        if (!provider.has_key) {
-          continue;
-        }
-        for (const model of provider.models ?? []) {
-          models.push(`${provider.name}/${model}`);
-        }
-      }
-      return models;
+      return selectableModels(cfg.providers);
     } catch {
       return [];
     }

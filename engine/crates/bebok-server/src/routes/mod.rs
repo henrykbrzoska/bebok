@@ -21,6 +21,7 @@ pub mod fs_browse;
 pub mod git;
 pub mod mcp;
 pub mod meta;
+pub mod plugins;
 pub mod processes;
 pub mod projects;
 pub mod providers;
@@ -52,8 +53,6 @@ pub fn build_api_router() -> Router<AppState> {
             post(session::abort_task),
         )
         .route("/session/{id}/agents", get(agents::list_agents))
-        // F9-10: what `delegation.model_policy` resolves to.
-        .route("/delegation/models", get(agents::delegation_models))
         // Fleet generation via LLM (min 3 members per agent type).
         .route("/fleet/generate", post(agents::generate_fleet))
         .route("/session/{id}/export", get(session::export_session))
@@ -102,7 +101,12 @@ pub fn build_api_router() -> Router<AppState> {
             post(git::remove_worktree),
         )
         .route("/version", get(meta::version))
-        .route("/plugins", get(meta::list_plugins))
+        .route("/plugins", get(plugins::list_plugins))
+        .route("/plugins/registry", get(plugins::plugin_registry))
+        .route("/plugins/{name}/install", post(plugins::install_plugin))
+        .route("/plugins/{name}/toggle", post(plugins::toggle_plugin))
+        .route("/plugins/{name}/status", get(plugins::plugin_status))
+        .route("/plugins/{name}/{action}", post(plugins::plugin_invoke))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(
             "/tools/safety",

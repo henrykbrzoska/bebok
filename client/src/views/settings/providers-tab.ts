@@ -39,6 +39,8 @@ export class ProvidersTab {
   /** Agent type the discovered model is about to be assigned to. */
   readonly assignType = signal('code');
   readonly assignModel = signal('');
+  /** Filter for the discovered models list. */
+  readonly modelSearch = signal('');
 
   readonly selected = computed<ProviderDraft | null>(
     () => this.store.providers().find((p) => p.name === this.store.selectedProvider()) ?? null,
@@ -70,10 +72,24 @@ export class ProvidersTab {
     return JSON.stringify({ ...saved, api_key: null }) !== JSON.stringify({ ...provider, api_key: null });
   });
 
-  /** Models discovered by the last successful "Test connection". */
+  /** Models discovered by the last successful "Test connection" (blanks dropped). */
   readonly discovered = computed<string[]>(() => {
     const provider = this.selected();
-    return provider ? (this.store.checkedModels()[provider.name] ?? []) : [];
+    if (!provider) {
+      return [];
+    }
+    return (this.store.checkedModels()[provider.name] ?? []).filter(
+      (model) => model.trim() !== '',
+    );
+  });
+
+  /** Discovered models filtered by the search term (case-insensitive substring). */
+  readonly filteredModels = computed<string[]>(() => {
+    const q = this.modelSearch().trim().toLowerCase();
+    if (!q) {
+      return this.discovered();
+    }
+    return this.discovered().filter((m) => m.toLowerCase().includes(q));
   });
 
   select(name: string): void {

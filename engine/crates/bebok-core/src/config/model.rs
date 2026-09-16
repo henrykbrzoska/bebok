@@ -100,117 +100,70 @@ pub struct FleetConfig {
     pub members: Vec<FleetMember>,
 }
 
-/// WP-DELEGATION (F8-2): when the main agent should hand work to sub-agents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// `verify.buildTest` policy — whether the agent runs builds/tests autonomously.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DelegationMode {
-    /// No policy text; the `task`/`fleet` tools stay available.
-    Off,
-    /// Decompose when the task has independent parts / spans areas (default).
+pub enum BuildTestMode {
+    /// Run builds and tests autonomously (default).
     #[default]
     Auto,
-    /// Decompose every non-trivial task.
-    Always,
+    /// Ask the user before running builds/tests.
+    Ask,
+    /// Never mention or run builds/tests.
+    Off,
 }
 
-impl DelegationMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DelegationMode::Off => "off",
-            DelegationMode::Auto => "auto",
-            DelegationMode::Always => "always",
-        }
+impl BuildTestMode {
+    /// Parse the `verify` config section (`{ "buildTest": "auto" | "ask" | "off" }`).
+    /// Unknown/missing values resolve to [`BuildTestMode::Auto`].
+    pub fn from_config(section: &serde_json::Value) -> Self {
+        section
+            .get("buildTest")
+            .and_then(serde_json::Value::as_str)
+            .and_then(Self::parse)
+            .unwrap_or_default()
     }
 
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "off" => Some(DelegationMode::Off),
-            "auto" => Some(DelegationMode::Auto),
-            "always" => Some(DelegationMode::Always),
+    /// Parse one policy word (case-insensitive, trimmed).
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "ask" => Some(Self::Ask),
+            "off" | "none" | "never" => Some(Self::Off),
             _ => None,
         }
     }
+
+    /// The canonical config word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Ask => "ask",
+            Self::Off => "off",
+        }
+    }
 }
 
-/// Default number of sub-agents that may run at the same time per session.
+/// WP-DELEGATION: concurrency cap for sub-agent fan-out. Sub-agents are only
+/// ever spawned from the configured fleet list; this is the only remaining
+/// `delegation` knob. Legacy keys (`mode`, `model_policy`/`modelPolicy`) are
+/// ignored on load (with a warning).
 pub const DEFAULT_DELEGATION_MAX_CONCURRENT: usize = 3;
 /// Hard ceiling for `delegation.max_concurrent` (guards against typos).
 pub const MAX_DELEGATION_MAX_CONCURRENT: usize = 16;
 
-/// F9-10: `delegation.model_policy` — which model sub-agents run on.
-/// Serialised as a plain string: `"inherit"`, `"cheaper"` or an explicit
-/// `provider/model` id.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum DelegationModelPolicy {
-    /// The parent's model.
-    Inherit,
-    /// A lighter sibling of the parent's model (same provider, via the model
-    /// catalog); inherit when there is none.
-    #[default]
-    Cheaper,
-    /// Always this model.
-    Explicit(String),
-}
-
-impl DelegationModelPolicy {
-    /// Parse the config string (`inherit` / `cheaper` / anything else = an
-    /// explicit model id; empty = the default `cheaper`).
-    pub fn parse(s: &str) -> Self {
-        let t = s.trim();
-        match t.to_ascii_lowercase().as_str() {
-            "" | "cheaper" => DelegationModelPolicy::Cheaper,
-            "inherit" => DelegationModelPolicy::Inherit,
-            _ => DelegationModelPolicy::Explicit(t.to_string()),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            DelegationModelPolicy::Inherit => "inherit",
-            DelegationModelPolicy::Cheaper => "cheaper",
-            DelegationModelPolicy::Explicit(m) => m.as_str(),
-        }
-    }
-}
-
-impl Serialize for DelegationModelPolicy {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for DelegationModelPolicy {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        Ok(DelegationModelPolicy::parse(&s))
-    }
-}
-
-/// WP-DELEGATION (F8-2): `delegation` config section. Global config with a
-/// per-key project override (a project that sets only `mode` keeps the global
-/// `max_concurrent` / `model_policy`).
+/// `delegation` config section: just the concurrency cap.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DelegationConfig {
-    pub mode: DelegationMode,
     /// Upper bound on concurrently *running* children; extra ones queue.
     pub max_concurrent: usize,
-    /// Legacy (pre F9-10) explicit model override for every sub-agent
-    /// (`provider/model`). Still honoured: a non-empty value with no
-    /// `model_policy` means `Explicit(model)`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// F9-10: `inherit` | `cheaper` (default) | explicit `provider/model`.
-    pub model_policy: DelegationModelPolicy,
 }
 
 impl Default for DelegationConfig {
     fn default() -> Self {
         Self {
-            mode: DelegationMode::Auto,
             max_concurrent: DEFAULT_DELEGATION_MAX_CONCURRENT,
-            model: None,
-            model_policy: DelegationModelPolicy::Cheaper,
         }
     }
 }
@@ -219,30 +172,6 @@ impl DelegationConfig {
     /// `max_concurrent` clamped to `1..=MAX_DELEGATION_MAX_CONCURRENT`.
     pub fn effective_max_concurrent(&self) -> usize {
         self.max_concurrent.clamp(1, MAX_DELEGATION_MAX_CONCURRENT)
-    }
-
-    /// The explicit sub-agent model, if the effective policy names one
-    /// (legacy `model` key or an explicit `model_policy`).
-    pub fn model_override(&self) -> Option<String> {
-        match self.effective_model_policy() {
-            DelegationModelPolicy::Explicit(m) => Some(m),
-            _ => None,
-        }
-    }
-
-    /// The policy in force: `model_policy`, except that a legacy non-empty
-    /// `model` with the default policy means "explicit that model".
-    pub fn effective_model_policy(&self) -> DelegationModelPolicy {
-        if self.model_policy == DelegationModelPolicy::Cheaper
-            && let Some(m) = self
-                .model
-                .as_deref()
-                .map(str::trim)
-                .filter(|m| !m.is_empty())
-        {
-            return DelegationModelPolicy::Explicit(m.to_string());
-        }
-        self.model_policy.clone()
     }
 }
 
@@ -368,6 +297,11 @@ impl ResolvedConfig {
     /// The effective `verify.frontend` policy (WP-AUTOVERIFY / F8-1).
     pub fn frontend_verify(&self) -> super::verify::FrontendVerify {
         super::verify::FrontendVerify::from_config(&self.verify)
+    }
+
+    /// The effective `verify.buildTest` policy.
+    pub fn build_test_mode(&self) -> BuildTestMode {
+        BuildTestMode::from_config(&self.verify)
     }
 }
 
@@ -529,5 +463,86 @@ mod tests {
         let long = "x".repeat(MAX_CUSTOM_CSS_LEN + 10);
         let out = UiConfig::sanitize_css(&long);
         assert_eq!(out.len(), MAX_CUSTOM_CSS_LEN);
+    }
+
+    #[test]
+    fn build_test_mode_default_is_auto() {
+        assert_eq!(BuildTestMode::default(), BuildTestMode::Auto);
+        assert_eq!(
+            BuildTestMode::from_config(&serde_json::json!({})),
+            BuildTestMode::Auto
+        );
+        assert_eq!(
+            BuildTestMode::from_config(&serde_json::Value::Null),
+            BuildTestMode::Auto
+        );
+        // Missing `buildTest` key (e.g. only `frontend` set).
+        assert_eq!(
+            BuildTestMode::from_config(&serde_json::json!({ "frontend": "off" })),
+            BuildTestMode::Auto
+        );
+    }
+
+    #[test]
+    fn build_test_mode_parses_every_value_case_insensitively() {
+        assert_eq!(BuildTestMode::parse("auto"), Some(BuildTestMode::Auto));
+        assert_eq!(BuildTestMode::parse("Auto"), Some(BuildTestMode::Auto));
+        assert_eq!(BuildTestMode::parse(" AUTO "), Some(BuildTestMode::Auto));
+        assert_eq!(BuildTestMode::parse("ask"), Some(BuildTestMode::Ask));
+        assert_eq!(BuildTestMode::parse("ASK"), Some(BuildTestMode::Ask));
+        assert_eq!(BuildTestMode::parse("off"), Some(BuildTestMode::Off));
+        assert_eq!(BuildTestMode::parse(" Off "), Some(BuildTestMode::Off));
+        assert_eq!(BuildTestMode::parse("none"), Some(BuildTestMode::Off));
+        assert_eq!(BuildTestMode::parse("never"), Some(BuildTestMode::Off));
+    }
+
+    #[test]
+    fn build_test_mode_rejects_unknown_words() {
+        assert_eq!(BuildTestMode::parse("sometimes"), None);
+        assert_eq!(BuildTestMode::parse(""), None);
+        assert_eq!(BuildTestMode::parse("on"), None);
+        // Non-string config values fall back to the default.
+        assert_eq!(
+            BuildTestMode::from_config(&serde_json::json!({ "buildTest": 3 })),
+            BuildTestMode::Auto
+        );
+        assert_eq!(
+            BuildTestMode::from_config(&serde_json::json!({ "buildTest": true })),
+            BuildTestMode::Auto
+        );
+    }
+
+    #[test]
+    fn build_test_mode_as_str_round_trips() {
+        for mode in [BuildTestMode::Auto, BuildTestMode::Ask, BuildTestMode::Off] {
+            assert_eq!(BuildTestMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(BuildTestMode::Auto.as_str(), "auto");
+        assert_eq!(BuildTestMode::Ask.as_str(), "ask");
+        assert_eq!(BuildTestMode::Off.as_str(), "off");
+    }
+
+    #[test]
+    fn build_test_mode_follows_the_resolved_config() {
+        let cfg = |mode: &str| {
+            ResolvedConfig::builder()
+                .verify(serde_json::json!({ "buildTest": mode }))
+                .build()
+        };
+        assert_eq!(cfg("ask").build_test_mode(), BuildTestMode::Ask);
+        assert_eq!(cfg("off").build_test_mode(), BuildTestMode::Off);
+        // Default config (no `verify` section) is auto, and a config that
+        // only sets `frontend` must not disturb `buildTest`.
+        assert_eq!(
+            ResolvedConfig::default().build_test_mode(),
+            BuildTestMode::Auto
+        );
+        assert_eq!(
+            ResolvedConfig::builder()
+                .verify(serde_json::json!({ "frontend": "ask" }))
+                .build()
+                .build_test_mode(),
+            BuildTestMode::Auto
+        );
     }
 }

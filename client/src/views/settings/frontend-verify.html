@@ -5,13 +5,13 @@
   <fieldset class="modes" [disabled]="store.saving()">
     <legend class="micro-label">{{ t('settings.frontendVerifyLabel') }}</legend>
     @for (m of modes; track m) {
-      <label class="mode" [class.selected]="mode() === m">
+      <label class="mode" [class.selected]="effectiveMode() === m">
         <input
           type="radio"
           name="frontend-verify"
           [value]="m"
-          [checked]="mode() === m"
-          (change)="setMode(m)"
+          [checked]="effectiveMode() === m"
+          (change)="selectMode(m)"
           [attr.data-testid]="'frontend-verify-' + m"
         />
         <span class="mode-text">
@@ -41,4 +41,25 @@
       </span>
     }
   </label>
+
+  <div class="actions">
+    <button
+      type="button"
+      class="primary"
+      (click)="save()"
+      [disabled]="!hasChanges() || store.saving()"
+      data-testid="frontend-verify-save"
+    >
+      {{ t('settings.frontendVerifySave') }}
+    </button>
+    @if (store.saving()) {
+      <span class="spinner"></span>
+    }
+    @if (store.saved(); as msg) {
+      <span class="small saved-msg">{{ msg }}</span>
+    }
+    @if (store.error(); as err) {
+      <span class="inline-error">{{ err }}</span>
+    }
+  </div>
 </div>

@@ -59,9 +59,21 @@ impl ToolRegistry {
     }
 
     /// All registered tools (plugin first, then built-ins, then MCP).
+    ///
+    /// A dynamic tool shadowing a built-in of the same name is listed once,
+    /// as dynamic (same precedence as [`ToolRegistry::get`]). Without this
+    /// dedup the provider request would carry two tools under one name and
+    /// e.g. DeepSeek rejects it with 400 "Tool names must be unique".
     pub fn list(&self) -> Vec<Arc<dyn Tool>> {
-        let mut out: Vec<Arc<dyn Tool>> = self.dynamic.read().unwrap().values().cloned().collect();
-        out.extend(self.builtin.clone());
+        let dynamic = self.dynamic.read().unwrap();
+        let mut out: Vec<Arc<dyn Tool>> = dynamic.values().cloned().collect();
+        out.extend(
+            self.builtin
+                .iter()
+                .filter(|t| !dynamic.contains_key(t.name()))
+                .cloned(),
+        );
+        drop(dynamic);
         out.extend(self.mcp.read().unwrap().values().cloned());
         out
     }
@@ -136,5 +148,53 @@ impl ToolRegistry {
     /// Drop every MCP tool (all servers toggled off).
     pub fn clear_mcp_tools(&self) {
         self.mcp.write().unwrap().clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ToolCtx;
+    use crate::tool::ToolOutput;
+    use async_trait::async_trait;
+    use serde_json::Value;
+
+    struct StubTool(&'static str);
+
+    #[async_trait]
+    impl Tool for StubTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "stub"
+        }
+        fn parameters_schema(&self) -> Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, _ctx: ToolCtx, _args: Value) -> ToolOutput {
+            ToolOutput::new("", "")
+        }
+        fn is_read_only(&self) -> bool {
+            true
+        }
+    }
+
+    /// A dynamic tool shadowing a built-in must appear in `list()` exactly
+    /// once (as dynamic) — otherwise the provider request carries two tools
+    /// under one name and e.g. DeepSeek rejects it with 400
+    /// "Tool names must be unique" (regression test)
+    /// dynamically in `instance_store.rs` on top of the built-in).
+    #[test]
+    fn list_dedups_dynamic_shadow_of_builtin() {
+        let reg = ToolRegistry::new(vec![Arc::new(StubTool("grep"))]);
+        reg.register_tool(Arc::new(StubTool("grep")));
+        let names = reg.names();
+        assert_eq!(
+            names.iter().filter(|n| *n == "grep").count(),
+            1,
+            "names: {names:?}"
+        );
+        assert_eq!(reg.source_of("grep"), Some(ToolSource::Dynamic));
     }
 }

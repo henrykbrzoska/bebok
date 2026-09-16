@@ -12,6 +12,24 @@
   min-width: 160px;
 }
 
+.model-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+.model-search input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  padding: var(--space-4) var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+  color: var(--code-text-strong);
+}
+
 .model-list {
   list-style: none;
   margin: 0;

@@ -45,6 +45,13 @@ impl Hook {
     /// After a permission decision was made (ask resolved / cache hit).
     /// Payload: [`PermissionHook`].
     pub const PERMISSION_RESOLVED: Hook = Hook("permission.resolved");
+    /// After a file was written by a tool (success only). Payload:
+    /// [`FileWriteHook`]. Observer plugins subscribe here (e.g. the
+    /// index plugin rescans on file writes).
+    pub const AFTER_FILE_WRITE: Hook = Hook("after.file_write");
+    /// After a store instance was created. Payload:
+    /// [`InstanceCreatedHook`]. Emit-only today (no subscriber in-tree).
+    pub const INSTANCE_CREATED: Hook = Hook("instance.created");
 }
 
 impl fmt::Display for Hook {
@@ -130,6 +137,22 @@ pub struct PermissionHook {
     pub pattern: String,
 }
 
+/// Payload for [`Hook::AFTER_FILE_WRITE`]: a tool successfully mutated a
+/// file. `path` is the tool's `path` argument (instance-relative); tools
+/// without a path (e.g. `bash`) report `None` and invalidate broadly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWriteHook {
+    pub tool: String,
+    pub path: Option<String>,
+}
+
+/// Payload for [`Hook::INSTANCE_CREATED`]: a store instance was created
+/// (or lazily attached).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceCreatedHook {
+    pub directory: String,
+}
+
 /// Result of running one plugin at one hook.
 #[derive(Debug)]
 pub enum HookResult {
@@ -142,13 +165,19 @@ pub enum HookResult {
     Stop(Option<String>),
 }
 
-/// A plugin: event observer + typed hook filters.
+/// A plugin: event observer + typed hook filters + action handler.
 ///
 /// `on_event` is the observer side (observe-only; cannot veto). `on_hook`
 /// receives the hook point and a JSON snapshot of the typed payload; override
 /// it to mutate (return `Changed`) or veto (return `Stop`). Payload types are
 /// decoupled through JSON so every plugin only has to know the payloads it
 /// actually cares about.
+///
+/// `on_action` handles explicit JSON actions (e.g. `status`, `rebuild`,
+/// `search`) invoked via [`PluginHost::invoke`]. The default implementation
+/// returns `None` (action not handled); override it for in-process plugins
+/// that expose an action API. Subprocess plugins delegate through
+/// [`crate::plugin_process::DynamicPlugin`] which calls the child process.
 #[async_trait]
 pub trait BebokPlugin: Send + Sync {
     /// Human-readable plugin id (e.g. `"telemetry"`, `"guard"`).
@@ -160,6 +189,17 @@ pub trait BebokPlugin: Send + Sync {
     /// Run at one hook. Default: no-op (`Continue`).
     async fn on_hook(&self, _hook: Hook, _payload: &mut serde_json::Value) -> HookResult {
         HookResult::Continue
+    }
+
+    /// Handle an explicit action invocation (JSON-lines protocol).
+    /// Return `Some(response_json)` on success, `None` when the action
+    /// is not recognised. Default: `None` (action not handled).
+    async fn on_action(
+        &self,
+        _action: &str,
+        _input: &serde_json::Value,
+    ) -> Option<serde_json::Value> {
+        None
     }
 }
 
@@ -283,6 +323,27 @@ impl PluginHost {
         !self.inner.plugins.read().await.is_empty()
     }
 
+    /// Invoke an action on a registered plugin by name.
+    ///
+    /// Looks up the plugin in registration order, calls
+    /// [`BebokPlugin::on_action`]. Returns `Some(response)` when the plugin
+    /// handled the action, `None` when no plugin registered with that name
+    /// exists or the plugin does not handle the action.
+    pub async fn invoke(
+        &self,
+        name: &str,
+        action: &str,
+        input: &serde_json::Value,
+    ) -> Option<serde_json::Value> {
+        let plugins = self.inner.plugins.read().await.clone();
+        for p in plugins {
+            if p.name() == name {
+                return p.on_action(action, input).await;
+            }
+        }
+        None
+    }
+
     /// Run every plugin at `hook`, in registration order, stopping early on a
     /// `Stop`. `payload` is (de)serialized through JSON per plugin so each
     /// plugin sees exactly the typed payload it knows. Plugin errors never
@@ -323,6 +384,8 @@ pub fn hook_names() -> Vec<&'static str> {
         Hook::AFTER_TOOL.0,
         Hook::TURN_END.0,
         Hook::PERMISSION_RESOLVED.0,
+        Hook::AFTER_FILE_WRITE.0,
+        Hook::INSTANCE_CREATED.0,
     ]
 }
 

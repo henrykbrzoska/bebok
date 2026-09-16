@@ -1,5 +1,78 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- Settings → Agents: saving "Frontend verification" no longer wipes a
+  previously saved "Build & test" value (and vice versa). Each card now
+  merges the sibling `verify.*` key into its `PUT /config` delta, because
+  the engine replaces the whole top-level `verify` section.
+
+### Features
+- Searchable model picker: every model dropdown (chat toolbar, new-session
+  dialog, agent model override, fleet members) is now a filterable combobox
+  with models grouped by provider, so long lists like OpenRouter's can be
+  searched instead of scrolled.
+- Native `code_index_status` and `code_index_search` tools: in-process tools
+  in `bebok-core` that delegate to the `bebok-index` plugin, enabling the
+  model to query the local code index (tantivy) directly from the agent loop.
+  Both tools are read-only, abort-aware, and registered for all agent presets.
+- Central enforcement of code-index-first: every prompt (user sessions and
+  delegated sub-agents via task/fleet) now includes a "Code index first" section
+  when the `bebok-index` plugin is available. The section instructs the model to
+  query the local code index before falling back to `grep`/`glob`. The prompt
+  text is read from the plugin's `AGENT_INDEX.md` (or a custom file named in
+  `bebok-plugin.json`'s `prompt_file` field), with a built-in fallback when the
+  file is missing. Injection happens in `apply_request_hook` so it covers all
+  code paths — no prompt bypasses it.
+- `GET /stats` now includes a `delegation` object with `direct` and `delegated` totals (tokens, cost, calls), splitting top-level sessions from sub-agent sessions by `parent`. Each `top_sessions` row carries a `parent` field (`null` or the parent UUID string).
+- `ask` and `plan` presets now include `fetch` in their tool whitelist with an
+  `Allow` permission rule, enabling read-only HTTP access for the local code
+  index (`GET /plugins/bebok-index/status`, `POST /plugins/bebok-index/search`).
+- Dynamic plugin loading: the engine can now spawn external plugin binaries
+  as subprocesses (JSON-lines over stdio). `PluginProcess` manages the
+  child lifecycle, `DynamicPlugin` wraps it behind `BebokPlugin`, and
+  `PluginHost::invoke(name, action, input)` dispatches to the matching
+  plugin. New HTTP routes `GET /plugins/{name}/status` and
+  `POST /plugins/{name}/{action}` expose the protocol. Manifest
+  `bebok-plugin.json` gains an optional `entrypoint` field (backward
+  compatible). When the binary is missing, invocation returns `None`
+  (graceful degradation, no panic).
+- Orchestrator supervision: the orchestrator watches sub-agents for looping /
+  wandering, cancels a stray child with `task_cancel` and re-delegates it with
+  a corrective brief.
+
+### Other
+- BREAKING: removed the delegation mode / model_policy configuration —
+  sub-agents spawn only from the fleet list, `delegation` keeps just
+  `max_concurrent`, and `GET /delegation/models` is gone.
+
+### Fixes
+- Disabling a plugin via `POST /plugins/{name}/toggle` with `enabled: false`
+  now immediately unregisters it from the global backend and blocks all access
+  to its endpoints (`/plugins/{name}/status`, `/plugins/{name}/{action}`) and
+  tools (`code_index_status`, `code_index_search`) for the project, even if
+  the plugin is still registered globally for another project. Previously
+  toggling a plugin off left the backend running and cross-project isolation
+  was broken.
+- `GET /plugins/{name}/status` and `POST /plugins/{name}/{action}` now
+  automatically load and register declared, enabled, installed plugins on
+  first access instead of returning 404. Previously the engine only
+  registered plugins during startup, so a freshly installed plugin
+  required a full restart to become reachable.
+- Fix: plugin subprocesses are now spawned via their resolved binary path
+  (slot dir or `PATH`) instead of the bare command name. Previously a
+  registered plugin sitting in its slot dir failed to start with
+  `No such file or directory`, because the OS resolves the binary via
+  `PATH`, not via the child's working directory.
+- Fix: `code_search` no longer appears twice in the tool list sent to the
+  provider (DeepSeek rejected it with 400 "Tool names must be unique").
+  `ToolRegistry::list()` now skips a built-in shadowed by a dynamic tool,
+  same as `list_with_source()` already did.
+- Fix: the code-index settings card now calls the correct plugin routes
+  (`/plugins/bebok-index/status` and `/plugins/bebok-index/rebuild`) instead
+  of the non-existent `/index/status` and `/index/rebuild`, which returned 404.
+
 ## 1.7.0 — 2026-09-14
 
 ### Auto-update

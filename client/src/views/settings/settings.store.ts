@@ -23,10 +23,12 @@ import {
   ResolvedSkill,
 } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { selectableModels } from '../../core/model-list';
 import { ProviderDraft } from './provider-catalog';
 
-/** The seven tabs of the redesigned Settings screen (design handoff §8). */
+/** The eight tabs of the redesigned Settings screen (design handoff §8). */
 export type SettingsTab =
+  | 'general'
   | 'providers'
   | 'agents'
   | 'mcp'
@@ -36,6 +38,7 @@ export type SettingsTab =
   | 'rawJson';
 
 export const SETTINGS_TABS: readonly SettingsTab[] = [
+  'general',
   'providers',
   'agents',
   'mcp',
@@ -116,6 +119,9 @@ export class SettingsStore {
   /** Non-fatal note from the last generation (engine fell back to a default list). */
   readonly fleetNotice = signal<string | null>(null);
 
+  /** Validation error for the fleet list (null = valid). */
+  readonly fleetError = signal<string | null>(null);
+
   // --- permissions ---------------------------------------------------------
 
   readonly rules = signal<PermissionRule[]>([]);
@@ -145,16 +151,13 @@ export class SettingsStore {
   readonly rawProjectPath = signal('');
   readonly rawGlobalPath = signal('');
 
-  /** Flat list of selectable models (`provider/model`) from every provider. */
-  readonly availableModels = computed<string[]>(() => {
-    const out: string[] = [];
-    for (const provider of this.providers()) {
-      for (const model of provider.models ?? []) {
-        out.push(`${provider.name}/${model}`);
-      }
-    }
-    return out;
-  });
+  /**
+   * Flat list of selectable models (`provider/model`): only usable providers
+   * (key resolvable or keyless, e.g. Ollama) and only non-blank model names.
+   */
+  readonly availableModels = computed<string[]>(() =>
+    selectableModels(this.providers()),
+  );
 
   /** MCP server entries from the raw `config.mcp` object. */
   readonly mcpConfig = computed<Record<string, McpServerConfig>>(() => {
@@ -372,7 +375,7 @@ export class SettingsStore {
   }
 
   addFleetMember(): void {
-    this.fleetMembers.update((list) => [...list, { name: '', agent: 'code', model: '' }]);
+    this.fleetMembers.update((list) => [...list, { name: '', agent: '', model: '' }]);
   }
 
   removeFleetMember(index: number): void {
@@ -380,6 +383,7 @@ export class SettingsStore {
   }
 
   updateFleetMember(index: number, field: 'name' | 'agent' | 'model', value: string): void {
+    this.fleetError.set(null);
     this.fleetMembers.update((list) => {
       const next = list.map((m) => ({ ...m }));
       if (next[index]) {
@@ -399,18 +403,40 @@ export class SettingsStore {
     if (!dir || this.saving()) {
       return;
     }
+    const members = this.fleetMembers()
+      .map((m) => ({
+        name: m.name.trim(),
+        agent: m.agent.trim(),
+        model: m.model.trim(),
+      }))
+      .filter((m) => m.name.length > 0 || m.agent.length > 0 || m.model.length > 0);
+    // Unique non-empty names; agent required; model optional (empty = parent model).
+    const seen = new Set<string>();
+    for (const m of members) {
+      if (!m.name) {
+        this.error.set(this.i18n.t('settings.fleetNeedName'));
+        this.fleetError.set(this.i18n.t('settings.fleetNeedName'));
+        return;
+      }
+      const key = m.name.toLowerCase();
+      if (seen.has(key)) {
+        this.error.set(this.i18n.t('settings.fleetDuplicateName', { name: m.name }));
+        this.fleetError.set(this.i18n.t('settings.fleetDuplicateName', { name: m.name }));
+        return;
+      }
+      seen.add(key);
+      if (!m.agent) {
+        this.error.set(this.i18n.t('settings.fleetNeedAgent', { name: m.name }));
+        this.fleetError.set(this.i18n.t('settings.fleetNeedAgent', { name: m.name }));
+        return;
+      }
+    }
     this.saving.set(true);
     this.error.set(null);
     this.saved.set(null);
+    this.fleetError.set(null);
     this.fleetNotice.set(null);
     try {
-      const members = this.fleetMembers()
-        .map((m) => ({
-          name: m.name.trim(),
-          agent: m.agent.trim() || 'code',
-          model: m.model.trim(),
-        }))
-        .filter((m) => m.name.length > 0);
       await this.engine.putConfig(dir, {
         fleet: { enabled: this.fleetEnabled(), members },
       });

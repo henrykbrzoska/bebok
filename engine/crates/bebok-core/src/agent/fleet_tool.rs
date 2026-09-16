@@ -187,11 +187,12 @@ fn resolve_hetero_members(
             .clone()
             .or_else(|| t.name.clone())
             .unwrap_or_else(|| agent.clone());
+        let model = matched.map(|m| m.model.clone()).unwrap_or_default();
         out.push((
             crate::config::FleetMember {
                 name: display,
                 agent,
-                model: String::new(),
+                model,
             },
             t.prompt.clone(),
             t.images.clone(),
@@ -631,14 +632,15 @@ async fn run_member(
     };
     let mut agent = instance.resolve_agent(agent_name);
 
-    // Effective model (F9-10): member override, else the delegation model
-    // policy applied to the parent's model (`heavy` = the parent's model).
+    // Effective model: member override, else what the config says for the
+    // child agent (`models.<agent>` when set, else the parent's model).
     let parent_model =
         crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
     let model = crate::agent::resolve_subagent_model(
-        bebok_llm::ModelCatalog::global(),
         &cfg.delegation,
         &parent_model,
+        agent_name,
+        |a| cfg.model_for(a),
         Some(member.model.trim()),
     );
 
@@ -953,6 +955,27 @@ mod tests {
         assert_eq!(resolved[0].0.name, "3");
         assert_eq!(resolved[0].0.agent, "code");
         assert_eq!(resolved[0].1, "do thing");
+    }
+
+    #[test]
+    fn hetero_member_match_carries_over_the_configured_model() {
+        let configured = vec![FleetMember {
+            name: "gpu".into(),
+            agent: "code".into(),
+            model: "openai/gpt-5.4".into(),
+        }];
+        let raw = Some(vec![FleetTask {
+            prompt: "do thing".into(),
+            agent: None,
+            name: None,
+            member: Some("gpu".into()),
+            images: None,
+        }]);
+        let cleaned = clean_tasks(raw);
+        let resolved = resolve_hetero_members(&configured, &cleaned).unwrap();
+        assert_eq!(resolved[0].0.name, "gpu");
+        assert_eq!(resolved[0].0.agent, "code");
+        assert_eq!(resolved[0].0.model, "openai/gpt-5.4");
     }
 
     #[test]
