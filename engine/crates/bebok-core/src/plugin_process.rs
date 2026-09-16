@@ -80,8 +80,9 @@ impl PluginProcess {
             if local.exists() {
                 return Some(local);
             }
-            // Try to find on PATH via `which`.
-            std::process::Command::new("which")
+            // Try to find on PATH via `which` (`where` on Windows).
+            let probe = if cfg!(windows) { "where" } else { "which" };
+            std::process::Command::new(probe)
                 .arg(&self.command)
                 .output()
                 .ok()
@@ -363,41 +364,70 @@ mod tests {
 
     /// Binary that echoes back `{"ok":true,"action":"<action>"}` for any
     /// request — a perfect subprocess stub for integration tests.
+    ///
+    /// On Windows the stub is a PowerShell script driven via `powershell`
+    /// (ships with Windows itself); on Unix a POSIX shell script driven via
+    /// `sh` (neither `sh` nor `awk` exist on a stock Windows runner).
     fn echo_stub_path() -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("bebok-plugin-proc-stub-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("echo-stub.sh");
-        std::fs::write(
-            &script,
-            r#"#!/bin/sh
+        #[cfg(windows)]
+        {
+            let script = dir.join("echo-stub.ps1");
+            std::fs::write(
+                &script,
+                "while (($line = [Console]::In.ReadLine()) -ne $null) {\r\n  if ($line -match '\"action\"\\s*:\\s*\"([^\"]+)\"') { $action = $Matches[1] } else { $action = \"unknown\" }\r\n  '{\"ok\":true,\"action\":\"' + $action + '\"}'\r\n}\r\n",
+            )
+            .unwrap();
+        }
+        #[cfg(not(windows))]
+        {
+            let script = dir.join("echo-stub.sh");
+            std::fs::write(
+                &script,
+                r#"#!/bin/sh
 while IFS= read -r line; do
   action=$(echo "$line" | awk -F'"action"' '{split($2,a,"\""); print a[2]}')
   [ -z "$action" ] && action="unknown"
   printf '{"ok":true,"action":"%s"}\n' "$action"
 done
 "#,
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
         dir
+    }
+
+    /// Shell command launching the echo stub: `sh <script>` on Unix,
+    /// `powershell -NoProfile -ExecutionPolicy Bypass -File <script>` on Windows.
+    #[cfg(windows)]
+    fn echo_stub_command(script: &std::path::Path) -> String {
+        format!(
+            "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {} --plugin-server",
+            script.display()
+        )
+    }
+    #[cfg(not(windows))]
+    fn echo_stub_command(script: &std::path::Path) -> String {
+        format!("sh {} --plugin-server", script.display())
     }
 
     #[tokio::test]
     async fn process_invoke_roundtrip() {
         let dir = echo_stub_path();
+        #[cfg(windows)]
+        let script = dir.join("echo-stub.ps1");
+        #[cfg(not(windows))]
         let script = dir.join("echo-stub.sh");
 
-        // Use `sh <script>` as the binary so the stub runs via shell.
-        let mut proc = PluginProcess::new(
-            "test",
-            dir.clone(),
-            Some(&format!("sh {} --plugin-server", script.display())),
-        );
+        // Use `<shell> <script>` as the binary so the stub runs via shell.
+        let mut proc = PluginProcess::new("test", dir.clone(), Some(&echo_stub_command(&script)));
 
         let result = proc
             .invoke("status", &serde_json::json!({"project": "/tmp"}))
