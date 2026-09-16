@@ -284,6 +284,61 @@ mod tests {
         }
     }
 
+    /// Write a portable echo-stub plugin script into `slot_dir` and return
+    /// the manifest entrypoint command for it. Unix uses `sh` + awk (both
+    /// guaranteed present); Windows uses `powershell` (ships with the OS —
+    /// neither `sh` nor `awk` exists on a stock Windows runner). The `.ps1`
+    /// path is quoted: `%TEMP%` often contains spaces.
+    #[cfg(windows)]
+    fn write_stub(slot_dir: &std::path::Path, plugin: &str) -> String {
+        let stub = slot_dir.join("stub.ps1");
+        std::fs::write(
+            &stub,
+            format!(
+                "while (($line = [Console]::In.ReadLine()) -ne $null) {{\r\n  if ($line -match '\"action\"\\s*:\\s*\"([^\"]+)\"') {{ $action = $Matches[1] }} else {{ $action = \"unknown\" }}\r\n  '{{\"ok\":true,\"action\":\"' + $action + '\",\"plugin\":\"{plugin}\"}}'\r\n}}\r\n",
+            ),
+        )
+        .unwrap();
+        let ps = if std::process::Command::new("where")
+            .arg("pwsh")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "pwsh"
+        } else {
+            "powershell"
+        };
+        format!(
+            "{ps} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" --plugin-server",
+            stub.display()
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn write_stub(slot_dir: &std::path::Path, plugin: &str) -> String {
+        let stub = slot_dir.join("stub.sh");
+        std::fs::write(
+            &stub,
+            format!(
+                r#"#!/bin/sh
+while IFS= read -r line; do
+  action=$(echo "$line" | awk -F'"action"' '{{split($2,a,"\""); print a[2]}}')
+  [ -z "$action" ] && action="unknown"
+  printf '{{"ok":true,"action":"%s","plugin":"{plugin}"}}\n' "$action"
+done
+"#,
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        format!("sh {} --plugin-server", stub.display())
+    }
+
     #[tokio::test]
     async fn list_install_toggle_roundtrip() {
         let base = temp_base("roundtrip");
@@ -467,30 +522,11 @@ mod tests {
         // Create a stub plugin binary.
         let slot_dir = project.join(".bebok").join("plugins").join("dyn-test");
         std::fs::create_dir_all(&slot_dir).unwrap();
-        let stub = slot_dir.join("dyn-stub.sh");
-        std::fs::write(
-            &stub,
-            r#"#!/bin/sh
-while IFS= read -r line; do
-  action=$(echo "$line" | awk -F'"action"' '{split($2,a,"\""); print a[2]}')
-  [ -z "$action" ] && action="unknown"
-  printf '{"ok":true,"action":"%s","plugin":"dyn-test"}\n' "$action"
-done
-"#,
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let entrypoint = write_stub(&slot_dir, "dyn-test");
 
         // Create and register a DynamicPlugin.
-        let dyn_plugin = bebok_core::DynamicPlugin::new(
-            "dyn-test",
-            slot_dir.clone(),
-            Some(format!("sh {} --plugin-server", stub.display())),
-        );
+        let dyn_plugin =
+            bebok_core::DynamicPlugin::new("dyn-test", slot_dir.clone(), Some(entrypoint));
         let host = bebok_core::PluginHost::global();
         host.register(std::sync::Arc::new(dyn_plugin)).await;
 
@@ -550,26 +586,10 @@ done
         // 2. Create slot dir with manifest + stub binary.
         let slot_dir = plugins_dir.join(plugin_name);
         std::fs::create_dir_all(&slot_dir).unwrap();
-        let stub = slot_dir.join("stub.sh");
-        std::fs::write(
-            &stub,
-            r#"#!/bin/sh
-while IFS= read -r line; do
-  action=$(echo "$line" | awk -F'"action"' '{split($2,a,"\""); print a[2]}')
-  [ -z "$action" ] && action="unknown"
-  printf '{"ok":true,"action":"%s","plugin":"lazy-test"}\n' "$action"
-done
-"#,
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let entrypoint = write_stub(&slot_dir, plugin_name);
         let manifest = serde_json::json!({
             "name": plugin_name,
-            "entrypoint": format!("sh {} --plugin-server", stub.display())
+            "entrypoint": entrypoint
         });
         std::fs::write(
             slot_dir.join("bebok-plugin.json"),

@@ -29,6 +29,49 @@ use crate::error::{CoreError, Result};
 /// Default timeout for one plugin invocation.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Split an entrypoint command string into argv, honouring single and
+/// double quotes. This matters on Windows where e.g. `%TEMP%` often
+/// contains spaces (`C:\Users\Jan Kowalski\...`): a naive
+/// `split_whitespace` would shred a quoted script path into several
+/// bogus arguments and the child would exit immediately.
+fn split_entrypoint(cmd: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut in_arg = false;
+    for ch in cmd.chars() {
+        match quote {
+            Some(q) => {
+                if ch == q {
+                    quote = None;
+                } else {
+                    cur.push(ch);
+                }
+            }
+            None => match ch {
+                '"' | '\'' => {
+                    quote = Some(ch);
+                    in_arg = true;
+                }
+                c if c.is_whitespace() => {
+                    if in_arg {
+                        parts.push(std::mem::take(&mut cur));
+                        in_arg = false;
+                    }
+                }
+                _ => {
+                    cur.push(ch);
+                    in_arg = true;
+                }
+            },
+        }
+    }
+    if in_arg {
+        parts.push(cur);
+    }
+    parts
+}
+
 /// Handle to a running subprocess plugin.
 ///
 /// The process is spawned lazily on first [`invoke`](Self::invoke) and kept
@@ -56,8 +99,20 @@ impl PluginProcess {
     pub fn new(name: &str, slot_dir: PathBuf, entrypoint: Option<&str>) -> Self {
         let default_ep = format!("{name} --plugin-server");
         let args_str = entrypoint.unwrap_or(&default_ep);
-        let mut parts: Vec<String> = args_str.split_whitespace().map(String::from).collect();
-        let command = parts.remove(0);
+        let mut parts: Vec<String> = split_entrypoint(args_str);
+        if parts.is_empty() {
+            parts.push(default_ep.clone());
+        }
+        let mut command = parts.remove(0);
+        // Strip stray surrounding quotes (defensive: split_entrypoint
+        // already strips them, but a hand-written entrypoint may quote
+        // the binary itself).
+        if command.len() >= 2
+            && ((command.starts_with('"') && command.ends_with('"'))
+                || (command.starts_with('\'') && command.ends_with('\'')))
+        {
+            command = command[1..command.len() - 1].to_string();
+        }
         Self {
             name: name.to_string(),
             command,
@@ -88,7 +143,15 @@ impl PluginProcess {
                 .ok()
                 .and_then(|o| {
                     if o.status.success() {
-                        let path = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                        // `where` on Windows may list several matches (one
+                        // per line); take the first usable line instead of
+                        // treating the whole stdout blob as one path.
+                        let path = String::from_utf8_lossy(&o.stdout)
+                            .lines()
+                            .map(str::trim)
+                            .find(|l| !l.is_empty())
+                            .unwrap_or("")
+                            .to_string();
                         if !path.is_empty() {
                             Some(PathBuf::from(path))
                         } else {
@@ -405,11 +468,27 @@ done
     }
 
     /// Shell command launching the echo stub: `sh <script>` on Unix,
-    /// `powershell -NoProfile -ExecutionPolicy Bypass -File <script>` on Windows.
+    /// `powershell -NoProfile -ExecutionPolicy Bypass -File "<script>"` on
+    /// Windows (quoted: `%TEMP%` often contains spaces). Prefers `pwsh`
+    /// (PowerShell 7) when installed, falls back to inbox `powershell`.
+    #[cfg(windows)]
+    fn ps_command() -> &'static str {
+        if std::process::Command::new("where")
+            .arg("pwsh")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "pwsh"
+        } else {
+            "powershell"
+        }
+    }
     #[cfg(windows)]
     fn echo_stub_command(script: &std::path::Path) -> String {
         format!(
-            "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {} --plugin-server",
+            "{} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{}\" --plugin-server",
+            ps_command(),
             script.display()
         )
     }
@@ -446,6 +525,25 @@ done
 
         proc.kill();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entrypoint_split_honours_quotes() {
+        assert_eq!(
+            split_entrypoint("sh foo.sh --plugin-server"),
+            vec!["sh", "foo.sh", "--plugin-server"]
+        );
+        assert_eq!(
+            split_entrypoint(
+                "powershell -File \"C:\\Users\\Jan Kowalski\\stub.ps1\" --plugin-server"
+            ),
+            vec![
+                "powershell",
+                "-File",
+                "C:\\Users\\Jan Kowalski\\stub.ps1",
+                "--plugin-server"
+            ]
+        );
     }
 
     #[test]

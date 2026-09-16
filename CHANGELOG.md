@@ -3,6 +3,11 @@
 ## 1.7.1 — 2026-09-16
 
 ### Fixes
+- Fix: dynamic plugin subprocesses now spawn reliably on Windows
+  (`split_entrypoint` honours quotes so script paths with spaces from
+  `%TEMP%` survive, `where` takes the first match line, test stubs prefer
+  `pwsh` with a `powershell` fallback). Fixes the two
+  `routes::plugins` invoke roundtrip failures on CI windows-latest.
 - Settings → Agents: saving "Frontend verification" no longer wipes a
   previously saved "Build & test" value (and vice versa). Each card now
   merges the sibling `verify.*` key into its `PUT /config` delta, because
