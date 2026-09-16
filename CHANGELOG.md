@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2 — 2026-09-16
+
+### Fixes
+- **engine**: spawn dynamic plugin subprocesses reliably on Windows (7346c19)
+
 ## 1.7.1 — 2026-09-16
 
 ### Fixes
