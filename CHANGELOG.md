@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Features
+- Chrome companion extension (`client/chrome-extension`, MV3, unpacked): ask the
+  local engine about the page you are reading — popup with question +
+  attach toggles (URL/title, selection, page text, screenshot), right-click
+  "Ask Bebok about selection", options page with Test connection. See
+  `client/chrome-extension/README.md` for install (paste the `BEBOK_READY` URL).
+
 ### Fixes
 - Plugins: `code_index_status`/`code_index_search` now lazy-register
   `bebok-index` from its on-disk declaration + slot, so they keep working

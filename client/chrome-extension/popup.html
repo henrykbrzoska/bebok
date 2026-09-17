@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bebok</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <span class="brand">Bebok</span>
+      <button
+        id="options"
+        class="icon-button"
+        type="button"
+        title="Options"
+        aria-label="Options"
+      >
+        ⚙
+      </button>
+    </header>
+
+    <main class="body">
+      <label class="label" for="question">Ask about this page</label>
+      <textarea
+        id="question"
+        class="question"
+        rows="4"
+        placeholder="What does this page say about…?"
+        spellcheck="false"
+      ></textarea>
+
+      <fieldset class="includes">
+        <legend class="label">Attach</legend>
+        <label class="check">
+          <input id="includeUrl" type="checkbox" checked />
+          <span>Page URL &amp; title</span>
+        </label>
+        <label class="check">
+          <input id="includeSelection" type="checkbox" checked />
+          <span>Selected text</span>
+        </label>
+        <label class="check">
+          <input id="includeText" type="checkbox" checked />
+          <span>Page text (≈4000 chars)</span>
+        </label>
+        <label class="check">
+          <input id="includeScreenshot" type="checkbox" />
+          <span>Screenshot</span>
+        </label>
+      </fieldset>
+
+      <button id="ask" class="primary" type="button">Ask</button>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section id="answerWrap" class="answer-wrap" hidden>
+        <div class="answer-head">
+          <span class="label">Answer</span>
+          <a id="sessionLink" class="link" href="#" target="_blank" rel="noreferrer"
+            >Open session ↗</a
+          >
+        </div>
+        <pre id="answer" class="answer"></pre>
+      </section>
+
+      <footer class="footer">
+        <span id="target" class="target"></span>
+      </footer>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

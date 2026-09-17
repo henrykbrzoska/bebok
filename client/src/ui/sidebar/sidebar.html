@@ -148,7 +148,12 @@
     </nav>
 
     <div class="footer">
-      <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      <button type="button" class="engine-live-btn" data-testid="engine-live-btn" (click)="toggleEngineUrl()" [attr.title]="engineUrl() || statusLabel()">
+        <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      </button>
+      @if (showEngineUrl() && engineUrl()) {
+        <span class="engine-url" data-testid="engine-url">{{ engineUrl() }}</span>
+      }
       <select
         class="lang-select"
         [ngModel]="currentLang()"
@@ -182,7 +187,9 @@
         </button>
       }
       <div class="rail-status">
-        <app-status-dot [label]="statusLabel()" [tone]="statusTone()" [labelHidden]="true" />
+        <button type="button" class="engine-live-btn" data-testid="engine-live-btn" (click)="toggleEngineUrl()" [attr.title]="engineUrl() || statusLabel()">
+          <app-status-dot [label]="statusLabel()" [tone]="statusTone()" [labelHidden]="true" />
+        </button>
       </div>
     </nav>
   }

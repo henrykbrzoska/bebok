@@ -1,0 +1,215 @@
+/* Bebok Chrome extension - popup styles.
+   Plain CSS (no framework, no bundler), light + dark via prefers-color-scheme. */
+
+:root {
+  --bg: #ffffff;
+  --fg: #17181c;
+  --muted: #6b7280;
+  --border: #e2e4e9;
+  --accent: #3b6ef5;
+  --accent-fg: #ffffff;
+  --surface: #f6f7f9;
+  --danger: #b42318;
+  --ok: #177245;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --fg: #eceef2;
+    --muted: #9aa1ac;
+    --border: #2b2d35;
+    --accent: #5b86ff;
+    --accent-fg: #10121a;
+    --surface: #1e2026;
+    --danger: #ff8a80;
+    --ok: #6edc9c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 380px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+
+.icon-button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.question {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+.question:focus-visible,
+.icon-button:focus-visible,
+.primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.includes {
+  margin: 0;
+  padding: 8px 10px 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.includes legend {
+  padding: 0 4px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.primary {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.status {
+  margin: 0;
+  min-height: 16px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status[data-kind='error'] {
+  color: var(--danger);
+}
+
+.status[data-kind='ok'] {
+  color: var(--ok);
+}
+
+.answer-wrap {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.answer-wrap[hidden] {
+  display: none;
+}
+
+.answer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.answer {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.target {
+  color: var(--muted);
+  font-size: 11px;
+  word-break: break-all;
+}
