@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 — 2026-09-17
 
 ### Features
 - Chrome companion extension (`client/chrome-extension`, MV3, unpacked): ask the
