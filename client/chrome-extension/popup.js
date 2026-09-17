@@ -131,6 +131,14 @@ function showAnswer(text) {
   dom.answerWrap.hidden = false;
 }
 
+/** Build an engine URL that keeps `?token=` intact (see background.js). */
+function enginePathUrl(engineUrl, path) {
+  const trimmed = String(engineUrl || '').trim();
+  const url = new URL(trimmed);
+  url.pathname = url.pathname.replace(/\/+$/, '') + path;
+  return url.toString();
+}
+
 /** Point the "Open session" link at the Bebok UI (or the raw API). */
 function showSessionLink(sessionID, engineUrl) {
   if (!sessionID || !chrome.tabs) {
@@ -138,7 +146,7 @@ function showSessionLink(sessionID, engineUrl) {
     return;
   }
   dom.sessionLink.hidden = false;
-  dom.sessionLink.href = `${String(engineUrl || '').replace(/\/+$/, '')}/session/${sessionID}/message`;
+  dom.sessionLink.href = enginePathUrl(engineUrl, `/session/${sessionID}/message`);
   dom.sessionLink.textContent = `Session ${sessionID.slice(0, 8)} ↗`;
 }
 

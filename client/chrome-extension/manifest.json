@@ -18,6 +18,13 @@
   },
   "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "icons": {
     "16": "icons/icon-16.svg",
     "48": "icons/icon-48.svg",

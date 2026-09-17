@@ -40,15 +40,29 @@ const POLL_INTERVAL_MS = 800;
 /** Upper bound for waiting for a turn to finish (ms). */
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** Strip trailing slashes so `${base}/session` never doubles them. */
-function normalizeEngineUrl(engineUrl) {
-  return String(engineUrl || '').trim().replace(/\/+$/, '');
-}
-
-/** Join `${base}/<path>?directory=` safely. */
-function engineUrlWithDirectory(engineUrl, path, directory) {
-  const base = normalizeEngineUrl(engineUrl);
-  return `${base}${path}?directory=${encodeURIComponent(directory)}`;
+/**
+ * Parse an engine URL and join a path onto its pathname, preserving the
+ * existing query (token) and optionally adding `directory`.
+ *
+ * Examples:
+ *   'http://127.0.0.1:8787?token=abc' + '/session'
+ *   -> 'http://127.0.0.1:8787/session?token=abc'
+ *   same + '/config' + 'E:\bebok'
+ *   -> 'http://127.0.0.1:8787/config?token=abc&directory=E%3A%5Cbebok'
+ */
+function buildEngineUrl(engineUrl, path, directory) {
+  const trimmed = String(engineUrl || '').trim();
+  let url;
+  try {
+    url = new URL(trimmed);
+  } catch (_) {
+    throw new Error(`Invalid engine URL: ${trimmed}`);
+  }
+  url.pathname = url.pathname.replace(/\/+$/, '') + path;
+  if (directory !== undefined && directory !== null && String(directory).trim()) {
+    url.searchParams.set('directory', String(directory));
+  }
+  return url.toString();
 }
 
 async function readJsonSafe(response) {
@@ -98,7 +112,7 @@ async function captureScreenshot(enabled) {
 
 /** `POST /session` -> fresh session id for `directory`. */
 async function createSession(engineUrl, directory) {
-  const response = await fetch(`${normalizeEngineUrl(engineUrl)}/session`, {
+  const response = await fetch(buildEngineUrl(engineUrl, '/session'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ directory, agent: 'ask' }),
@@ -114,7 +128,7 @@ async function createSession(engineUrl, directory) {
 /** `POST /session/{id}/prompt` -> start the turn (202 when busy -> Error). */
 async function sendPrompt(engineUrl, sessionID, message, images) {
   const response = await fetch(
-    `${normalizeEngineUrl(engineUrl)}/session/${sessionID}/prompt`,
+    buildEngineUrl(engineUrl, '/session/' + sessionID + '/prompt'),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -126,10 +140,10 @@ async function sendPrompt(engineUrl, sessionID, message, images) {
 
 /** Wait until `GET /session/{id}` reports `running === false`. */
 async function waitForTurn(engineUrl, sessionID) {
-  const base = normalizeEngineUrl(engineUrl);
+  const base = buildEngineUrl(engineUrl, `/session/${sessionID}`);
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   for (;;) {
-    const response = await fetch(`${base}/session/${sessionID}`);
+    const response = await fetch(base);
     await throwUnlessOk(response, 'GET /session/{id}');
     const meta = await readJsonSafe(response);
     if (!meta || meta.running !== true) return;
@@ -146,7 +160,7 @@ async function waitForTurn(engineUrl, sessionID) {
  */
 async function readAnswer(engineUrl, sessionID) {
   const response = await fetch(
-    `${normalizeEngineUrl(engineUrl)}/session/${sessionID}/message`
+    buildEngineUrl(engineUrl, `/session/${sessionID}/message`)
   );
   await throwUnlessOk(response, 'GET /session/{id}/message');
   const body = await readJsonSafe(response);
@@ -194,7 +208,7 @@ async function handleTestConnection(payload) {
   if (!engineUrl) return { ok: false, error: 'Engine URL is not set' };
   if (!directory) return { ok: false, error: 'Working directory is not set' };
   try {
-    const response = await fetch(engineUrlWithDirectory(engineUrl, '/config', directory));
+    const response = await fetch(buildEngineUrl(engineUrl, '/config', directory));
     await throwUnlessOk(response, 'GET /config');
     const body = await readJsonSafe(response);
     const model =
