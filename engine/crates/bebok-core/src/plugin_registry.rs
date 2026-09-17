@@ -53,6 +53,18 @@ pub struct RegistryPlugin {
     /// Human-readable blurb for the Settings list.
     #[serde(default)]
     pub description: String,
+    /// Latest version advertised by the registry catalogue (absent in older
+    /// `plugins.json` files). Plan B: lets the client show `v{version}`
+    /// even before install and compare against the installed manifest.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// Optional pre-built archive URL (`https://…`, .zip or .tar.gz).
+    #[serde(default)]
+    pub asset_url: Option<String>,
+    /// Expected SHA-256 hex digest of the archive (64 hex chars, required
+    /// when `asset_url` is present).
+    #[serde(default)]
+    pub asset_sha256: Option<String>,
 }
 
 /// The registry file (`plugins.json`): `{ "plugins": [...] }`.
@@ -60,6 +72,11 @@ pub struct RegistryPlugin {
 pub struct PluginRegistryFile {
     #[serde(default)]
     pub plugins: Vec<RegistryPlugin>,
+}
+
+/// Returns true when `s` is exactly 64 lowercase hex characters (SHA-256).
+fn is_64_hex(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 impl PluginRegistryFile {
@@ -87,6 +104,29 @@ impl PluginRegistryFile {
                 return Err(CoreError::BadRequest(format!(
                     "invalid registry plugin url '{}' (expected https://)",
                     p.url
+                )));
+            }
+            // Validate optional asset fields.
+            if let Some(ref asset_url) = p.asset_url {
+                if !asset_url.starts_with("https://") {
+                    return Err(CoreError::BadRequest(format!(
+                        "invalid registry plugin asset_url '{}' for '{}'",
+                        asset_url, p.name
+                    )));
+                }
+                match &p.asset_sha256 {
+                    Some(hash) if is_64_hex(hash) => {}
+                    _ => {
+                        return Err(CoreError::BadRequest(format!(
+                            "plugin '{}' has asset_url but missing or invalid asset_sha256 (expected 64 hex chars)",
+                            p.name
+                        )));
+                    }
+                }
+            } else if p.asset_sha256.is_some() {
+                return Err(CoreError::BadRequest(format!(
+                    "plugin '{}' has asset_sha256 but no asset_url",
+                    p.name
                 )));
             }
         }
@@ -126,6 +166,21 @@ pub struct PluginManifest {
     /// Backward-compatible: old manifests without this field still work.
     #[serde(default)]
     pub entrypoint: Option<String>,
+    /// Platform-specific entrypoint override for Windows.
+    #[serde(default)]
+    pub entrypoint_windows: Option<String>,
+    /// Platform-specific entrypoint override for Unix.
+    #[serde(default)]
+    pub entrypoint_unix: Option<String>,
+    /// Prompt file bundled with the plugin (e.g. `"AGENT_INDEX.md"`):
+    /// a plain file name resolved against the slot dir. Absolute paths,
+    /// `..` segments and separators are rejected by
+    /// [`crate::agent::index_prompt::sanitize_prompt_file`].
+    #[serde(default)]
+    pub prompt_file: Option<String>,
+    /// Optional manifest of archive assets (JSON value).
+    #[serde(default)]
+    pub assets: Option<serde_json::Value>,
 }
 
 impl PluginManifest {
@@ -284,6 +339,9 @@ pub fn fallback_registry() -> PluginRegistryFile {
             repo: crate::plugin_decl::KNOWN_PLUGIN_REPO.to_string(),
             url: crate::plugin_decl::KNOWN_PLUGIN_URL.to_string(),
             description: "Per-instance code index for Bebok.".to_string(),
+            version: None,
+            asset_url: None,
+            asset_sha256: None,
         }],
     }
 }
@@ -371,12 +429,18 @@ mod tests {
                     repo: "henrykbrzoska/bebok-index".to_string(),
                     url: "https://github.com/henrykbrzoska/bebok-index".to_string(),
                     description: "Code index.".to_string(),
+                    version: None,
+                    asset_url: None,
+                    asset_sha256: None,
                 },
                 RegistryPlugin {
                     name: "bad name!".to_string(),
                     repo: String::new(),
                     url: "ftp://example.com/x".to_string(),
                     description: String::new(),
+                    version: None,
+                    asset_url: None,
+                    asset_sha256: None,
                 },
             ],
         }
@@ -426,6 +490,10 @@ mod tests {
             min_engine_version: "1.5.0".to_string(),
             description: "x".to_string(),
             entrypoint: None,
+            entrypoint_windows: None,
+            entrypoint_unix: None,
+            prompt_file: None,
+            assets: None,
         };
         ok.validate().unwrap();
         assert!(ok.engine_compatible("1.6.0"));
@@ -439,6 +507,10 @@ mod tests {
             min_engine_version: String::new(),
             description: String::new(),
             entrypoint: None,
+            entrypoint_windows: None,
+            entrypoint_unix: None,
+            prompt_file: None,
+            assets: None,
         };
         assert!(bad.validate().is_err());
 
@@ -448,6 +520,10 @@ mod tests {
             min_engine_version: "1.5".to_string(),
             description: String::new(),
             entrypoint: None,
+            entrypoint_windows: None,
+            entrypoint_unix: None,
+            prompt_file: None,
+            assets: None,
         };
         assert!(bad_ver.validate().is_err());
 
@@ -457,6 +533,10 @@ mod tests {
             min_engine_version: String::new(),
             description: String::new(),
             entrypoint: None,
+            entrypoint_windows: None,
+            entrypoint_unix: None,
+            prompt_file: None,
+            assets: None,
         };
         assert!(no_min.engine_compatible("0.0.1"));
     }

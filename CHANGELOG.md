@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- Plugins: `code_index_status`/`code_index_search` now lazy-register
+  `bebok-index` from its on-disk declaration + slot, so they keep working
+  right after an engine restart without a prior status call; a crashed or
+  timed-out plugin reports `{ok:false,error}` (instead of a misleading
+  "not registered"), the subprocess keeps a persistent stdout reader
+  (no lost responses on back-to-back calls), stderr is captured on
+  failure (bounded, for diagnostics), and the binary resolution is cached.
+- Plugins: `prompt_file` from the slot manifest is validated (plain file
+  name only — absolute paths, `..` and separators are rejected and fall
+  back to `AGENT_INDEX.md`); it is now also a typed `PluginManifest` field.
+  A corrupt declaration is fail-closed (treated as disabled) everywhere —
+  tools, prompt injection and `is_disabled` agree.
+- Plugins: `GET /plugins` no longer claims `binary:"present"` for the
+  typeless conversion and `installed` is consistently `is_dir()`; toggle ON
+  re-registers the plugin; `POST …/update` shares the `slot_state` binary
+  check (manifest/entrypoint aware); `GET …/status` forwards the
+  normalized instance root; `GET /plugins/registry` returns
+  `{plugins,cached}`; invoking a reserved action name
+  (`install|update|toggle|status`) is a 400.
+- Plugins (Settings → General): rebuild no longer reports success on
+  `ok:false` (sets the inline error instead), the Update label shows the
+  registry version (`Update vX` only when it differs from the installed
+  one), toggle/install/update refresh the index card, three quiet-poll
+  failures in a row show `unknown` instead of a stale `ready`, and the
+  status dot + version got `data-testid`s.
+
+- Plugins: Settings → General now has an **Update** button on every installed
+  plugin. It re-resolves the plugin's release and downloads the binary for
+  your platform when it is missing, so a plugin that was installed without an
+  asset for your OS can be repaired in place (the button becomes the primary
+  action and the row shows the available version); the plugin's version is
+  shown in the button label.
+
+### Fixes
+- Plugins: updating a plugin whose platform binary is unavailable now reports
+  a clear "binary missing for this platform" message (engine answers
+  `503 binary_missing`, and `no_asset_for_platform` / `offline_fallback` /
+  `checksum_mismatch` get their own messages) instead of a confusing
+  `404 Not Found`.
+
+## 1.7.2 — 2026-09-16
+
+### Fixes
+- **engine**: spawn dynamic plugin subprocesses reliably on Windows (7346c19)
+
 ## 1.7.1 — 2026-09-16
 
 ### Fixes

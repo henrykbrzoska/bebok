@@ -506,8 +506,22 @@ export class EngineClient {
   }
 
   /**
+   * Plan B: `POST /plugins/{name}/update?directory=` -> re-resolve the
+   * plugin's release, download the binary for the running platform when it is
+   * absent and refresh the declaration (`{plugin: {…, version, binary}}`).
+   * The engine answers `503 binary_missing` when no asset matches the platform.
+   */
+  updatePlugin(directory: string, name: string): Promise<PluginResponse> {
+    return this.request<PluginResponse>(
+      'POST',
+      `/plugins/${encodeURIComponent(name)}/update?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
    * `GET /plugins/bebok-index/status?directory=` -> live code-index snapshot
-   * (`{ ok, status, files, symbols }`).
+   * (`plugin_status` verbatim JSON: `{ status, files, symbols }`). A disabled
+   * plugin answers 404 (not 409), surfaced as an error by `request()`.
    */
   getIndexStatus(directory: string): Promise<IndexStatusResponse> {
     return this.request<IndexStatusResponse>(
@@ -517,9 +531,10 @@ export class EngineClient {
   }
 
   /**
-   * `POST /plugins/bebok-index/rebuild?directory=` -> enqueue a full rebuild;
-   * returns the snapshot taken right after enqueueing (`{ status, files, symbols,
-   * rebuild }`). 409 when the index is disabled for this instance.
+   * `POST /plugins/bebok-index/rebuild?directory=` -> generic `plugin_invoke`:
+   * the engine returns the plugin's JSON verbatim, so no snapshot shape is
+   * guaranteed (expect `{ status, files, symbols, rebuild }` plus an optional
+   * `ok: false` failure flag). A disabled plugin answers 404 (not 409).
    */
   rebuildIndex(directory: string): Promise<IndexRebuildResponse> {
     return this.request<IndexRebuildResponse>(

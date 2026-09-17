@@ -480,6 +480,16 @@ export interface DeclaredPlugin {
   url: string;
   enabled: boolean;
   installed: boolean;
+  /**
+   * Plan B: version of the installed plugin (omitted by engines that predate
+   * the version-aware install/update path).
+   */
+  version?: string;
+  /**
+   * Plan B: whether the release binary for the running platform is present
+   * (`missing` = the plugin was installed without a usable build for this OS).
+   */
+  binary?: 'present' | 'missing';
 }
 
 /** TOR C: `GET /plugins?directory=` payload (plus legacy host introspection). */
@@ -501,6 +511,8 @@ export interface RegistryPlugin {
   repo: string;
   url: string;
   description: string;
+  /** Latest version advertised by the registry (absent on older engines). */
+  version?: string;
 }
 
 /** `GET /plugins/registry` payload: the installable-plugin catalogue. */
@@ -1119,14 +1131,18 @@ export interface IndexStatusResponse {
   status: string;
   files: number;
   symbols: number;
+  /** Full-rebuild flag (`POST …/rebuild` echo); absent on plain status reads. */
+  rebuild?: boolean;
 }
 
-/** `POST /plugins/bebok-index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
+/** `POST /plugins/bebok-index/rebuild?directory=` payload: verbatim plugin JSON. */
 export interface IndexRebuildResponse {
   status: string;
   files: number;
   symbols: number;
   rebuild: boolean;
+  /** Failure flag echoed by the plugin (`false` = rebuild did not start). */
+  ok?: boolean;
 }
 
 /** `process.output` event properties (coalesced, at most ~3/s per process). */

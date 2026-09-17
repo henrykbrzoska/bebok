@@ -386,6 +386,7 @@ mod tests {
             | ApiError::Conflict(m)
             | ApiError::Forbidden(m)
             | ApiError::BadGateway(m)
+            | ApiError::ServiceUnavailable(m)
             | ApiError::Internal(m) => m,
         }
     }

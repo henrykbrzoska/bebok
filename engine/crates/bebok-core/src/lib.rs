@@ -14,6 +14,7 @@ pub mod llm_trace;
 pub mod permission;
 pub mod plugin;
 pub mod plugin_decl;
+pub mod plugin_download;
 pub mod plugin_process;
 pub mod plugin_registry;
 pub mod provider;
