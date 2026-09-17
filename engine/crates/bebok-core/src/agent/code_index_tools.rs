@@ -55,6 +55,20 @@ impl Tool for CodeIndexStatus {
             );
         }
 
+        // Lazy registration: after an engine restart the plugin is only on
+        // disk (declaration + slot) until something registers it.
+        if !ensure_index_plugin(&ctx.root).await {
+            let error_msg = plugin_not_registered_error("bebok-index", &ctx.root);
+            return ToolOutput::new(
+                serde_json::to_string(&json!({
+                    "ok": false,
+                    "error": error_msg
+                }))
+                .unwrap_or_default(),
+                "code_index_status",
+            );
+        }
+
         let directory = ctx.root.to_string_lossy().to_string();
         let input = json!({ "directory": directory });
 
@@ -170,6 +184,20 @@ impl Tool for CodeIndexSearch {
             );
         }
 
+        // Lazy registration: after an engine restart the plugin is only on
+        // disk (declaration + slot) until something registers it.
+        if !ensure_index_plugin(&ctx.root).await {
+            let error_msg = plugin_not_registered_error("bebok-index", &ctx.root);
+            return ToolOutput::new(
+                serde_json::to_string(&json!({
+                    "ok": false,
+                    "error": error_msg
+                }))
+                .unwrap_or_default(),
+                "code_index_search",
+            );
+        }
+
         let directory = ctx.root.to_string_lossy().to_string();
         let input = json!({ "directory": directory, "query": query, "limit": parsed.limit });
 
@@ -210,21 +238,64 @@ async fn invoke_plugin(name: &str, action: &str, input: &Value) -> Option<Value>
         .await
 }
 
-/// Build a smart error message when a plugin is not registered: when the
-/// plugin's slot dir exists but the binary is missing, tell the user to
-/// update; otherwise say it is not registered.
+/// Lazily register the `bebok-index` plugin on the global host from its
+/// on-disk declaration + slot dir (mirrors the server's
+/// `ensure_plugin_registered`: the agent tools must work right after an
+/// engine restart, without a prior `GET /plugins/{name}/status` call).
+/// Returns `false` when the plugin must not be invoked (disabled /
+/// undeclared / slot missing) — the caller then reports "not registered".
+async fn ensure_index_plugin(root: &std::path::Path) -> bool {
+    const NAME: &str = "bebok-index";
+    // Fail closed like the rest of the stack: a broken declaration counts
+    // as disabled.
+    if crate::plugin_decl::is_disabled(root, NAME) {
+        return false;
+    }
+    // No declaration at all → nothing to register from.
+    let decl_path = crate::plugin_decl::decl_path(root, NAME);
+    if !decl_path.is_file() {
+        return false;
+    }
+    let host = crate::plugin::PluginHost::global();
+    if host.names().await.iter().any(|n| n == NAME) {
+        return true;
+    }
+    let slot_dir = crate::plugin_decl::install_dir(root, NAME);
+    if !slot_dir.is_dir() {
+        return false;
+    }
+    match crate::plugin_process::load_dynamic_plugin(&slot_dir) {
+        Ok(dyn_plugin) => {
+            tracing::info!(
+                "lazy-registering plugin '{NAME}' for agent tools from {}",
+                slot_dir.display()
+            );
+            host.register(std::sync::Arc::new(dyn_plugin)).await;
+            true
+        }
+        Err(e) => {
+            tracing::warn!(
+                "cannot load plugin '{NAME}' from {}: {e}",
+                slot_dir.display()
+            );
+            false
+        }
+    }
+}
+
+/// Build a smart error message when a plugin is not registered: use the
+/// shared [`crate::plugin_decl::slot_state`] logic (manifest + platform
+/// entrypoint + real binary presence) instead of guessing from the
+/// entrypoint alone, so a crashed process with an existing binary is not
+/// misreported as "binary missing".
 fn plugin_not_registered_error(name: &str, root: &std::path::Path) -> String {
     let slot = crate::plugin_decl::install_dir(root, name);
     if slot.is_dir() {
-        // Slot exists — check if it has a manifest with an entrypoint.
-        if let Ok(manifest) = crate::plugin_registry::read_manifest(&slot) {
-            let has_ep = manifest.entrypoint.is_some()
-                || manifest.entrypoint_windows.is_some()
-                || manifest.entrypoint_unix.is_some();
-            if has_ep {
-                // Binary likely missing — point the user to update.
-                return format!("{name} plugin binary is missing — run Update in Settings");
-            }
+        // `installed` derives from the same `is_dir()` check in the listing.
+        let (_, binary) = crate::plugin_decl::slot_state(root, name, true);
+        if binary == "missing" {
+            // Binary missing — point the user to update.
+            return format!("{name} plugin binary is missing — run Update in Settings");
         }
         format!("{name} plugin is not registered")
     } else {

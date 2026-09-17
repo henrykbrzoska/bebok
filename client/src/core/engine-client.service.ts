@@ -520,7 +520,8 @@ export class EngineClient {
 
   /**
    * `GET /plugins/bebok-index/status?directory=` -> live code-index snapshot
-   * (`{ ok, status, files, symbols }`).
+   * (`plugin_status` verbatim JSON: `{ status, files, symbols }`). A disabled
+   * plugin answers 404 (not 409), surfaced as an error by `request()`.
    */
   getIndexStatus(directory: string): Promise<IndexStatusResponse> {
     return this.request<IndexStatusResponse>(
@@ -530,9 +531,10 @@ export class EngineClient {
   }
 
   /**
-   * `POST /plugins/bebok-index/rebuild?directory=` -> enqueue a full rebuild;
-   * returns the snapshot taken right after enqueueing (`{ status, files, symbols,
-   * rebuild }`). 409 when the index is disabled for this instance.
+   * `POST /plugins/bebok-index/rebuild?directory=` -> generic `plugin_invoke`:
+   * the engine returns the plugin's JSON verbatim, so no snapshot shape is
+   * guaranteed (expect `{ status, files, symbols, rebuild }` plus an optional
+   * `ok: false` failure flag). A disabled plugin answers 404 (not 409).
    */
   rebuildIndex(directory: string): Promise<IndexRebuildResponse> {
     return this.request<IndexRebuildResponse>(

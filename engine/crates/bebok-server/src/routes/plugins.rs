@@ -1,7 +1,8 @@
 //! Plugin declaration routes (TOR B — silnik): `GET /plugins` lists declared
 //! plugins from `<project>/.bebok/plugins/*.json` plus the registered
 //! in-process host names; `POST /plugins/{name}/install` creates the
-//! declaration + slot dir (only `bebok-index`); `POST
+//! declaration + slot dir (for any name listed in the plugin registry —
+//! the bundled offline fallback only contains `bebok-index`); `POST
 //! /plugins/{name}/toggle` flips the `enabled` switch. Thin handlers: all
 //! logic lives in `bebok_core::{plugin_decl, InstanceStore}`.
 
@@ -19,6 +20,17 @@ use crate::state::AppState;
 /// registered. This is idempotent: a plugin that is already known is
 /// skipped, and an undeclared / disabled / missing plugin is silently
 /// left unregistered (the caller will still get a 404).
+///
+/// Per-project limitation: the global host is keyed by plugin name only,
+/// not by `(root, name)` — the host API exposes just `names()`, so there
+/// is no way to compare the registered plugin's `slot_dir`
+/// ([`DynamicPlugin::slot_dir`](bebok_core::DynamicPlugin::slot_dir))
+/// against `root` here. Two projects using the same plugin name therefore
+/// share one registration (first one wins).
+/// TODO: key registrations per `(root, name)` (or store the owning root
+/// alongside the plugin) so per-project enable/disable can't leak across
+/// projects; until then callers must not assume the registered slot
+/// belongs to their project.
 async fn ensure_plugin_registered(root: &std::path::Path, name: &str) {
     let host = bebok_core::PluginHost::global();
 
@@ -95,20 +107,28 @@ pub async fn list_plugins(
 
 /// `GET /plugins/registry` -> the installable-plugin catalogue from the
 /// central registry (fetched + cached; bundled `bebok-index` fallback when
-/// offline): `{ plugins: [{name, repo, url, description}], cached: bool }`.
+/// offline): `{ plugins: [{name, repo, url, description}], cached: bool }`
+/// (`cached` is true when served from the fresh on-disk cache, false when
+/// fetched from the network, read from a stale cache, or bundled).
 pub async fn plugin_registry(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let data_dir = state.store.data_dir().to_path_buf();
+    let cached = bebok_core::plugin_registry::cache_is_fresh(&data_dir);
     let registry = bebok_core::load_registry_or_fallback(&data_dir, bebok_core::REGISTRY_URL).await;
-    Ok(Json(serde_json::json!({ "plugins": registry.plugins })))
+    Ok(Json(
+        serde_json::json!({ "plugins": registry.plugins, "cached": cached }),
+    ))
 }
+
 /// `POST /plugins/{name}/install?directory=` -> clone the plugin repo
 /// (latest tag) into the slot dir `<root>/.bebok/plugins/<name>/`, validate
 /// its `bebok-plugin.json` manifest and create the declaration file.
 /// The name must be listed in the plugin registry; anything else is a 400
-/// (no arbitrary URLs, only public repos). Idempotent: keeps an existing
-/// declaration.
+/// (no arbitrary URLs, only public repos). Any registry-listed plugin is
+/// accepted — the registry is just a catalogue (currently its only entry
+/// is `bebok-index`, and the offline bundled fallback contains only it).
+/// Idempotent: keeps an existing declaration.
 pub async fn install_plugin(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -129,7 +149,7 @@ pub async fn install_plugin(
 
 /// `POST /plugins/{name}/update?directory=` -> remove the existing slot and
 /// re-install from the registry entry. Idempotent. Fails with 409 when the
-/// plugin's subprocess is running, 423 when the session is busy, 404 when
+/// plugin's subprocess is running (responds to `status`), 404 when
 /// no declaration exists, and 503 when the slot exists but the binary is
 /// missing.
 pub async fn update_plugin(
@@ -168,35 +188,25 @@ pub async fn update_plugin(
         }
     }
 
-    // 503: slot exists but no binary.
+    // 503: slot is a dir but no binary resolves for this platform.
+    // Shared logic with the plugin listing (`plugin_decl::slot_state`):
+    // a missing slot manifest, a manifest without an entrypoint, or a
+    // missing slot binary all mean `binary == "missing"` (per the
+    // documented `DeclaredPlugin.binary` contract).
     let slot = bebok_core::plugin_decl::install_dir(&instance.root, &name);
     if slot.is_dir() {
-        let manifest_path = slot.join(bebok_core::PLUGIN_MANIFEST_FILE);
-        if manifest_path.is_file()
-            && let Ok(manifest) = bebok_core::read_manifest(&slot)
-            && (manifest.entrypoint.is_some()
-                || manifest.entrypoint_windows.is_some()
-                || manifest.entrypoint_unix.is_some())
-        {
-            // Check binary presence using resolved_binary logic.
-            // Simplified: check the entrypoint command or default.
-            let ep = manifest.entrypoint.as_deref().unwrap_or(&name);
-            let cmd = ep.split_whitespace().next().unwrap_or(&name);
-            let bin_local = slot.join(cmd);
-            let has_bin =
-                bin_local.exists() || (cfg!(windows) && slot.join(format!("{cmd}.exe")).exists());
-            if !has_bin {
-                // Machine-readable code embedded in the text body (ApiError
-                // serializes as text): the client maps `binary_missing`
-                // onto `settings.pluginBinaryMissing`.
-                let body = serde_json::json!({
-                    "error": "binary_missing",
-                    "message": format!(
-                        "plugin '{name}' binary is missing — run Update in Settings"
-                    ),
-                });
-                return Err(ApiError::service_unavailable(body.to_string()).into_response());
-            }
+        let (_, binary) = bebok_core::plugin_decl::slot_state(&instance.root, &name, true);
+        if binary == "missing" {
+            // Machine-readable code embedded in the text body (ApiError
+            // serializes as text): the client maps `binary_missing`
+            // onto `settings.pluginBinaryMissing`.
+            let body = serde_json::json!({
+                "error": "binary_missing",
+                "message": format!(
+                    "plugin '{name}' binary is missing — run Update in Settings"
+                ),
+            });
+            return Err(ApiError::service_unavailable(body.to_string()).into_response());
         }
     }
 
@@ -251,8 +261,21 @@ pub async fn toggle_plugin(
     // When disabling, immediately unregister from the global host so that
     // backend tools (code_index_*, plugin invoke, etc.) stop working for
     // this plugin without waiting for a restart.
+    // NOTE: the global host is keyed by name only (see the per-project
+    // TODO on `ensure_plugin_registered`) — another project may still be
+    // using this plugin, but we unregister anyway to fail closed locally.
+    // TODO: keep per-(root, name) registrations so toggle OFF only affects
+    // this project.
     if !enabled {
+        tracing::warn!(
+            "unregistering plugin '{name}' globally on toggle OFF for {}",
+            instance.root.display()
+        );
         bebok_core::PluginHost::global().unregister(&name).await;
+    } else {
+        // Toggle ON: the plugin may have been unregistered by a previous
+        // toggle OFF — register it back (no-op when already registered).
+        ensure_plugin_registered(&instance.root, &name).await;
     }
 
     Ok(Json(serde_json::json!({ "plugin": plugin })))
@@ -284,7 +307,9 @@ pub async fn plugin_status(
 
     ensure_plugin_registered(&instance.root, &name).await;
     let host = bebok_core::PluginHost::global();
-    let input = serde_json::json!({ "directory": q.directory });
+    // Normalised project root (the instance root), not the raw
+    // `?directory=` query value (which may be relative / unnormalised).
+    let input = serde_json::json!({ "directory": instance.root.to_string_lossy() });
     match host.invoke(&name, "status", &input).await {
         Some(resp) => Ok(Json(resp)),
         None => Err(
@@ -300,12 +325,25 @@ pub async fn plugin_status(
 /// is never overwritten). Returns the plugin's JSON response, or 404 when
 /// no plugin with that name is registered or the plugin is disabled for
 /// this project.
+///
+/// NOTE: `install`, `update`, `toggle` and `status` are reserved action
+/// names (they are dedicated routes) — invoking them through this route
+/// returns a 400. Axum matches `/plugins/{name}/update` against the
+/// dedicated `update_plugin` route first, so this guard only fires for
+/// names where the dedicated routes don't match (defence in depth), but it
+/// must stay so the generic `{action}` route never shadows them.
 pub async fn plugin_invoke(
     State(state): State<AppState>,
     Path((name, action)): Path<(String, String)>,
     Query(q): Query<DirectoryQuery>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    if matches!(action.as_str(), "install" | "update" | "toggle" | "status") {
+        return Err(ApiError::bad_request(format!(
+            "action '{action}' is reserved — use POST /plugins/{{name}}/{action} instead"
+        ))
+        .into_response());
+    }
     let instance = state
         .store
         .get_or_create_instance(&q.directory)
@@ -559,6 +597,37 @@ done
         let text = axum::body::to_bytes(body, 64 * 1024).await.unwrap();
         assert_eq!(parts.status, axum::http::StatusCode::BAD_REQUEST);
         assert!(String::from_utf8_lossy(&text).contains("nope"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Unregistered plugin name -> 404 on both status and invoke routes.
+    /// Reserved action names (`install`/`update`/`toggle`/`status`) through
+    /// the generic `{action}` route -> 400 (they have dedicated routes).
+    #[tokio::test]
+    async fn plugin_invoke_rejects_reserved_actions() {
+        let base = temp_base("reserved");
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let dir = project.to_str().unwrap().to_string();
+        let state = state_for(&base);
+
+        for action in ["install", "update", "toggle", "status"] {
+            let err = plugin_invoke(
+                State(state.clone()),
+                Path(("bebok-index".to_string(), action.to_string())),
+                Query(query(&dir)),
+                Json(serde_json::json!({})),
+            )
+            .await
+            .expect_err(&format!("reserved action '{action}' must 400"));
+            let (parts, body) = err.into_parts();
+            let text = axum::body::to_bytes(body, 64 * 1024).await.unwrap();
+            assert_eq!(parts.status, axum::http::StatusCode::BAD_REQUEST);
+            let text = String::from_utf8_lossy(&text);
+            assert!(text.contains("reserved"), "body: {text}");
+            assert!(text.contains(action), "body: {text}");
+        }
 
         let _ = std::fs::remove_dir_all(&base);
     }

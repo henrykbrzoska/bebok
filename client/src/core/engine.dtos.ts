@@ -1131,14 +1131,18 @@ export interface IndexStatusResponse {
   status: string;
   files: number;
   symbols: number;
+  /** Full-rebuild flag (`POST …/rebuild` echo); absent on plain status reads. */
+  rebuild?: boolean;
 }
 
-/** `POST /plugins/bebok-index/rebuild?directory=` payload: snapshot taken right after enqueueing. */
+/** `POST /plugins/bebok-index/rebuild?directory=` payload: verbatim plugin JSON. */
 export interface IndexRebuildResponse {
   status: string;
   files: number;
   symbols: number;
   rebuild: boolean;
+  /** Failure flag echoed by the plugin (`false` = rebuild did not start). */
+  ok?: boolean;
 }
 
 /** `process.output` event properties (coalesced, at most ~3/s per process). */

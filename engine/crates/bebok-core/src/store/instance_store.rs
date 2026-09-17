@@ -170,7 +170,10 @@ impl InstanceStore {
             decl
         };
         crate::git::ensure_plugin_slots_ignored(root)?;
-        let installed = crate::plugin_decl::install_dir(root, name).exists();
+        // `is_dir` (not `exists`): a stray file at the slot path must not
+        // count as an installed plugin (consistent with `slot_state` and
+        // the update route's 503 check).
+        let installed = crate::plugin_decl::install_dir(root, name).is_dir();
         let decl_out = crate::DeclaredPlugin::with_state(root, decl, installed);
         self.bus.publish(crate::event::Event::plugin_changed(
             &instance.directory,
@@ -285,7 +288,8 @@ impl InstanceStore {
 
     /// Remove the existing slot and re-install from the registry entry.
     /// Used by the `POST /plugins/{name}/update` route.
-    /// Fails with 409/423 when a child process is running.
+    /// The route handler rejects a running plugin subprocess (409) and a
+    /// slot with a missing binary (503); here we just re-install.
     pub async fn update_plugin(
         &self,
         instance: &Arc<Instance>,
@@ -312,10 +316,8 @@ impl InstanceStore {
             )));
         }
 
-        // Check slot exists but has no binary (503 binary_missing when
-        // the slot exists but the binary is gone).
-        // (The route handler checks is_running; here we just do the
-        // re-install.)
+        // The 503 `binary_missing` check lives in the route handler
+        // (shared `plugin_decl::slot_state` logic); here we just re-install.
 
         // Remove the old slot.
         if slot.is_dir() {

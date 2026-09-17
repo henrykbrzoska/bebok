@@ -229,3 +229,195 @@ describe('GeneralTab plugin update button (Plan B)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('GeneralTab index status refresh (404 -> unknown)', () => {
+  let fixture: ComponentFixture<GeneralTab>;
+  let component: GeneralTab;
+  let engine: EngineClient;
+  let i18n: I18nService;
+
+  async function setupIndex(statusSpy: jasmine.Spy): Promise<void> {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [GeneralTab],
+      providers: [provideZonelessChangeDetection(), SettingsStore],
+    });
+    engine = TestBed.inject(EngineClient);
+    i18n = TestBed.inject(I18nService);
+    i18n.setLanguage('en');
+    spyOn(engine, 'connect').and.returnValue(Promise.resolve({ baseUrl: 'http://x' } as never));
+    spyOn(engine, 'pluginRegistry').and.returnValue(Promise.resolve(REGISTRY as never));
+    spyOn(engine, 'listPlugins').and.returnValue(
+      Promise.resolve({ declared: [] } as never),
+    );
+    (engine as unknown as Record<string, unknown>)['getIndexStatus'] = statusSpy;
+    fixture = TestBed.createComponent(GeneralTab);
+    component = fixture.componentInstance;
+    component.store.directory.set('C:/tmp/project');
+    fixture.detectChanges();
+  }
+
+  afterEach(() => fixture?.destroy());
+
+  it('quiet poll shows unknown after 3 consecutive failures', async () => {
+    const statusSpy = jasmine
+      .createSpy('getIndexStatus')
+      .and.returnValue(Promise.reject(new Error('engine GET /plugins/bebok-index/status -> 404')));
+    await setupIndex(statusSpy);
+    component.indexStatus.set({ status: 'ready', files: 1, symbols: 2 });
+    await component.refreshIndexStatus(true);
+    expect(component.indexStatus()?.status).toBe('ready');
+    await component.refreshIndexStatus(true);
+    expect(component.indexStatus()?.status).toBe('ready');
+    await component.refreshIndexStatus(true);
+    expect(component.indexStatus()?.status).toBe('unknown');
+    expect(component.indexStatusText()).toBe(i18n.t('settings.indexUnknown'));
+  });
+
+  it('non-quiet refresh surfaces the 404 as indexError', async () => {
+    const statusSpy = jasmine
+      .createSpy('getIndexStatus')
+      .and.returnValue(Promise.reject(new Error('engine GET /plugins/bebok-index/status -> 404')));
+    await setupIndex(statusSpy);
+    await component.refreshIndexStatus();
+    expect(component.indexError()).toContain('404');
+  });
+
+  it('normalizeIndexStatus passes the rebuild flag through', async () => {
+    const { normalizeIndexStatus } = await import('./general-tab');
+    expect(normalizeIndexStatus({ status: 'ready', files: 1, symbols: 2, rebuild: true })).toEqual({
+      status: 'ready',
+      files: 1,
+      symbols: 2,
+      rebuild: true,
+    });
+    expect('rebuild' in normalizeIndexStatus({ status: 'ready', files: 1, symbols: 2 })).toBeFalse();
+  });
+});
+
+describe('GeneralTab rebuild ok:false -> indexError', () => {
+  let fixture: ComponentFixture<GeneralTab>;
+  let component: GeneralTab;
+  let engine: EngineClient;
+  let i18n: I18nService;
+  let toasts: ToastStore;
+
+  async function setupRebuild(rebuildSpy: jasmine.Spy): Promise<void> {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [GeneralTab],
+      providers: [provideZonelessChangeDetection(), SettingsStore],
+    });
+    engine = TestBed.inject(EngineClient);
+    i18n = TestBed.inject(I18nService);
+    i18n.setLanguage('en');
+    toasts = TestBed.inject(ToastStore);
+    toasts.clear();
+    spyOn(engine, 'connect').and.returnValue(Promise.resolve({ baseUrl: 'http://x' } as never));
+    spyOn(engine, 'pluginRegistry').and.returnValue(Promise.resolve(REGISTRY as never));
+    spyOn(engine, 'listPlugins').and.returnValue(
+      Promise.resolve({ declared: [] } as never),
+    );
+    spyOn(engine, 'getIndexStatus').and.returnValue(
+      Promise.resolve({ status: 'ready', files: 1, symbols: 2 }),
+    );
+    (engine as unknown as Record<string, unknown>)['rebuildIndex'] = rebuildSpy;
+    fixture = TestBed.createComponent(GeneralTab);
+    component = fixture.componentInstance;
+    component.store.directory.set('C:/tmp/project');
+    fixture.detectChanges();
+  }
+
+  afterEach(() => fixture?.destroy());
+
+  it('does not toast success nor set indexLastRebuild when ok is false', async () => {
+    const rebuildSpy = jasmine
+      .createSpy('rebuildIndex')
+      .and.returnValue(Promise.resolve({ status: 'error', files: 0, symbols: 0, rebuild: false, ok: false }));
+    await setupRebuild(rebuildSpy);
+    await component.rebuildIndex();
+    expect(component.indexLastRebuild()).toBeNull();
+    expect(component.indexError()).not.toBeNull();
+    expect(toasts.toasts().length).toBe(1);
+    expect(toasts.toasts()[0].kind).toBe('danger');
+    expect(toasts.toasts()[0].text).not.toBe(i18n.t('settings.indexRebuilt'));
+    expect(component.indexRebuilding()).toBeFalse();
+  });
+
+  it('clears indexError and toasts success when ok is not false', async () => {
+    const rebuildSpy = jasmine
+      .createSpy('rebuildIndex')
+      .and.returnValue(Promise.resolve({ status: 'indexing', files: 0, symbols: 0, rebuild: true }));
+    await setupRebuild(rebuildSpy);
+    component.indexError.set('stale');
+    await component.rebuildIndex();
+    expect(component.indexError()).toBeNull();
+    expect(component.indexLastRebuild()).not.toBeNull();
+    const toast = toasts.toasts()[toasts.toasts().length - 1];
+    expect(toast.kind).toBe('success');
+    expect(toast.text).toBe(i18n.t('settings.indexRebuilt'));
+  });
+
+  it('sets indexError on a rejected rebuild', async () => {
+    const rebuildSpy = jasmine
+      .createSpy('rebuildIndex')
+      .and.returnValue(Promise.reject(new Error('engine POST /plugins/bebok-index/rebuild -> 404')));
+    await setupRebuild(rebuildSpy);
+    await component.rebuildIndex();
+    expect(component.indexError()).toContain('404');
+    expect(component.indexLastRebuild()).toBeNull();
+    expect(toasts.toasts()[toasts.toasts().length - 1].kind).toBe('danger');
+  });
+});
+
+describe('GeneralTab updateLabel registry-target versions', () => {
+  let fixture: ComponentFixture<GeneralTab>;
+  let component: GeneralTab;
+  let engine: EngineClient;
+  let i18n: I18nService;
+
+  async function setupVersions(registryVersion?: string, declaredVersion?: string): Promise<void> {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [GeneralTab],
+      providers: [provideZonelessChangeDetection(), SettingsStore],
+    });
+    engine = TestBed.inject(EngineClient);
+    i18n = TestBed.inject(I18nService);
+    i18n.setLanguage('en');
+    spyOn(engine, 'connect').and.returnValue(Promise.resolve({ baseUrl: 'http://x' } as never));
+    spyOn(engine, 'pluginRegistry').and.returnValue(
+      Promise.resolve({
+        plugins: [{ ...REGISTRY.plugins[0], ...(registryVersion ? { version: registryVersion } : {}) }],
+      } as never),
+    );
+    spyOn(engine, 'listPlugins').and.returnValue(
+      Promise.resolve(
+        (declaredVersion ? declared({ version: declaredVersion }) : declared({})) as never,
+      ),
+    );
+    spyOn(engine, 'getIndexStatus').and.returnValue(
+      Promise.resolve({ status: 'ready', files: 0, symbols: 0 }),
+    );
+    fixture = TestBed.createComponent(GeneralTab);
+    component = fixture.componentInstance;
+    component.store.directory.set('C:/tmp/project');
+    fixture.detectChanges();
+    await component.refreshPlugins();
+    fixture.detectChanges();
+  }
+
+  afterEach(() => fixture?.destroy());
+
+  it('shows bare Update when registry and installed versions agree', async () => {
+    await setupVersions('1.2.3', '1.2.3');
+    expect(component.updateLabel(component.rows()[0])).toBe(i18n.t('settings.pluginUpdate'));
+  });
+
+  it('shows Update vX with the registry version when they differ', async () => {
+    await setupVersions('2.0.0', '1.2.3');
+    expect(component.updateLabel(component.rows()[0])).toBe(
+      `${i18n.t('settings.pluginUpdate')} v2.0.0`,
+    );
+  });
+});

@@ -88,6 +88,14 @@ pub struct PluginProcess {
     slot_dir: PathBuf,
     /// Lazily spawned child; `None` until first invoke.
     child: Option<Child>,
+    /// Persistent line reader over the child's stdout. Kept between
+    /// invocations: a fresh `BufReader` per call could swallow extra lines
+    /// the child already wrote into its buffer, losing responses.
+    /// Taken out of the struct only when the child is dropped/respawned.
+    reader: Option<BufReader<tokio::process::ChildStdout>>,
+    /// Cached binary resolution (`None` = unresolved/missing). Refreshed
+    /// when the child fails to spawn (a fresh install may have appeared).
+    resolved: Option<Option<PathBuf>>,
 }
 
 impl PluginProcess {
@@ -119,13 +127,24 @@ impl PluginProcess {
             args: parts,
             slot_dir,
             child: None,
+            reader: None,
+            resolved: None,
         }
+    }
+
+    /// Resolve the command, using the cache when available. The cache is
+    /// filled on first use (and on spawn) and cleared on spawn failure.
+    fn resolved_binary(&self) -> Option<PathBuf> {
+        if let Some(cached) = &self.resolved {
+            return cached.clone();
+        }
+        self.resolve_binary_uncached()
     }
 
     /// Resolve the command to an absolute path for the `exists()` check.
     /// Returns `Some(absolute_path)` when the binary can be located on disk,
     /// `None` when it should be resolved via PATH at spawn time (e.g. `"sh"`).
-    fn resolved_binary(&self) -> Option<PathBuf> {
+    fn resolve_binary_uncached(&self) -> Option<PathBuf> {
         if Path::new(&self.command).is_absolute() {
             let p = PathBuf::from(&self.command);
             if p.exists() {
@@ -190,12 +209,15 @@ impl PluginProcess {
         if let Some(child) = self.child.as_mut() {
             match child.try_wait() {
                 Ok(Some(_status)) => {
-                    // Process exited — respawn below.
+                    // Process exited — respawn below (drop the stale reader
+                    // with it: its buffer belongs to the dead child).
                     self.child = None;
+                    self.reader = None;
                 }
                 Ok(None) => return Ok(()), // Still running.
                 Err(_) => {
                     self.child = None;
+                    self.reader = None;
                 }
             }
         }
@@ -214,10 +236,13 @@ impl PluginProcess {
             .current_dir(&self.slot_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null()) // plugin logs go elsewhere
+            .stderr(Stdio::piped()) // captured on failure (bounded read), see invoke
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| {
+                // A fresh install (Update button) may have appeared since the
+                // last resolution — refresh the cache so the next call retries.
+                self.resolved = None;
                 CoreError::Other(format!(
                     "failed to spawn plugin '{}' (command: {}): {e}",
                     self.name, self.command,
@@ -225,6 +250,11 @@ impl PluginProcess {
             })?;
 
         self.child = Some(child);
+        self.reader = None; // rebuilt lazily from the new child's stdout
+        // Remember what resolved, so later calls skip the `which` probe.
+        if self.resolved.is_none() {
+            self.resolved = Some(self.resolve_binary_uncached());
+        }
         Ok(())
     }
 
@@ -243,64 +273,96 @@ impl PluginProcess {
             .as_mut()
             .ok_or_else(|| CoreError::Other(format!("plugin '{}' not running", self.name)))?;
 
-        // Build the request envelope.
-        let mut request = input.clone();
-        if let Some(obj) = request.as_object_mut() {
-            obj.insert("action".to_string(), Value::String(action.to_string()));
-        } else {
-            let mut obj = serde_json::Map::new();
-            obj.insert("action".to_string(), Value::String(action.to_string()));
-            obj.insert("payload".to_string(), input.clone());
-            request = Value::Object(obj);
+        // Write request to stdin first (child borrow ends before the read).
+        {
+            // Build the request envelope.
+            let mut request = input.clone();
+            if let Some(obj) = request.as_object_mut() {
+                obj.insert("action".to_string(), Value::String(action.to_string()));
+            } else {
+                let mut obj = serde_json::Map::new();
+                obj.insert("action".to_string(), Value::String(action.to_string()));
+                obj.insert("payload".to_string(), input.clone());
+                request = Value::Object(obj);
+            }
+
+            let mut line = serde_json::to_string(&request).map_err(CoreError::Json)?;
+            line.push('\n');
+
+            let stdin = child.stdin.as_mut().ok_or_else(|| {
+                CoreError::Other(format!("plugin '{}' stdin unavailable", self.name))
+            })?;
+            stdin
+                .write_all(line.as_bytes())
+                .await
+                .map_err(CoreError::Io)?;
+            stdin.flush().await.map_err(CoreError::Io)?;
         }
 
-        let mut line = serde_json::to_string(&request).map_err(CoreError::Json)?;
-        line.push('\n');
-
-        // Write request to stdin.
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| CoreError::Other(format!("plugin '{}' stdin unavailable", self.name)))?;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(CoreError::Io)?;
-        stdin.flush().await.map_err(CoreError::Io)?;
-
-        // Read one line from stdout (with timeout).
-        let stdout = child.stdout.as_mut().ok_or_else(|| {
+        // Read one line from stdout (with timeout) through the PERSISTENT
+        // reader: a fresh BufReader per call could swallow lines the child
+        // already wrote into its buffer, losing responses.
+        if self.reader.is_none() {
+            let stdout = self
+                .child
+                .as_mut()
+                .and_then(|c| c.stdout.take())
+                .ok_or_else(|| {
+                    CoreError::Other(format!("plugin '{}' stdout unavailable", self.name))
+                })?;
+            self.reader = Some(BufReader::new(stdout));
+        }
+        let reader = self.reader.as_mut().ok_or_else(|| {
             CoreError::Other(format!("plugin '{}' stdout unavailable", self.name))
         })?;
-        let mut reader = BufReader::new(stdout);
         let mut response_line = String::new();
 
-        tokio::select! {
+        // A bounded stderr snippet for diagnostics when the child fails.
+        let stderr_snippet: String;
+
+        enum ReadOutcome {
+            Line,
+            Eof,
+            ReadError(String),
+            Timeout,
+        }
+        let outcome = tokio::select! {
             result = reader.read_line(&mut response_line) => {
                 match result {
-                    Ok(0) => {
-                        // EOF — plugin crashed or exited.
-                        self.child = None;
-                        return Err(CoreError::Other(format!(
-                            "plugin '{}' closed stdout (possibly crashed)",
-                            self.name
-                        )));
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(CoreError::Other(format!(
-                            "plugin '{}' read error: {e}",
-                            self.name
-                        )));
-                    }
+                    Ok(0) => ReadOutcome::Eof,
+                    Ok(_) => ReadOutcome::Line,
+                    Err(e) => ReadOutcome::ReadError(e.to_string()),
                 }
             }
-            _ = tokio::time::sleep(DEFAULT_TIMEOUT) => {
-                // Kill the stuck process by dropping it (kill_on_drop(true)).
-                self.child = None;
+            _ = tokio::time::sleep(DEFAULT_TIMEOUT) => ReadOutcome::Timeout,
+        };
+        // The borrow of `self.reader` ends here (NLL): error paths below
+        // may drop the child + reader.
+        match outcome {
+            ReadOutcome::Line => {}
+            ReadOutcome::Eof => {
+                stderr_snippet = self.take_stderr_snippet().await;
+                self.drop_child();
                 return Err(CoreError::Other(format!(
-                    "plugin '{}' timed out after {DEFAULT_TIMEOUT:?}",
+                    "plugin '{}' closed stdout (possibly crashed){}",
+                    self.name,
+                    stderr_suffix(&stderr_snippet),
+                )));
+            }
+            ReadOutcome::ReadError(e) => {
+                return Err(CoreError::Other(format!(
+                    "plugin '{e}' read error: {}",
                     self.name
+                )));
+            }
+            ReadOutcome::Timeout => {
+                stderr_snippet = self.take_stderr_snippet().await;
+                // Kill the stuck process by dropping it (kill_on_drop(true)).
+                self.drop_child();
+                return Err(CoreError::Other(format!(
+                    "plugin '{}' timed out after {DEFAULT_TIMEOUT:?}{}",
+                    self.name,
+                    stderr_suffix(&stderr_snippet),
                 )));
             }
         }
@@ -320,7 +382,35 @@ impl PluginProcess {
     /// Kill the subprocess (if running).
     pub fn kill(&mut self) {
         // Dropping a tokio `Child` kills the process (kill_on_drop(true)).
+        self.drop_child();
+    }
+
+    /// Drop the child and its reader together (the reader's buffer belongs
+    /// to that child and must not survive a respawn).
+    fn drop_child(&mut self) {
         self.child.take();
+        self.reader.take();
+    }
+
+    /// Take up to 4 KiB of the child's stderr for diagnostics. The stderr
+    /// pipe is drained here (error path only) so a chatty child can't block
+    /// on a full pipe while we wait for stdout.
+    async fn take_stderr_snippet(&mut self) -> String {
+        use tokio::io::AsyncReadExt;
+        const CAP: usize = 4096;
+        let Some(child) = self.child.as_mut() else {
+            return String::new();
+        };
+        let Some(stderr) = child.stderr.as_mut() else {
+            return String::new();
+        };
+        let mut buf = vec![0u8; CAP];
+        // Best effort with a short deadline — never block the error path.
+        let n = tokio::time::timeout(std::time::Duration::from_millis(200), stderr.read(&mut buf))
+            .await
+            .unwrap_or(Ok(0))
+            .unwrap_or(0);
+        String::from_utf8_lossy(&buf[..n]).trim().to_string()
     }
 
     /// Plugin name.
@@ -336,6 +426,22 @@ impl PluginProcess {
     /// Resolved binary path, if locatable on disk.
     pub fn binary_path(&self) -> Option<PathBuf> {
         self.resolved_binary()
+    }
+}
+
+/// Truncate a stderr snippet for inline error messages.
+fn stderr_suffix(snippet: &str) -> String {
+    if snippet.is_empty() {
+        String::new()
+    } else {
+        const MAX: usize = 300;
+        let s: String = snippet.chars().take(MAX).collect();
+        let s = if snippet.chars().count() > MAX {
+            format!("{s}…")
+        } else {
+            s
+        };
+        format!("; stderr: {s}")
     }
 }
 
@@ -389,14 +495,19 @@ impl crate::plugin::BebokPlugin for DynamicPlugin {
     ) -> Option<serde_json::Value> {
         match self.invoke_action(action, input).await {
             Ok(Some(resp)) => Some(resp),
+            // No binary on disk: graceful degradation (callers map this to
+            // "not registered" / `binary_missing`).
             Ok(None) => None,
             Err(e) => {
+                // Execution failure (timeout / crash / bad JSON) is NOT "not
+                // registered": return a machine-readable error payload so
+                // routes and tools report 502/503 instead of 404.
                 tracing::warn!(
                     "dynamic plugin '{}' action '{}' failed: {e}",
                     self.name,
                     action
                 );
-                None
+                Some(serde_json::json!({ "ok": false, "error": e.to_string() }))
             }
         }
     }
@@ -586,5 +697,49 @@ done
         let mut proc = PluginProcess::new("ghost", dir, None);
         let result = proc.invoke("status", &serde_json::json!({})).await.unwrap();
         assert!(result.is_none(), "missing binary must return None");
+    }
+
+    #[tokio::test]
+    async fn back_to_back_invokes_keep_responses_aligned() {
+        // Regression test for the persistent-reader fix: two fast invokes
+        // must each get their own response (a fresh BufReader per call
+        // could swallow the second line into the first call's buffer).
+        let dir = echo_stub_path();
+        #[cfg(windows)]
+        let script = dir.join("echo-stub.ps1");
+        #[cfg(not(windows))]
+        let script = dir.join("echo-stub.sh");
+        let mut proc = PluginProcess::new("test", dir.clone(), Some(&echo_stub_command(&script)));
+
+        for action in ["status", "search", "status", "rebuild"] {
+            let result = proc.invoke(action, &serde_json::json!({})).await.unwrap();
+            let resp = result.expect("expected response");
+            assert_eq!(resp["action"], action, "response #{action} misaligned");
+        }
+
+        proc.kill();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn execution_error_is_error_payload_not_none() {
+        use crate::plugin::BebokPlugin;
+        // A registered plugin whose process fails must surface
+        // `{ok:false,error}` (not `None` = "not registered"). Use a command
+        // that resolves on PATH but exits immediately: the spawn succeeds,
+        // the I/O fails.
+        let dir = echo_stub_path();
+        #[cfg(windows)]
+        let ep = "cmd /C exit 1".to_string();
+        #[cfg(not(windows))]
+        let ep = "sh -c \"exit 1\"".to_string();
+        let plugin = DynamicPlugin::new("dying", dir.clone(), Some(ep));
+        let resp = plugin
+            .on_action("status", &serde_json::json!({}))
+            .await
+            .expect("execution failure must be an error payload, not None");
+        assert_eq!(resp["ok"], false);
+        assert!(resp.get("error").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

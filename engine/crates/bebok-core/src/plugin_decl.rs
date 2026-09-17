@@ -211,6 +211,9 @@ fn slot_has_binary(slot: &Path, name: &str) -> bool {
 
 impl From<(PluginDecl, bool)> for DeclaredPlugin {
     fn from((decl, installed): (PluginDecl, bool)) -> Self {
+        // No project root is available here, so the slot manifest cannot be
+        // consulted: `version`/`binary` stay empty ("unknown" to the client)
+        // instead of claiming a binary is present.
         Self {
             name: decl.name,
             repo: decl.repo,
@@ -218,7 +221,7 @@ impl From<(PluginDecl, bool)> for DeclaredPlugin {
             enabled: decl.enabled,
             installed,
             version: String::new(),
-            binary: "present".to_string(),
+            binary: String::new(),
         }
     }
 }
@@ -279,7 +282,7 @@ pub fn list_declared(root: &Path) -> Vec<DeclaredPlugin> {
     for path in entries {
         match read_decl(&path) {
             Ok(decl) => {
-                let installed = install_dir(root, &decl.name).exists();
+                let installed = install_dir(root, &decl.name).is_dir();
                 out.push(DeclaredPlugin::with_state(root, decl, installed));
             }
             Err(e) => {
@@ -306,19 +309,32 @@ pub fn set_enabled(root: &Path, name: &str, enabled: bool) -> Result<DeclaredPlu
     let mut decl = read_decl(&path)?;
     decl.enabled = enabled;
     write_decl(root, &decl)?;
-    let installed = install_dir(root, &decl.name).exists();
+    let installed = install_dir(root, &decl.name).is_dir();
     Ok(DeclaredPlugin::with_state(root, decl, installed))
 }
 
-/// Returns `true` **only** when the declaration file exists, is parseable,
-/// and has `enabled == false`.  In every other case (missing file, I/O error,
-/// parse error, `enabled == true`) this returns `false` — preserving the
-/// existing "assume enabled" behaviour.
+/// Returns `true` when the plugin is effectively off for this project:
+/// the declaration file exists and is parseable with `enabled == false`,
+/// **or** the declaration exists but is unreadable/invalid. A broken
+/// declaration is fail-closed (treated as disabled and logged) so that a
+/// corrupt file cannot silently flip a plugin back on: this mirrors
+/// [`crate::agent::index_prompt::index_section`], which returns `None`
+/// instead of injecting the prompt in the same situation. A *missing*
+/// declaration still returns `false` ("assume enabled").
 pub fn is_disabled(root: &Path, name: &str) -> bool {
     let path = decl_path(root, name);
+    if !path.is_file() {
+        return false;
+    }
     match read_decl(&path) {
         Ok(decl) => !decl.enabled,
-        Err(_) => false,
+        Err(e) => {
+            tracing::warn!(
+                "treating plugin '{name}' as disabled: unreadable declaration {}: {e}",
+                path.display()
+            );
+            true
+        }
     }
 }
 

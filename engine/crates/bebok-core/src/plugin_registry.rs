@@ -172,6 +172,12 @@ pub struct PluginManifest {
     /// Platform-specific entrypoint override for Unix.
     #[serde(default)]
     pub entrypoint_unix: Option<String>,
+    /// Prompt file bundled with the plugin (e.g. `"AGENT_INDEX.md"`):
+    /// a plain file name resolved against the slot dir. Absolute paths,
+    /// `..` segments and separators are rejected by
+    /// [`crate::agent::index_prompt::sanitize_prompt_file`].
+    #[serde(default)]
+    pub prompt_file: Option<String>,
     /// Optional manifest of archive assets (JSON value).
     #[serde(default)]
     pub assets: Option<serde_json::Value>,
@@ -486,6 +492,7 @@ mod tests {
             entrypoint: None,
             entrypoint_windows: None,
             entrypoint_unix: None,
+            prompt_file: None,
             assets: None,
         };
         ok.validate().unwrap();
@@ -502,6 +509,7 @@ mod tests {
             entrypoint: None,
             entrypoint_windows: None,
             entrypoint_unix: None,
+            prompt_file: None,
             assets: None,
         };
         assert!(bad.validate().is_err());
@@ -514,6 +522,7 @@ mod tests {
             entrypoint: None,
             entrypoint_windows: None,
             entrypoint_unix: None,
+            prompt_file: None,
             assets: None,
         };
         assert!(bad_ver.validate().is_err());
@@ -526,6 +535,7 @@ mod tests {
             entrypoint: None,
             entrypoint_windows: None,
             entrypoint_unix: None,
+            prompt_file: None,
             assets: None,
         };
         assert!(no_min.engine_compatible("0.0.1"));
