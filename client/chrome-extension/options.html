@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bebok options</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body class="options">
+    <header class="bar">
+      <span class="brand">Bebok options</span>
+    </header>
+
+    <main class="body">
+      <p class="hint">
+        Point the extension at a running Bebok engine. Start one with
+        <code>cargo run -p bebok-server -- --port 8787</code> and paste the
+        <code>BEBOK_READY</code> URL below (it carries the capability token when
+        auth is on).
+      </p>
+
+      <label class="label" for="engineUrl">Engine URL</label>
+      <input
+        id="engineUrl"
+        class="question"
+        type="url"
+        placeholder="http://127.0.0.1:8787?token=…"
+        spellcheck="false"
+      />
+
+      <label class="label" for="directory">Working directory</label>
+      <input
+        id="directory"
+        class="question"
+        type="text"
+        placeholder="E:\bebok"
+        spellcheck="false"
+      />
+      <p class="hint">
+        The project the agent works in (absolute path, as shown by the engine).
+      </p>
+
+      <div class="row">
+        <button id="test" class="primary" type="button">Test connection</button>
+        <button id="save" class="icon-button" type="button">Save</button>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -112,6 +112,23 @@
   font-size: var(--fs-11-5);
 }
 
+.engine-live-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.engine-url {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+}
+
 .status-row[data-phase='live'] app-status-dot {
   color: var(--success);
 }

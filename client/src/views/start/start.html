@@ -43,7 +43,12 @@
     }
 
     <div class="status-row" [attr.data-phase]="phase()">
-      <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      <button type="button" class="engine-live-btn" data-testid="engine-live-btn" (click)="toggleEngineUrl()" [attr.title]="engineUrl() || statusLabel()">
+        <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
+      </button>
+      @if (showEngineUrl() && engineUrl()) {
+        <span class="engine-url" data-testid="engine-url">{{ engineUrl() }}</span>
+      }
       @if (phase() === 'live' && !isTauri() && !showAddressForm()) {
         <button type="button" class="link-btn" (click)="toggleAddressForm()">
           {{ t('start.engineAddress') }}

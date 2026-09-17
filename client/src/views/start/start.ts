@@ -79,6 +79,14 @@ export class StartView implements OnInit, OnDestroy {
   readonly removeWorktreeToo = signal(false);
   /** Transient confirmation after a worktree was removed. */
   readonly notice = signal<string | null>(null);
+
+  /** Engine URL toggle (same as sidebar). */
+  readonly showEngineUrl = signal(false);
+  toggleEngineUrl(): void {
+    this.showEngineUrl.update((v) => !v);
+  }
+  /** The engine base URL from the live connection. */
+  readonly engineUrl = computed(() => this.engine.connection()?.baseUrl ?? '');
   private deleteTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** One of the three states the handoff asks for: connecting / live / error. */

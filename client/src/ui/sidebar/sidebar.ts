@@ -23,6 +23,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { AgentInfo, SessionMeta, isSubAgentSession, parentSessionId } from '../../core/engine.dtos';
+import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
 import { OpenSessionsStore } from '../../core/open-sessions.store';
 import { SessionActivityStore } from '../../core/session-activity.store';
@@ -59,8 +60,16 @@ export class Sidebar {
   readonly activity = inject(SessionActivityStore);
   private readonly toolSafety = inject(ToolSafetyStore);
   private readonly newSessionDialog = inject(NewSessionDialogStore);
+  private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
+
+  /** Engine base URL (http://host:port, no token) shown on click. */
+  readonly engineUrl = computed(() => this.engine.connection()?.baseUrl ?? '');
+  readonly showEngineUrl = signal(false);
+  toggleEngineUrl(): void {
+    this.showEngineUrl.update((v) => !v);
+  }
 
   readonly t = this.i18n.t.bind(this.i18n);
   readonly languages = LANGUAGES;
