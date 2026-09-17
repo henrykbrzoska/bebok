@@ -54,3 +54,7 @@
   align-items: center;
   margin-left: auto;
 }
+/* Plan B: "binary missing" hint shown next to the Update button. */
+.plugin-binary-warn {
+  color: var(--warning);
+}

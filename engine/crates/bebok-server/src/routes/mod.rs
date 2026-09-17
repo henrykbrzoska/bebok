@@ -104,8 +104,13 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/plugins", get(plugins::list_plugins))
         .route("/plugins/registry", get(plugins::plugin_registry))
         .route("/plugins/{name}/install", post(plugins::install_plugin))
+        .route("/plugins/{name}/update", post(plugins::update_plugin))
         .route("/plugins/{name}/toggle", post(plugins::toggle_plugin))
         .route("/plugins/{name}/status", get(plugins::plugin_status))
+        // NOTE: `/plugins/{name}/{action}` is generic, but `install`,
+        // `update`, `toggle` and `status` have dedicated routes above which
+        // Axum matches first; `plugin_invoke` additionally rejects those
+        // reserved action names with a 400 (defence in depth).
         .route("/plugins/{name}/{action}", post(plugins::plugin_invoke))
         // WP-CHAT4 (F7-7): explicit per-tool safety categories.
         .route(

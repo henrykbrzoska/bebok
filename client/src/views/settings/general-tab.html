@@ -23,6 +23,9 @@
       ></span>
       <span class="plugin-id mono">{{ row.name }}</span>
       <span class="plugin-repo small muted mono">{{ row.repo }}</span>
+      @if (row.version) {
+        <span class="plugin-version small muted mono" [attr.data-testid]="'plugin-version-' + row.name">v{{ row.version }}</span>
+      }
       @if (row.description) {
         <span class="plugin-desc small faint">{{ row.description }}</span>
       }
@@ -38,6 +41,21 @@
             (click)="install(row.name)"
           >{{ t('settings.pluginInstall') }}</button>
         } @else {
+          @if (isBinaryMissing(row)) {
+            <span
+              class="plugin-binary-warn small warn"
+              [attr.data-testid]="'plugin-binary-missing-' + row.name"
+            >{{ t('settings.pluginBinaryMissing') }}</span>
+          }
+          <button
+            type="button"
+            class="plugin-update"
+            [class.primary]="isBinaryMissing(row)"
+            [class.ghost]="!isBinaryMissing(row)"
+            [attr.data-testid]="'plugin-update-' + row.name"
+            [disabled]="busyName() !== null"
+            (click)="update(row)"
+          >{{ updateLabel(row) }}</button>
           <button
             type="button"
             [attr.data-testid]="'plugin-toggle-' + row.name"
@@ -61,6 +79,7 @@
     <div class="index-row" data-testid="index-status-row">
       <span
         class="dot"
+        data-testid="index-status-dot"
         [class.ok]="indexStatusTone() === 'ok'"
         [class.warn]="indexStatusTone() === 'warn'"
         [class.err]="indexStatusTone() === 'err'"

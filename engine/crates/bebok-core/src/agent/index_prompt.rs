@@ -59,13 +59,22 @@ pub fn index_section(root: &Path) -> Option<String> {
     let decl_path = plugin_decl::decl_path(root, name);
 
     let available = if decl_path.is_file() {
-        // An explicit declaration wins over the slot: disabled means off.
-        match plugin_decl::read_decl(&decl_path).ok() {
-            Some(d) if d.enabled => true,
-            _ => return None,
+        // An explicit declaration wins over the slot. Fail closed on an
+        // unreadable/invalid declaration (mirrors `is_disabled`): a corrupt
+        // file hides the index instead of silently re-enabling it.
+        match plugin_decl::read_decl(&decl_path) {
+            Ok(d) if d.enabled => true,
+            Ok(_) => return None,
+            Err(e) => {
+                tracing::warn!(
+                    "hiding code index: unreadable declaration {}: {e}",
+                    decl_path.display()
+                );
+                return None;
+            }
         }
     } else {
-        slot.exists()
+        slot.is_dir()
     };
 
     if !available {
@@ -73,6 +82,8 @@ pub fn index_section(root: &Path) -> Option<String> {
     }
 
     // Resolve prompt file name from the slot manifest (fall back to AGENT_INDEX.md).
+    // The manifest's `prompt_file` is sanitized (plain file name, no
+    // traversal): anything suspicious falls back to the default.
     let prompt_name = read_prompt_file_name(&slot.join("bebok-plugin.json"))
         .unwrap_or_else(|| "AGENT_INDEX.md".to_string());
 
@@ -88,16 +99,39 @@ pub fn index_section(root: &Path) -> Option<String> {
     Some(text)
 }
 
-/// Read the `prompt_file` field from the slot's `bebok-plugin.json` (if present).
+/// Read the `prompt_file` field from the slot's `bebok-plugin.json` (if present),
+/// sanitized via [`sanitize_prompt_file`]. Anything unreadable, missing or
+/// suspicious returns `None` (the caller falls back to `AGENT_INDEX.md`).
 fn read_prompt_file_name(manifest_path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(manifest_path).ok()?;
     // The manifest is JSON; try to parse the extra field from the raw value.
+    // (The typed `PluginManifest` also carries `prompt_file`, but the raw
+    // read keeps working with hand-written manifests that fail validation.)
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    value
-        .get("prompt_file")?
-        .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.to_string())
+    let raw = value.get("prompt_file")?.as_str()?;
+    sanitize_prompt_file(raw)
+}
+
+/// Accept only a plain file name for the plugin's prompt file: reject empty
+/// strings, absolute paths, `..` segments and any path separator (both `/`
+/// and `\`, so Windows-style traversal fails everywhere). Returns the file
+/// name on success, `None` when the value must not be trusted.
+pub fn sanitize_prompt_file(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(name);
+    if path.is_absolute()
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || path.file_name().is_none_or(|f| f.to_string_lossy() != name)
+    {
+        tracing::warn!("rejecting suspicious plugin prompt_file '{raw}'");
+        return None;
+    }
+    Some(name.to_string())
 }
 
 #[cfg(test)]
@@ -377,5 +411,66 @@ mod tests {
             FALLBACK_SECTION.contains("no args needed"),
             "FALLBACK_SECTION must note native tools need no directory arg"
         );
+    }
+
+    #[test]
+    fn sanitize_prompt_file_accepts_plain_names() {
+        assert_eq!(
+            sanitize_prompt_file("AGENT_INDEX.md").as_deref(),
+            Some("AGENT_INDEX.md")
+        );
+        assert_eq!(
+            sanitize_prompt_file("  CUSTOM.md  ").as_deref(),
+            Some("CUSTOM.md")
+        );
+    }
+
+    #[test]
+    fn sanitize_prompt_file_rejects_traversal() {
+        for evil in [
+            "",
+            "   ",
+            "../evil.md",
+            "sub/dir.md",
+            "sub\\dir.md",
+            "..\\evil.md",
+            "/etc/passwd",
+            "C:\\Windows\\x.md",
+            "....//x",
+        ] {
+            assert_eq!(sanitize_prompt_file(evil), None, "must reject '{evil}'");
+        }
+    }
+
+    #[test]
+    fn malicious_prompt_file_falls_back_to_default() {
+        let root = temp_root("traversal");
+        write_decl(
+            &root,
+            r#"{"name":"bebok-index","repo":"a/b","enabled":true}"#,
+        );
+        // Traversal attempt in the slot manifest must be ignored…
+        write_slot_file(
+            &root,
+            "bebok-plugin.json",
+            r#"{"name":"bebok-index","prompt_file":"../../evil.md"}"#,
+        );
+        // …so the default file is used instead.
+        write_slot_file(&root, "AGENT_INDEX.md", "Default wins.");
+
+        let section = index_section(&root).unwrap();
+        assert_eq!(section, "Default wins.");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn corrupt_declaration_hides_index() {
+        let root = temp_root("corrupt-decl");
+        write_decl(&root, "{not valid json");
+        fs::create_dir_all(slot_dir(&root)).unwrap();
+
+        // Fail closed (mirrors is_disabled): a corrupt file hides the index.
+        assert!(index_section(&root).is_none());
+        let _ = fs::remove_dir_all(&root);
     }
 }

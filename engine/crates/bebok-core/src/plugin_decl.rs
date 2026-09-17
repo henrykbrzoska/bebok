@@ -49,6 +49,12 @@ pub struct PluginDecl {
     /// Local on/off switch (default: enabled when absent).
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Optional pre-built archive URL (`https://…`, .zip or .tar.gz).
+    #[serde(default)]
+    pub asset_url: Option<String>,
+    /// Expected SHA-256 hex digest of the archive (64 hex chars).
+    #[serde(default)]
+    pub asset_sha256: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -63,6 +69,8 @@ impl PluginDecl {
             repo: KNOWN_PLUGIN_REPO.to_string(),
             url: KNOWN_PLUGIN_URL.to_string(),
             enabled,
+            asset_url: None,
+            asset_sha256: None,
         }
     }
 
@@ -107,7 +115,7 @@ impl PluginDecl {
 }
 
 /// Declared plugin with its derived install state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclaredPlugin {
     pub name: String,
     pub repo: String,
@@ -115,16 +123,105 @@ pub struct DeclaredPlugin {
     pub enabled: bool,
     /// True when `<root>/.bebok/plugins/<name>/` exists on disk.
     pub installed: bool,
+    /// Version from the slot manifest (`""` when the slot has no manifest).
+    /// Plan B: lets `GET /plugins` render `v{version}` and lets the client
+    /// decide whether an Update is worthwhile. Old engines never emit it.
+    #[serde(default)]
+    pub version: String,
+    /// Plan B platform-binary state: `"present"` when the slot binary
+    /// resolves for this OS, `"missing"` otherwise (missing slot counts as
+    /// missing). Old engines never emit it; the client treats absence as
+    /// "unknown" (secondary Update styling).
+    #[serde(default)]
+    pub binary: String,
 }
 
-impl From<(PluginDecl, bool)> for DeclaredPlugin {
-    fn from((decl, installed): (PluginDecl, bool)) -> Self {
+impl DeclaredPlugin {
+    /// Build from a declaration + install flag, enriching with the slot
+    /// manifest version and the platform-binary presence. Never fails:
+    /// unreadable slots degrade to `("", "missing")`.
+    pub fn with_state(root: &Path, decl: PluginDecl, installed: bool) -> Self {
+        let (version, binary) = slot_state(root, &decl.name, installed);
         Self {
             name: decl.name,
             repo: decl.repo,
             url: decl.url,
             enabled: decl.enabled,
             installed,
+            version,
+            binary,
+        }
+    }
+}
+
+/// Slot-derived `(version, binary)` for [`DeclaredPlugin::with_state`].
+/// `installed == false` short-circuits to `("", "missing")`; any I/O or
+/// parse failure degrades the same way (never fatal for a listing).
+pub fn slot_state(root: &Path, name: &str, installed: bool) -> (String, String) {
+    if !installed {
+        return (String::new(), "missing".to_string());
+    }
+    let slot = install_dir(root, name);
+    if !slot.is_dir() {
+        return (String::new(), "missing".to_string());
+    }
+    let version = crate::plugin_registry::read_manifest(&slot)
+        .map(|m| m.version)
+        .unwrap_or_default();
+    let binary = if slot_has_binary(&slot, name) {
+        "present"
+    } else {
+        "missing"
+    }
+    .to_string();
+    (version, binary)
+}
+
+/// True when the slot contains an executable for this platform: the
+/// manifest's platform entrypoint (`entrypoint_windows` on Windows,
+/// `entrypoint_unix` elsewhere, else generic `entrypoint`, else `<name>`),
+/// first word only, resolved against the slot dir (plus `.exe` on Windows).
+fn slot_has_binary(slot: &Path, name: &str) -> bool {
+    let cmd: String = match crate::plugin_registry::read_manifest(slot) {
+        Ok(m) => {
+            #[cfg(windows)]
+            let ep = m.entrypoint_windows.as_deref().or(m.entrypoint.as_deref());
+            #[cfg(not(windows))]
+            let ep = m.entrypoint_unix.as_deref().or(m.entrypoint.as_deref());
+            ep.unwrap_or(name)
+                .split_whitespace()
+                .next()
+                .unwrap_or(name)
+                .to_string()
+        }
+        Err(_) => name.to_string(),
+    };
+    if Path::new(&cmd).is_absolute() {
+        return Path::new(&cmd).exists();
+    }
+    if slot.join(&cmd).exists() {
+        return true;
+    }
+    #[cfg(windows)]
+    if slot.join(format!("{cmd}.exe")).exists() {
+        return true;
+    }
+    false
+}
+
+impl From<(PluginDecl, bool)> for DeclaredPlugin {
+    fn from((decl, installed): (PluginDecl, bool)) -> Self {
+        // No project root is available here, so the slot manifest cannot be
+        // consulted: `version`/`binary` stay empty ("unknown" to the client)
+        // instead of claiming a binary is present.
+        Self {
+            name: decl.name,
+            repo: decl.repo,
+            url: decl.url,
+            enabled: decl.enabled,
+            installed,
+            version: String::new(),
+            binary: String::new(),
         }
     }
 }
@@ -185,8 +282,8 @@ pub fn list_declared(root: &Path) -> Vec<DeclaredPlugin> {
     for path in entries {
         match read_decl(&path) {
             Ok(decl) => {
-                let installed = install_dir(root, &decl.name).exists();
-                out.push(DeclaredPlugin::from((decl, installed)));
+                let installed = install_dir(root, &decl.name).is_dir();
+                out.push(DeclaredPlugin::with_state(root, decl, installed));
             }
             Err(e) => {
                 tracing::warn!(
@@ -212,19 +309,32 @@ pub fn set_enabled(root: &Path, name: &str, enabled: bool) -> Result<DeclaredPlu
     let mut decl = read_decl(&path)?;
     decl.enabled = enabled;
     write_decl(root, &decl)?;
-    let installed = install_dir(root, &decl.name).exists();
-    Ok(DeclaredPlugin::from((decl, installed)))
+    let installed = install_dir(root, &decl.name).is_dir();
+    Ok(DeclaredPlugin::with_state(root, decl, installed))
 }
 
-/// Returns `true` **only** when the declaration file exists, is parseable,
-/// and has `enabled == false`.  In every other case (missing file, I/O error,
-/// parse error, `enabled == true`) this returns `false` — preserving the
-/// existing "assume enabled" behaviour.
+/// Returns `true` when the plugin is effectively off for this project:
+/// the declaration file exists and is parseable with `enabled == false`,
+/// **or** the declaration exists but is unreadable/invalid. A broken
+/// declaration is fail-closed (treated as disabled and logged) so that a
+/// corrupt file cannot silently flip a plugin back on: this mirrors
+/// [`crate::agent::index_prompt::index_section`], which returns `None`
+/// instead of injecting the prompt in the same situation. A *missing*
+/// declaration still returns `false` ("assume enabled").
 pub fn is_disabled(root: &Path, name: &str) -> bool {
     let path = decl_path(root, name);
+    if !path.is_file() {
+        return false;
+    }
     match read_decl(&path) {
         Ok(decl) => !decl.enabled,
-        Err(_) => false,
+        Err(e) => {
+            tracing::warn!(
+                "treating plugin '{name}' as disabled: unreadable declaration {}: {e}",
+                path.display()
+            );
+            true
+        }
     }
 }
 
@@ -282,6 +392,8 @@ mod tests {
                 repo: String::new(),
                 url: String::new(),
                 enabled: true,
+                asset_url: None,
+                asset_sha256: None,
             };
             assert!(decl.validate().is_err(), "{bad:?}");
         }
@@ -290,6 +402,8 @@ mod tests {
             repo: "no-slash".to_string(),
             url: String::new(),
             enabled: true,
+            asset_url: None,
+            asset_sha256: None,
         };
         assert!(bad_repo.validate().is_err());
         let bad_url = PluginDecl {
@@ -297,6 +411,8 @@ mod tests {
             repo: String::new(),
             url: "git@github.com:x/y.git".to_string(),
             enabled: true,
+            asset_url: None,
+            asset_sha256: None,
         };
         assert!(bad_url.validate().is_err());
     }
