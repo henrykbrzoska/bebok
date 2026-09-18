@@ -1,0 +1,216 @@
+<div class="schedules-page">
+  <header class="page-header">
+    <h1>{{ t('schedules.title') }}</h1>
+    <button
+      class="btn btn-primary"
+      (click)="toggleForm()"
+      [attr.data-testid]="'add-schedule-btn'"
+      [disabled]="tasksLoading()"
+    >
+      {{ showAddForm() ? t('schedules.closeForm') : t('schedules.addTask') }}
+    </button>
+  </header>
+
+  @if (tasksLoading()) {
+    <div class="loading-container">
+      <p>{{ t('schedules.loading') }}</p>
+    </div>
+  } @else if (tasksError()) {
+    <div class="error-container">
+      <p>{{ t('schedules.error') }}: {{ tasksError() }}</p>
+    </div>
+  } @else {
+    @if (tasks().length === 0) {
+      <div class="empty-container">
+        <p>{{ t('schedules.empty') }}</p>
+        <p class="hint">{{ t('schedules.emptyHint') }}</p>
+      </div>
+    } @else {
+      <div class="tasks-list">
+        @for (task of tasks(); track task.id) {
+          <article class="task-card" [attr.data-testid]="'task-card-' + task.id">
+            <header class="task-header">
+              <h2 class="task-name">
+                <span>{{ task.name }}</span>
+                @if (task.enabled) {
+                  <span class="status-badge enabled">{{ t('schedules.enabled') }}</span>
+                } @else {
+                  <span class="status-badge disabled">{{ t('schedules.disabled') }}</span>
+                }
+              </h2>
+              <div class="task-actions">
+                <button
+                  class="btn btn-text"
+                  (click)="runNow(task)"
+                  [attr.data-testid]="'task-run-' + task.id"
+                  [disabled]="newTaskLoading()"
+                >
+                  {{ t('schedules.runNow') }}
+                </button>
+                <button
+                  class="btn btn-text"
+                  (click)="toggleEnabled(task)"
+                  [attr.data-testid]="'task-toggle-' + task.id"
+                  [disabled]="newTaskLoading()"
+                >
+                  {{ task.enabled ? t('schedules.disable') : t('schedules.enable') }}
+                </button>
+                <button
+                  class="btn btn-danger"
+                  (click)="deleteTask(task)"
+                  [attr.data-testid]="'task-delete-' + task.id"
+                  [disabled]="newTaskLoading()"
+                >
+                  {{ t('schedules.delete') }}
+                </button>
+              </div>
+            </header>
+            <div class="task-body">
+              <p class="task-prompt">{{ task.prompt }}</p>
+              <div class="task-meta">
+                <span class="task-agent">{{ task.agent }}</span>
+                <span class="task-mode">{{ task.kind }}</span>
+                @if (task.next_run_at) {
+                  <span class="task-next-run">
+                    {{ t('schedules.nextRun') }}: {{ task.next_run_at | date:'yyyy-MM-dd HH:mm' }}
+                  </span>
+                }
+              </div>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  }
+
+  @if (showAddForm()) {
+    <section class="add-form" [attr.data-testid]="'add-schedule-form'">
+      <h3>{{ t('schedules.addTask') }}</h3>
+      <div class="form-group">
+        <label for="task-name">{{ t('schedules.name') }}</label>
+        <input
+          id="task-name"
+          type="text"
+          [value]="newName()"
+          (input)="newName.set($any($event).target.value)"
+          [attr.data-testid]="'new-task-name'"
+        />
+      </div>
+      <div class="form-group">
+        <label for="task-prompt">{{ t('schedules.prompt') }}</label>
+        <textarea
+          id="task-prompt"
+          rows="4"
+          [value]="newPrompt()"
+          (input)="newPrompt.set($any($event).target.value)"
+          [attr.data-testid]="'new-task-prompt'"
+        ></textarea>
+      </div>
+      <div class="form-group">
+        <label for="task-agent">{{ t('schedules.agent') }}</label>
+        <select
+          id="task-agent"
+          [value]="newAgent()"
+          (change)="newAgent.set($any($event).target.value)"
+          [attr.data-testid]="'new-task-agent'"
+        >
+          @for (agent of agentOptions(); track agent) {
+            <option [value]="agent">{{ agent }}</option>
+          }
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="task-mode">{{ t('schedules.mode') }}</label>
+        <select
+          id="task-mode"
+          [value]="newMode()"
+          (change)="newMode.set($any($event).target.value)"
+          [attr.data-testid]="'new-task-mode'"
+        >
+          <option value="interval">{{ t('schedules.mode.interval') }}</option>
+          <option value="daily">{{ t('schedules.mode.daily') }}</option>
+          <option value="weekly">{{ t('schedules.mode.weekly') }}</option>
+        </select>
+      </div>
+      @if (newMode() === 'interval') {
+        <div class="form-group">
+          <label for="task-interval">{{ t('schedules.intervalMinutes') }}</label>
+          <input
+            id="task-interval"
+            type="number"
+            [value]="newIntervalMinutes()"
+            (input)="newIntervalMinutes.set(+$any($event).target.value)"
+            [attr.data-testid]="'new-task-interval'"
+          />
+        </div>
+      } @else if (newMode() === 'daily') {
+        <div class="form-group">
+          <label for="task-daily">{{ t('schedules.dailyTime') }}</label>
+          <input
+            id="task-daily"
+            type="time"
+            [value]="newDailyTime()"
+            (input)="newDailyTime.set($any($event).target.value)"
+            [attr.data-testid]="'new-task-daily'"
+          />
+        </div>
+      } @else {
+        <div class="form-group">
+          <label for="task-weekly-day">{{ t('schedules.weeklyDay') }}</label>
+          <select
+            id="task-weekly-day"
+            [value]="newWeeklyDay()"
+            (change)="newWeeklyDay.set($any($event).target.value)"
+            [attr.data-testid]="'new-task-weekly-day'"
+          >
+            <option value="mon">{{ t('schedules.day.mon') }}</option>
+            <option value="tue">{{ t('schedules.day.tue') }}</option>
+            <option value="wed">{{ t('schedules.day.wed') }}</option>
+            <option value="thu">{{ t('schedules.day.thu') }}</option>
+            <option value="fri">{{ t('schedules.day.fri') }}</option>
+            <option value="sat">{{ t('schedules.day.sat') }}</option>
+            <option value="sun">{{ t('schedules.day.sun') }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="task-weekly-time">{{ t('schedules.weeklyTime') }}</label>
+          <input
+            id="task-weekly-time"
+            type="time"
+            [value]="newWeeklyTime()"
+            (input)="newWeeklyTime.set($any($event).target.value)"
+            [attr.data-testid]="'new-task-weekly-time'"
+          />
+        </div>
+      }
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            [checked]="newEnabled()"
+            (change)="newEnabled.set($any($event).target.checked)"
+            [attr.data-testid]="'new-task-enabled'"
+          />
+          {{ t('schedules.enabled') }}
+        </label>
+      </div>
+      <div class="form-actions">
+        <button
+          class="btn btn-primary"
+          (click)="addTask()"
+          [disabled]="newTaskLoading()"
+          [attr.data-testid]="'add-task-btn'"
+        >
+          {{ t('schedules.create') }}
+        </button>
+        <button
+          class="btn btn-text"
+          (click)="toggleForm()"
+          [attr.data-testid]="'cancel-add-btn'"
+        >
+          {{ t('schedules.cancel') }}
+        </button>
+      </div>
+    </section>
+  }
+</div>

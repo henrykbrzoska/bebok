@@ -81,8 +81,8 @@ export class Topbar {
         return this.t('nav.terminal');
       case 'debug':
         return this.t('nav.debugLog');
-      case 'stats':
-        return this.t('nav.stats');
+      case 'schedules':
+        return this.t('nav.schedules');
       case 'settings':
         return this.t('nav.settings');
       case 'about':

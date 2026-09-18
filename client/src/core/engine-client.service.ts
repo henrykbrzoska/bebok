@@ -67,6 +67,7 @@ import {
   BrowserState,
   IndexRebuildResponse,
   IndexStatusResponse,
+  ScheduleTask,
 } from './engine.dtos';
 import { EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -854,5 +855,53 @@ export class EngineClient {
       return undefined as T;
     }
     return (await res.json()) as T;
+  }
+
+  /**
+   * `GET /schedules?directory=` -> list of scheduled tasks (plain array).
+   */
+  listSchedules(directory: string): Promise<ScheduleTask[]> {
+    return this.request<ScheduleTask[]>(
+      'GET',
+      `/schedules?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /**
+   * `POST /schedules` with body {directory, ...task} -> create a new schedule.
+   */
+  createSchedule(task: Partial<ScheduleTask>): Promise<ScheduleTask> {
+    return this.request<ScheduleTask>('POST', '/schedules', task);
+  }
+
+  /**
+   * `PATCH /schedules/{id}` with body {name?, enabled?, prompt?} -> update a schedule.
+   */
+  patchSchedule(id: string, body: { name?: string; enabled?: boolean; prompt?: string }): Promise<ScheduleTask> {
+    return this.request<ScheduleTask>(
+      'PATCH',
+      `/schedules/${encodeURIComponent(id)}`,
+      body,
+    );
+  }
+
+  /**
+   * `POST /schedules/{id}/run` -> run a schedule now.
+   */
+  runSchedule(id: string): Promise<ScheduleTask> {
+    return this.request<ScheduleTask>(
+      'POST',
+      `/schedules/${encodeURIComponent(id)}/run`,
+    );
+  }
+
+  /**
+   * `DELETE /schedules/{id}` -> delete a schedule.
+   */
+  deleteSchedule(id: string): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/schedules/${encodeURIComponent(id)}`,
+    );
   }
 }

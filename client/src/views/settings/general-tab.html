@@ -4,6 +4,19 @@
 </div>
 
 <div class="card">
+  <h3>{{ t('schedules.statsCard') }}</h3>
+  <p class="card-sub">{{ t('schedules.statsCardHint') }}</p>
+  <button
+    type="button"
+    class="btn btn-text"
+    (click)="navigateStats()"
+    data-testid="stats-link"
+  >
+    {{ t('schedules.statsCardLink') }}
+  </button>
+</div>
+
+<div class="card">
   <h3>{{ t('settings.pluginsTitle') }}</h3>
   <p class="card-sub">{{ t('settings.pluginsHint') }}</p>
 

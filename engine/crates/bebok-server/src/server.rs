@@ -77,6 +77,9 @@ pub fn build_app() -> (Router, AppState) {
         llm_trace,
     };
 
+    // Scheduler: tick-loop that fires due tasks via create_session + prompt_turn.
+    crate::routes::schedules::spawn_scheduler(state.clone());
+
     let app = build_api_router()
         // Image attachments: up to 5 images x 5 MiB base64 (~35 MB JSON).
         // Axum's default 2 MiB Json limit would reject those with 413 before

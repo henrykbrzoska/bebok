@@ -113,7 +113,7 @@ export class Sidebar {
       { screen: 'explorer', path: '/explorer', labelKey: 'nav.explorer', icon: 'explorer' },
       { screen: 'terminal', path: '/terminal', labelKey: 'nav.terminal', icon: 'terminal' },
       { screen: 'debug', path: '/debug', labelKey: 'nav.debugLog', icon: 'debug' },
-      { screen: 'stats', path: '/stats', labelKey: 'nav.stats', icon: 'stats' },
+      { screen: 'schedules', path: '/schedules', labelKey: 'nav.schedules', icon: 'schedules' },
       { screen: 'settings', path: '/settings', labelKey: 'nav.settings', icon: 'settings' },
     ];
 
@@ -278,7 +278,7 @@ export class Sidebar {
   }
 }
 
-type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.stats' | 'nav.settings';
+type NavLabelKey = 'nav.explorer' | 'nav.terminal' | 'nav.debugLog' | 'nav.schedules' | 'nav.settings';
 
 /** One rendered line of the session list (F9-12). */
 export interface SessionRow {

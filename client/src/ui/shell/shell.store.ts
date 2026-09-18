@@ -25,6 +25,7 @@ export type Screen =
   | 'terminal'
   | 'debug'
   | 'stats'
+  | 'schedules'
   | 'settings'
   | 'about'
   | 'updates';
@@ -146,6 +147,7 @@ const SCREENS: readonly string[] = [
   'terminal',
   'debug',
   'stats',
+  'schedules',
   'settings',
   'about',
   'updates',

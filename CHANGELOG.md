@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Schedules: new built-in scheduler for recurring tasks (interval / daily /
+  weekly per project, with prompt + agent preset, toggle, run-now and run
+  history). The sidebar button now opens Schedules instead of Stats; the
+  Stats view moved to a card in Settings → General.
+
 ## 1.8.1 — 2026-09-18
 
 ### Features
