@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.2 — 2026-09-18
 
 ### Fixes
 - Plugins: the `list_install_toggle_roundtrip` engine test no longer needs
