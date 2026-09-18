@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.1 — 2026-09-18
 
 ### Features
 - Index: the code index now rebuilds automatically a few seconds after file
