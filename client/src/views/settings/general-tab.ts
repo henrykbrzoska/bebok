@@ -12,7 +12,8 @@
  * by the engine.
  */
 
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
+import { Router } from '@angular/router';
 
 import { DeclaredPlugin, IndexStatusResponse, RegistryPlugin } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
@@ -43,6 +44,7 @@ export class GeneralTab implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
   private readonly toasts = inject(ToastStore);
+  private readonly router = inject(Router);
 
   readonly store = inject(SettingsStore);
   readonly t = this.i18n.t.bind(this.i18n);
@@ -105,6 +107,10 @@ export class GeneralTab implements OnInit, OnDestroy {
       clearInterval(this.indexPoll);
       this.indexPoll = null;
     }
+  }
+
+  navigateStats(): void {
+    void this.router.navigate(['/stats']);
   }
 
   async refreshPlugins(): Promise<void> {

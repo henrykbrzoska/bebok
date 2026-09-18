@@ -18,6 +18,7 @@ pub mod plugin_download;
 pub mod plugin_process;
 pub mod plugin_registry;
 pub mod provider;
+pub mod scheduler;
 pub mod session;
 pub mod stats;
 pub mod store;

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Features
+- Schedules: new built-in scheduler for recurring tasks (interval / daily /
+  weekly per project, with prompt + agent preset, toggle, run-now and run
+  history). The sidebar button now opens Schedules instead of Stats; the
+  Stats view moved to a card in Settings → General.
+
 ### Fixes
 - Plugins: the `list_install_toggle_roundtrip` engine test no longer needs
   network access (it seeds the plugin slot with a fixture manifest), so the

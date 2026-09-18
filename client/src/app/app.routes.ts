@@ -7,6 +7,7 @@ import { TerminalView } from '../views/terminal/terminal';
 import { ExplorerView } from '../views/explorer/explorer';
 import { DebugView } from '../views/debug/debug';
 import { StatsView } from '../views/stats/stats';
+import { SchedulesView } from '../views/schedules/schedules';
 import { BrowserView } from '../views/browser-view/browser-view';
 import { AboutView } from '../views/about/about';
 import { UpdatesView } from '../views/updates/updates';
@@ -26,6 +27,7 @@ export const routes: Routes = [
   { path: 'explorer', component: ExplorerView, data: { screen: 'explorer' } },
   { path: 'debug', component: DebugView, data: { screen: 'debug' } },
   { path: 'stats', component: StatsView, data: { screen: 'stats' } },
+  { path: 'schedules', component: SchedulesView, data: { screen: 'schedules' } },
   // F8-4: static, localized "What is Bebok?" explainer page.
   { path: 'about', component: AboutView, data: { screen: 'about' } },
   { path: 'updates', component: UpdatesView, data: { screen: 'updates' } },

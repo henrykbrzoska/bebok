@@ -32,7 +32,7 @@ type ActionId =
   | 'switchProject'
   | 'openExplorer'
   | 'openTerminal'
-  | 'openStats'
+  | 'openSchedules'
   | 'openAbout'
   | 'settingsMcp'
   | 'settingsSkills'
@@ -47,7 +47,7 @@ interface PaletteAction {
     | 'palette.switchProject'
     | 'palette.openExplorer'
     | 'palette.openTerminal'
-    | 'palette.openStats'
+    | 'palette.openSchedules'
     | 'palette.openAbout'
     | 'palette.settingsMcp'
     | 'palette.settingsSkills'
@@ -62,7 +62,7 @@ const ACTIONS: PaletteAction[] = [
   { id: 'switchProject', labelKey: 'palette.switchProject' },
   { id: 'openExplorer', labelKey: 'palette.openExplorer' },
   { id: 'openTerminal', labelKey: 'palette.openTerminal' },
-  { id: 'openStats', labelKey: 'palette.openStats' },
+  { id: 'openSchedules', labelKey: 'palette.openSchedules' },
   { id: 'openAbout', labelKey: 'palette.openAbout' },
   { id: 'settingsMcp', labelKey: 'palette.settingsMcp' },
   { id: 'settingsSkills', labelKey: 'palette.settingsSkills' },
@@ -164,8 +164,8 @@ export class CommandPalette {
       case 'openTerminal':
         await this.router.navigate(['/terminal'], { queryParams });
         return;
-      case 'openStats':
-        await this.router.navigate(['/stats'], { queryParams });
+      case 'openSchedules':
+        await this.router.navigate(['/schedules'], { queryParams });
         return;
       case 'openAbout':
         await this.router.navigate(['/about']);

@@ -27,6 +27,7 @@ pub mod projects;
 pub mod providers;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
+pub mod schedules;
 pub mod session;
 pub mod stats;
 pub mod tools;
@@ -118,6 +119,15 @@ pub fn build_api_router() -> Router<AppState> {
             get(tools::get_tool_safety).put(tools::put_tool_safety),
         )
         .route("/stats", get(stats::get_stats))
+        .route(
+            "/schedules",
+            get(schedules::list_schedules).post(schedules::create_schedule),
+        )
+        .route(
+            "/schedules/{id}",
+            patch(schedules::patch_schedule).delete(schedules::delete_schedule),
+        )
+        .route("/schedules/{id}/run", post(schedules::run_schedule))
         .route("/event", get(events::event_stream))
         .route(
             "/debug/log",

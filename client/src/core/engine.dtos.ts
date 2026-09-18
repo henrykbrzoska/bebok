@@ -1160,3 +1160,26 @@ export interface ProcessExitedEvent {
   sessionID: string;
   code: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// Schedules (task scheduling / cron-like)
+// ---------------------------------------------------------------------------
+
+export interface ScheduleTask {
+  id: string;
+  name: string;
+  kind: string;
+  interval_mins: number | null;
+  hour: number | null;
+  minute: number | null;
+  weekday: number | null;
+  prompt: string;
+  directory?: string;
+  agent: string | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_status: string;
+  next_run_at: string;
+}
+
+// ---------------------------------------------------------------------------
