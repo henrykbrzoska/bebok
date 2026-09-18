@@ -482,13 +482,41 @@ done
         assert!(listed.get("hooks").is_some());
 
         // Install the known plugin: declaration + slot dir appear.
-        let installed = install_plugin(
+        // Offline hermetic: pre-seed the slot dir with a minimal fixture
+        // manifest so `install_plugin` skips the network (live registry
+        // fetch + ~9 MB asset download / git clone) and only exercises
+        // the declaration bookkeeping under test. The real download path
+        // is covered by `bebok-core`'s `plugin_download` unit tests.
+        let slot_dir = project.join(".bebok").join("plugins").join("bebok-index");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        std::fs::write(
+            slot_dir.join("bebok-plugin.json"),
+            r#"{"name":"bebok-index","version":"0.0.0-test","min_engine_version":"0.0.0"}"#,
+        )
+        .unwrap();
+        // NOTE: on failure, dump the error response body (status +
+        // text) so CI logs show the real install error instead of just
+        // the opaque `Response` debug.
+        let installed = match install_plugin(
             State(state.clone()),
             Path("bebok-index".to_string()),
             Query(query(&dir)),
         )
         .await
-        .unwrap();
+        {
+            Ok(v) => v,
+            Err(resp) => {
+                let (parts, body) = resp.into_parts();
+                let bytes = axum::body::to_bytes(body, 64 * 1024)
+                    .await
+                    .unwrap_or_default();
+                panic!(
+                    "install_plugin failed: HTTP {}: {}",
+                    parts.status,
+                    String::from_utf8_lossy(&bytes)
+                );
+            }
+        };
         assert_eq!(installed["plugin"]["name"], "bebok-index");
         assert_eq!(installed["plugin"]["repo"], "henrykbrzoska/bebok-index");
         assert_eq!(installed["plugin"]["enabled"], true);

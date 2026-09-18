@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- Plugins: the `list_install_toggle_roundtrip` engine test no longer needs
+  network access (it seeds the plugin slot with a fixture manifest), so the
+  Windows CI job is not at the mercy of the live registry download.
+
 ## 1.8.1 — 2026-09-18
 
 ### Features
