@@ -234,6 +234,15 @@ export class StartView implements OnInit, OnDestroy {
   }
 
   /**
+   * Global mode: start a session without a project directory, using the hub preset.
+   */
+  async openGlobalMode(): Promise<void> {
+    this.error.set(null);
+    this.directory.set(null);
+    this.newSessionDialog.openFor('', { agent: 'hub' });
+  }
+
+  /**
    * Open the "New session" dialog (WP-GIT / F6-16): agent, model and the
    * git-worktree option live there; it creates the session and navigates.
    */

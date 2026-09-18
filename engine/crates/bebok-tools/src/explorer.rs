@@ -34,10 +34,13 @@ pub fn explorer_walker(root: &Path) -> ignore::WalkBuilder {
 
 /// Immediate children of `rel` (or the root when `rel` is empty/`.`).
 /// Returns entries relative to `root`.
+/// Entries under the engine's data directory (sibling of root) are
+/// filtered out to prevent leaking internal state in hub mode.
 pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
     let Ok(base) = normalize_rel(root, rel) else {
         return Vec::new();
     };
+    let data_dir = root.parent().unwrap_or(root);
     let mut entries: Vec<FsEntry> = Vec::new();
 
     let walker = explorer_walker(&base).max_depth(Some(1)).build();
@@ -50,6 +53,11 @@ pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
             continue;
         }
         let path = entry.path();
+        // Filter out entries under the engine's data directory (e.g.
+        // `<data>/instances/`) to prevent leaking internal state in hub mode.
+        if is_under_data_dir(path, root, data_dir) {
+            continue;
+        }
         // Always `/`-separated: the walker appends the child with the OS
         // separator to the `/`-separated `rel` the client sent, which on
         // Windows produced `apps/frontend\\file.ts` (E2E R9). The client
@@ -71,11 +79,13 @@ pub fn list_children(root: &Path, rel: &str) -> Vec<FsEntry> {
 }
 
 /// A recursive tree (up to `max_depth` levels beyond the base) rendered as text.
+/// Entries under the engine's data directory are filtered out.
 pub fn tree_text(root: &Path, rel: &str, max_depth: usize) -> String {
     let base = match normalize_rel(root, rel) {
         Ok(base) => base,
         Err(e) => return format!("error: {e}"),
     };
+    let data_dir = root.parent().unwrap_or(root);
     let mut out = String::new();
     out.push_str(&base.to_string_lossy());
     out.push('\n');
@@ -86,6 +96,10 @@ pub fn tree_text(root: &Path, rel: &str, max_depth: usize) -> String {
             continue;
         };
         if entry.depth() == 0 {
+            continue;
+        }
+        // Filter entries under the engine's data directory.
+        if is_under_data_dir(entry.path(), root, data_dir) {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
@@ -111,6 +125,13 @@ fn normalize_rel(root: &Path, rel: &str) -> Result<PathBuf, String> {
 /// Validate an explorer path before constructing a successful HTTP response.
 pub fn validate_rel(root: &Path, rel: &str) -> Result<(), String> {
     normalize_rel(root, rel).map(|_| ())
+}
+
+/// Return `true` when `path` is a descendant of `data_dir` (the engine's
+/// canonical data root) — i.e. the path should be hidden from tools to
+/// prevent leaking internal state. Used by explorer, glob, find, grep.
+pub fn is_under_data_dir(path: &Path, root: &Path, data_dir: &Path) -> bool {
+    path.strip_prefix(data_dir).is_ok() && path.strip_prefix(root).is_err()
 }
 
 /// Maximum file size for binary reads: 10 MiB.
@@ -244,5 +265,80 @@ mod tests {
         assert_eq!(files[0].path, "apps/frontend/src/main.ts");
         assert!(!files[0].path.contains('\\'));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Hub security: entries under the engine data directory are filtered out.
+    /// Simulates the global instance where root = `<data_dir>/global/` and
+    /// `<data_dir>/instances/` contains internal engine state.
+    #[test]
+    fn data_dir_entries_are_filtered_in_list_children() {
+        let base =
+            std::env::temp_dir().join(format!("bebok-explorer-data-dir-{}", uuid::Uuid::new_v4()));
+        // Simulate: data_dir = base, root = base/global
+        let data_dir = base.clone();
+        let root = base.join("global");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("project.txt"), "hello").unwrap();
+        // Internal engine directory (sibling of global under data_dir).
+        std::fs::create_dir_all(base.join("instances").join("abc")).unwrap();
+        std::fs::write(base.join("instances").join("abc").join("secret.json"), "{}").unwrap();
+        // Since root = base/global, walker starts under root and can't reach
+        // base/instances/ via relative traversal. But the is_under_data_dir
+        // filter is a defense-in-depth: entries whose canonical path falls
+        // under data_dir but not root are excluded.
+        let entries = list_children(&root, "");
+        for entry in &entries {
+            let full = root.join(&entry.path);
+            assert!(
+                !is_under_data_dir(&full, &root, &data_dir),
+                "entry {} must not be under data_dir",
+                entry.path
+            );
+        }
+        // The project file IS inside root — visible.
+        assert!(entries.iter().any(|e| e.path == "project.txt"));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Hub security: tree_text also filters data_dir entries.
+    #[test]
+    fn data_dir_entries_are_filtered_in_tree_text() {
+        let base = std::env::temp_dir().join(format!(
+            "bebok-explorer-data-dir-tree-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let _data_dir = base.clone();
+        let root = base.join("global");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("project.txt"), "hello").unwrap();
+        let tree = tree_text(&root, "", 3);
+        // tree_text lists file/dir names (not full paths), so verify
+        // the project file is present and internal dirs are not.
+        assert!(tree.contains("project.txt"));
+        // instances/ is outside root, so the walker can't reach it.
+        assert!(!tree.contains("instances"));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Unit test for is_under_data_dir helper.
+    #[test]
+    fn is_under_data_dir_unit() {
+        let root = PathBuf::from("/data/global");
+        let data_dir = PathBuf::from("/data");
+        assert!(is_under_data_dir(
+            &PathBuf::from("/data/instances/abc"),
+            &root,
+            &data_dir
+        ));
+        assert!(!is_under_data_dir(
+            &PathBuf::from("/data/global/project.txt"),
+            &root,
+            &data_dir
+        ));
+        assert!(!is_under_data_dir(
+            &PathBuf::from("/other/path"),
+            &root,
+            &data_dir
+        ));
     }
 }

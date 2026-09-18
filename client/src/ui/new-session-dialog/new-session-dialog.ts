@@ -106,7 +106,12 @@ export class NewSessionDialog {
     return this.t('newSession.worktreeHint');
   });
   readonly branchValid = computed(() => !this.useWorktree() || isValidBranch(this.branch().trim()));
-  readonly canCreate = computed(() => !!this.directory() && !this.creating() && this.branchValid());
+  /** Allow empty directory for global mode (hub agent). */
+  readonly canCreate = computed(() => {
+    const dir = this.directory();
+    const isGlobalMode = dir === '' && this.selectedAgent() === 'hub';
+    return (dir !== '' || isGlobalMode) && !this.creating() && this.branchValid();
+  });
 
   readonly creating = signal(false);
   readonly error = signal<string | null>(null);
@@ -151,7 +156,11 @@ export class NewSessionDialog {
 
   async create(): Promise<void> {
     const directory = this.directory();
-    if (!directory || !this.canCreate()) {
+    const isGlobalMode = directory === '' && this.selectedAgent() === 'hub';
+    if (!isGlobalMode && !directory) {
+      return;
+    }
+    if (!this.canCreate()) {
       return;
     }
     this.creating.set(true);
@@ -188,10 +197,12 @@ export class NewSessionDialog {
     this.git.set(null);
 
     const entry = this.projectEntry();
-    this.gitLoading.set(entry !== null);
+    // Skip worktree and git for global mode (empty directory).
+    const isGlobalMode = directory === '' && this.selectedAgent() === 'hub';
+    this.gitLoading.set(!isGlobalMode && entry !== null);
     const [models, git] = await Promise.all([
       this.loadModels(directory),
-      entry ? this.engine.projectGit(entry.id).catch(() => null) : Promise.resolve(null),
+      isGlobalMode ? Promise.resolve(null) : (entry ? this.engine.projectGit(entry.id).catch(() => null) : Promise.resolve(null)),
     ]);
     if (seq !== this.loadSeq) {
       return;
@@ -206,6 +217,10 @@ export class NewSessionDialog {
 
   /** Same derivation as every other model switcher: usable providers only. */
   private async loadModels(directory: string): Promise<string[]> {
+    // Skip loading models for global mode (empty directory).
+    if (directory === '') {
+      return [];
+    }
     try {
       const cfg = await this.engine.getConfig(directory);
       return selectableModels(cfg.providers);

@@ -164,6 +164,9 @@ pub struct PermissionEngine {
     /// so autonomous verification does not stall on prompts. Explicit
     /// project/global/agent rules are evaluated first and still win.
     browser_auto: AtomicBool,
+    /// Hub global instance flag: when true, YOLO is forced off and mutating
+    /// tools always default to `Ask` regardless of read-only classification.
+    root_is_global: AtomicBool,
 }
 
 impl PermissionEngine {
@@ -190,6 +193,7 @@ impl PermissionEngine {
             global: RwLock::new(Layer::new(global_rules)),
             yolo: AtomicBool::new(false),
             browser_auto: AtomicBool::new(false),
+            root_is_global: AtomicBool::new(false),
         }
     }
 
@@ -199,8 +203,19 @@ impl PermissionEngine {
     }
 
     /// Enable/disable YOLO mode (auto-allow everything, no asks).
+    /// In hub/global mode YOLO is forced off and this is a no-op.
     pub fn set_yolo(&self, enabled: bool) {
+        if self.root_is_global.load(Ordering::Relaxed) {
+            return;
+        }
         self.yolo.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Enable hub/global mode: YOLO is forced off and mutating tools
+    /// always default to `Ask`. Called once at global instance creation.
+    pub fn set_global_mode(&self) {
+        self.root_is_global.store(true, Ordering::Relaxed);
+        self.yolo.store(false, Ordering::Relaxed);
     }
 
     pub fn yolo(&self) -> bool {
@@ -239,7 +254,7 @@ impl PermissionEngine {
         read_only: bool,
     ) -> Evaluation {
         let call = call_string(tool, args);
-        if self.yolo.load(Ordering::Relaxed) {
+        if self.yolo.load(Ordering::Relaxed) && !self.root_is_global.load(Ordering::Relaxed) {
             return Evaluation {
                 verdict: Verdict::Allow,
                 suggested_rule: tool_rule(tool),
@@ -362,6 +377,7 @@ fn verdict(action: Action) -> Verdict {
 mod tests {
     use super::super::store::persist_project_rule;
     use super::*;
+    use serde_json::json;
 
     fn tmp_dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("bebok-perm-{name}-{}", uuid::Uuid::new_v4()));
@@ -840,6 +856,82 @@ mod tests {
             "write_file(x/y.ts)"
         ));
         assert!(!PermissionEngine::rule_matches("write_file(*)", "bash(ls)"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Helper: build an engine forced into hub mode (`root_is_global = true`)
+    /// regardless of whether the directory is the real data dir.
+    fn hub_engine(dir: &Path) -> PermissionEngine {
+        let eng = PermissionEngine::load_with_global(dir, None);
+        eng.set_global_mode();
+        eng
+    }
+
+    /// Hub security: mutating tools always ask in global/hub mode, even when
+    /// the tool is classified `read_only` (no explicit rules configured).
+    #[test]
+    fn hub_mode_forces_ask_for_mutating_tools() {
+        let dir = tmp_dir("hub-mutating");
+        let engine = hub_engine(&dir);
+
+        for (tool, args, ro) in [
+            ("write_file", json!({"path": "a.txt"}), false),
+            ("edit_file", json!({"path": "a.txt"}), false),
+            ("append_file", json!({"path": "a.txt"}), false),
+            ("rm", json!({"path": "a.txt"}), false),
+            ("bash", json!({"command": "ls"}), false),
+            ("mv", json!({"from": "a", "to": "b"}), false),
+            ("cp", json!({"from": "a", "to": "b"}), false),
+        ] {
+            let eval = engine.evaluate(None, tool, &args, ro);
+            assert_eq!(eval.verdict, Verdict::Ask, "hub: {tool} must be Ask");
+        }
+
+        // Read-only tools remain Allow (not flagged as mutating).
+        let eval = engine.evaluate(None, "read_file", &json!({"path": "a.txt"}), true);
+        assert_eq!(
+            eval.verdict,
+            Verdict::Allow,
+            "hub: read_file should be Allow"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Hub security: YOLO mode is forced off in global/hub instances.
+    #[test]
+    fn hub_mode_forces_yolo_off() {
+        let dir = tmp_dir("hub-yolo");
+        let engine = hub_engine(&dir);
+
+        engine.set_yolo(true);
+        assert!(!engine.yolo(), "YOLO must stay off in hub mode");
+
+        // Even with YOLO "on", mutating tools still ask.
+        let eval = engine.evaluate(None, "write_file", &json!({"path": "x.txt"}), false);
+        assert_eq!(
+            eval.verdict,
+            Verdict::Ask,
+            "YOLO bypass must not work in hub mode"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Hub security: non-hub instances are unaffected.
+    #[test]
+    fn non_hub_yolo_works_normally() {
+        let dir = tmp_dir("non-hub-yolo");
+        let engine = PermissionEngine::load_with_global(&dir, None);
+        assert!(!engine.root_is_global.load(Ordering::Relaxed));
+        engine.set_yolo(true);
+        assert!(engine.yolo());
+        let eval = engine.evaluate(None, "write_file", &json!({"path": "x.txt"}), false);
+        assert_eq!(
+            eval.verdict,
+            Verdict::Allow,
+            "YOLO should work in non-hub mode"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

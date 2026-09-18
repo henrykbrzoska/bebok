@@ -399,3 +399,18 @@
   padding: var(--space-10) var(--space-14);
   font-size: var(--fs-12);
 }
+
+/* --- Global mode card -------------------------------------------------- */
+.global-mode-card {
+  margin-top: var(--space-16);
+  border-color: var(--accent);
+}
+
+.global-mode-card .card-hint {
+  font-size: var(--fs-13);
+  margin-bottom: var(--space-12);
+}
+
+.global-mode-card button {
+  width: 100%;
+}

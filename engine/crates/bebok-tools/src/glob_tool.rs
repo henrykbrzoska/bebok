@@ -46,6 +46,7 @@ impl Tool for Glob {
         let mut error: Option<String> = None;
         match glob(&full_pattern) {
             Ok(paths) => {
+                let data_dir = ctx.root.parent().unwrap_or(&ctx.root);
                 for entry in paths.flatten() {
                     // Prefer a path relative to the root for readability.
                     let rel = entry
@@ -53,6 +54,10 @@ impl Tool for Glob {
                         .unwrap_or(&entry)
                         .to_string_lossy()
                         .to_string();
+                    // Filter out entries under the engine's data directory.
+                    if crate::explorer::is_under_data_dir(&entry, &ctx.root, data_dir) {
+                        continue;
+                    }
                     matches.push(rel);
                 }
             }

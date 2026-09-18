@@ -76,6 +76,14 @@
         </button>
       </div>
 
+      <div class="card global-mode-card">
+        <h2>{{ t('start.globalModeTitle') }}</h2>
+        <p class="card-hint">{{ t('start.globalModeDesc') }}</p>
+        <button class="primary" (click)="openGlobalMode()" data-testid="global-mode-card">
+          {{ t('start.globalModeButton') }}
+        </button>
+      </div>
+
       @if (recentProjects().length > 0) {
         <div class="recent-row">
           <span class="micro-label">{{ t('start.recentProjects') }}</span>

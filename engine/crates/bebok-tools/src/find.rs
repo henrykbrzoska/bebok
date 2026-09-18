@@ -92,6 +92,7 @@ impl Tool for Find {
         };
 
         let root = ctx.root.join(path);
+        let data_dir = ctx.root.parent().unwrap_or(&ctx.root).to_path_buf();
         let title = format!("find {path}");
 
         let mut walker = WalkBuilder::new(&root);
@@ -124,6 +125,11 @@ impl Tool for Find {
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .replace('\\', "/");
+
+            // Filter out entries under the engine's data directory.
+            if crate::explorer::is_under_data_dir(entry.path(), &ctx.root, &data_dir) {
+                continue;
+            }
 
             if let Some((pat, match_rel)) = &name_pattern {
                 let target: String = if *match_rel {

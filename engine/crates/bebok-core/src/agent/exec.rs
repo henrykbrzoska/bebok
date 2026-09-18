@@ -207,6 +207,7 @@ pub async fn exec_gated_call(
                 .get("path")
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
+            directory: ctx.state.directory().to_string(),
         };
         hooks.run_hook(Hook::AFTER_FILE_WRITE, &mut payload).await;
     }

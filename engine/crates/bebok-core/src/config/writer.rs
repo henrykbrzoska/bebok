@@ -167,4 +167,35 @@ mod tests {
 
         std::fs::remove_dir_all(&base).ok();
     }
+
+    #[test]
+    fn write_allowed_paths_delta_round_trips() {
+        // Same JSONC round-trip path `write_global_delta` uses (a thin
+        // delegation to `write_delta_to` with the global config path), run
+        // against a temp file instead of the real global config.
+        let base = std::env::temp_dir().join(format!("bebok-alloww-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("config.json");
+        std::fs::write(
+            &path,
+            "{\n  // keep me\n  \"model\": \"zai/glm-5.3\",\n  \"allowed_paths\": [\"/old/path\"]\n}\n",
+        )
+        .unwrap();
+
+        write_delta_to(
+            &path,
+            &serde_json::json!({ "allowed_paths": ["/home/user/hub", "/home/user/work"] }),
+        )
+        .unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("// keep me"), "comment must survive: {text}");
+        assert!(jsonc::parse(&text).is_ok(), "still valid JSONC: {text}");
+        // Unrelated keys survive, the list is replaced (never merged).
+        let cfg = load_with_global(&base, Some(&path));
+        assert_eq!(cfg.model, "zai/glm-5.3");
+        assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
+
+        std::fs::remove_dir_all(&base).ok();
+    }
 }

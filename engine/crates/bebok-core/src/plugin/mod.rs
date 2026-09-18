@@ -18,6 +18,8 @@
 //! state at a hook is responsible for keeping the change consistent with the
 //! rest of the engine (the disk journal stays authoritative).
 
+pub mod index_rescan;
+
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
@@ -144,6 +146,9 @@ pub struct PermissionHook {
 pub struct FileWriteHook {
     pub tool: String,
     pub path: Option<String>,
+    /// Project root directory the write belongs to (the index rebuilds
+    /// per-directory).
+    pub directory: String,
 }
 
 /// Payload for [`Hook::INSTANCE_CREATED`]: a store instance was created

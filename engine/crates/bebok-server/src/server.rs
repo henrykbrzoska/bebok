@@ -104,6 +104,22 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
     // delivers to all subscribers; attach is idempotent, first bus wins.)
     let bus = state.store.bus();
     bebok_core::PluginHost::global().attach(&bus).await;
+    // Auto-rebuild: in-process plugin that debounces file writes
+    // and triggers bebok-index rebuild.
+    bebok_core::PluginHost::global()
+        .register(std::sync::Arc::new(
+            bebok_core::plugin::index_rescan::IndexRescanPlugin::new(),
+        ))
+        .await;
+
+    // `--global`: pre-warm the hub instance (`__global__`, data_dir/global/)
+    // so the first hub session has no cold-start cost. Lazy creation in
+    // get_or_create_instance covers the flag-less path identically.
+    if bind.global
+        && let Err(e) = state.store.get_or_create_instance("").await
+    {
+        tracing::warn!("--global pre-warm failed: {e:#}");
+    }
 
     // `--port 0` lets the OS pick a free port; we must announce the real one.
     let addr = std::net::SocketAddr::new(bind.host, bind.port);

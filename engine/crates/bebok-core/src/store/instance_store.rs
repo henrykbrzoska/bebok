@@ -23,6 +23,20 @@ use crate::session::persist::{self, data_root};
 use crate::session::{Part, Session, ToolState};
 use crate::util::normalize_path;
 
+/// Instance key for hub-mode sessions that arrive with an empty directory.
+/// Sessions under this key live in `<data_dir>/global/` (pathguard confines
+/// writes to that sandbox).
+const GLOBAL_INSTANCE_KEY: &str = "__global__";
+
+/// Normalize a directory string, preserving the global key literally.
+fn normalize_directory(directory: &str) -> String {
+    if directory == GLOBAL_INSTANCE_KEY {
+        GLOBAL_INSTANCE_KEY.to_string()
+    } else {
+        normalize_path(Path::new(directory))
+    }
+}
+
 /// Global store: instances keyed by normalized directory, sessions by id.
 pub struct InstanceStore {
     pub(crate) data_dir: PathBuf,
@@ -386,26 +400,40 @@ impl InstanceStore {
     }
 
     /// Get or lazily create the instance for a directory.
+    ///
+    /// An empty or whitespace-only `directory` resolves to the *global*
+    /// instance: `directory = "__global__"`, `root = data_dir/global/`.
+    /// This lets hub-mode sessions (`--global`) run with full tools in a
+    /// sandbox isolated from any project on disk.
     pub async fn get_or_create_instance(&self, directory: &str) -> Result<Arc<Instance>> {
-        let normalized = normalize_path(Path::new(directory));
+        // Hub global instance: empty directory → sandboxed root.
+        let (normalized, root) = if directory.trim().is_empty() {
+            let root = self.data_dir.join("global");
+            (GLOBAL_INSTANCE_KEY.to_string(), root)
+        } else {
+            let normalized = normalize_path(Path::new(directory));
+            (normalized.clone(), PathBuf::from(&normalized))
+        };
+
         if let Some(inst) = self.instances.read().await.get(&normalized) {
             return Ok(inst.clone());
         }
 
         // Ensure the project directory exists (tools write relative to root).
-        let root = PathBuf::from(&normalized);
         if !root.exists() {
             tokio::fs::create_dir_all(&root)
                 .await
                 .map_err(CoreError::Io)?;
-            let normalized = normalize_path(&root);
-            return Box::pin(self.get_or_create_instance(&normalized)).await;
         }
 
         let config = Arc::new(std::sync::RwLock::new(config::load(&root)));
         configure_browser(&root, &config.read().unwrap());
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
         let permission = Arc::new(PermissionEngine::load(&root));
+        if normalized == GLOBAL_INSTANCE_KEY {
+            // Hub mode: YOLO is never allowed, mutating tools always Ask.
+            permission.set_global_mode();
+        }
         permission.set_yolo(config.read().unwrap().yolo);
         permission.set_browser_auto(
             config
@@ -685,7 +713,7 @@ impl InstanceStore {
     /// (`<directory>/.bebok/worktrees/<branch>`, WP-GIT) are listed with the
     /// project they belong to, so they show up in its sidebar and Start list.
     pub async fn list_sessions(&self, directory: &str) -> Vec<Session> {
-        let normalized = normalize_path(Path::new(directory));
+        let normalized = normalize_directory(directory);
         let root = Path::new(&normalized);
         let mut sessions: Vec<Session> = self
             .meta
@@ -767,7 +795,7 @@ impl InstanceStore {
     /// Return unresolved permission requests for all live sessions in a directory,
     /// including delegated child sessions whose asks appear in the parent UI.
     pub async fn pending_permissions(&self, directory: &str) -> Vec<serde_json::Value> {
-        let normalized = normalize_path(Path::new(directory));
+        let normalized = normalize_directory(directory);
         let sessions: Vec<Arc<SessionState>> = self
             .sessions
             .read()
@@ -798,7 +826,7 @@ impl InstanceStore {
         rule: &str,
         except: &str,
     ) -> usize {
-        let normalized = normalize_path(Path::new(directory));
+        let normalized = normalize_directory(directory);
         let sessions: Vec<Arc<SessionState>> = self
             .sessions
             .read()
@@ -1145,6 +1173,77 @@ mod tests {
         let cfg = std::fs::read_to_string(project.join(".bebok").join("config.json")).unwrap();
         assert!(cfg.contains("write_file(*)"), "{cfg}");
         assert!(!cfg.contains("orders.ts"), "{cfg}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Hub global instance: empty directory → `__global__` key, root at
+    /// `data_dir/global/`, full tools available.
+    #[tokio::test]
+    async fn empty_directory_resolves_to_global_instance() {
+        let base = std::env::temp_dir().join(format!("bebok-global-{}", uuid::Uuid::new_v4()));
+        let data = base.join("data");
+        let store = InstanceStore::with_data_dir(data.clone());
+
+        let instance = store.get_or_create_instance("").await.unwrap();
+        assert_eq!(
+            instance.directory, "__global__",
+            "empty directory must map to __global__ key"
+        );
+        assert_eq!(
+            instance.root,
+            data.join("global"),
+            "root must be data_dir/global/"
+        );
+        assert!(
+            instance.root.exists(),
+            "data_dir/global/ must be created on first access"
+        );
+
+        // A session can be created and opened under the global instance.
+        let session = store.create_session("", "code", None).await.unwrap();
+        assert_eq!(session.directory(), "__global__");
+        let listed = store.list_sessions("__global__").await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, session.id());
+
+        // A second call with empty directory returns the cached instance.
+        let again = store.get_or_create_instance("").await.unwrap();
+        assert!(std::sync::Arc::ptr_eq(&instance, &again));
+
+        // Whitespace-only is also treated as empty (global).
+        let ws = store.get_or_create_instance("   ").await.unwrap();
+        assert!(std::sync::Arc::ptr_eq(&instance, &ws));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The global sandbox rejects path escapes: `../x` does not leave
+    /// `data_dir/global/`.
+    #[tokio::test]
+    async fn global_instance_rejects_path_escape() {
+        let base =
+            std::env::temp_dir().join(format!("bebok-global-escape-{}", uuid::Uuid::new_v4()));
+        let data = base.join("data");
+        let store = InstanceStore::with_data_dir(data.clone());
+        let instance = store.get_or_create_instance("").await.unwrap();
+
+        // pathguard: `../x` resolves outside data_dir/global/ → rejected.
+        let result = bebok_tools::resolve_in_root(&instance.root, "../x");
+        assert!(result.is_err(), "../x must be rejected in global sandbox");
+        assert!(
+            result.unwrap_err().contains("escapes"),
+            "error must mention escape"
+        );
+
+        // A file inside the sandbox is accepted (directory must exist).
+        tokio::fs::create_dir_all(instance.root.join("sub"))
+            .await
+            .unwrap();
+        assert!(
+            bebok_tools::resolve_in_root(&instance.root, "sub/file.txt").is_ok(),
+            "relative path inside global sandbox must be accepted"
+        );
+
         let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Index: the code index now rebuilds automatically a few seconds after file
+  writes (debounced per project directory, fire-and-forget); the manual
+  "Rebuild index" button remains as a fallback.
+- Config: new `allowed_paths` key (global or project config) — an allowlist of
+  directories for multi-workspace ("hub") setups. It is parsed, resolved into
+  the effective config and preserved through config edits (JSONC round-trip,
+  project layer replaces the global list). Not yet enforced — gate-keeping of
+  tool calls arrives in a follow-up.
+
 ## 1.8.0 — 2026-09-17
 
 ### Features

@@ -83,6 +83,31 @@ If native tools are unavailable, fall back to `fetch`:
 Prefer the index for "where is X?" over grep/glob.
 "#;
 
+pub(crate) const HUB_PROMPT: &str = r#"You are Bebok in "hub" mode: a multi-project operator and inbox manager.
+You coordinate work across multiple projects, track status, and manage a meta-config
+registry. Do NOT pretend to be inside any specific project. When the user asks for
+coding work in a project, delegate to the `code` preset via a `task` call.
+
+Multi-project scope:
+- Read the global registry at ~/.bebok/config.json or project .bebok/config.json.
+- Use `list_dir`, `stat`, `read_file`, `glob`, `find` to discover project structures.
+- Track status across projects via session context or stored notes.
+
+Meta-config & inbox:
+- Monitor ~/.bebok/inbox (or configured inbox path) for incoming requests.
+- Use `read_file`, `list_dir`, `stat` to inspect inbox items.
+- For each item, decide: ignore, reply in place, or spawn `code`/`plan`/`debug` subtask.
+
+Delegation:
+- When coding work is needed in a project, use `task` with `agent: "code"` and
+  a self-contained prompt that includes the project root path and goal.
+- Do not execute writes directly; let the delegated `code` agent do the edits.
+
+Code-index:
+- Use `code_index_status` and `code_index_search` to find code locations.
+- If native tools are unavailable, fall back to `fetch` as documented in `ask` mode.
+"#;
+
 pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
 Diagnose the reported problem methodically: reproduce it, gather evidence
 (logs, tests, git status), form and test a hypothesis, and fix the root cause.
@@ -240,6 +265,64 @@ impl Agent {
         }
     }
 
+    pub fn hub() -> Self {
+        Self {
+            name: "hub".to_string(),
+            prompt: HUB_PROMPT.to_string(),
+            description: Some("Multi-project operator and inbox manager".to_string()),
+            tools: vec![
+                "read_file".to_string(),
+                "head".to_string(),
+                "tail".to_string(),
+                "wc".to_string(),
+                "list_dir".to_string(),
+                "tree".to_string(),
+                "pwd".to_string(),
+                "stat".to_string(),
+                "du".to_string(),
+                "sort".to_string(),
+                "uniq".to_string(),
+                "diff".to_string(),
+                "which".to_string(),
+                "find".to_string(),
+                "realpath".to_string(),
+                "basename".to_string(),
+                "dirname".to_string(),
+                "sha256sum".to_string(),
+                "glob".to_string(),
+                "grep".to_string(),
+                "fetch".to_string(),
+                "code_index_status".to_string(),
+                "code_index_search".to_string(),
+            ],
+            permissions: vec![
+                Rule {
+                    pattern: "write_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "edit_file(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "edit(*)".to_string(),
+                    action: Action::Deny,
+                },
+                Rule {
+                    pattern: "fetch(*)".to_string(),
+                    action: Action::Allow,
+                },
+                Rule {
+                    pattern: "mcp__*".to_string(),
+                    action: Action::Ask,
+                },
+            ],
+            model: None,
+            builtin: true,
+            source: None,
+        }
+    }
+
     pub fn plan() -> Self {
         Self {
             name: "plan".to_string(),
@@ -320,11 +403,12 @@ impl Agent {
         }
     }
 
-    /// The five built-in presets (SPEC §3.5 + orchestrator).
+    /// The six built-in presets (SPEC §3.5 + orchestrator).
     pub fn builtins() -> Vec<Agent> {
         vec![
             Self::code(),
             Self::ask(),
+            Self::hub(),
             Self::plan(),
             Self::debug(),
             Self::orchestrator(),
@@ -410,6 +494,27 @@ mod tests {
         assert!(
             plan.tools.contains(&"fetch".to_string()),
             "plan preset must whitelist fetch"
+        );
+    }
+
+    #[test]
+    fn builtins_contain_hub() {
+        let builtins = Agent::builtins();
+        let hub = builtins.iter().find(|a| a.name == "hub");
+        assert!(hub.is_some(), "hub preset must be in builtins");
+        let hub = hub.unwrap();
+        assert!(hub.builtin, "hub preset must have builtin flag set");
+        assert!(
+            hub.tools.contains(&"fetch".to_string()),
+            "hub preset must whitelist fetch"
+        );
+        assert!(
+            hub.tools.contains(&"code_index_status".to_string()),
+            "hub preset must whitelist code_index_status"
+        );
+        assert!(
+            hub.tools.contains(&"code_index_search".to_string()),
+            "hub preset must whitelist code_index_search"
         );
     }
 

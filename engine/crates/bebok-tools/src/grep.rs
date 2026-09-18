@@ -68,6 +68,7 @@ impl Tool for Grep {
         };
 
         let start = ctx.root.join(path);
+        let data_dir = ctx.root.parent().unwrap_or(&ctx.root).to_path_buf();
         let files = tokio::task::spawn_blocking(move || collect_files(&start)).await;
 
         let files = match files {
@@ -81,6 +82,10 @@ impl Tool for Grep {
         for file in files.into_iter().take(MAX_FILES) {
             if matched >= MAX_MATCHES {
                 break;
+            }
+            // Filter out files under the engine's data directory.
+            if crate::explorer::is_under_data_dir(&file, &ctx.root, &data_dir) {
+                continue;
             }
             let Ok(text) = tokio::fs::read_to_string(&file).await else {
                 continue;

@@ -67,6 +67,15 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(yolo) = v.get("yolo").and_then(|x| x.as_bool()) {
         cfg.yolo = yolo;
     }
+    // Hub step 4: global allowlist of directories (`allowed_paths`; any layer
+    // that carries the key replaces the list, project wins). Malformed values
+    // (non-array / non-string entries) are ignored; nothing is enforced yet.
+    if let Some(paths) = v.get("allowed_paths").and_then(|x| x.as_array()) {
+        cfg.allowed_paths = paths
+            .iter()
+            .filter_map(|p| p.as_str().map(str::to_string))
+            .collect();
+    }
     // Per-agent-type model overrides (project layer wins per key).
     if let Some(models) = v.get("models").and_then(|x| x.as_object()) {
         if let Some(existing) = cfg.models.as_object_mut() {
@@ -325,6 +334,58 @@ mod tests {
         assert_eq!(cfg.permission["edit"], "allow");
         // Global terminal survives (shallow merge per top-level key).
         assert_eq!(cfg.terminal["shell"], "bash");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn allowed_paths_defaults_empty_and_layers_global_project() {
+        let base = std::env::temp_dir().join(format!("bebok-allow-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+
+        // 1. Nothing present -> empty list.
+        let cfg = load_with_global(&project_dir, None);
+        assert!(cfg.allowed_paths.is_empty(), "default must be empty");
+
+        // 2. Global only: parsed into ResolvedConfig.
+        std::fs::write(
+            &global,
+            r#"{
+                // hub: workspace allowlist
+                "allowed_paths": ["/home/user/hub", "/home/user/work"]
+            }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
+
+        // 3. Project layer replaces the global list when it carries the key.
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "allowed_paths": ["/home/user/other"] }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.allowed_paths, vec!["/home/user/other"]);
+
+        // 4. Project without the key keeps the global list.
+        std::fs::write(project_dir.join(".bebok").join("config.json"), r#"{}"#).unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
+
+        // 5. Malformed values are ignored gracefully.
+        let mut cfg = ResolvedConfig::default();
+        apply(&mut cfg, &serde_json::json!({ "allowed_paths": "nope" }));
+        assert!(cfg.allowed_paths.is_empty());
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "allowed_paths": ["ok", 42, null] }),
+        );
+        assert_eq!(cfg.allowed_paths, vec!["ok"]);
+        apply(&mut cfg, &serde_json::json!({ "allowed_paths": [] }));
+        assert!(cfg.allowed_paths.is_empty(), "empty array clears the list");
 
         std::fs::remove_dir_all(&base).ok();
     }

@@ -197,6 +197,11 @@ pub struct ResolvedConfig {
     pub tool_output_cap: usize,
     /// YOLO mode: auto-allow every tool call without asking (dangerous).
     pub yolo: bool,
+    /// Global allowlist of absolute directories agents may operate in
+    /// (hub workspaces). Parsed + round-tripped only for now — not yet
+    /// enforced by the permission engine.
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
     pub permission: Value,
     pub mcp: Value,
     pub skills: Value,
@@ -238,6 +243,7 @@ impl Default for ResolvedConfig {
             context_budget: DEFAULT_CONTEXT_BUDGET,
             tool_output_cap: DEFAULT_TOOL_OUTPUT_CAP,
             yolo: false,
+            allowed_paths: Vec::new(),
             permission: Value::Object(serde_json::Map::new()),
             mcp: Value::Object(serde_json::Map::new()),
             skills: Value::Object(serde_json::Map::new()),
@@ -373,6 +379,11 @@ impl ResolvedConfigBuilder {
 
     pub fn yolo(mut self, yolo: bool) -> Self {
         self.inner.yolo = yolo;
+        self
+    }
+
+    pub fn allowed_paths(mut self, paths: Vec<String>) -> Self {
+        self.inner.allowed_paths = paths;
         self
     }
 

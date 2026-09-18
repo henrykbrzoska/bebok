@@ -165,10 +165,18 @@ pub async fn create_session(
         })));
     }
 
+    let directory = if body.directory.trim().is_empty() {
+        // Hub mode: an empty directory resolves to the `__global__` instance
+        // in InstanceStore::get_or_create_instance (sandboxed at
+        // `data_dir/global/`).
+        ""
+    } else {
+        body.directory.as_str()
+    };
     let session = state
         .store
         .create_session(
-            &body.directory,
+            directory,
             body.agent.as_deref().unwrap_or("code"),
             body.model.as_deref(),
         )

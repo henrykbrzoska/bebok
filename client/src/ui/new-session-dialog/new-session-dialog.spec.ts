@@ -21,10 +21,11 @@ const ALPHA: ProjectEntry = {
 const AGENTS: AgentInfo[] = [
   { name: 'code', builtin: true, model: 'anthropic/claude-sonnet' },
   { name: 'plan', builtin: true },
+  { name: 'hub', builtin: true },
 ];
 const GIT: ProjectGitInfo = {
   project_id: 'alpha', path: DIR, worktrees_dir: `${DIR}/.bebok/worktrees`,
-  is_repo: true, root: DIR, branch: 'main', remote_url: 'git@github.com:acme/alpha.git', is_github: true, dirty_count: 2,
+  is_repo: true, root: DIR, branch: 'main', remote_url: '[EMAIL]:acme/alpha.git', is_github: true, dirty_count: 2,
 };
 const CONFIG = {
   providers: [
@@ -194,6 +195,39 @@ describe('NewSessionDialog (F6-16)', () => {
     fixture.detectChanges();
     (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.backdrop')?.click();
     expect(store.open()).toBeFalse();
+  });
+
+  it('allows global mode (empty directory with hub agent) to create a session', async () => {
+    engine.getConfig.calls.reset();
+    engine.projectGit.calls.reset();
+    store.openFor('', { agent: 'hub' });
+    await settle();
+    const component = fixture.componentInstance;
+    expect(component.directory()).toBe('');
+    expect(component.selectedAgent()).toBe('hub');
+    expect(component.canCreate()).toBeTrue();
+    expect(engine.getConfig).not.toHaveBeenCalled();
+    expect(engine.projectGit).not.toHaveBeenCalled();
+    expect(component.models()).toEqual([]);
+    expect(component.worktreeAvailable()).toBeFalse();
+
+    await component.create();
+    expect(engine.createSession).toHaveBeenCalledWith('', 'hub', undefined, undefined);
+    expect(projectSessions.refresh).toHaveBeenCalled();
+    expect(router.navigate).toHaveBeenCalledWith(['/chat', 'sess-1']);
+    expect(store.open()).toBeFalse();
+  });
+
+  it('disables create for empty directory with non-hub agent', async () => {
+    engine.getConfig.calls.reset();
+    store.openFor('', { agent: 'code' });
+    await settle();
+    const component = fixture.componentInstance;
+    expect(component.directory()).toBe('');
+    expect(component.selectedAgent()).toBe('code');
+    expect(component.canCreate()).toBeFalse();
+    await component.create();
+    expect(engine.createSession).not.toHaveBeenCalled();
   });
 });
 

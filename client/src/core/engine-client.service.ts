@@ -203,6 +203,7 @@ export class EngineClient {
    * engine first runs `git worktree add <directory>/.bebok/worktrees/<branch>`
    * and binds the session to that worktree instead; the response then also
    * carries `directory` + `worktree` (see `CreateWorktreeSessionResponse`).
+   * An empty directory is allowed for global/hub mode.
    */
   createSession(
     directory: string,

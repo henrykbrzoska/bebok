@@ -9,7 +9,7 @@
       <form class="body" (submit)="$event.preventDefault(); create()">
         <div class="field">
           <span class="field-label">{{ t('newSession.directory') }}</span>
-          <span class="directory" [title]="directory() ?? ''">{{ directory() }}</span>
+          <span class="directory" [title]="directory() ?? ''">{{ directory() === '' ? t('start.globalModeTitle') : directory() }}</span>
         </div>
 
         <div class="two-col">
