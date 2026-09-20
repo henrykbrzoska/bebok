@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.2 — 2026-09-18
 
 ### Features
 - Schedules: new built-in scheduler for recurring tasks (interval / daily /
