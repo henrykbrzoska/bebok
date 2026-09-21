@@ -109,9 +109,7 @@ mod tests {
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
         };
-        build_api_router()
-            .layer(cors_layer(8787))
-            .with_state(state)
+        build_api_router().layer(cors_layer(8787)).with_state(state)
     }
 
     /// Every method a route in `build_api_router` actually uses must survive
@@ -158,10 +156,7 @@ mod tests {
     /// includes `http://localhost:<port>` in allowed origins.
     #[tokio::test]
     async fn dynamic_port_origin_is_allowed() {
-        let dir = std::env::temp_dir().join(format!(
-            "bebok-cors-dynamic-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("bebok-cors-dynamic-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).ok();
         let state = AppState {
             store: bebok_core::InstanceStore::with_data_dir(dir.join("data")),
@@ -172,9 +167,7 @@ mod tests {
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
         };
-        let app = build_api_router()
-            .layer(cors_layer(9999))
-            .with_state(state);
+        let app = build_api_router().layer(cors_layer(9999)).with_state(state);
         let req = Request::builder()
             .method("OPTIONS")
             .uri("/session")

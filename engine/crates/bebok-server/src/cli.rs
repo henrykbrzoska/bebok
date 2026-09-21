@@ -87,7 +87,9 @@ pub fn parse_cli(args: &[String]) -> anyhow::Result<BindSpec> {
                 let env_port = env_port.trim().to_string();
                 if !env_port.is_empty() {
                     let parsed: u16 = env_port.parse().map_err(|_| {
-                        anyhow::anyhow!("BEBOK_PORT must be a valid port number (0-65535), got '{env_port}'")
+                        anyhow::anyhow!(
+                            "BEBOK_PORT must be a valid port number (0-65535), got '{env_port}'"
+                        )
                     })?;
                     tracing::info!("using port {parsed} from BEBOK_PORT env");
                     parsed
