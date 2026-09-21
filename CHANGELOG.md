@@ -17,6 +17,12 @@
   result) with `browser.remote.enabled` routing in the engine. Multiple
   commands in flight per session (waiters keyed by command id);
   `extension_port` is not yet used by the pull flow.
+- Chrome companion extension: new `tabs` remote command listing open tabs
+  (`{id, title, url, active, windowId}`, optional `chrome.tabs.query`
+  filter) without switching tabs. The extension README now documents the
+  Options status texts, the stale-Engine-URL trap in desktop mode (random
+  port + fresh token per launch), the MV3 service-worker sleep (~35 s) with
+  wake-up steps, and the unpacked-reload step after editing extension files.
 
 ## 1.8.1 — 2026-09-18
 

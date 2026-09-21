@@ -36,7 +36,8 @@ you are reading, and optionally lets the agent drive your browser remotely
 Remote piloting lets the agent drive your real browser tabs. When enabled the
 extension registers with the engine and listens for commands (navigate,
 screenshot, evaluate, click, type, getText, getPageContext, find, wait,
-history, console) dispatched on your active tab.
+history, console, tabs). All commands except `tabs` run on your active tab;
+`tabs` lists tabs without switching them.
 
 ### Enable
 
@@ -93,6 +94,53 @@ listening TCP socket, so the engine cannot push commands.
 | `wait` | `{selector?, text?, timeout_ms?}` | `{met}` |
 | `history` | `{action: back\|forward\|reload}` | `{url, title}` |
 | `console` | `{}` | `{entries: []}` (phase 5) |
+| `tabs` | `{}` (or `chrome.tabs.query` filter, e.g. `{active: true, currentWindow: true}`) | `[{id, title, url, active, windowId}]` — all tabs, no tab switching |
+
+### Options page status messages
+
+The `<p id="remoteStatus">` line under **Remote piloting** is static text —
+it confirms your settings, **not** a live connection:
+
+| Message | Meaning |
+|---------|---------|
+| `Disabled` | Checkbox unticked (`remoteEnabled === false`). |
+| `Enabled but engine URL or directory is not set` | Ticked, but Engine URL or Working directory is empty — fill both in. |
+| `Enabled — extension will register on the next heartbeat` | Ticked + URL + directory set. The extension registers immediately on toggle and then heartbeats every 5 s. If the engine sees no heartbeat, the extension's service worker is asleep (see "Service worker falls asleep" below). |
+
+### Desktop mode: the Engine URL goes stale on every restart
+
+When the engine runs as the Tauri desktop sidecar it listens on a **random
+port** (`--port 0`) with a **fresh token per launch**. After every engine
+restart you must:
+
+1. Copy the new full `BEBOK_READY` URL **including `?token=…`**.
+2. Paste it into **Options → Engine URL**.
+3. Press **Test connection** (expects `OK`).
+4. Untick + retick **Enable remote piloting** to force `POST /browser/register`.
+
+A stale URL fails silently with 401 — the Options status text stays green
+(see above) while the engine rejects every register/heartbeat.
+
+### Service worker falls asleep (MV3)
+
+The heartbeat runs on `setInterval` inside the MV3 service worker. Brave/Chrome
+kills an idle worker after ~30–35 s (about 7 heartbeats), taking the heartbeat
+and the long-poll loop with it. Symptom: the extension registered fine, then
+`POST /browser/remote/<action>` hangs the full 30 s and returns
+`503 extension did not return a result ...`. To wake it:
+
+1. Open the extension's **Options** page (an open Options page keeps the worker alive).
+2. In `brave://extensions` (or `chrome://extensions`) click reload (🔃) on Bebok Companion, **or** untick + retick **Enable remote piloting**.
+3. Within ~30 s, issue the command — e.g. list tabs (see Test 6 below).
+
+### Reload after changing extension files
+
+The extension is loaded **unpacked** (`Load unpacked` → `client/chrome-extension`),
+so code edits (e.g. a new handler in `background.js`) are not picked up
+automatically. After every edit: `brave://extensions` → reload (🔃) on
+Bebok Companion, then untick + retick **Enable remote piloting**.
+Without the reload the old worker keeps running and new commands answer
+`unknown action` or time out.
 
 ## How it works — architecture
 
@@ -180,3 +228,30 @@ Should return `{"result":{"value":"Example Domain"}}`.
 With remote piloting enabled and the agent using `browser_open`, `browser_click`
 etc., the agent should be able to interact with the user's real browser tabs
 instead of the built-in Chromium.
+
+### Test 6 — List tabs
+
+No navigation needed — `tabs` calls `chrome.tabs.query()` directly and works
+even on `chrome://` pages (where scripting-based commands fail):
+
+```bash
+curl -X POST 'http://127.0.0.1:8787/browser/remote/tabs?session_id=extension&directory=/home/rajner/bebok' \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+  -H 'Authorization: Bearer <token>'
+```
+
+Should return all tabs of all windows:
+
+```json
+{"result":[{"id":1072510390,"title":"Bebok options",
+  "url":"chrome-extension://ecpjfaioblmppkcaejjggkadfeoibbcc/options.html",
+  "active":true,"windowId":1072510295}]}
+```
+
+Useful filters (passed straight to `chrome.tabs.query`):
+`{"active":true,"currentWindow":true}` (active tab only),
+`{"url":"https://github.com/*"}` (URL pattern). Note: `session_id=extension`
+— the value the extension registers under (`registerExtension()` in
+`background.js`). If the call hangs 30 s → `503`, the service worker is
+asleep — wake it per "Service worker falls asleep" above and retry.

@@ -637,6 +637,19 @@ const handlers = {
     return { url: tab.url || '', title: tab.title || '' };
   },
 
+  // ── Tabs ──────────────────────────────────────────────
+
+  tabs: async (params) => {
+    const tabs = await chrome.tabs.query(params || {});
+    return tabs.map((t) => ({
+      id: t.id,
+      title: t.title || '',
+      url: t.url || '',
+      active: t.active || false,
+      windowId: t.windowId,
+    }));
+  },
+
   // ── Element discovery ───────────────────────────────────────────────
 
   find: async (params) => {
