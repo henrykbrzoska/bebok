@@ -43,6 +43,8 @@ use tokio::task::JoinHandle;
 use super::console::{self, ConsoleBuffer, SharedConsole};
 use super::discovery;
 use super::frames::{self, Frame, FrameSink};
+use super::page::{AnyPage, LocalPage};
+use super::remote::{RemoteClient, RemotePage};
 use super::settings::{BrowserDisplay, BrowserSettings};
 
 /// Default viewport (CSS pixels). Wide enough for desktop layouts, small
@@ -179,30 +181,47 @@ impl BrowserDriver {
 
     /// The page bound to `session_id`, launching the browser on first use
     /// with the settings of `root` (the session's instance directory).
-    pub async fn page(self: &Arc<Self>, session_id: &str, root: &Path) -> Result<Page, String> {
+    ///
+    /// Automatically selects between local Chromium and remote extension based
+    /// on the `browser.remote.enabled` config setting.
+    pub async fn page(self: &Arc<Self>, session_id: &str, root: &Path) -> Result<AnyPage, String> {
         self.ensure_reaper();
-        let mut sessions = self.sessions.lock().await;
-        if let Some(sb) = sessions.get_mut(session_id) {
-            // A crashed/exited browser must not be handed out again.
-            let dead = matches!(sb.browser.try_wait(), Ok(Some(_)));
-            if !dead {
-                sb.last_used = Instant::now();
-                return Ok(sb.page.clone());
-            }
-            if let Some(mut sb) = sessions.remove(session_id) {
-                sb.handler.abort();
-                if let Some(task) = sb.console_task.take() {
-                    task.abort();
-                }
-                let _ = sb.browser.kill().await;
-                cleanup_user_data_dir(&sb.user_data_dir);
-            }
-        }
         let settings = self.settings_for(root);
-        let sb = launch(session_id, root, &settings).await?;
-        let page = sb.page.clone();
-        sessions.insert(session_id.to_string(), sb);
-        Ok(page)
+
+        // Decide whether to use remote extension. Remote mode never touches
+        // the local Chromium: the page lives in the user's own browser and
+        // is driven through the Companion extension over HTTP.
+        if settings.remote.enabled {
+            // Get extension port from settings
+            let port = settings.remote.extension_port.ok_or_else(|| {
+                "remote browser enabled but no extension port configured; set browser.remote.extensionPort".to_string()
+            })?;
+
+            let client = RemoteClient::new(port, session_id)?;
+            Ok(Arc::new(RemotePage::new(client)))
+        } else {
+            // Local browser: existing behavior
+            let mut sessions = self.sessions.lock().await;
+            if let Some(sb) = sessions.get_mut(session_id) {
+                let dead = matches!(sb.browser.try_wait(), Ok(Some(_)));
+                if !dead {
+                    sb.last_used = Instant::now();
+                    return Ok(Arc::new(LocalPage::new(sb.page.clone(), sb.headed)));
+                }
+                if let Some(mut sb) = sessions.remove(session_id) {
+                    sb.handler.abort();
+                    if let Some(task) = sb.console_task.take() {
+                        task.abort();
+                    }
+                    let _ = sb.browser.kill().await;
+                    cleanup_user_data_dir(&sb.user_data_dir);
+                }
+            }
+            let sb = launch(session_id, root, &settings).await?;
+            let page = LocalPage::new(sb.page.clone(), sb.headed);
+            sessions.insert(session_id.to_string(), sb);
+            Ok(Arc::new(page))
+        }
     }
 
     /// True when `session_id` currently has a live browser.
@@ -261,43 +280,7 @@ impl BrowserDriver {
             sb.last_used = Instant::now();
             sb.page.clone()
         };
-        match action {
-            HistoryAction::Reload => {
-                tokio::time::timeout(REQUEST_TIMEOUT, page.reload())
-                    .await
-                    .map_err(|_| "reload timed out".to_string())?
-                    .map_err(|e| format!("reload failed: {e}"))?;
-            }
-            HistoryAction::Back | HistoryAction::Forward => {
-                let history = page
-                    .execute(GetNavigationHistoryParams::default())
-                    .await
-                    .map_err(|e| format!("navigation history unavailable: {e}"))?;
-                let current = history.current_index;
-                let target = match action {
-                    HistoryAction::Back => current - 1,
-                    _ => current + 1,
-                };
-                let entry = usize::try_from(target)
-                    .ok()
-                    .and_then(|i| history.entries.get(i))
-                    .ok_or_else(|| {
-                        format!(
-                            "cannot go {} from here",
-                            if action == HistoryAction::Back {
-                                "back"
-                            } else {
-                                "forward"
-                            }
-                        )
-                    })?;
-                page.execute(NavigateToHistoryEntryParams::new(entry.id))
-                    .await
-                    .map_err(|e| format!("history navigation failed: {e}"))?;
-                let _ =
-                    tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation()).await;
-            }
-        }
+        navigate_page_history(&page, action).await?;
         let url = page.url().await.ok().flatten().unwrap_or_default();
         let title = page.get_title().await.ok().flatten().unwrap_or_default();
         Ok((url, title))
@@ -529,6 +512,50 @@ impl BrowserDriver {
             })
         });
     }
+}
+
+/// Back / forward / reload on a raw local page; shared by
+/// [`BrowserDriver::navigate_history`] and [`super::page::LocalPage`].
+/// Returns `Ok` on completion (history navigation waits for the load event,
+/// best effort).
+pub async fn navigate_page_history(page: &Page, action: HistoryAction) -> Result<(), String> {
+    match action {
+        HistoryAction::Reload => {
+            tokio::time::timeout(REQUEST_TIMEOUT, page.reload())
+                .await
+                .map_err(|_| "reload timed out".to_string())?
+                .map_err(|e| format!("reload failed: {e}"))?;
+        }
+        HistoryAction::Back | HistoryAction::Forward => {
+            let history = page
+                .execute(GetNavigationHistoryParams::default())
+                .await
+                .map_err(|e| format!("navigation history unavailable: {e}"))?;
+            let current = history.current_index;
+            let target = match action {
+                HistoryAction::Back => current - 1,
+                _ => current + 1,
+            };
+            let entry = usize::try_from(target)
+                .ok()
+                .and_then(|i| history.entries.get(i))
+                .ok_or_else(|| {
+                    format!(
+                        "cannot go {} from here",
+                        if action == HistoryAction::Back {
+                            "back"
+                        } else {
+                            "forward"
+                        }
+                    )
+                })?;
+            page.execute(NavigateToHistoryEntryParams::new(entry.id))
+                .await
+                .map_err(|e| format!("history navigation failed: {e}"))?;
+            let _ = tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation()).await;
+        }
+    }
+    Ok(())
 }
 
 /// Close the browser bound to `session_id` (called by `bebok-core` on turn
@@ -823,6 +850,7 @@ async fn shutdown(mut sb: SessionBrowser) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser::settings::BrowserRemote;
 
     #[test]
     fn user_data_dir_is_per_session_and_filesystem_safe() {
@@ -860,6 +888,7 @@ mod tests {
             BrowserSettings {
                 display: BrowserDisplay::Viewer,
                 window_position: Some((1, 2)),
+                ..BrowserSettings::default()
             },
         );
         assert_eq!(driver.settings_for(root).display, BrowserDisplay::Viewer);
@@ -879,6 +908,7 @@ mod tests {
         let settings = BrowserSettings {
             display: BrowserDisplay::Headed,
             window_position: Some((1300, 40)),
+            ..BrowserSettings::default()
         };
         let headed: Vec<String> = launch_args(&settings, false)
             .iter()
@@ -914,6 +944,7 @@ mod tests {
         let settings = BrowserSettings {
             display: BrowserDisplay::Headed,
             window_position: Some((10, 20)),
+            ..BrowserSettings::default()
         };
         for headless in [false, true] {
             for arg in launch_args(&settings, headless) {
@@ -980,6 +1011,7 @@ mod tests {
             BrowserSettings {
                 display: BrowserDisplay::Viewer,
                 window_position: None,
+                ..BrowserSettings::default()
             },
         );
         // Viewer mode but no sink installed: nothing to deliver to.
@@ -991,5 +1023,58 @@ mod tests {
         assert!(!driver.should_stream("s", root));
         driver.mark_viewer("s");
         assert!(driver.should_stream("s", root));
+    }
+
+    #[test]
+    fn remote_disabled_returns_local_fallback() {
+        // Remote disabled (default): settings_for returns LocalPage
+        let driver = BrowserDriver::default();
+        let root = Path::new("C:/projects/a");
+        let settings = driver.settings_for(root);
+        assert!(!settings.remote.enabled);
+    }
+
+    #[test]
+    fn remote_enabled_without_port_returns_error() {
+        // Remote enabled but no port configured: should error
+        let driver = BrowserDriver::default();
+        let root = Path::new("C:/projects/b");
+        driver.configure(
+            root,
+            BrowserSettings {
+                display: BrowserDisplay::Headed,
+                window_position: None,
+                remote: BrowserRemote {
+                    enabled: true,
+                    extension_port: None,
+                    tab_id: None,
+                },
+            },
+        );
+        let settings = driver.settings_for(root);
+        assert!(settings.remote.enabled);
+        assert!(settings.remote.extension_port.is_none());
+    }
+
+    #[test]
+    fn remote_enabled_with_port_configured() {
+        // Remote enabled with port configured
+        let driver = BrowserDriver::default();
+        let root = Path::new("C:/projects/c");
+        driver.configure(
+            root,
+            BrowserSettings {
+                display: BrowserDisplay::Headed,
+                window_position: None,
+                remote: BrowserRemote {
+                    enabled: true,
+                    extension_port: Some(4317),
+                    tab_id: None,
+                },
+            },
+        );
+        let settings = driver.settings_for(root);
+        assert!(settings.remote.enabled);
+        assert_eq!(settings.remote.extension_port, Some(4317));
     }
 }

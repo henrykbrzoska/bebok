@@ -259,8 +259,7 @@ impl Tool for BrowserWait {
             let deadline = started + Duration::from_millis(a.timeout_ms);
             loop {
                 let probe = match page.evaluate(js.as_str()).await {
-                    Ok(res) => {
-                        let v = res.into_value::<Value>().unwrap_or(Value::Null);
+                    Ok(v) => {
                         if let Some(err) = v.get("error").and_then(Value::as_str) {
                             return Err(err.to_string());
                         }
@@ -536,11 +535,10 @@ impl Tool for BrowserFind {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            let res = page
+            let v = page
                 .evaluate(find_js(&a).as_str())
                 .await
                 .map_err(|e| format!("listing elements failed: {e}"))?;
-            let v = res.into_value::<Value>().unwrap_or(Value::Null);
             if let Some(err) = v.get("error").and_then(Value::as_str) {
                 return Err(err.to_string());
             }

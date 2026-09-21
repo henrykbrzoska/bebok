@@ -10,11 +10,15 @@
  * (`{ type: 'bebok.testConnection' }`) so it is covered by the extension's host
  * permissions; if the worker does not know the message yet we fall back to a
  * direct `fetch` from this page.
+ *
+ * "Remote piloting" section manages the `remoteEnabled` flag in
+ * `chrome.storage.sync`; the background worker reacts to storage changes and
+ * starts / stops the polling loop and heartbeat.
  */
 'use strict';
 
 const TEST_MESSAGE = 'bebok.testConnection';
-const STORAGE_KEYS = { engineUrl: '', directory: '' };
+const STORAGE_KEYS = { engineUrl: '', directory: '', remoteEnabled: false };
 
 const el = (id) => document.getElementById(id);
 const dom = {
@@ -23,6 +27,8 @@ const dom = {
   test: el('test'),
   save: el('save'),
   status: el('status'),
+  remoteEnabled: el('remoteEnabled'),
+  remoteStatus: el('remoteStatus'),
 };
 
 function setStatus(text, kind) {
@@ -34,15 +40,26 @@ function setStatus(text, kind) {
   }
 }
 
+function setRemoteStatus(text, kind) {
+  dom.remoteStatus.textContent = text || '';
+  if (kind) {
+    dom.remoteStatus.dataset.kind = kind;
+  } else {
+    delete dom.remoteStatus.dataset.kind;
+  }
+}
+
 function load() {
   return new Promise((resolve) => {
     if (!chrome.storage || !chrome.storage.sync) {
-      resolve({ engineUrl: '', directory: '' });
+      resolve({ engineUrl: '', directory: '', remoteEnabled: false });
       return;
     }
     chrome.storage.sync.get(STORAGE_KEYS, (values) => {
       dom.engineUrl.value = values.engineUrl || '';
       dom.directory.value = values.directory || '';
+      dom.remoteEnabled.checked = Boolean(values.remoteEnabled);
+      updateRemoteStatus(values);
       resolve(values);
     });
   });
@@ -117,8 +134,53 @@ async function runTest() {
   }
 }
 
+// ── Remote piloting ──────────────────────────────────────────────────────
+
+const STORAGE_KEY_REMOTE_ENABLED = 'remoteEnabled';
+
+/**
+ * Show a brief status line under the remote piloting checkbox.
+ * `values` is the full storage snapshot (may have stale values).
+ */
+function updateRemoteStatus(values) {
+  const enabled = Boolean(values && values.remoteEnabled);
+  const hasUrl = Boolean(values && values.engineUrl);
+  const hasDir = Boolean(values && values.directory);
+
+  if (!enabled) {
+    setRemoteStatus('Disabled', '');
+    return;
+  }
+  if (!hasUrl || !hasDir) {
+    setRemoteStatus(
+      'Enabled but engine URL or directory is not set',
+      'error'
+    );
+    return;
+  }
+  setRemoteStatus(
+    'Enabled — extension will register on the next heartbeat',
+    'ok'
+  );
+}
+
+function onRemoteToggle() {
+  const enabled = dom.remoteEnabled.checked;
+  if (!chrome.storage || !chrome.storage.sync) {
+    setRemoteStatus('Extension storage unavailable in preview.', 'error');
+    return;
+  }
+  chrome.storage.sync.set({ [STORAGE_KEY_REMOTE_ENABLED]: enabled }, () => {
+    // Re-read to get the latest snapshot for the status line.
+    chrome.storage.sync.get(STORAGE_KEYS, updateRemoteStatus);
+  });
+}
+
+// ── Bootstrap ────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', () => {
   dom.test.addEventListener('click', runTest);
   dom.save.addEventListener('click', save);
+  dom.remoteEnabled.addEventListener('change', onRemoteToggle);
   load();
 });

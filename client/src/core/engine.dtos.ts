@@ -524,7 +524,7 @@ export interface ResolvedSkill {
   name: string;
   description?: string | null;
   content: string;
-  source: 'global' | 'project';
+  source: 'bundled' | 'global' | 'project';
   path: string;
   enabled: boolean;
 }

@@ -390,6 +390,12 @@ mod tests {
                 ptys: Arc::new(bebok_pty::PtyManager::new()),
                 debug: Arc::new(bebok_core::DebugLog::new(base.join("debug.log"))),
                 llm_trace: Arc::new(bebok_core::LlmTrace::new(2)),
+                remote_extensions: Arc::new(tokio::sync::Mutex::new(
+                    std::collections::HashMap::new(),
+                )),
+                command_queue: Arc::new(tokio::sync::Mutex::new(
+                    crate::state::CommandRegistry::new(),
+                )),
             };
             Self { base, root, state }
         }
