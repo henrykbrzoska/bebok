@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Extension server status & control: port scan discovery (8780–8790) from
+  background worker with `/version` probe, status dot in popup, start command
+  copy, fixed port and token control in Options.
+- Fixed-engine profile: the client can save a server address + token as a
+  "fixed" profile (`localStorage bebok.remote.profileKind`). When fixed, the
+  Start screen skips the address form and shows a status dot with a "Use
+  different server" link; the sidebar footer gains a Connect/Disconnect
+  toggle. A deliberate disconnect blocks automatic reconnection until the
+  user reconnects manually.
+- SSE exponential backoff: reconnection attempts after a dropped stream grow
+  from 1.5 s to a 30 s cap and reset on live. The `visibilitychange` event
+  triggers an immediate retry when the user returns to the tab.
+- `bebok-server --token <val>`: stable, predictable engine token via CLI flag
+  (highest precedence: `--token` > `BEBOK_TOKEN` env > token file > random);
+  `--port` fallback from `BEBOK_PORT` env with u16 validation; readable
+  `AddrInUse` error when the port is occupied; dynamic CORS origin for
+  non-default ports; `scripts/bebok.mjs` passes `BEBOK_PORT` through to both
+  `cmdFullBuildDev` and `cmdEngine`.
+- Companion extension: pinned `BEBOK_TOKEN` + **Search local Bebok** that
+  probes the Engine URL, `8787` and the last known port with the pinned
+  token and saves the working URL — auto-reconnect after restarts with no
+  more pasting. New **Pinned token** field in Options; `BEBOK_PORT` pins
+  the desktop sidecar to a fixed port; `scripts/bebok.mjs` passes both
+  through. Details in the extension README ("Stable token + port").
+
+### Fixes
+- Companion extension Options: new **Search local Bebok** button probes the
+  Engine URL field (or `127.0.0.1:8787`) and saves it when the engine needs
+  no token; otherwise it says whether to paste the fresh `BEBOK_READY` URL
+  or start the engine. A positive **Test connection** now saves both fields
+  automatically. (Token auto-handoff for desktop random-port mode is still
+  open — the scan deliberately never guesses tokens.)
+- Remote browser piloting reconnects by itself after an engine restart
+  (heartbeat re-registers a wiped registry), rejects commands to a stale
+  extension with a clear wake-up hint instead of a 30 s hang, and no longer
+  breaks on `tabs` with an empty or legacy body. The Companion Options
+  page shows live connection proof with accurate error hints (stale token
+  vs unreachable engine vs asleep worker).
+- Companion extension requests `<all_urls>` host access: without it Chrome
+  refuses script injection into ordinary tabs ("Extension manifest must
+  request permission to access this host") and remote commands
+  (`getPageContext`, `click`, `type`, screenshots) fail everywhere except
+  activated tabs. After updating, reload the extension (↻) and re-allow
+  site access if Chrome asks.
+
 ## 1.8.3 — 2026-09-21
 
 ### Features

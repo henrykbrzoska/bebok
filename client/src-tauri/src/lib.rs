@@ -334,7 +334,28 @@ pub fn run() {
                     }
                 };
 
-                let (mut rx, child) = match sidecar.args(["--port", "0"]).spawn() {
+                // `BEBOK_PORT` pins the sidecar to a fixed port (variant 5:
+                // pinned BEBOK_TOKEN + fixed port => the Companion extension
+                // can reconnect after every restart); otherwise random (`0`).
+                let mut port_arg = "0".to_string();
+                if let Ok(pinned) = std::env::var("BEBOK_PORT") {
+                    let pinned = pinned.trim().to_string();
+                    if !pinned.is_empty() {
+                        if pinned.parse::<u16>().is_ok() {
+                            eprintln!("engine sidecar: pinned port {pinned} (BEBOK_PORT)");
+                            port_arg = pinned;
+                        } else {
+                            eprintln!(
+                                "engine sidecar: ignoring invalid BEBOK_PORT={pinned:?}, using random port"
+                            );
+                        }
+                    }
+                }
+                if port_arg == "0" {
+                    eprintln!("engine sidecar: random port (--port 0)");
+                }
+
+                let (mut rx, child) = match sidecar.args(["--port", &port_arg]).spawn() {
                     Ok(pair) => pair,
                     Err(err) => {
                         eprintln!("failed to spawn bebok-server sidecar: {err}");

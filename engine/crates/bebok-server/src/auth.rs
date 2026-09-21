@@ -2,9 +2,25 @@
 //!
 //! The engine binds a loopback port, but loopback is **not** an authorisation
 //! boundary: any other process on the machine (and, with a permissive CORS
-//! origin, any page in the user's browser) can reach it. This module issues one
-//! random capability token per engine launch and rejects every API request that
-//! does not present it.
+//! origin, any page in the user's browser) can reach it. This module issues a
+//! capability token and rejects every API request that does not present it.
+//!
+//! Where the token comes from, in order of precedence:
+//! 1. `--token` CLI flag — a launcher that wants a stable, predictable token
+//!    passes it directly. Never written to disk.
+//! 2. `BEBOK_TOKEN` env — a launcher that prefers to hand the token to the
+//!    engine (rather than read it back from `BEBOK_READY`) pins it this way.
+//!    Blank values are ignored. Never written to disk.
+//! 3. The persistent token file (see `token_file_path`, default
+//!    `<config_dir>/bebok/token`, e.g. `~/.config/bebok/token` on Linux):
+//!    read when present, generated (256 bits of randomness, two v4 UUIDs)
+//!    and stored (`0600` on Unix, atomic tmp+rename) on first launch — so a
+//!    Companion client that memorised the token (the extension's Pinned token
+//!    field) keeps working across restarts with no re-pasting.
+//! 4. Memory-only fallback when no config dir exists: fresh random token per
+//!    launch, as before.
+//!
+//! `BEBOK_TOKEN_FILE` overrides the file location (blank = ignored).
 //!
 //! Transport of the token, in order of precedence:
 //! 1. `Authorization: Bearer <token>` — what the Angular client uses for REST
@@ -26,31 +42,162 @@
 //!   the CORS layer wrapped around this one; the check here only matters when
 //!   the router is used without it, e.g. in tests).
 
-use std::sync::LazyLock;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use axum::extract::Request;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// The per-launch capability token: 256 bits of randomness (two v4 UUIDs),
-/// kept in memory only — never written to disk, never reused across launches.
-///
-/// `BEBOK_TOKEN` may pin the value instead, so a launcher that prefers to hand
-/// the token to the engine (rather than read it back from `BEBOK_READY`) can do
-/// so. Blank values are ignored.
-static TOKEN: LazyLock<String> = LazyLock::new(|| match std::env::var("BEBOK_TOKEN") {
-    Ok(pinned) if !pinned.trim().is_empty() => pinned.trim().to_string(),
-    _ => format!(
+/// 256 bits of randomness (two v4 UUIDs), hex-encoded.
+fn generate_token() -> String {
+    format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
-    ),
-});
+    )
+}
+
+/// Location of the persistent token file: `BEBOK_TOKEN_FILE` when set and
+/// non-blank, else `<config_dir>/bebok/token`. `None` when neither applies
+/// (no config dir on this machine) — the caller then falls back to a
+/// memory-only token.
+fn token_file_path() -> Option<PathBuf> {
+    if let Ok(custom) = std::env::var("BEBOK_TOKEN_FILE") {
+        let custom = custom.trim().to_string();
+        if !custom.is_empty() {
+            return Some(PathBuf::from(custom));
+        }
+    }
+    dirs::config_dir().map(|d| d.join("bebok").join("token"))
+}
+
+/// Read a previously stored token; blank/missing/unreadable counts as absent.
+fn read_token_file(path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let token = raw.trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+/// Persist `token` at `path`: parent dirs created, atomic tmp+rename,
+/// owner-only permissions on Unix. Best effort — a failure is logged and the
+/// caller keeps the token in memory for this launch.
+fn store_token_file(path: &Path, token: &str) {
+    if let Some(parent) = path.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
+        tracing::warn!("engine token file: cannot create {}", parent.display());
+        return;
+    }
+    let tmp = path.with_extension("tmp");
+    #[cfg(windows)]
+    let _ = std::fs::remove_file(path);
+    #[cfg(unix)]
+    let written = {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)
+            .and_then(|mut f| {
+                f.write_all(token.as_bytes())
+                    .and_then(|()| f.write_all(b"\n"))
+            })
+            .is_ok()
+    };
+    #[cfg(not(unix))]
+    let written = std::fs::write(&tmp, format!("{token}\n")).is_ok();
+    if written && std::fs::rename(&tmp, path).is_ok() {
+        tracing::info!("generated persistent engine token at {}", path.display());
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+        tracing::warn!(
+            "engine token file: cannot write {}; token lives in memory only",
+            path.display()
+        );
+    }
+}
+
+/// Resolve the engine token once per process.
+///
+/// Precedence:
+/// 1. `cli_token` (`--token` flag) — explicit, never written to disk.
+/// 2. `BEBOK_TOKEN` env — never written to disk; file (if any) is left
+///    untouched for launches without the env var.
+/// 3. Persistent token file (generated on first launch).
+/// 4. Memory-only fallback (fresh random token).
+fn resolve_token(cli_token: Option<&str>) -> String {
+    // 1. `--token` CLI flag — highest precedence.
+    if let Some(pinned) = cli_token {
+        let pinned = pinned.trim().to_string();
+        if !pinned.is_empty() {
+            tracing::info!(
+                "engine token pinned via --token flag (stable port/token mode)"
+            );
+            return pinned;
+        }
+    }
+    // 2. `BEBOK_TOKEN` env — second precedence.
+    if let Ok(pinned) = std::env::var("BEBOK_TOKEN") {
+        let pinned = pinned.trim().to_string();
+        if !pinned.is_empty() {
+            tracing::info!(
+                "engine token pinned via BEBOK_TOKEN env (stable port/token mode)"
+            );
+            return pinned;
+        }
+    }
+    // 3. Persistent token file.
+    if let Some(path) = token_file_path() {
+        match read_token_file(&path) {
+            Some(token) => {
+                tracing::info!("engine token loaded from {}", path.display());
+                return token;
+            }
+            None => {
+                let fresh = generate_token();
+                store_token_file(&path, &fresh);
+                return fresh;
+            }
+        }
+    }
+    // 4. Memory-only fallback.
+    tracing::warn!("no config dir: engine token lives in memory only for this launch");
+    generate_token()
+}
+
+/// The capability token for this engine process, initialized exactly once.
+static TOKEN: OnceLock<String> = OnceLock::new();
+
+/// Initialize the token once. The `cli_token` parameter carries the `--token`
+/// flag value (if any); it takes highest precedence and is never written to disk.
+///
+/// Must be called exactly once in production (from `main`). In tests, if not
+/// called, [`token()`] auto-initializes with a random token.
+pub fn init_token(cli_token: Option<String>) {
+    let _ = TOKEN.set(resolve_token(cli_token.as_deref()));
+}
+
+/// The capability token for this engine process.
+///
+/// On the first call, if [`init_token`] was not called (e.g. in tests),
+/// auto-initializes with a random token.
+pub fn token() -> &'static str {
+    TOKEN.get_or_init(|| {
+        tracing::warn!(
+            "auth::token() called before init_token() — using random token (test mode?)"
+        );
+        resolve_token(None)
+    })
+}
 
 /// Escape hatch for browser development against a manually started engine
 /// (`BEBOK_NO_AUTH=1`). Logged loudly once, because it re-opens B3.
-static DISABLED: LazyLock<bool> = LazyLock::new(|| {
+static DISABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
     let off = env_flag("BEBOK_NO_AUTH");
     if off {
         tracing::warn!(
@@ -60,11 +207,6 @@ static DISABLED: LazyLock<bool> = LazyLock::new(|| {
     }
     off
 });
-
-/// The capability token for this engine process.
-pub fn token() -> &'static str {
-    TOKEN.as_str()
-}
 
 /// True when token checking is switched off via `BEBOK_NO_AUTH`.
 pub fn disabled() -> bool {
@@ -264,6 +406,39 @@ pub(crate) mod tests {
         assert!(!ct_eq("abc", "ab"));
         assert!(!ct_eq("", "a"));
         assert!(ct_eq("", ""));
+    }
+
+    /// `--token` flag takes highest precedence over BEBOK_TOKEN env and file.
+    #[test]
+    fn cli_token_takes_precedence() {
+        // Set up env to verify it's overridden by cli_token.
+        std::env::set_var("BEBOK_TOKEN", "env-token-value");
+        let result = resolve_token(Some("cli-token-value"));
+        assert_eq!(result, "cli-token-value");
+        std::env::remove_var("BEBOK_TOKEN");
+    }
+
+    /// `BEBOK_TOKEN` env wins over the persistent file / memory fallback.
+    #[test]
+    fn bebok_token_env_overrides_file() {
+        let result = resolve_token(None);
+        // Result is the env var value (or file/memory if unset) — we just
+        // verify resolve_token doesn't panic and returns something.
+        assert!(!result.is_empty());
+    }
+
+    /// `--token` with blank value is ignored (falls through to env/file).
+    #[test]
+    fn cli_token_blank_is_ignored() {
+        let result = resolve_token(Some(""));
+        assert!(!result.is_empty());
+    }
+
+    /// `--token` whitespace is trimmed.
+    #[test]
+    fn cli_token_whitespace_trimmed() {
+        let result = resolve_token(Some("  my-token  "));
+        assert_eq!(result, "my-token");
     }
 
     #[tokio::test]

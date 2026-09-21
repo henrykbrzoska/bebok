@@ -10,7 +10,7 @@
       </p>
     }
 
-    @if (showAddressForm() && !isTauri()) {
+    @if (showAddressForm() && !isTauri() && !fixedProfile()) {
       <label class="field">
         <span class="field-label">{{ t('start.engineAddress') }}</span>
         <input
@@ -49,7 +49,17 @@
       @if (showEngineUrl() && engineUrl()) {
         <span class="engine-url" data-testid="engine-url">{{ engineUrl() }}</span>
       }
-      @if (phase() === 'live' && !isTauri() && !showAddressForm()) {
+      @if (phase() === 'live' && !isTauri() && !showAddressForm() && !fixedProfile()) {
+        <button type="button" class="link-btn" data-testid="start-save-fixed" (click)="saveAsFixed()">
+          {{ t('start.saveAsFixed') }}
+        </button>
+      }
+      @if (fixedProfile()) {
+        <span class="fixed-hint" data-testid="start-fixed-hint">{{ t('start.fixedProfileHint') }}</span>
+        <button type="button" class="link-btn" data-testid="start-use-different" (click)="clearProfile()">
+          {{ t('start.useDifferentServer') }}
+        </button>
+      } @else if (phase() === 'live' && !isTauri() && !showAddressForm()) {
         <button type="button" class="link-btn" (click)="toggleAddressForm()">
           {{ t('start.engineAddress') }}
         </button>

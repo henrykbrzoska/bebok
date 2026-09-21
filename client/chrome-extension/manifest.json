@@ -16,8 +16,8 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "tabs"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "tabs", "alarms"],
+  "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],

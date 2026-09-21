@@ -351,6 +351,14 @@ function engineEnv(flags, clientPort) {
   };
   if (flags['no-auth']) env.BEBOK_NO_AUTH = '1';
   if (flags.diagnostic) env.BEBOK_DIAGNOSTIC = '1';
+  // Variant 5 (pinned BEBOK_TOKEN): pass a stable token/port through to the
+  // engine so the Companion extension can reconnect after every restart.
+  // The engine pins its capability token from BEBOK_TOKEN (see auth.rs) and
+  // listens on BEBOK_PORT when valid; both are opt-in, defaults unchanged.
+  for (const k of ['BEBOK_TOKEN', 'BEBOK_PORT']) {
+    if (process.env[k]) env[k] = process.env[k];
+  }
+  if (env.BEBOK_TOKEN) log('using pinned BEBOK_TOKEN from env (extension auto-reconnect on)');
   env.BEBOK_DIAGNOSTIC = '1'
   return env;
 }
@@ -403,7 +411,8 @@ function bootstrapUrl(clientPort, engineUrl) {
 }
 
 async function cmdFullBuildDev(flags) {
-  const port = Number(flags.port ?? DEFAULT_ENGINE_PORT);
+  const port = Number(flags.port ?? process.env.BEBOK_PORT ?? DEFAULT_ENGINE_PORT);
+  if (!flags.port && process.env.BEBOK_PORT) log(`using BEBOK_PORT=${process.env.BEBOK_PORT} from env`);
   const clientPort = Number(flags['client-port'] ?? DEFAULT_CLIENT_PORT);
   await ensureClientDeps();
 
@@ -449,7 +458,8 @@ async function cmdFullBuildDev(flags) {
 }
 
 async function cmdEngine(flags) {
-  const port = Number(flags.port ?? DEFAULT_ENGINE_PORT);
+  const port = Number(flags.port ?? process.env.BEBOK_PORT ?? DEFAULT_ENGINE_PORT);
+  if (!flags.port && process.env.BEBOK_PORT) log(`using BEBOK_PORT=${process.env.BEBOK_PORT} from env`);
   const clientPort = Number(flags['client-port'] ?? DEFAULT_CLIENT_PORT);
   const bin = await buildEngine({ release: !!flags.release });
   const { url } = await startEngine(bin, port, engineEnv(flags, clientPort));

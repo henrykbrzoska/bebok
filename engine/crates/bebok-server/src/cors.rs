@@ -4,17 +4,37 @@
 //! and on `http://localhost:4200` in browser dev. Extend via `BEBOK_CORS`
 //! (comma separated); the defaults always apply.
 //!
+//! The Companion Chrome extension (`chrome-extension://<id>`, a different id
+//! per install) is NOT in the defaults: add it via
+//! `BEBOK_CORS=chrome-extension://<your-id>` (the id is shown on
+//! `chrome://extensions` with Developer mode on). Without it the popup's
+//! `fetch` fails at preflight (`net::ERR_FAILED`, not a 401 — CORS runs
+//! before the token layer). The background worker is unaffected (it is
+//! covered by the extension's `host_permissions`), so heartbeat/long-poll
+//! keep working while the popup is blocked — a confusing combination worth
+//! checking first when Options says OK but the popup fails.
+//!
 //! CORS is NOT an authorisation boundary: it only constrains browsers that
 //! choose to respect it, never another local process or `curl`. The actual
 //! boundary is the per-launch capability token in [`crate::auth`]; this layer
 //! merely has to let the `Authorization` header through (and answer preflight
 //! before the token layer sees it, hence it wraps the API router).
+//!
+//! ## Dynamic port
+//!
+//! When `--port 0` or a non-default port is used, the actual listening port
+//! is not known at router-build time. [`cors_layer`] takes the actual port
+//! as a parameter so `http://localhost:<actual>` is always included.
 
 use axum::http::{HeaderValue, Method};
 use tower_http::cors::CorsLayer;
 
 /// CORS origins allowed to talk to the local engine (SPEC §8).
-pub fn cors_layer() -> CorsLayer {
+///
+/// `actual_port` is the port the engine is actually listening on (after
+/// `TcpListener::bind`); it is added to the allowed origins so CORS works
+/// for non-default ports (e.g. `--port 0`, `--port 9999`).
+pub fn cors_layer(actual_port: u16) -> CorsLayer {
     const DEFAULTS: &[&str] = &[
         "http://localhost:4200",
         "http://127.0.0.1:4200",
@@ -28,6 +48,14 @@ pub fn cors_layer() -> CorsLayer {
     let mut origins: Vec<HeaderValue> = Vec::new();
     for o in DEFAULTS {
         if let Ok(v) = HeaderValue::from_str(o) {
+            origins.push(v);
+        }
+    }
+    // Dynamic port: add `http://localhost:<actual>` when it differs from the
+    // hardcoded defaults so that browser CORS checks pass for any port.
+    if actual_port != 0 && actual_port != 8787 && actual_port != 4200 {
+        let origin = format!("http://localhost:{actual_port}");
+        if let Ok(v) = HeaderValue::from_str(&origin) {
             origins.push(v);
         }
     }
@@ -81,7 +109,9 @@ mod tests {
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
         };
-        build_api_router().layer(cors_layer()).with_state(state)
+        build_api_router()
+            .layer(cors_layer(8787))
+            .with_state(state)
     }
 
     /// Every method a route in `build_api_router` actually uses must survive
@@ -122,5 +152,45 @@ mod tests {
                 "{method} {path}: allow-methods {allowed:?} does not list {method}"
             );
         }
+    }
+
+    /// Dynamic port: after building with a custom port, the CORS layer
+    /// includes `http://localhost:<port>` in allowed origins.
+    #[tokio::test]
+    async fn dynamic_port_origin_is_allowed() {
+        let dir = std::env::temp_dir().join(format!(
+            "bebok-cors-dynamic-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        let state = AppState {
+            store: bebok_core::InstanceStore::with_data_dir(dir.join("data")),
+            #[cfg(not(target_os = "android"))]
+            ptys: Arc::new(bebok_pty::PtyManager::new()),
+            debug: Arc::new(bebok_core::DebugLog::new(dir.join("debug.log"))),
+            llm_trace: bebok_core::LLM_TRACE.clone(),
+            remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+        };
+        let app = build_api_router()
+            .layer(cors_layer(9999))
+            .with_state(state);
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/session")
+            .header(header::ORIGIN, "http://localhost:9999")
+            .header("access-control-request-method", "POST")
+            .header(
+                "access-control-request-headers",
+                "authorization,content-type",
+            )
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "preflight for dynamic port 9999"
+        );
     }
 }

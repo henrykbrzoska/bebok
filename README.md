@@ -102,6 +102,8 @@ Roadmap: 1.6.0 adds an Android app (chat + remote follow).
 - **About** page ("What is Bebok?") with the Silesian legend, in all 12 UI languages.
 - MCP bridge (`rmcp`, stdio + streamable HTTP), `AGENTS.md` + `skill/*/SKILL.md`
   prompt assembly, in-process plugin hooks, JSONC config with comment-preserving writers.
+- Chrome extension (Phase 1): port scan discovery (8780–8790), server status dot
+  in popup, start command copy, fixed port control.
 - Built-in cross-platform tools: `read_file`, `write_file`, `edit_file`,
   `append_file`, `sed`, `fetch`, `bash` and native ports of `pwd`, `list_dir`,
   `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`,

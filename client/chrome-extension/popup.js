@@ -1,21 +1,9 @@
 /**
  * Bebok Chrome extension - popup logic.
- *
- * Plain ES2019 + async/await (no bundler, no modules). Flow:
- *   1. load settings (`engineUrl`, `directory`) from `chrome.storage.sync`
- *   2. ask the content script for page context (selection + meta + main text)
- *   3. send everything to the background worker (`chrome.runtime.sendMessage`
- *      with `{ type: 'bebok.ask' }`) - the worker owns the engine HTTP calls
- *      because only it has `host_permissions`
- *   4. render the answer + a link to the session in the Bebok UI
- *
- * Message names are shared with `background.js` (see `ext-core`).
  */
 'use strict';
 
-/** Message type understood by the background worker. */
 const ASK_MESSAGE = 'bebok.ask';
-/** Message type understood by the content script. */
 const PAGE_CONTEXT_MESSAGE = 'bebok.pageContext';
 
 const el = (id) => document.getElementById(id);
@@ -33,9 +21,13 @@ const dom = {
   answer: el('answer'),
   sessionLink: el('sessionLink'),
   target: el('target'),
+  statusDot: el('statusDot'),
+  copyCmd: el('copyCmd'),
 };
 
 let busy = false;
+let _engineUrl = '';
+let _directory = '';
 
 function setStatus(text, kind) {
   dom.status.textContent = text || '';
@@ -52,7 +44,6 @@ function setBusy(value) {
   dom.ask.textContent = value ? 'Asking…' : 'Ask';
 }
 
-/** Open the options page (gear button / "set up" links). */
 function openOptions() {
   if (chrome.runtime && chrome.runtime.openOptionsPage) {
     chrome.runtime.openOptionsPage();
@@ -61,9 +52,6 @@ function openOptions() {
   }
 }
 
-/** Read `{ engineUrl, directory }` from synced settings.
- * Outside the extension (plain http preview) `chrome.storage` is undefined -
- * resolve empty settings instead of throwing, so the page still renders. */
 function readSettings() {
   return new Promise((resolve) => {
     if (!chrome.storage || !chrome.storage.sync) {
@@ -74,7 +62,6 @@ function readSettings() {
   });
 }
 
-/** Ask the *active tab's* content script for the page snapshot. */
 function requestPageContext() {
   return new Promise((resolve) => {
     if (!chrome.tabs || !chrome.tabs.query) {
@@ -91,8 +78,6 @@ function requestPageContext() {
         tab.id,
         { type: PAGE_CONTEXT_MESSAGE },
         (response) => {
-          // `chrome.runtime.lastError` is set when no content script answered
-          // (chrome:// pages, Web Store, or a tab loaded before install).
           void chrome.runtime.lastError;
           resolve(response && response.ok ? response.context : null);
         }
@@ -101,11 +86,6 @@ function requestPageContext() {
   });
 }
 
-/**
- * Build the prompt sent to the engine: the user's question plus the requested
- * page context blocks. Kept deliberately explicit so the model sees what came
- * from where.
- */
 function buildPrompt(question, context, options) {
   const blocks = [question.trim()];
   if (context) {
@@ -131,7 +111,6 @@ function showAnswer(text) {
   dom.answerWrap.hidden = false;
 }
 
-/** Build an engine URL that keeps `?token=` intact (see background.js). */
 function enginePathUrl(engineUrl, path) {
   const trimmed = String(engineUrl || '').trim();
   const url = new URL(trimmed);
@@ -139,7 +118,6 @@ function enginePathUrl(engineUrl, path) {
   return url.toString();
 }
 
-/** Point the "Open session" link at the Bebok UI (or the raw API). */
 function showSessionLink(sessionID, engineUrl) {
   if (!sessionID || !chrome.tabs) {
     dom.sessionLink.hidden = true;
@@ -219,7 +197,6 @@ async function ask() {
   }
 }
 
-/** Pick up the selection stashed by the context-menu entry (then clear it). */
 function consumePendingSelection() {
   if (!chrome.storage || !chrome.storage.session) return;
   chrome.storage.session.get({ pendingSelection: null }, (values) => {
@@ -236,12 +213,53 @@ function consumePendingSelection() {
   });
 }
 
+// ── Status probe (Phase 1) ────────────────────────────────────────────────
+
+async function probeVersion() {
+  if (!_engineUrl) {
+    setStatusDot('');
+    return;
+  }
+  try {
+    const url = enginePathUrl(_engineUrl, '/version');
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    setStatusDot('●', 'ok');
+  } catch (_) {
+    setStatusDot('●', 'error');
+  }
+}
+
+function setStatusDot(char, kind) {
+  if (dom.statusDot) {
+    dom.statusDot.textContent = char || '';
+    if (kind) {
+      dom.statusDot.dataset.kind = kind;
+    } else {
+      delete dom.statusDot.dataset.kind;
+    }
+  }
+}
+
+function copyStartCommand() {
+  const token = localStorage.getItem('bebokToken') || '';
+  const port = localStorage.getItem('fixedPort') || '8787';
+  const cmd = `BEBOK_TOKEN=${token} bebok-server --port ${port}`;
+  navigator.clipboard.writeText(cmd).then(() => {
+    setStatus('Command copied to clipboard.', 'ok');
+    setTimeout(() => setStatus(''), 2000);
+  }, () => {
+    setStatus('Failed to copy command.', 'error');
+  });
+}
+
 function init() {
   dom.ask.addEventListener('click', ask);
   dom.options.addEventListener('click', openOptions);
+  dom.copyCmd.addEventListener('click', copyStartCommand);
   consumePendingSelection();
   dom.question.addEventListener('keydown', (event) => {
-    // Ctrl/Cmd+Enter submits like the button; Enter keeps inserting newlines.
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       ask();
@@ -250,11 +268,18 @@ function init() {
   setStatus('');
 
   readSettings().then((settings) => {
-    if (!settings.engineUrl || !settings.directory) {
+    _engineUrl = settings.engineUrl;
+    _directory = settings.directory;
+    if (!_engineUrl || !_directory) {
       setStatus('Configure the engine URL and directory in Options.', 'error');
       dom.target.textContent = '';
+      setStatusDot('');
     } else {
-      dom.target.textContent = `${settings.engineUrl} · ${settings.directory}`;
+      dom.target.textContent = `${_engineUrl} · ${_directory}`;
+      setStatusDot('●', 'pending');
+      // Probe GET /version every 10s
+      probeVersion();
+      setInterval(probeVersion, 10000);
     }
   });
 }

@@ -13,6 +13,9 @@
 //!    queued commands (waits up to 25 s if the queue is empty).
 //! 5. Extension posts results: `POST /browser/remote/result` with
 //!    `{id, session_id, result?, error?}` → engine wakes the waiting tool call.
+//! 6. Pre-flight status check: `GET /browser/remote/status?session_id=&directory=`
+//!    → returns all registered extensions and queue depths, allowing clients to
+//!    verify an extension is alive before sending a blocking command.
 //!
 //! The tool-facing endpoint (`POST /browser/remote/{action}`) always returns
 //! `{result: ...}` or `{error: "..."}` so that `RemoteClient` works without
@@ -28,6 +31,9 @@ use tokio::sync::oneshot;
 
 use crate::error::ApiError;
 use crate::state::{AppState, CommandRegistry, QueuedCommand, RemoteExtension, WaiterHandle};
+
+/// Maximum age (seconds) of a heartbeat before we consider the extension stale.
+const STALE_THRESHOLD_SECS: i64 = 90;
 
 // ── Query / body types ───────────────────────────────────────────────────
 
@@ -65,6 +71,13 @@ pub struct PendingQuery {
     pub session_id: Option<String>,
 }
 
+/// Query parameters for status endpoint.
+#[derive(Debug, Deserialize)]
+pub struct StatusQuery {
+    pub session_id: Option<String>,
+    pub directory: Option<String>,
+}
+
 /// Result payload posted back by the extension.
 #[derive(Debug, Deserialize)]
 pub struct ResultBody {
@@ -88,6 +101,23 @@ impl IntoResponse for OkResponse {
     }
 }
 
+/// Extension info for status response.
+#[derive(Debug, Serialize)]
+pub struct ExtensionInfo {
+    pub session_id: String,
+    pub directory: String,
+    pub last_seen: i64,
+    pub last_seen_age_secs: i64,
+}
+
+/// Response for status endpoint.
+#[derive(Debug, Serialize)]
+pub struct StatusResponse {
+    pub ok: bool,
+    pub extensions: Vec<ExtensionInfo>,
+    pub queue: std::collections::HashMap<String, usize>,
+}
+
 // ── Drop guard: ensures a timed-out or cancelled waiter is removed ────────
 
 struct WaiterGuard {
@@ -108,6 +138,16 @@ impl Drop for WaiterGuard {
     }
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+/// Current unix timestamp in seconds, or error.
+fn now_secs() -> Result<i64, ApiError> {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .map_err(|e| ApiError::internal(format!("get timestamp: {e}")))
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────
 
 /// Register a remote browser extension.
@@ -115,10 +155,7 @@ pub async fn register(
     State(state): State<AppState>,
     Query(query): Query<RegisterQuery>,
 ) -> Result<OkResponse, ApiError> {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|e| ApiError::internal(format!("get timestamp: {e}")))?
-        .as_secs() as i64;
+    let now = now_secs()?;
 
     let ext = RemoteExtension {
         port: query.port,
@@ -137,24 +174,117 @@ pub async fn register(
 }
 
 /// Refresh the last_seen timestamp for a registered extension.
+///
+/// If the `session_id` is unknown (not in the registry), this handler
+/// **creates** the entry rather than returning 404. This is intentional:
+/// the MV3 service worker dies after ~30 s of inactivity, taking the
+/// heartbeat loop with it. When the user wakes the worker, it resumes
+/// heartbeating — but the engine may have restarted in the meantime and
+/// lost the in-memory registry. Treating the first post-restart heartbeat
+/// as a re-registration prevents a 404 → 503 cascade that would confuse
+/// the user.
 pub async fn heartbeat(
     State(state): State<AppState>,
     Query(query): Query<HeartbeatQuery>,
 ) -> Result<OkResponse, ApiError> {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|e| ApiError::internal(format!("get timestamp: {e}")))?
-        .as_secs() as i64;
+    let now = now_secs()?;
 
     let mut registry = state.remote_extensions.lock().await;
     if let Some(ext) = registry.get_mut(&query.session_id) {
         ext.last_seen = now;
-        Ok(OkResponse { ok: true })
+        // Self-heal: older extension builds heartbeat without `directory`;
+        // adopt it from the query when provided so `/status?directory=`
+        // filtering keeps matching.
+        if let Some(dir) = query.directory.clone()
+            && !dir.is_empty()
+        {
+            ext.directory = dir;
+        }
     } else {
-        Err(ApiError::not_found(format!(
-            "extension with session_id {} not registered",
-            query.session_id
-        )))
+        // Entry missing — likely a post-restart heartbeat from a worker
+        // that is still alive. Re-create the entry; preserve any existing
+        // directory from the query or default to empty.
+        let ext = RemoteExtension {
+            port: String::new(),
+            session_id: query.session_id.clone(),
+            directory: query.directory.unwrap_or_default(),
+            last_seen: now,
+        };
+        registry.insert(query.session_id, ext);
+    }
+
+    Ok(OkResponse { ok: true })
+}
+
+/// Get status of all registered extensions and queue depths.
+pub async fn status(
+    State(state): State<AppState>,
+    Query(query): Query<StatusQuery>,
+) -> Result<Json<StatusResponse>, ApiError> {
+    let now = now_secs()?;
+
+    // Build extensions list with optional filtering.
+    let mut extensions: Vec<ExtensionInfo> = Vec::new();
+    let registry = state.remote_extensions.lock().await;
+    for ext in registry.values() {
+        // Apply filters if provided.
+        if let Some(ref sid) = query.session_id
+            && ext.session_id != *sid
+        {
+            continue;
+        }
+        if let Some(ref dir) = query.directory
+            && ext.directory != *dir
+        {
+            continue;
+        }
+        extensions.push(ExtensionInfo {
+            session_id: ext.session_id.clone(),
+            directory: ext.directory.clone(),
+            last_seen: ext.last_seen,
+            last_seen_age_secs: now.saturating_sub(ext.last_seen),
+        });
+    }
+    drop(registry);
+
+    // Build queue depth map (only sessions with depth > 0).
+    let mut queue: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    {
+        let q = state.command_queue.lock().await;
+        for (sid, cmds) in q.queue.iter() {
+            if !cmds.is_empty() {
+                queue.insert(sid.clone(), cmds.len());
+            }
+        }
+    }
+
+    Ok(Json(StatusResponse {
+        ok: true,
+        extensions,
+        queue,
+    }))
+}
+
+/// Normalize the params payload for the `tabs` action.
+///
+/// The legacy Chrome extension sometimes sends `{"query": "x"}` (a string
+/// value for `query`) which causes `chrome.tabs.query()` to throw
+/// `No matching signature`. We normalise by:
+/// - Using `{}` when `body` is `None` or not an object.
+/// - Stripping the `query` key when it is not an object (e.g. a string).
+fn normalize_tabs_params(body: Option<Value>) -> Value {
+    match body {
+        None => json!({}),
+        Some(Value::Object(map)) => {
+            let mut m = map;
+            if let Some(q) = m.get("query")
+                && !q.is_object()
+            {
+                m.remove("query");
+            }
+            Value::Object(m)
+        }
+        Some(_) => json!({}),
     }
 }
 
@@ -170,8 +300,10 @@ pub async fn remote(
     Query(query): Query<RemoteQuery>,
     body: Option<axum::extract::Json<Value>>,
 ) -> Result<axum::extract::Json<Value>, ApiError> {
-    // 1. Resolve the target extension.
+    // 1. Resolve the target extension, checking staleness.
     let registry = state.remote_extensions.lock().await;
+    let now = now_secs()?;
+
     let ext = registry
         .get(&query.session_id)
         .or_else(|| {
@@ -189,12 +321,32 @@ pub async fn remote(
         )
     })?;
 
+    // Check freshness: if the best candidate's last heartbeat is older
+    // than 90 s, the MV3 service worker is almost certainly asleep.
+    let age_secs = now.saturating_sub(ext.last_seen);
+    if age_secs > STALE_THRESHOLD_SECS {
+        return Err(ApiError::service_unavailable(format!(
+            "extension last heartbeat {age_secs}s ago (stale > {STALE_THRESHOLD_SECS}s) \
+             — worker is probably asleep; ask the user to open the extension Options page \
+             / reload it, then retry"
+        )));
+    }
+
     // 2. Build and enqueue the command.
     let cmd_id = uuid::Uuid::new_v4().to_string();
+
+    // Normalize params for the `tabs` action to guard against legacy
+    // client bugs sending `{"query": "x"}`.
+    let params = if action == "tabs" {
+        normalize_tabs_params(body.map(|Json(v)| v))
+    } else {
+        body.map(|Json(v)| v).unwrap_or(json!({}))
+    };
+
     let cmd = QueuedCommand {
         id: cmd_id.clone(),
         method: action.clone(),
-        params: body.map(|Json(v)| v).unwrap_or(json!({})),
+        params,
         session_id: ext.session_id.clone(),
     };
 
@@ -366,8 +518,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn heartbeat_creates_entry_for_unknown_session() {
+        let state = make_state();
+        let resp = heartbeat(
+            State(state.clone()),
+            Query(HeartbeatQuery {
+                session_id: "new-ext".into(),
+                directory: Some("/home/user/project".into()),
+            }),
+        )
+        .await
+        .expect("heartbeat should succeed (re-register)");
+        assert!(resp.ok);
+
+        let exts = state.remote_extensions.lock().await;
+        let ext = exts
+            .get("new-ext")
+            .expect("heartbeat should create the entry");
+        assert_eq!(ext.session_id, "new-ext");
+        assert_eq!(ext.directory, "/home/user/project");
+        assert_eq!(ext.port, ""); // port is empty for heartbeat-created entries
+        assert!(ext.last_seen > 0);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_refreshes_last_seen() {
+        let state = make_state();
+        let before = now_secs().unwrap();
+
+        // First heartbeat — creates the entry.
+        heartbeat(
+            State(state.clone()),
+            Query(HeartbeatQuery {
+                session_id: "s1".into(),
+                directory: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let ts1 = {
+            let exts = state.remote_extensions.lock().await;
+            exts["s1"].last_seen
+        };
+        assert!(ts1 >= before);
+
+        // Sleep a tiny bit and send another heartbeat.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        heartbeat(
+            State(state.clone()),
+            Query(HeartbeatQuery {
+                session_id: "s1".into(),
+                directory: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let ts2 = {
+            let exts = state.remote_extensions.lock().await;
+            exts["s1"].last_seen
+        };
+        assert!(
+            ts2 >= ts1,
+            "last_seen should be refreshed (or same if sub-ms)"
+        );
+    }
+
+    #[tokio::test]
     async fn heartbeat_fails_without_registration() {
         let state = make_state();
+        // This is no longer expected to fail — heartbeat now re-registers.
         let result = heartbeat(
             State(state),
             Query(HeartbeatQuery {
@@ -376,7 +598,88 @@ mod tests {
             }),
         )
         .await;
-        assert!(result.is_err());
+        assert!(
+            result.is_ok(),
+            "heartbeat for unknown session should now succeed"
+        );
+    }
+
+    #[tokio::test]
+    async fn status_empty_registry() {
+        let state = make_state();
+        let resp = status(
+            State(state),
+            Query(StatusQuery {
+                session_id: None,
+                directory: None,
+            }),
+        )
+        .await
+        .expect("status should succeed");
+
+        assert!(resp.ok);
+        assert!(resp.extensions.is_empty());
+        assert!(resp.queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_after_register() {
+        let state = make_state();
+        register(
+            State(state.clone()),
+            Query(RegisterQuery {
+                port: "9222".into(),
+                session_id: "s1".into(),
+                directory: "/tmp".into(),
+            }),
+        )
+        .await
+        .expect("register should succeed");
+
+        let resp = status(
+            State(state),
+            Query(StatusQuery {
+                session_id: None,
+                directory: None,
+            }),
+        )
+        .await
+        .expect("status should succeed");
+
+        assert!(resp.ok);
+        assert_eq!(resp.extensions.len(), 1);
+        assert_eq!(resp.extensions[0].session_id, "s1");
+        assert_eq!(resp.extensions[0].directory, "/tmp");
+        assert!(resp.extensions[0].last_seen_age_secs >= 0);
+        assert!(resp.extensions[0].last_seen_age_secs < 3600);
+    }
+
+    #[tokio::test]
+    async fn status_filter_unknown_session() {
+        let state = make_state();
+        register(
+            State(state.clone()),
+            Query(RegisterQuery {
+                port: "9222".into(),
+                session_id: "s1".into(),
+                directory: "/tmp".into(),
+            }),
+        )
+        .await
+        .expect("register should succeed");
+
+        let resp = status(
+            State(state),
+            Query(StatusQuery {
+                session_id: Some("unknown".into()),
+                directory: None,
+            }),
+        )
+        .await
+        .expect("status should succeed");
+
+        assert!(resp.ok);
+        assert!(resp.extensions.is_empty());
     }
 
     #[tokio::test]
@@ -393,6 +696,49 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn remote_rejects_stale_extension() {
+        let state = make_state();
+
+        // Register an extension with a "last_seen" far in the past.
+        let stale_ts = now_secs().unwrap() - 200; // 200 s ago, well past the 90 s threshold
+        state.remote_extensions.lock().await.insert(
+            "s1".into(),
+            RemoteExtension {
+                port: "9222".into(),
+                session_id: "s1".into(),
+                directory: "/tmp".into(),
+                last_seen: stale_ts,
+            },
+        );
+
+        let err = remote(
+            State(state),
+            Path("navigate".into()),
+            Query(RemoteQuery {
+                session_id: "s1".into(),
+                directory: None,
+            }),
+            None,
+        )
+        .await
+        .expect_err("remote should fail for stale extension");
+
+        match &err {
+            ApiError::ServiceUnavailable(msg) => {
+                assert!(
+                    msg.contains("stale"),
+                    "error message should mention staleness: {msg}"
+                );
+                assert!(
+                    msg.contains("90"),
+                    "error message should mention the threshold: {msg}"
+                );
+            }
+            other => panic!("expected ServiceUnavailable, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -467,6 +813,36 @@ mod tests {
             .expect("remote should succeed");
         let body: Value = tool_response.0;
         assert_eq!(body["result"]["url"], "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn tabs_normalize_body_none() {
+        let result = normalize_tabs_params(None);
+        assert_eq!(result, json!({}));
+    }
+
+    #[tokio::test]
+    async fn tabs_normalize_query_string() {
+        let result = normalize_tabs_params(Some(json!({"query": "x"})));
+        assert_eq!(result, json!({}));
+    }
+
+    #[tokio::test]
+    async fn tabs_normalize_query_object_preserved() {
+        let result = normalize_tabs_params(Some(json!({"query": {"active": true}})));
+        assert_eq!(result, json!({"query": {"active": true}}));
+    }
+
+    #[tokio::test]
+    async fn tabs_normalize_non_object_body() {
+        let result = normalize_tabs_params(Some(json!("just a string")));
+        assert_eq!(result, json!({}));
+    }
+
+    #[tokio::test]
+    async fn tabs_normalize_object_preserves_valid_keys() {
+        let result = normalize_tabs_params(Some(json!({"active": true, "currentWindow": true})));
+        assert_eq!(result, json!({"active": true, "currentWindow": true}));
     }
 
     #[tokio::test]

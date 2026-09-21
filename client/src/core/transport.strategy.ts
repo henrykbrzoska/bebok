@@ -23,11 +23,24 @@
  * exactly once - persisted like a manual "Connect" - and then stripped from
  * the address bar (`history.replaceState`) so reloads, bookmarks and copied
  * links do not keep re-applying (or leaking) the token.
+ *
+ * Fixed profile (Phase 2): the client can be configured to always connect to
+ * a pre-defined engine (http://localhost:8787 + token). When `profileKind` is
+ * `'fixed'` the Start screen skips the address form and the sidebar offers a
+ * Connect/Disconnect toggle instead of requiring manual address entry.
  */
 
 import { setEngineToken, splitEngineUrl } from './auth.interceptor';
 
 export type PlatformKind = 'tauri' | 'http';
+
+export type ConnectionProfileKind = 'tauri' | 'fixed' | 'manual';
+
+export interface ConnectionProfile {
+  kind: ConnectionProfileKind;
+  baseUrl: string;
+  token: string | null;
+}
 
 export interface EngineConnection {
   kind: PlatformKind;
@@ -41,6 +54,7 @@ export interface EngineInfo {
 
 const REMOTE_URL_KEY = 'bebok.remote.baseUrl';
 const REMOTE_TOKEN_KEY = 'bebok.remote.token';
+const PROFILE_KIND_KEY = 'bebok.remote.profileKind';
 const DIRECTORY_KEY = 'bebok.lastDirectory';
 
 const DEFAULT_REMOTE_URL = 'http://127.0.0.1:8787';
@@ -119,6 +133,62 @@ export class TransportStrategy {
       return true;
     }
     return 'Capacitor' in window;
+  }
+
+  // -------------------------------------------------------------------------
+  // Connection profile (Phase 2)
+  // -------------------------------------------------------------------------
+
+  /** Read the persisted connection profile (kind, URL, token). */
+  readProfile(): ConnectionProfile {
+    let kind: ConnectionProfileKind = 'manual';
+    try {
+      const stored = localStorage.getItem(PROFILE_KIND_KEY);
+      if (stored === 'fixed' || stored === 'tauri') {
+        kind = stored;
+      }
+    } catch {
+      /* ignore */
+    }
+    return {
+      kind,
+      baseUrl: this.readRemoteUrl(),
+      token: this.readRemoteToken(),
+    };
+  }
+
+  /**
+   * Persist a fixed-engine profile: saves URL + token + profile kind.
+   * Delegates to `saveRemote` for the URL/token pair so existing bootstrap
+   * and adopt paths keep working.
+   */
+  saveFixedProfile(baseUrl: string, token?: string | null): void {
+    this.saveRemote(baseUrl, token);
+    try {
+      localStorage.setItem(PROFILE_KIND_KEY, 'fixed');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Clear the connection profile, reverting to `'manual'` mode. */
+  clearProfile(): void {
+    try {
+      localStorage.removeItem(PROFILE_KIND_KEY);
+      localStorage.removeItem(REMOTE_URL_KEY);
+      localStorage.removeItem(REMOTE_TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** True when the user explicitly configured a fixed-engine connection. */
+  isFixedProfile(): boolean {
+    try {
+      return localStorage.getItem(PROFILE_KIND_KEY) === 'fixed';
+    } catch {
+      return false;
+    }
   }
 
   /**

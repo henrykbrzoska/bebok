@@ -69,7 +69,7 @@ import {
   IndexStatusResponse,
   ScheduleTask,
 } from './engine.dtos';
-import { EngineConnection, TransportStrategy } from './transport.strategy';
+import { ConnectionProfile, EngineConnection, TransportStrategy } from './transport.strategy';
 
 export interface PermissionDecisionInput {
   decision: 'allow' | 'deny';
@@ -98,6 +98,14 @@ export class EngineClient {
    */
   readonly unauthorized = signal(false);
 
+  /**
+   * True when the user explicitly disconnected (sidebar Disconnect button).
+   * `connect()` is a no-op while this flag is set until `reconnect()` clears
+   * it. This prevents the event store or start view from reconnecting
+   * automatically after a deliberate disconnect.
+   */
+  readonly isDisconnected = signal(false);
+
   constructor() {
     onEngineUnauthorized(() => this.unauthorized.set(true));
   }
@@ -113,6 +121,15 @@ export class EngineClient {
 
   /** Resolve (and cache) the engine connection for the current platform. */
   async connect(): Promise<EngineConnection> {
+    // A deliberate disconnect blocks automatic reconnection until the user
+    // explicitly reconnects (sidebar button or start screen).
+    if (this.isDisconnected()) {
+      const existing = this.connection();
+      if (existing) {
+        return existing;
+      }
+      throw new Error('engine disconnected by user');
+    }
     const existing = this.connection();
     if (existing) {
       return existing;
@@ -149,6 +166,7 @@ export class EngineClient {
       this.connection.set(null);
       await this.connect();
     }
+    this.isDisconnected.set(false);
     this.unauthorized.set(false);
     await this.ping();
     if (this.unauthorized()) {
@@ -193,6 +211,45 @@ export class EngineClient {
 
   readLastDirectory(): string | null {
     return this.transport.readLastDirectory();
+  }
+
+  // -------------------------------------------------------------------------
+  // Connection profile (Phase 2)
+  // -------------------------------------------------------------------------
+
+  /** Read the persisted connection profile (kind, URL, token). */
+  getProfile(): ConnectionProfile {
+    return this.transport.readProfile();
+  }
+
+  /**
+   * Persist a fixed-engine profile (URL + token + kind). The Start screen
+   * and sidebar call this after the user pastes a BEBOK_READY URL and opts
+   * to "save as fixed".
+   */
+  saveFixedProfile(baseUrl: string, token?: string | null): void {
+    this.transport.saveFixedProfile(baseUrl, token);
+  }
+
+  /** Clear the connection profile, reverting to manual mode. */
+  clearProfile(): void {
+    this.transport.clearProfile();
+  }
+
+  /** True when the user explicitly configured a fixed-engine connection. */
+  isFixedProfile(): boolean {
+    return this.transport.isFixedProfile();
+  }
+
+  /**
+   * Disconnect from the engine: clear the connection, drop the token, stop
+   * the event stream and set `isDisconnected` so automatic reconnect is
+   * suppressed until the user explicitly reconnects.
+   */
+  disconnect(): void {
+    this.connection.set(null);
+    this.unauthorized.set(false);
+    this.isDisconnected.set(true);
   }
 
   // ---------------------------------------------------------------------------
