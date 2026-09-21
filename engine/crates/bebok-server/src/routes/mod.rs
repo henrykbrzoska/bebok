@@ -81,8 +81,11 @@ pub fn build_api_router() -> Router<AppState> {
         // Remote browser extension (phase 1.1 registration, phase 2 pull queue).
         .route("/browser/register", post(browser_remote::register))
         .route("/browser/heartbeat", post(browser_remote::heartbeat))
+        .route("/browser/remote/status", get(browser_remote::status))
         .route("/browser/remote/pending", get(browser_remote::pending))
         .route("/browser/remote/result", post(browser_remote::result))
+        // NOTE: /browser/remote/{action} must come after specific routes;
+        // GET status vs POST action — method and path specificity matter.
         .route("/browser/remote/{action}", post(browser_remote::remote))
         .route("/agent", get(meta::list_agents))
         .route("/mcp", get(mcp::list_mcp))

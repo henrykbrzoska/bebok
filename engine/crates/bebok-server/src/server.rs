@@ -22,7 +22,8 @@ use crate::middleware::log_http;
 use crate::routes::build_api_router;
 use crate::state::AppState;
 
-/// Assemble shared state + the full router (same wiring as the old `main`).
+/// Assemble shared state + the router (without CORS layer — applied later
+/// in [`serve`] once the actual port is known).
 pub fn build_app() -> (Router, AppState) {
     let store = InstanceStore::new();
 
@@ -83,6 +84,8 @@ pub fn build_app() -> (Router, AppState) {
     // Scheduler: tick-loop that fires due tasks via create_session + prompt_turn.
     crate::routes::schedules::spawn_scheduler(state.clone());
 
+    // CORS is NOT applied here — `serve()` adds it after `TcpListener::bind`
+    // so the actual port is included in allowed origins.
     let app = build_api_router()
         // Image attachments: up to 5 images x 5 MiB base64 (~35 MB JSON).
         // Axum's default 2 MiB Json limit would reject those with 413 before
@@ -90,7 +93,6 @@ pub fn build_app() -> (Router, AppState) {
         // `bebok_core::agent::images::validate_agent_images`.
         .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(middleware::from_fn_with_state(state.clone(), log_http))
-        .layer(cors_layer())
         .with_state(state.clone());
     (app, state)
 }
@@ -129,9 +131,22 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
 
     // `--port 0` lets the OS pick a free port; we must announce the real one.
     let addr = std::net::SocketAddr::new(bind.host, bind.port);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            anyhow::bail!(
+                "port {addr} is already in use — kill the occupying process or pick a \
+                 different port with --port"
+            );
+        }
+        Err(e) => return Err(e.into()),
+    };
     let actual = listener.local_addr()?;
     tracing::info!("bebok engine listening on http://{actual}");
+
+    // Apply CORS *after* binding so the actual port (random or custom) is
+    // included in the allowed origins.
+    let app = app.layer(cors_layer(actual.port()));
 
     // Machine-readable handshake for the parent (Tauri sidecar spawn).
     // The ONLY stdout line.

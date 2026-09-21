@@ -12,12 +12,23 @@ you are reading, and optionally lets the agent drive your browser remotely
    cargo run -p bebok-server -- --port 8787
    ```
 2. Open `chrome://extensions`, enable **Developer mode**, **Load unpacked**,
-   pick this directory (`client/chrome-extension`).
-3. Open the extension's **Options** and paste:
+   pick this directory (`client/chrome-extension`). The extension requests
+   access to all sites (`<all_urls>`) — remote piloting injects scripts
+   into whatever tab is active (e.g. idealista, github), and without it
+   Chrome refuses with "Extension manifest must request permission to
+   access this host".
+3. Open the extension's **Options** and either paste:
    - **Engine URL** — the full `BEBOK_READY` URL, token included
      (`http://127.0.0.1:8787?token=…`)
    - **Working directory** — the project the agent works in (`E:\bebok`)
-4. Press **Test connection** (expects `OK`). Then click the toolbar icon.
+   
+   …or press **Search local Bebok** (probes the Engine URL field, or
+   `http://127.0.0.1:8787` when empty): a no-auth engine is filled in and
+   saved automatically; otherwise the status tells you what to do next
+   (paste the fresh `BEBOK_READY` URL when the token is stale, start the
+   engine when nothing listens).
+4. Press **Test connection** (expects `OK`). A positive test saves both
+   fields automatically. Then click the toolbar icon.
 
 > CORS: extension origins are `chrome-extension://<id>`. If the popup reports
 > a CORS failure, restart the engine with the extension id allowed:
@@ -47,6 +58,25 @@ history, console, tabs). All commands except `tabs` run on your active tab;
    set and tested (see Install above).
 4. The extension registers immediately on toggle and sends a heartbeat every
    5 s. The Options page shows the current status.
+
+### Auto-reconnect (no more pasting after restarts)
+
+Once remote piloting is enabled with a tested URL, the extension keeps
+itself connected without user action:
+
+- **On browser/worker startup** it probes once right away (stored URL →
+  `127.0.0.1:8787` → last known good port) using the stored URL token or
+  the Pinned token, adopts whatever answers, and re-registers.
+- **On 3 failed heartbeats in a row** (~15 s of unreachable engine, e.g.
+  the desktop sidecar restarted on a new random port) it re-runs the same
+  discovery, throttled to at most one attempt per minute.
+- A **401** (engine alive, token stale/rotated) is *not* auto-retried on
+  other ports — the Options status tells you to update the token.
+
+Prerequisite: the engine token must be stable — the default persistent file
+`~/.config/bebok/token` already is (created on first engine launch), or pin
+it explicitly via `BEBOK_TOKEN` + the Pinned token field. The last known
+good port survives worker restarts (persisted in `chrome.storage.sync`).
 
 ### How it works
 
@@ -98,28 +128,69 @@ listening TCP socket, so the engine cannot push commands.
 
 ### Options page status messages
 
-The `<p id="remoteStatus">` line under **Remote piloting** is static text —
-it confirms your settings, **not** a live connection:
+The `<p id="remoteStatus">` line under **Remote piloting** updates live from
+the engine — the initial fallback shows `Checking…` until the first query
+arrives.
 
 | Message | Meaning |
 |---------|---------|
 | `Disabled` | Checkbox unticked (`remoteEnabled === false`). |
 | `Enabled but engine URL or directory is not set` | Ticked, but Engine URL or Working directory is empty — fill both in. |
-| `Enabled — extension will register on the next heartbeat` | Ticked + URL + directory set. The extension registers immediately on toggle and then heartbeats every 5 s. If the engine sees no heartbeat, the extension's service worker is asleep (see "Service worker falls asleep" below). |
+| `Registered · last beat Ns ago · queued commands: N` | Live proof: the engine has seen the extension. If `N > 30` a note warns the worker may be asleep — open Options to wake it. |
+| `Not registered — …` with *401* hint | The stored token no longer matches the engine (rotated or `BEBOK_TOKEN` changed). Paste the new `BEBOK_READY` URL, Save, Test connection. |
+| `Not registered — …` with *Failed to fetch* hint | The engine is not running or the port is wrong. Check the engine process. |
+| `Not registered — …` with generic hint | The extension's service worker is asleep. Open this Options page to wake it, reload the extension, or untick+retick remote piloting. |
 
 ### Desktop mode: the Engine URL goes stale on every restart
 
 When the engine runs as the Tauri desktop sidecar it listens on a **random
-port** (`--port 0`) with a **fresh token per launch**. After every engine
-restart you must:
+port** (`--port 0`). The capability token, however, is **stable**: the engine
+loads it from the persistent file `~/.config/bebok/token` (created on first
+launch; `BEBOK_TOKEN_FILE` overrides the path). After an engine restart you
+only need the new port:
 
-1. Copy the new full `BEBOK_READY` URL **including `?token=…`**.
+1. Copy the new full `BEBOK_READY` URL (the `?token=…` part is unchanged).
 2. Paste it into **Options → Engine URL**.
 3. Press **Test connection** (expects `OK`).
 4. Untick + retick **Enable remote piloting** to force `POST /browser/register`.
 
-A stale URL fails silently with 401 — the Options status text stays green
-(see above) while the engine rejects every register/heartbeat.
+A stale port fails with *Failed to fetch*; a stale token fails with 401 —
+the Options status shows `Not registered` with a hint (see above).
+
+### Stable port (auto-reconnect)
+
+To stop pasting the URL after every restart, pin the port too. The desktop
+sidecar reads `BEBOK_PORT` from env (opt-in; dev scripts use `--port`):
+
+| Var | Effect | Where to set |
+|-----|--------|--------------|
+| `BEBOK_PORT` | desktop sidecar listens on this fixed port instead of `--port 0` | env before starting the desktop app |
+| `BEBOK_TOKEN` | capability token pinned to this value instead of the persistent file (see `engine/.../auth.rs`) | env before starting the engine / desktop app — overrides the file, never written to disk |
+
+Setup (bash):
+
+```bash
+export BEBOK_PORT=8787   # desktop sidecar only; dev scripts use --port
+# optional: export BEBOK_TOKEN='...' to override the file token
+```
+
+Windows (`cmd`): `set BEBOK_TOKEN=…` / `set BEBOK_PORT=8787` before launch.
+`scripts/bebok.mjs` (`full-build-dev`, `engine`) passes both through when set
+and logs `using pinned BEBOK_TOKEN from env`.
+
+Then, in extension **Options**:
+
+1. Paste the `BEBOK_READY` URL once, paste the same token into
+   **Pinned token (BEBOK_TOKEN)**, set the Working directory.
+2. **Test connection** (saves all three fields).
+3. From now on **Search local Bebok** finds the engine on any probed port
+   (URL field → `8787` → last known good) using the pinned token and saves
+   the working URL — no more pasting after restarts.
+
+Security note: a stable token (file or pinned) is weaker than a fresh random
+one per launch (any local process holding it keeps access until you rotate
+it). Fine for loopback dev; rotate by replacing the file contents (or
+changing the env value) and re-pasting once.
 
 ### Service worker falls asleep (MV3)
 

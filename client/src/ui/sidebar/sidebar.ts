@@ -78,6 +78,9 @@ export class Sidebar {
   readonly expanded = this.shell.sidebarExpanded;
   readonly activeScreen = this.shell.activeScreen;
 
+  /** Whether the user deliberately disconnected (sidebar Disconnect button). */
+  readonly isDisconnected = this.engine.isDisconnected;
+
   /** Project directory shown in the switcher row (engine-persisted choice). */
   readonly directory = this.project.directory;
   readonly agents = this.project.agents;
@@ -275,6 +278,31 @@ export class Sidebar {
 
   setLanguage(lang: Language): void {
     this.i18n.setLanguage(lang);
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Connect / Disconnect
+  // -------------------------------------------------------------------------
+
+  /**
+   * Toggle the engine connection: when connected, disconnect; when
+   * disconnected (or never connected), attempt a fresh connect.
+   */
+  async toggleConnection(): Promise<void> {
+    if (this.engine.connected() && !this.engine.isDisconnected()) {
+      this.engine.disconnect();
+      this.events.stop();
+    } else {
+      this.engine.isDisconnected.set(false);
+      this.engine.connection.set(null);
+      this.events.restart();
+      try {
+        await this.engine.connect();
+        await this.engine.ping();
+      } catch {
+        // Connection failure is surfaced through the events store state.
+      }
+    }
   }
 }
 

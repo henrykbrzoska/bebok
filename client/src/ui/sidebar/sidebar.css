@@ -500,6 +500,28 @@
   color: var(--text-muted);
 }
 
+.connect-btn,
+.disconnect-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-11);
+  padding: 2px var(--space-6);
+  border-radius: var(--radius-control-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.connect-btn:hover {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.disconnect-btn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .lang-select {
   margin-left: auto;
   font: inherit;

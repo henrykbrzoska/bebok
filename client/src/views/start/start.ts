@@ -61,6 +61,9 @@ export class StartView implements OnInit, OnDestroy {
   readonly remoteBaseUrl = signal('');
   readonly showAddressForm = signal(false);
 
+  /** Phase 2: true when a fixed profile is active — skip address form. */
+  readonly fixedProfile = signal(false);
+
   /** working directory + sessions (shared with the sidebar) */
   readonly directory = signal<string | null>(null);
   readonly sessions = this.project.sessions;
@@ -135,6 +138,9 @@ export class StartView implements OnInit, OnDestroy {
       this.directory.set(last);
     }
 
+    // Phase 2: check if a fixed profile is active.
+    this.fixedProfile.set(this.engine.isFixedProfile());
+
     // F0-1: always attempt a connection at startup, on every platform.
     await this.connect();
   }
@@ -185,6 +191,29 @@ export class StartView implements OnInit, OnDestroy {
 
   toggleAddressForm(): void {
     this.showAddressForm.update((shown) => !shown);
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Fixed profile
+  // -------------------------------------------------------------------------
+
+  /** Save the current connection as a fixed profile (auto-connect on next visit). */
+  saveAsFixed(): void {
+    const conn = this.engine.connection();
+    if (!conn) {
+      return;
+    }
+    const profile = this.engine.getProfile();
+    this.engine.saveFixedProfile(conn.baseUrl, profile.token);
+    this.fixedProfile.set(true);
+  }
+
+  /** Clear the fixed profile and fall back to manual mode. */
+  clearProfile(): void {
+    this.engine.clearProfile();
+    this.fixedProfile.set(false);
+    this.showAddressForm.set(true);
+    this.remoteBaseUrl.set('http://127.0.0.1:8787');
   }
 
   /**

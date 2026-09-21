@@ -7,6 +7,11 @@
  * On every (re)connect a `reconnectVersion` bump lets active views re-sync
  * their transcript so events that fell into a reconnect gap are not lost.
  * No polling anywhere.
+ *
+ * Backoff: when the stream drops, the retry delay grows exponentially from
+ * 1.5 s to a cap of 30 s and resets to 1.5 s as soon as the stream is live
+ * again. The `visibilitychange` event triggers an immediate retry when the
+ * tab becomes visible (the user may have restarted the engine while away).
  */
 
 import { Injectable, inject, signal } from '@angular/core';
@@ -23,7 +28,10 @@ import { EngineEvent } from './engine.dtos';
  */
 export type SseState = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unauthorized';
 
-const RECONNECT_DELAY_MS = 1500;
+/** Initial (and reset) delay between reconnection attempts (ms). */
+const BASE_RECONNECT_DELAY_MS = 1_500;
+/** Maximum delay between reconnection attempts (ms). */
+const MAX_RECONNECT_DELAY_MS = 30_000;
 
 type Listener = (event: EngineEvent) => void;
 
@@ -42,6 +50,14 @@ export class EventsStore {
   private controller: AbortController | null = null;
   /** True once a stream was established at least once in this session. */
   private everLive = false;
+  /** Current exponential backoff delay (ms). Resets to base on live. */
+  private currentDelay = BASE_RECONNECT_DELAY_MS;
+  /** Event listener for document visibility changes. */
+  private readonly onVisibilityChange = (): void => {
+    if (!this.stopped && document.visibilityState === 'visible' && !this.running) {
+      void this.run();
+    }
+  };
 
   /** Subscribe to the global event stream. Returns an unsubscribe function. */
   onEvent(listener: Listener): () => void {
@@ -57,6 +73,7 @@ export class EventsStore {
     this.started = true;
     this.stopped = false;
     this.running = true;
+    this.registerVisibilityListener();
     void this.run();
   }
 
@@ -66,7 +83,9 @@ export class EventsStore {
     this.running = false;
     this.controller?.abort();
     this.controller = null;
+    this.currentDelay = BASE_RECONNECT_DELAY_MS;
     this.state.set('idle');
+    this.unregisterVisibilityListener();
   }
 
   /** Reconnect after a config change: stop, drop credentials, start fresh. */
@@ -88,7 +107,7 @@ export class EventsStore {
         } catch (err) {
           // Never reached the engine at all -> surface an error, keep retrying.
           this.state.set(this.everLive ? 'reconnecting' : 'error');
-          await this.sleep(RECONNECT_DELAY_MS);
+          await this.backoffSleep();
           continue;
         }
       }
@@ -115,6 +134,8 @@ export class EventsStore {
           throw new Error(`SSE /event -> ${res.status}`);
         }
 
+        // Stream live — reset backoff to base delay.
+        this.currentDelay = BASE_RECONNECT_DELAY_MS;
         this.state.set('live');
         this.everLive = true;
         this.reconnectVersion.update((v) => v + 1);
@@ -131,7 +152,7 @@ export class EventsStore {
       }
 
       if (!this.stopped) {
-        await this.sleep(RECONNECT_DELAY_MS);
+        await this.backoffSleep();
       }
     }
     this.running = false;
@@ -193,7 +214,29 @@ export class EventsStore {
     }
   }
 
+  /** Exponential backoff: 1.5 s → 30 s, reset on live. */
+  private backoffSleep(): Promise<void> {
+    const delay = this.currentDelay;
+    this.currentDelay = Math.min(this.currentDelay * 2, MAX_RECONNECT_DELAY_MS);
+    return this.sleep(delay);
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** Watch tab visibility to trigger immediate reconnection when user returns. */
+  private registerVisibilityListener(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+  }
+
+  private unregisterVisibilityListener(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 }

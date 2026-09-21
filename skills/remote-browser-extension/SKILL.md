@@ -70,12 +70,24 @@ POST /browser/remote/tabs?session_id=extension&directory=/home/rajner/bebok
   This is NOT a page error. Tell the user: open the extension's Options page
   (keeps the worker alive), reload the extension (🔃) or untick+retick
   **Enable remote piloting**, then say "dawaj" — retry within ~30 s.
-- **HTTP 404 `... not registered`** — the extension never registered (or the
-  engine restarted and dropped the registry). Same wake-up steps as above.
-- **HTTP 401** — stale Engine URL: in desktop mode the engine listens on a
-  random port (`--port 0`) with a fresh token per launch. The user must paste
-  the new full `BEBOK_READY` URL (with `?token=`) into Options → Engine URL,
-  press Test connection, and retick remote piloting.
+  (A 1-minute keepalive alarm revives the worker automatically, and
+  `GET /browser/remote/status` shows the exact `last_seen_age_secs`.)
+- **HTTP 503 `extension last heartbeat Xs ago (stale > 90 s)`** — the engine
+  knows the worker is asleep and fails fast instead of hanging 30 s. Same
+  wake-up steps as above.
+- **HTTP 404 `... not registered`** — the extension never registered. (No
+  longer happens after a plain engine restart: since 1.8.4 the heartbeat
+  re-registers a wiped registry automatically.)
+- **HTTP 503 `tabs` error `No matching signature`** — a legacy client sent
+  `{"query": "x"}` instead of a `chrome.tabs.query` filter object. The
+  engine (and extension) now strip a non-object `query` key automatically;
+  retry with `{}`.
+- **HTTP 401** — stale Engine URL or rotated token: in desktop mode the
+  engine listens on a random port (`--port 0`); the token is stable (file
+  `~/.config/bebok/token`, overridable via `BEBOK_TOKEN`), but the port
+  changes every launch. The user must paste the new full `BEBOK_READY` URL
+  into Options → Engine URL, press Test connection, and retick remote
+  piloting (or pin `BEBOK_PORT` — see `client/chrome-extension/README.md`).
 - **Options shows `Enabled — extension will register on the next heartbeat`**
   — this is static text confirming settings (checkbox + URL + directory),
   NOT a live-connection proof. The only proof is fresh `POST

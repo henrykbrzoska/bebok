@@ -162,6 +162,12 @@
   background: transparent;
 }
 
+.fixed-hint {
+  font-size: var(--fs-11-5);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* --- Project directory card -------------------------------------------- */
 
 .row {

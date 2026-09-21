@@ -39,12 +39,80 @@
         The project the agent works in (absolute path, as shown by the engine).
       </p>
 
+      <label class="label" for="pinnedToken">Pinned token (BEBOK_TOKEN)</label>
+      <input
+        id="pinnedToken"
+        class="question"
+        type="password"
+        placeholder="(optional) same value as the engine's BEBOK_TOKEN"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <p class="hint">
+        Set the same value as the engine's <code>BEBOK_TOKEN</code> env var.
+        Stored locally, sent only to 127.0.0.1/localhost. With a stable token,
+        <strong>Search local Bebok</strong> finds the engine on any port.
+      </p>
+
       <div class="row">
         <button id="test" class="primary" type="button">Test connection</button>
+        <button id="search" type="button">Search local Bebok</button>
         <button id="save" class="icon-button" type="button">Save</button>
       </div>
 
+      <p class="hint">
+        No URL handy? <strong>Search local Bebok</strong> probes the Engine URL
+        above (or <code>http://127.0.0.1:8787</code> when empty). It saves the
+        address when the engine needs no token; otherwise it tells you to paste
+        the fresh <code>BEBOK_READY</code> URL. A positive
+        <strong>Test connection</strong> also saves both fields automatically.
+      </p>
+
       <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 0" />
+
+      <h2 style="font-size:14px;margin:16px 0 6px">Engine discovery</h2>
+      <p id="discoveryStatus" class="status" role="status" aria-live="polite"></p>
+      <div class="row">
+        <button id="rescan" type="button">Re-scan now</button>
+        <span class="hint">Last seen port: <span id="lastPort">-</span></span>
+        <span class="hint">Hint: <code>BEBOK_PORT=8787</code></span>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 0" />
+
+      <h2 style="font-size:14px;margin:16px 0 6px">Server control</h2>
+      <label class="label" for="bebokToken">Token (read-only)</label>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input
+          id="bebokToken"
+          class="question"
+          type="text"
+          placeholder="BEBOK_TOKEN"
+          readonly
+        />
+        <button id="genToken" type="button" class="icon-button">🔀</button>
+      </div>
+      <label class="label" for="fixedPort">Port</label>
+      <input
+        id="fixedPort"
+        class="question"
+        type="number"
+        min="1"
+        max="65535"
+        value="8787"
+      />
+      <label class="label" for="startCmd">Start command</label>
+      <textarea
+        id="startCmd"
+        class="question"
+        rows="2"
+        readonly
+      ></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="copyStartCmd" type="button">Copy</button>
+      </div>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 0" />
 

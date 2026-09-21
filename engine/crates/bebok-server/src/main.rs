@@ -51,6 +51,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let spec = cli::parse_cli(&std::env::args().skip(1).collect::<Vec<_>>())?;
+
+    // Initialize the capability token once: `--token` flag > `BEBOK_TOKEN` env
+    // > token file > memory-only random. Must happen before any code reads
+    // `auth::token()` (server.rs prints it in BEBOK_READY).
+    auth::init_token(spec.token.clone());
+
     let result = server::serve(spec).await;
     // F9-14: last-resort sweep (runtime-free) so a serve error or an early
     // return never leaves a background process behind.

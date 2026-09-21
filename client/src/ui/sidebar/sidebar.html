@@ -151,6 +151,29 @@
       <button type="button" class="engine-live-btn" data-testid="engine-live-btn" (click)="toggleEngineUrl()" [attr.title]="engineUrl() || statusLabel()">
         <app-status-dot [label]="statusLabel()" [tone]="statusTone()" />
       </button>
+      @if (isDisconnected()) {
+        <button
+          type="button"
+          class="connect-btn"
+          data-testid="sidebar-connect"
+          [attr.aria-label]="t('sidebar.connect')"
+          [title]="t('sidebar.connect')"
+          (click)="toggleConnection()"
+        >
+          {{ t('sidebar.connect') }}
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="disconnect-btn"
+          data-testid="sidebar-disconnect"
+          [attr.aria-label]="t('sidebar.disconnect')"
+          [title]="t('sidebar.disconnect')"
+          (click)="toggleConnection()"
+        >
+          {{ t('sidebar.disconnect') }}
+        </button>
+      }
       @if (showEngineUrl() && engineUrl()) {
         <span class="engine-url" data-testid="engine-url">{{ engineUrl() }}</span>
       }

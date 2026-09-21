@@ -119,3 +119,57 @@ describe('TransportStrategy bootstrap adoption', () => {
     expect(transport.readRemoteUrl()).toBe('http://127.0.0.1:9999');
   });
 });
+
+
+describe('TransportStrategy fixed profile (Phase 2)', () => {
+  const originalHref = window.location.href;
+
+  beforeEach(() => {
+    localStorage.clear();
+    setEngineToken(null);
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', originalHref);
+    localStorage.clear();
+    setEngineToken(null);
+  });
+
+  it('readProfile returns manual by default', () => {
+    const transport = new TransportStrategy();
+    const profile = transport.readProfile();
+    expect(profile.kind).toBe('manual');
+    expect(profile.baseUrl).toBe('http://127.0.0.1:8787');
+    expect(profile.token).toBeNull();
+  });
+
+  it('saveFixedProfile persists URL + token + kind=fixed', () => {
+    const transport = new TransportStrategy();
+    transport.saveFixedProfile('http://127.0.0.1:9999', 'tok-abc');
+    expect(transport.readRemoteUrl()).toBe('http://127.0.0.1:9999');
+    expect(transport.readRemoteToken()).toBe('tok-abc');
+    expect(transport.isFixedProfile()).toBeTrue();
+    expect(transport.readProfile().kind).toBe('fixed');
+  });
+
+  it('clearProfile reverts to manual and removes stored values', () => {
+    const transport = new TransportStrategy();
+    transport.saveFixedProfile('http://127.0.0.1:9999', 'tok-abc');
+    expect(transport.isFixedProfile()).toBeTrue();
+    transport.clearProfile();
+    expect(transport.isFixedProfile()).toBeFalse();
+    expect(transport.readProfile().kind).toBe('manual');
+    expect(transport.readProfile().baseUrl).toBe('http://127.0.0.1:8787');
+    expect(transport.readRemoteToken()).toBeNull();
+  });
+
+  it('connect() uses saved fixed profile URL', async () => {
+    const transport = new TransportStrategy();
+    transport.saveFixedProfile('http://127.0.0.1:9999', 'tok-abc');
+    // Construct a new transport to simulate a page reload with saved profile.
+    const transport2 = new TransportStrategy();
+    const conn = await transport2.connect();
+    expect(conn.baseUrl).toBe('http://127.0.0.1:9999');
+    expect(getEngineToken()).toBe('tok-abc');
+  });
+});
