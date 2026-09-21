@@ -3,10 +3,22 @@
 ## 1.8.3 — 2026-09-21
 
 ### Features
-- **skills**: load bundled skills from skills/ dir next to engine binary (e6f4c91)
-- **chrome-extension**: add tabs remote command and piloting docs (2514c36)
-- remote browser piloting - pull queue, extension handlers, config routing (7caa64f)
-- remote browser engine side - BrowserPage trait, RemotePage, extension endpoints (3bf03e5)
+- Remote browser piloting (Chrome extension preview): the agent can drive
+  the user's active tab through a pull queue (register, heartbeat, pending,
+  result) with `browser.remote.enabled` routing. Multiple commands in flight
+  per session (waiters keyed by command id).
+- Chrome companion extension: new `tabs` remote command listing open tabs
+  (`{id, title, url, active, windowId}`, optional `chrome.tabs.query`
+  filter) without switching tabs. The extension README now documents the
+  Options status texts, the stale-Engine-URL trap in desktop mode (random
+  port + fresh token per launch), the MV3 service-worker sleep (~35 s) with
+  wake-up steps, and the unpacked-reload step after editing extension files.
+- Skills: new bundled layer — `skills/<name>/SKILL.md` next to the engine
+  binary (repo `skills/` dir in dev) is loaded first and can be overridden
+  per-user (`~/.config/bebok/skill/`) or per-project (`.bebok/skill/`).
+  Ships with the `remote-browser-extension` skill (pilot the user's own
+  Brave/Chrome tabs via the Companion extension). Toggles in
+  Settings → Skills work for bundled skills as before.
 
 ## 1.8.2 — 2026-09-18
 
