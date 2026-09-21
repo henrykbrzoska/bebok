@@ -43,6 +43,7 @@ use tokio::task::JoinHandle;
 use super::console::{self, ConsoleBuffer, SharedConsole};
 use super::discovery;
 use super::frames::{self, Frame, FrameSink};
+use super::page::LocalPage;
 use super::settings::{BrowserDisplay, BrowserSettings};
 
 /// Default viewport (CSS pixels). Wide enough for desktop layouts, small
@@ -179,7 +180,11 @@ impl BrowserDriver {
 
     /// The page bound to `session_id`, launching the browser on first use
     /// with the settings of `root` (the session's instance directory).
-    pub async fn page(self: &Arc<Self>, session_id: &str, root: &Path) -> Result<Page, String> {
+    pub async fn page(
+        self: &Arc<Self>,
+        session_id: &str,
+        root: &Path,
+    ) -> Result<LocalPage, String> {
         self.ensure_reaper();
         let mut sessions = self.sessions.lock().await;
         if let Some(sb) = sessions.get_mut(session_id) {
@@ -187,7 +192,7 @@ impl BrowserDriver {
             let dead = matches!(sb.browser.try_wait(), Ok(Some(_)));
             if !dead {
                 sb.last_used = Instant::now();
-                return Ok(sb.page.clone());
+                return Ok(LocalPage::new(sb.page.clone(), sb.headed));
             }
             if let Some(mut sb) = sessions.remove(session_id) {
                 sb.handler.abort();
@@ -200,7 +205,7 @@ impl BrowserDriver {
         }
         let settings = self.settings_for(root);
         let sb = launch(session_id, root, &settings).await?;
-        let page = sb.page.clone();
+        let page = LocalPage::new(sb.page.clone(), sb.headed);
         sessions.insert(session_id.to_string(), sb);
         Ok(page)
     }
@@ -261,43 +266,7 @@ impl BrowserDriver {
             sb.last_used = Instant::now();
             sb.page.clone()
         };
-        match action {
-            HistoryAction::Reload => {
-                tokio::time::timeout(REQUEST_TIMEOUT, page.reload())
-                    .await
-                    .map_err(|_| "reload timed out".to_string())?
-                    .map_err(|e| format!("reload failed: {e}"))?;
-            }
-            HistoryAction::Back | HistoryAction::Forward => {
-                let history = page
-                    .execute(GetNavigationHistoryParams::default())
-                    .await
-                    .map_err(|e| format!("navigation history unavailable: {e}"))?;
-                let current = history.current_index;
-                let target = match action {
-                    HistoryAction::Back => current - 1,
-                    _ => current + 1,
-                };
-                let entry = usize::try_from(target)
-                    .ok()
-                    .and_then(|i| history.entries.get(i))
-                    .ok_or_else(|| {
-                        format!(
-                            "cannot go {} from here",
-                            if action == HistoryAction::Back {
-                                "back"
-                            } else {
-                                "forward"
-                            }
-                        )
-                    })?;
-                page.execute(NavigateToHistoryEntryParams::new(entry.id))
-                    .await
-                    .map_err(|e| format!("history navigation failed: {e}"))?;
-                let _ =
-                    tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation()).await;
-            }
-        }
+        navigate_page_history(&page, action).await?;
         let url = page.url().await.ok().flatten().unwrap_or_default();
         let title = page.get_title().await.ok().flatten().unwrap_or_default();
         Ok((url, title))
@@ -529,6 +498,50 @@ impl BrowserDriver {
             })
         });
     }
+}
+
+/// Back / forward / reload on a raw local page; shared by
+/// [`BrowserDriver::navigate_history`] and [`super::page::LocalPage`].
+/// Returns `Ok` on completion (history navigation waits for the load event,
+/// best effort).
+pub async fn navigate_page_history(page: &Page, action: HistoryAction) -> Result<(), String> {
+    match action {
+        HistoryAction::Reload => {
+            tokio::time::timeout(REQUEST_TIMEOUT, page.reload())
+                .await
+                .map_err(|_| "reload timed out".to_string())?
+                .map_err(|e| format!("reload failed: {e}"))?;
+        }
+        HistoryAction::Back | HistoryAction::Forward => {
+            let history = page
+                .execute(GetNavigationHistoryParams::default())
+                .await
+                .map_err(|e| format!("navigation history unavailable: {e}"))?;
+            let current = history.current_index;
+            let target = match action {
+                HistoryAction::Back => current - 1,
+                _ => current + 1,
+            };
+            let entry = usize::try_from(target)
+                .ok()
+                .and_then(|i| history.entries.get(i))
+                .ok_or_else(|| {
+                    format!(
+                        "cannot go {} from here",
+                        if action == HistoryAction::Back {
+                            "back"
+                        } else {
+                            "forward"
+                        }
+                    )
+                })?;
+            page.execute(NavigateToHistoryEntryParams::new(entry.id))
+                .await
+                .map_err(|e| format!("history navigation failed: {e}"))?;
+            let _ = tokio::time::timeout(Duration::from_secs(10), page.wait_for_navigation()).await;
+        }
+    }
+    Ok(())
 }
 
 /// Close the browser bound to `session_id` (called by `bebok-core` on turn

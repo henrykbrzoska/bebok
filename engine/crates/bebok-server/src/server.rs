@@ -5,6 +5,7 @@
 //! hand the per-launch capability token to the webview). Everything else logs
 //! to `stderr` via `tracing`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -75,6 +76,7 @@ pub fn build_app() -> (Router, AppState) {
         ptys: Arc::new(PtyManager::new()),
         debug,
         llm_trace,
+        remote_extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     };
 
     // Scheduler: tick-loop that fires due tasks via create_session + prompt_turn.

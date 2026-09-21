@@ -11,6 +11,7 @@ use crate::state::AppState;
 
 pub mod agents;
 pub mod browser;
+pub mod browser_remote;
 pub mod changes;
 pub mod common;
 pub mod config;
@@ -77,6 +78,10 @@ pub fn build_api_router() -> Router<AppState> {
             "/session/{id}/browser/{action}",
             post(browser::browser_action),
         )
+        // Remote browser extension (MVP Phase 1.1).
+        .route("/browser/register", post(browser_remote::register))
+        .route("/browser/heartbeat", post(browser_remote::heartbeat))
+        .route("/browser/remote/{action}", post(browser_remote::remote))
         .route("/agent", get(meta::list_agents))
         .route("/mcp", get(mcp::list_mcp))
         .route("/mcp/{name}/toggle", post(mcp::toggle_mcp))

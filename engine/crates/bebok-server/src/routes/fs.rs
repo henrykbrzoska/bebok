@@ -213,6 +213,7 @@ mod tests {
             ptys: Arc::new(bebok_pty::PtyManager::new()),
             debug: Arc::new(bebok_core::DebugLog::new(base.join("debug.log"))),
             llm_trace: Arc::new(bebok_core::LlmTrace::new(2)),
+            remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -263,6 +264,7 @@ mod tests {
             ptys: Arc::new(bebok_pty::PtyManager::new()),
             debug: Arc::new(bebok_core::DebugLog::new(base.join("debug.log"))),
             llm_trace: Arc::new(bebok_core::LlmTrace::new(2)),
+            remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

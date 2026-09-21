@@ -34,6 +34,8 @@ pub mod console;
 pub mod discovery;
 pub mod driver;
 pub mod frames;
+pub mod page;
+pub mod remote;
 pub mod settings;
 pub mod tools;
 pub mod verify_tools;
@@ -46,6 +48,8 @@ pub use driver::{
     resolve_executable, set_frame_sink,
 };
 pub use frames::{Frame, FrameSink};
+pub use page::{AnyPage, BrowserPage, LocalPage, evaluate_checked};
+pub use remote::{RemoteClient, RemotePage};
 pub use settings::{BrowserDisplay, BrowserSettings};
 
 use crate::tool::Tool;

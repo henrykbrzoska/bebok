@@ -21,32 +21,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::Engine as _;
-use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
-use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
-use chromiumoxide::layout::Point;
-use chromiumoxide::page::{Page, ScreenshotParams};
 use serde_json::{Value, json};
 
-use super::args::{
-    self, ClickTarget, GetTextArgs, ImageFormat, OpenArgs, ScreenshotArgs, TypeArgs,
-};
+use super::args::{self, ClickTarget, GetTextArgs, OpenArgs, ScreenshotArgs, TypeArgs};
 use super::driver::BrowserDriver;
-use super::frames;
+use super::page::{AnyPage, BrowserPage, encode_image};
 use crate::tool::{Tool, ToolCtx, ToolOutput};
 
 /// Upper bound on one tool call (navigation included).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Upper bound on waiting for the load event after `browser_open`.
-const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(20);
-/// JPEG quality when `format: "jpeg"` is requested.
-const JPEG_QUALITY: i64 = 85;
 
 /// Current `{url, title}` of a page, tolerant of transient CDP errors.
-pub(super) async fn page_state(page: &Page) -> (String, String) {
-    let url = page.url().await.ok().flatten().unwrap_or_default();
-    let title = page.get_title().await.ok().flatten().unwrap_or_default();
-    (url, title)
+pub async fn page_state(page: &impl BrowserPage) -> (String, String) {
+    page.state().await
 }
 
 pub(super) fn state_json(url: &str, title: &str) -> Value {
@@ -74,8 +61,11 @@ where
     }
 }
 
-pub(super) async fn page_for(driver: &Arc<BrowserDriver>, ctx: &ToolCtx) -> Result<Page, String> {
-    driver.page(&ctx.session_id, &ctx.root).await
+pub(super) async fn page_for(
+    driver: &Arc<BrowserDriver>,
+    ctx: &ToolCtx,
+) -> Result<AnyPage, String> {
+    Ok(Arc::new(driver.page(&ctx.session_id, &ctx.root).await?))
 }
 
 /// Turn a Chrome navigation error (`net::ERR_*`) or a `chrome-error://`
@@ -133,12 +123,6 @@ pub(super) fn explain_navigation_error(url: &str, raw: &str) -> String {
     format!("navigation to {url} failed: {raw}")
 }
 
-async fn find(page: &Page, selector: &str) -> Result<chromiumoxide::Element, String> {
-    page.find_element(selector)
-        .await
-        .map_err(|e| format!("no element matches selector '{selector}': {e}"))
-}
-
 // ── browser_open ────────────────────────────────────────────────────────
 
 pub struct BrowserOpen {
@@ -183,11 +167,9 @@ impl Tool for BrowserOpen {
         let work = async {
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            page.goto(url.as_str())
-                .await
-                .map_err(|e| explain_navigation_error(&url, &e.to_string()))?;
+            page.goto(url.as_str()).await?;
             // Best effort: the load event may already have fired.
-            let _ = tokio::time::timeout(NAVIGATION_TIMEOUT, page.wait_for_navigation()).await;
+            let _ = page.wait_for_navigation().await;
             if wait_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(wait_ms)).await;
             }
@@ -215,11 +197,11 @@ impl Tool for BrowserOpen {
 }
 
 /// Read the `net::ERR_*` code Chrome prints on its error page (best effort).
-async fn error_code_on_page(page: &Page) -> String {
+async fn error_code_on_page(page: &impl BrowserPage) -> String {
     page.evaluate("(document.body && document.body.innerText) || ''")
         .await
         .ok()
-        .and_then(|r| r.into_value::<String>().ok())
+        .and_then(|r| r.as_str().map(str::to_string))
         .and_then(|t| {
             t.split_whitespace()
                 .find(|w| w.starts_with("ERR_") || w.starts_with("net::ERR_"))
@@ -280,44 +262,13 @@ impl Tool for BrowserScreenshot {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            let mut params = ScreenshotParams::builder().full_page(full_page);
-            params = match format {
-                ImageFormat::Png => params.format(CaptureScreenshotFormat::Png),
-                ImageFormat::Jpeg => params
-                    .format(CaptureScreenshotFormat::Jpeg)
-                    .quality(JPEG_QUALITY),
-            };
-            // Headed windows on HiDPI screens render at DPR > 1: scale the
-            // capture to CSS pixels so click coordinates read off the image
-            // are right (WP-BROWSER2).
-            let headed = driver.is_headed(&ctx.session_id).await.unwrap_or(false);
-            let metrics = frames::page_metrics(&page).await;
-            if full_page && headed {
-                // chromiumoxide's full-page path installs a device-metrics
-                // override, which a visible window never recovers from
-                // cleanly; capture beyond the viewport instead (no override).
-                let content = page
-                    .layout_metrics()
-                    .await
-                    .map_err(|e| format!("layout metrics failed: {e}"))?
-                    .css_content_size;
-                params = params
-                    .full_page(false)
-                    .capture_beyond_viewport(true)
-                    .clip(frames::content_clip(content.width, content.height, metrics));
-            } else if !full_page && let Some(clip) = frames::css_pixel_clip(metrics) {
-                params = params.clip(clip);
-            }
-            let bytes = page
-                .screenshot(params.build())
-                .await
-                .map_err(|e| format!("screenshot failed: {e}"))?;
+            let bytes = page.screenshot(full_page, format).await?;
             let (url, page_title) = page_state(&page).await;
             Ok::<_, String>((bytes, url, page_title))
         };
         match bounded(&ctx, &title, work).await {
             Ok((bytes, url, page_title)) => {
-                let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                let data = encode_image(&bytes);
                 let text = format!(
                     "Screenshot of {url} ({} bytes, {}{}). The image is attached to this result.",
                     bytes.len(),
@@ -391,22 +342,7 @@ impl Tool for BrowserClick {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            match &target {
-                ClickTarget::Selector(sel) => {
-                    let el = find(&page, sel).await?;
-                    el.click()
-                        .await
-                        .map_err(|e| format!("click on '{sel}' failed: {e}"))?;
-                }
-                ClickTarget::Point { x, y } => {
-                    page.click(Point::new(*x, *y))
-                        .await
-                        .map_err(|e| format!("click at ({x}, {y}) failed: {e}"))?;
-                }
-            }
-            if wait_ms > 0 {
-                tokio::time::sleep(Duration::from_millis(wait_ms)).await;
-            }
+            page.click(&target, wait_ms).await?;
             Ok::<_, String>(page_state(&page).await)
         };
         match bounded(&ctx, &title, work).await {
@@ -468,38 +404,13 @@ impl Tool for BrowserType {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            let el = find(&page, &selector).await?;
-            el.focus()
-                .await
-                .map_err(|e| format!("cannot focus '{selector}': {e}"))?;
-            if clear {
-                el.call_js_fn(
-                    "function() { \
-                        if ('value' in this) { this.value = ''; } \
-                        else if (this.isContentEditable) { this.textContent = ''; } \
-                        this.dispatchEvent(new Event('input', { bubbles: true })); \
-                    }",
-                    false,
-                )
-                .await
-                .map_err(|e| format!("cannot clear '{selector}': {e}"))?;
-            }
-            el.type_str(&text)
-                .await
-                .map_err(|e| format!("typing into '{selector}' failed: {e}"))?;
-            if submit {
-                el.press_key("Enter")
-                    .await
-                    .map_err(|e| format!("pressing Enter failed: {e}"))?;
-                tokio::time::sleep(Duration::from_millis(args::DEFAULT_WAIT_MS)).await;
-            }
-            Ok::<_, String>(page_state(&page).await)
+            let typed = page.type_text(&selector, &text, clear, submit).await?;
+            Ok::<_, String>((page_state(&page).await, typed))
         };
         match bounded(&ctx, &title, work).await {
-            Ok((url, page_title)) => ToolOutput::new(
+            Ok(((url, page_title), typed)) => ToolOutput::new(
                 format!(
-                    "Typed {} characters into {selector}{}\nnow at {url}",
-                    text.chars().count(),
+                    "Typed {typed} characters into {selector}{}\nnow at {url}",
                     if submit { " and pressed Enter" } else { "" }
                 ),
                 title,
@@ -558,20 +469,7 @@ impl Tool for BrowserGetText {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            let text = match &selector {
-                Some(sel) => find(&page, sel)
-                    .await?
-                    .inner_text()
-                    .await
-                    .map_err(|e| format!("reading text of '{sel}' failed: {e}"))?
-                    .unwrap_or_default(),
-                None => page
-                    .evaluate("document.body ? document.body.innerText : ''")
-                    .await
-                    .map_err(|e| format!("reading page text failed: {e}"))?
-                    .into_value::<String>()
-                    .unwrap_or_default(),
-            };
+            let text = page.inner_text(selector.as_deref()).await?;
             Ok::<_, String>((text, page_state(&page).await))
         };
         match bounded(&ctx, &title, work).await {
@@ -630,37 +528,7 @@ impl Tool for BrowserEval {
             }
             let _live = driver.activity(&ctx.session_id);
             let page = page_for(&driver, &ctx).await?;
-            let params = EvaluateParams::builder()
-                .expression(js.clone())
-                .await_promise(true)
-                .return_by_value(true)
-                .build()
-                .map_err(|e| format!("invalid evaluate params: {e}"))?;
-            let res = page
-                .execute(params)
-                .await
-                .map_err(|e| format!("evaluation failed: {e}"))?;
-            let res = &res.result;
-            if let Some(ex) = &res.exception_details {
-                let detail = ex
-                    .exception
-                    .as_ref()
-                    .and_then(|o| o.description.clone())
-                    .unwrap_or_else(|| ex.text.clone());
-                return Err(format!("JavaScript threw: {detail}"));
-            }
-            let value = match &res.result.value {
-                Some(v) => v.clone(),
-                None => match &res.result.unserializable_value {
-                    Some(u) => Value::String(u.inner().to_string()),
-                    None => Value::String(
-                        res.result
-                            .description
-                            .clone()
-                            .unwrap_or_else(|| format!("[{:?}]", res.result.r#type)),
-                    ),
-                },
-            };
+            let value = page.eval_checked(&js).await?;
             Ok::<_, String>((value, page_state(&page).await))
         };
         match bounded(&ctx, &title, work).await {
