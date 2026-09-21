@@ -135,9 +135,7 @@ fn resolve_token(cli_token: Option<&str>) -> String {
     if let Some(pinned) = cli_token {
         let pinned = pinned.trim().to_string();
         if !pinned.is_empty() {
-            tracing::info!(
-                "engine token pinned via --token flag (stable port/token mode)"
-            );
+            tracing::info!("engine token pinned via --token flag (stable port/token mode)");
             return pinned;
         }
     }
@@ -145,9 +143,7 @@ fn resolve_token(cli_token: Option<&str>) -> String {
     if let Ok(pinned) = std::env::var("BEBOK_TOKEN") {
         let pinned = pinned.trim().to_string();
         if !pinned.is_empty() {
-            tracing::info!(
-                "engine token pinned via BEBOK_TOKEN env (stable port/token mode)"
-            );
+            tracing::info!("engine token pinned via BEBOK_TOKEN env (stable port/token mode)");
             return pinned;
         }
     }

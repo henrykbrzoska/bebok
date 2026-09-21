@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.4 — 2026-09-21
 
 ### Features
 - Extension server status & control: port scan discovery (8780–8790) from
