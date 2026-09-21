@@ -1,6 +1,7 @@
 //! CLI binding spec (`--host` / `--port` / `--addr` / `--token` + env fallbacks).
 
 /// Bind settings from CLI flags / env, resolved by the caller.
+#[derive(Debug)]
 pub struct BindSpec {
     pub host: std::net::IpAddr,
     pub port: u16,
@@ -140,34 +141,34 @@ mod tests {
     #[test]
     fn port_flag_overrides_env() {
         let args: Vec<String> = ["--port", "9999"].iter().map(|s| s.to_string()).collect();
-        std::env::set_var("BEBOK_PORT", "42");
+        unsafe { std::env::set_var("BEBOK_PORT", "42") };
         let spec = parse_cli(&args).unwrap();
         assert_eq!(spec.port, 9999);
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
     fn bebok_port_env_fallback() {
-        std::env::set_var("BEBOK_PORT", "3000");
+        unsafe { std::env::set_var("BEBOK_PORT", "3000") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 3000);
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
     fn bebok_port_env_invalid_fails() {
-        std::env::set_var("BEBOK_PORT", "not-a-number");
+        unsafe { std::env::set_var("BEBOK_PORT", "not-a-number") };
         let err = parse_cli(&[]).unwrap_err();
         assert!(err.to_string().contains("BEBOK_PORT"));
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
     fn bebok_port_env_empty_falls_back_to_default() {
-        std::env::set_var("BEBOK_PORT", "");
+        unsafe { std::env::set_var("BEBOK_PORT", "") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 8787);
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
@@ -199,25 +200,25 @@ mod tests {
 
     #[test]
     fn bebok_port_zero_is_valid() {
-        std::env::set_var("BEBOK_PORT", "0");
+        unsafe { std::env::set_var("BEBOK_PORT", "0") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 0);
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
     fn bebok_port_max_is_valid() {
-        std::env::set_var("BEBOK_PORT", "65535");
+        unsafe { std::env::set_var("BEBOK_PORT", "65535") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 65535);
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 
     #[test]
     fn bebok_port_overflow_fails() {
-        std::env::set_var("BEBOK_PORT", "99999");
+        unsafe { std::env::set_var("BEBOK_PORT", "99999") };
         let err = parse_cli(&[]).unwrap_err();
         assert!(err.to_string().contains("BEBOK_PORT"));
-        std::env::remove_var("BEBOK_PORT");
+        unsafe { std::env::remove_var("BEBOK_PORT") };
     }
 }
