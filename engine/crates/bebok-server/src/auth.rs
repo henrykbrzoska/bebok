@@ -408,10 +408,10 @@ pub(crate) mod tests {
     #[test]
     fn cli_token_takes_precedence() {
         // Set up env to verify it's overridden by cli_token.
-        std::env::set_var("BEBOK_TOKEN", "env-token-value");
+        unsafe { std::env::set_var("BEBOK_TOKEN", "env-token-value") };
         let result = resolve_token(Some("cli-token-value"));
         assert_eq!(result, "cli-token-value");
-        std::env::remove_var("BEBOK_TOKEN");
+        unsafe { std::env::remove_var("BEBOK_TOKEN") };
     }
 
     /// `BEBOK_TOKEN` env wins over the persistent file / memory fallback.
