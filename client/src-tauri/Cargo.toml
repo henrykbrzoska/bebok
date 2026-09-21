@@ -1,6 +1,6 @@
 [package]
 name = "bebok-desktop"
-version = "1.8.2"
+version = "1.8.3"
 description = "Bebok desktop shell (Tauri 2)"
 edition = "2021"
 license = "UNLICENSED"

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.3 — 2026-09-21
+
+### Features
+- **skills**: load bundled skills from skills/ dir next to engine binary (e6f4c91)
+- **chrome-extension**: add tabs remote command and piloting docs (2514c36)
+- remote browser piloting - pull queue, extension handlers, config routing (7caa64f)
+- remote browser engine side - BrowserPage trait, RemotePage, extension endpoints (3bf03e5)
+
 ## 1.8.2 — 2026-09-18
 
 ### Features
