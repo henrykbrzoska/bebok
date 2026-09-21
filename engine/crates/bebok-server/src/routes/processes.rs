@@ -393,6 +393,9 @@ mod tests {
                 remote_extensions: Arc::new(tokio::sync::Mutex::new(
                     std::collections::HashMap::new(),
                 )),
+                command_queue: Arc::new(tokio::sync::Mutex::new(
+                    crate::state::CommandRegistry::new(),
+                )),
             };
             Self { base, root, state }
         }

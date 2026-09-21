@@ -45,6 +45,22 @@
       </div>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0 0" />
+
+      <h2 style="font-size:14px;margin:16px 0 6px">Remote piloting</h2>
+      <p class="hint">
+        When enabled the extension registers with the engine and listens for
+        remote commands (navigate, screenshot, evaluate, click, …) on your
+        active tab. The agent can then drive your real browser.
+      </p>
+
+      <label class="check">
+        <input id="remoteEnabled" type="checkbox" />
+        <span>Enable remote piloting</span>
+      </label>
+
+      <p id="remoteStatus" class="status" role="status" aria-live="polite"></p>
     </main>
 
     <script src="options.js"></script>

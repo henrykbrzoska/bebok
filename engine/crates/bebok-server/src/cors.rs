@@ -79,6 +79,7 @@ mod tests {
             debug: Arc::new(bebok_core::DebugLog::new(dir.join("debug.log"))),
             llm_trace: bebok_core::LLM_TRACE.clone(),
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
         };
         build_api_router().layer(cors_layer()).with_state(state)
     }

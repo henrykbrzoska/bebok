@@ -65,7 +65,7 @@ pub(super) async fn page_for(
     driver: &Arc<BrowserDriver>,
     ctx: &ToolCtx,
 ) -> Result<AnyPage, String> {
-    Ok(Arc::new(driver.page(&ctx.session_id, &ctx.root).await?))
+    driver.page(&ctx.session_id, &ctx.root).await
 }
 
 /// Turn a Chrome navigation error (`net::ERR_*`) or a `chrome-error://`

@@ -12,6 +12,11 @@
 - Plugins: the `list_install_toggle_roundtrip` engine test no longer needs
   network access (it seeds the plugin slot with a fixture manifest), so the
   Windows CI job is not at the mercy of the live registry download.
+- Remote browser piloting (Chrome extension preview): the agent can drive the
+  user's active tab through a pull queue (register, heartbeat, pending,
+  result) with `browser.remote.enabled` routing in the engine. Multiple
+  commands in flight per session (waiters keyed by command id);
+  `extension_port` is not yet used by the pull flow.
 
 ## 1.8.1 — 2026-09-18
 

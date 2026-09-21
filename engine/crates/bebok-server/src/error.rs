@@ -16,6 +16,7 @@ use bebok_core::error::CoreError;
 
 /// Single handler error: maps to the same status codes (and trailing-newline
 /// text bodies) the previous tuple/`err_response` code produced.
+#[derive(Debug)]
 pub enum ApiError {
     BadRequest(String),
     NotFound(String),

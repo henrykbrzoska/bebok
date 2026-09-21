@@ -55,6 +55,52 @@ impl BrowserDisplay {
     }
 }
 
+/// Configuration for driving a tab in the user's own browser through the
+/// Bebok Companion Chrome extension (`browser.remote.*`, phase 3.2 of the
+/// remote-browser plan, `docs/chrome-extension-remote-browser.md`).
+/// When `enabled` is `false` (the default) the engine uses its built-in
+/// headless browser instead.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BrowserRemote {
+    /// Whether to drive a remote tab in the user's browser via the
+    /// extension instead of the built-in Chromium.
+    pub enabled: bool,
+    /// Port the extension listens on (registered at `POST /browser/register`).
+    /// `None` = let the engine assign one.
+    pub extension_port: Option<u16>,
+    /// A previously registered tab to reuse. `None` = open a new tab.
+    pub tab_id: Option<u64>,
+}
+
+impl BrowserRemote {
+    /// Parse the `browser.remote` subsection. Malformed values fall back to
+    /// the defaults (never an error: a typo in config must not break the tools).
+    pub fn from_config(value: &Value) -> Self {
+        let mut out = Self::default();
+        let Some(obj) = value.as_object() else {
+            return out;
+        };
+        if let Some(v) = obj.get("enabled").and_then(Value::as_bool) {
+            out.enabled = v;
+        }
+        out.extension_port = obj
+            .get("extensionPort")
+            .or_else(|| obj.get("extension_port"))
+            .and_then(|v| match v {
+                Value::Number(n) => n.as_u64().map(|p| p.clamp(0, u16::MAX as u64) as u16),
+                _ => None,
+            });
+        out.tab_id = obj
+            .get("tabId")
+            .or_else(|| obj.get("tab_id"))
+            .and_then(|v| match v {
+                Value::Number(n) => n.as_u64(),
+                _ => None,
+            });
+        out
+    }
+}
+
 /// Resolved `browser` section for one instance root.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BrowserSettings {
@@ -62,6 +108,9 @@ pub struct BrowserSettings {
     /// Desired top-left corner of the headed window (screen pixels). Set by
     /// the desktop client to "right of the app"; `None` = let Chrome decide.
     pub window_position: Option<(i32, i32)>,
+    /// Remote-browser config (`browser.remote.*`). Disabled by default:
+    /// when `false` the engine falls back to its built-in Chromium.
+    pub remote: BrowserRemote,
 }
 
 impl BrowserSettings {
@@ -81,6 +130,9 @@ impl BrowserSettings {
             .get("windowPosition")
             .or_else(|| obj.get("window_position"));
         out.window_position = pos.and_then(parse_position);
+        if let Some(remote) = obj.get("remote") {
+            out.remote = BrowserRemote::from_config(remote);
+        }
         out
     }
 
@@ -236,6 +288,7 @@ mod tests {
             let s = BrowserSettings {
                 display: mode,
                 window_position: None,
+                ..BrowserSettings::default()
             };
             assert!(s.headless(), "{mode:?}");
         }
@@ -245,5 +298,104 @@ mod tests {
     fn env_flag_semantics() {
         // Only checks the parser; never mutates process env (tests run in parallel).
         assert!(!env_flag("BEBOK_TEST_FLAG_THAT_DOES_NOT_EXIST_12345"));
+    }
+
+    #[test]
+    fn remote_defaults_to_disabled_without_key() {
+        let s = BrowserSettings::from_config(&Value::Null);
+        assert!(!s.remote.enabled);
+        assert_eq!(s.remote.extension_port, None);
+        assert_eq!(s.remote.tab_id, None);
+        // Backward compat: browser config without `remote` is treated
+        // as remote disabled — equals the default.
+        assert_eq!(
+            BrowserSettings::from_config(&json!({ "display": "viewer" })),
+            BrowserSettings {
+                display: BrowserDisplay::Viewer,
+                window_position: None,
+                ..BrowserSettings::default()
+            }
+        );
+    }
+
+    #[test]
+    fn remote_parses_enabled_port_and_tab_id() {
+        let s = BrowserSettings::from_config(&json!({
+            "remote": {
+                "enabled": true,
+                "extensionPort": 4317,
+                "tabId": 7
+            }
+        }));
+        assert!(s.remote.enabled);
+        assert_eq!(s.remote.extension_port, Some(4317));
+        assert_eq!(s.remote.tab_id, Some(7));
+
+        // snake_case keys are accepted too (tolerancyjnie).
+        let s = BrowserSettings::from_config(&json!({
+            "remote": {
+                "enabled": true,
+                "extension_port": 9,
+                "tab_id": 100
+            }
+        }));
+        assert!(s.remote.enabled);
+        assert_eq!(s.remote.extension_port, Some(9));
+        assert_eq!(s.remote.tab_id, Some(100));
+    }
+
+    #[test]
+    fn remote_ignores_garbage_values() {
+        // `enabled` must be a bool; other types are ignored -> default.
+        assert!(
+            !BrowserSettings::from_config(&json!({ "remote": { "enabled": "yes" } }))
+                .remote
+                .enabled
+        );
+        assert!(
+            !BrowserSettings::from_config(&json!({ "remote": { "enabled": 1 } }))
+                .remote
+                .enabled
+        );
+        assert!(
+            !BrowserSettings::from_config(&json!({ "remote": { "enabled": null } }))
+                .remote
+                .enabled
+        );
+        // Unknown extra keys are ignored — `enabled` still parses.
+        assert!(
+            BrowserSettings::from_config(&json!({ "remote": { "enabled": true, "extra": {} } }))
+                .remote
+                .enabled
+        );
+
+        // Non-bool / missing port -> None. Negative numbers are rejected
+        // by serde_json::Number::as_u64 -> None.
+        assert_eq!(
+            BrowserSettings::from_config(&json!({ "remote": { "extensionPort": "nope" } }))
+                .remote
+                .extension_port,
+            None
+        );
+        assert_eq!(
+            BrowserSettings::from_config(&json!({ "remote": { "extensionPort": -5 } }))
+                .remote
+                .extension_port,
+            None
+        );
+        assert_eq!(
+            BrowserSettings::from_config(&json!({ "remote": { "tabId": [] } }))
+                .remote
+                .tab_id,
+            None
+        );
+        // Non-object `remote` value -> treated like an absent section.
+        let s = BrowserSettings::from_config(&json!({ "remote": "on" }));
+        assert!(!s.remote.enabled);
+        // Empty object -> disabled with no overrides.
+        let s = BrowserSettings::from_config(&json!({ "remote": {} }));
+        assert!(!s.remote.enabled);
+        assert_eq!(s.remote.extension_port, None);
+        assert_eq!(s.remote.tab_id, None);
     }
 }
