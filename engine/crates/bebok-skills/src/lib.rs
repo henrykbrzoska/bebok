@@ -1,7 +1,10 @@
 //! Skills & instructions (SPEC §3.8, milestone M4).
 //!
 //! Discovery of `AGENTS.md` (global + project) and skill directories
-//! `~/.config/bebok/skill/<name>/SKILL.md` and `<project>/.bebok/skill/<name>/SKILL.md`.
+//! (lowest to highest priority):
+//! `skills/<name>/SKILL.md` next to the engine binary (or the repo's
+//! `skills/` dir in dev), `~/.config/bebok/skill/<name>/SKILL.md` and
+//! `<project>/.bebok/skill/<name>/SKILL.md`.
 //! Phase 1: the full content of enabled skills is appended to the system
 //! prompt. Toggles map to the `skills` config section (`{ "<name>": bool }`).
 
@@ -16,6 +19,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Source {
+    /// Shipped with Bebok (`skills/` next to the engine binary / repo root).
+    Bundled,
     Global,
     Project,
 }
@@ -39,7 +44,8 @@ pub struct Discovered {
     pub agents_global: Option<String>,
     /// Project `AGENTS.md` content (always included).
     pub agents_project: Option<String>,
-    /// Skills (global + project; project overrides global by name).
+    /// Skills (bundled + global + project; later layers override earlier
+    /// ones by name).
     pub skills: Vec<Skill>,
 }
 
@@ -63,6 +69,27 @@ pub fn project_skill_dir(project: &Path) -> PathBuf {
     project.join(".bebok").join("skill")
 }
 
+/// Bundled skill directory: `skills/` next to the running engine binary.
+///
+/// Resolution order: `<binary-dir>/skills` (installed layout, e.g. the Tauri
+/// sidecar dir), then walking up from the binary dir looking for a `skills/`
+/// sibling (dev layout: `engine/target/debug/bebok-server` → repo root
+/// `skills/`). Returns the first candidate that exists (missing dir is fine —
+/// `discover_skills` skips unreadable directories).
+pub fn bundled_skill_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    loop {
+        let candidate = dir.join("skills");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 /// Discover `AGENTS.md` + skills for a project directory.
 pub fn discover(project: &Path) -> Discovered {
     let agents_global = global_agents_path()
@@ -72,12 +99,26 @@ pub fn discover(project: &Path) -> Discovered {
     let agents_project = read_non_empty(&project.join("AGENTS.md"));
 
     let mut skills: Vec<Skill> = Vec::new();
+    if let Some(dir) = bundled_skill_dir() {
+        discover_skills(&dir, Source::Bundled, &mut skills);
+    }
     if let Some(dir) = global_skill_dir() {
         discover_skills(&dir, Source::Global, &mut skills);
     }
     discover_skills(&project_skill_dir(project), Source::Project, &mut skills);
 
-    // Project skills override global skills with the same name.
+    // Later layers override earlier ones with the same name.
+    let merged = merge_skills(skills);
+
+    Discovered {
+        agents_global,
+        agents_project,
+        skills: merged,
+    }
+}
+
+/// Merge layered skills by name: later entries override earlier ones.
+fn merge_skills(skills: Vec<Skill>) -> Vec<Skill> {
     let mut merged: Vec<Skill> = Vec::new();
     for skill in skills {
         if let Some(existing) = merged.iter_mut().find(|s| s.name == skill.name) {
@@ -86,12 +127,7 @@ pub fn discover(project: &Path) -> Discovered {
             merged.push(skill);
         }
     }
-
-    Discovered {
-        agents_global,
-        agents_project,
-        skills: merged,
-    }
+    merged
 }
 
 fn read_non_empty(path: &Path) -> Option<String> {
@@ -244,6 +280,53 @@ mod tests {
             !prompt.contains("skill B"),
             "disabled skill must be excluded"
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn test_skill(name: &str, source: Source, content: &str) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: None,
+            content: content.to_string(),
+            source,
+            path: PathBuf::from(format!("/fake/{name}/SKILL.md")),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn later_layers_override_by_name() {
+        let merged = merge_skills(vec![
+            test_skill("x", Source::Bundled, "bundled"),
+            test_skill("x", Source::Global, "global"),
+            test_skill("x", Source::Project, "project"),
+            test_skill("y", Source::Bundled, "bundled y"),
+        ]);
+        assert_eq!(merged.len(), 2);
+        let x = merged.iter().find(|s| s.name == "x").unwrap();
+        assert_eq!(x.source, Source::Project);
+        assert_eq!(x.content, "project");
+        let y = merged.iter().find(|s| s.name == "y").unwrap();
+        assert_eq!(y.source, Source::Bundled);
+    }
+
+    #[test]
+    fn bundled_dir_scan_reads_skill_files() {
+        let base = std::env::temp_dir().join(format!("bebok-skills-{}", uuid::Uuid::new_v4()));
+        let bundled = base.join("skills");
+        write_skill(
+            &bundled,
+            "demo",
+            "---\nname: demo\ndescription: a demo\n---\nDemo body.\n",
+        );
+
+        let mut out = Vec::new();
+        discover_skills(&bundled, Source::Bundled, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "demo");
+        assert_eq!(out[0].source, Source::Bundled);
+        assert!(out[0].content.contains("Demo body."));
 
         let _ = std::fs::remove_dir_all(&base);
     }

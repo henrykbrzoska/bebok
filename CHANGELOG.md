@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Features
+- Skills: new bundled layer — `skills/<name>/SKILL.md` next to the engine
+  binary (repo `skills/` dir in dev) is loaded first and can be overridden
+  per-user (`~/.config/bebok/skill/`) or per-project (`.bebok/skill/`).
+  Ships with the `remote-browser-extension` skill (pilot the user's own
+  Brave/Chrome tabs via the Companion extension). Toggles in
+  Settings → Skills work for bundled skills as before.
 - Schedules: new built-in scheduler for recurring tasks (interval / daily /
   weekly per project, with prompt + agent preset, toggle, run-now and run
   history). The sidebar button now opens Schedules instead of Stats; the
@@ -23,6 +29,12 @@
   Options status texts, the stale-Engine-URL trap in desktop mode (random
   port + fresh token per launch), the MV3 service-worker sleep (~35 s) with
   wake-up steps, and the unpacked-reload step after editing extension files.
+- New `remote-browser-extension` skill (Settings → Skills toggle): teaches
+  the agent when to pilot the user's own Brave/Chrome tabs via the Companion
+  extension pull queue (`POST /browser/remote/*` with
+  `session_id=extension`) instead of the built-in Chromium, including the
+  503-asleep / 404-unregistered / 401-stale-URL failure modes. The skill now
+  ships bundled with Bebok (see above) instead of living in `.bebok/`.
 
 ## 1.8.1 — 2026-09-18
 
