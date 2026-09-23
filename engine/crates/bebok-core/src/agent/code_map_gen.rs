@@ -96,7 +96,7 @@ pub fn cache_path(root: &Path) -> PathBuf {
 
 /// Rough token estimate (chars / 4), ceiling so short lines cost >= 1.
 pub fn estimate_tokens(text: &str) -> usize {
-    (text.chars().count() + 3) / 4
+    text.chars().count().div_ceil(4)
 }
 
 /// Scan `root` up to `config.max_depth` and build the map. Returns `None`
