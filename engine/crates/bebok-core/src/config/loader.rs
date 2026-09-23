@@ -135,6 +135,12 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(d) = v.get("delegation") {
         apply_delegation(&mut cfg.delegation, d);
     }
+    // Code map: merged per key (project overrides global per-field and
+    // per-path), so a project can flip `enabled` or add one override without
+    // repeating the whole global section.
+    if let Some(cm) = v.get("code_map") {
+        apply_code_map(&mut cfg.code_map, cm);
+    }
     // Sampling overrides merge per key (project wins per key): global
     // fields (`{ "temperature": 0.5 }`) and per-agent sections
     // (`{ "code": { "temperature": 0.2 } }`) alike.
@@ -154,6 +160,29 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
             }
         } else {
             cfg.sampling = Value::Object(map.clone());
+        }
+    }
+}
+
+/// Apply one layer's `code_map` section on top of the current value.
+/// Malformed values are ignored key-by-key (a non-bool `enabled` keeps the
+/// default); `max_tokens` clamps to `100..=2000`, `max_depth` to `1..=6`;
+/// `overrides` merge per path (later layer wins per key).
+pub fn apply_code_map(cfg: &mut super::model::CodeMapConfig, v: &Value) {
+    if let Some(enabled) = v.get("enabled").and_then(|x| x.as_bool()) {
+        cfg.enabled = enabled;
+    }
+    if let Some(n) = v.get("max_tokens").and_then(|x| x.as_u64()) {
+        cfg.max_tokens = (n as usize).clamp(100, 2000);
+    }
+    if let Some(n) = v.get("max_depth").and_then(|x| x.as_u64()) {
+        cfg.max_depth = (n as usize).clamp(1, 6);
+    }
+    if let Some(map) = v.get("overrides").and_then(|x| x.as_object()) {
+        for (k, val) in map {
+            if let Some(desc) = val.as_str() {
+                cfg.overrides.insert(k.clone(), desc.to_string());
+            }
         }
     }
 }
@@ -629,5 +658,95 @@ mod tests {
             cfg.delegation.max_concurrent,
             super::super::model::MAX_DELEGATION_MAX_CONCURRENT
         );
+    }
+
+    // -- code map ------------------------------------------------------------
+
+    #[test]
+    fn code_map_defaults_disabled() {
+        let cfg = ResolvedConfig::default();
+        assert!(!cfg.code_map.enabled);
+        assert_eq!(cfg.code_map.max_tokens, super::super::model::DEFAULT_CODE_MAP_MAX_TOKENS);
+        assert_eq!(cfg.code_map.max_depth, super::super::model::DEFAULT_CODE_MAP_MAX_DEPTH);
+        assert!(cfg.code_map.overrides.is_empty());
+    }
+
+    #[test]
+    fn code_map_project_overrides_global() {
+        let base = std::env::temp_dir().join(format!("bebok-codemap-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        std::fs::write(&global, r#"{ "code_map": { "enabled": true } }"#).unwrap();
+
+        // Global on, project silent -> on.
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(cfg.code_map.enabled);
+
+        // Project flips it off (per-field override).
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "code_map": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(!cfg.code_map.enabled);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn code_map_overrides_merge_per_key() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "enabled": true, "overrides": { "engine": "Global engine desc" } } }),
+        );
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "overrides": { "client": "Client desc", "engine": "Project engine desc" } } }),
+        );
+        assert!(cfg.code_map.enabled);
+        assert_eq!(
+            cfg.code_map.overrides.get("engine").map(String::as_str),
+            Some("Project engine desc"),
+            "project layer wins per path"
+        );
+        assert_eq!(
+            cfg.code_map.overrides.get("client").map(String::as_str),
+            Some("Client desc"),
+            "global-only paths survive the project layer"
+        );
+    }
+
+    #[test]
+    fn code_map_malformed_values_ignored() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "enabled": "yes", "max_tokens": "lots", "overrides": { "a": 42 } } }),
+        );
+        assert!(!cfg.code_map.enabled, "non-bool enabled keeps the default");
+        assert_eq!(
+            cfg.code_map.max_tokens,
+            super::super::model::DEFAULT_CODE_MAP_MAX_TOKENS
+        );
+        assert!(cfg.code_map.overrides.is_empty());
+        // A non-object section is a no-op.
+        apply(&mut cfg, &serde_json::json!({ "code_map": "on" }));
+        assert!(!cfg.code_map.enabled);
+    }
+
+    #[test]
+    fn code_map_max_tokens_clamped() {
+        let mut cfg = ResolvedConfig::default();
+        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_tokens": 99999 } }));
+        assert_eq!(cfg.code_map.max_tokens, 2000);
+        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_tokens": 1 } }));
+        assert_eq!(cfg.code_map.max_tokens, 100);
+        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_depth": 0 } }));
+        assert_eq!(cfg.code_map.max_depth, 1);
+        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_depth": 99 } }));
+        assert_eq!(cfg.code_map.max_depth, 6);
     }
 }

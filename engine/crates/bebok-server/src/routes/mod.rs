@@ -13,6 +13,7 @@ pub mod agents;
 pub mod browser;
 pub mod browser_remote;
 pub mod changes;
+pub mod code_map;
 pub mod common;
 pub mod config;
 pub mod debug;
@@ -112,6 +113,10 @@ pub fn build_api_router() -> Router<AppState> {
             post(git::remove_worktree),
         )
         .route("/version", get(meta::version))
+        // Pre-computed code map (opt-in via `code_map.enabled`): current map
+        // for debugging/UI + forced regeneration of `.bebok/code-map.json`.
+        .route("/code-map", get(code_map::get_code_map))
+        .route("/code-map/regenerate", post(code_map::regenerate_code_map))
         .route("/plugins", get(plugins::list_plugins))
         .route("/plugins/registry", get(plugins::plugin_registry))
         .route("/plugins/{name}/install", post(plugins::install_plugin))

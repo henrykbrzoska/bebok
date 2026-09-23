@@ -100,6 +100,44 @@ pub struct FleetConfig {
     pub members: Vec<FleetMember>,
 }
 
+/// Default cap on the code-map prompt section (tokens).
+pub const DEFAULT_CODE_MAP_MAX_TOKENS: usize = 400;
+/// Default directory depth scanned for the code map (root children = 1).
+pub const DEFAULT_CODE_MAP_MAX_DEPTH: usize = 3;
+
+/// Pre-computed project code map configuration (`code_map`).
+///
+/// When `enabled`, the engine scans the project tree, derives a one-sentence
+/// description per directory and injects the rendered map into the system
+/// prompt (see `crate::agent::code_map_prompt`), so the model orients itself
+/// without a `list_dir`/`tree`/`glob` walk at the start of every conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeMapConfig {
+    /// Master toggle: when false, no map is generated or injected (zero I/O).
+    pub enabled: bool,
+    /// Max tokens the map section may occupy in the system prompt.
+    pub max_tokens: usize,
+    /// Max directory depth to scan (root children = 1).
+    pub max_depth: usize,
+    /// Manual per-path description overrides (key = project-relative path
+    /// without trailing slash, value = description).
+    #[serde(default)]
+    pub overrides: std::collections::HashMap<String, String>,
+}
+
+impl Default for CodeMapConfig {
+    fn default() -> Self {
+        Self {
+            // OFF by default — opt-in per project.
+            enabled: false,
+            max_tokens: DEFAULT_CODE_MAP_MAX_TOKENS,
+            max_depth: DEFAULT_CODE_MAP_MAX_DEPTH,
+            overrides: std::collections::HashMap::new(),
+        }
+    }
+}
+
 /// `verify.buildTest` policy — whether the agent runs builds/tests autonomously.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -259,6 +297,9 @@ pub struct ResolvedConfig {
     /// WP-DELEGATION (F8-2): sub-agent delegation policy + concurrency cap.
     #[serde(default)]
     pub delegation: DelegationConfig,
+    /// Pre-computed project code map (off by default; opt-in per project).
+    #[serde(default)]
+    pub code_map: CodeMapConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -287,6 +328,7 @@ impl Default for ResolvedConfig {
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
             delegation: DelegationConfig::default(),
+            code_map: CodeMapConfig::default(),
         }
     }
 }
@@ -473,6 +515,11 @@ impl ResolvedConfigBuilder {
 
     pub fn delegation(mut self, d: DelegationConfig) -> Self {
         self.inner.delegation = d;
+        self
+    }
+
+    pub fn code_map(mut self, code_map: CodeMapConfig) -> Self {
+        self.inner.code_map = code_map;
         self
     }
 

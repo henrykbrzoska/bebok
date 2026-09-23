@@ -326,6 +326,13 @@ fn assemble_prompt(
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
+    // Pre-computed code map (`code_map.enabled`, opt-in): "what is where"
+    // orientation without a list_dir/tree/glob walk at conversation start.
+    if let Some(section) = bebok_core::agent::code_map_section(&instance.root, cfg) {
+        tracing::debug!("code map section added to the system prompt");
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+
     // Fleet-only delegation: the orchestrator note (fleet roster, spawn rule,
     // cap, supervision tools), main-thread sessions only; the text lives in
     // `bebok_core::agent::delegation_policy`, and the `Fleet:` paragraph is

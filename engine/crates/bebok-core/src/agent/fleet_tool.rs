@@ -764,6 +764,11 @@ fn assemble_prompt(
     if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
+    // Pre-computed code map (`code_map.enabled`): fleet members get the same
+    // "what is where" orientation as the main thread.
+    if let Some(section) = super::code_map_prompt::code_map_section(&instance.root, cfg) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
     // WP-DELEGATION: a worker's brief, not the main thread's policy.
     agent.prompt = format!(
         "{}\n\n{}",
