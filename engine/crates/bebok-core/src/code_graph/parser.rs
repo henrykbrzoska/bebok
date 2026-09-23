@@ -282,11 +282,8 @@ fn strip_mod_prefix(line: &str) -> Option<&str> {
         let r = r.trim_start();
         // pub(crate), pub(super), pub(in path)
         if r.starts_with('(') {
-            if let Some(end) = r.find(')') {
-                r[end + 1..].trim_start()
-            } else {
-                return None;
-            }
+            let end = r.find(')')?;
+            r[end + 1..].trim_start()
         } else {
             r
         }

@@ -194,7 +194,7 @@ fn resolve_use_to_file(
             return Some(c.clone());
         }
         // Also check with crate-name prefix.
-        for (rel, _) in id_map.iter() {
+        for rel in id_map.keys() {
             if rel == c || rel.ends_with(&format!("/{c}")) {
                 return Some(rel.clone());
             }
