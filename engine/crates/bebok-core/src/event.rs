@@ -6,7 +6,8 @@
 //!
 //! Known event types include `session.*`, `message.updated`,
 //! `message.part.updated`, `permission.asked` / `permission.resolved`,
-//! `task.started` / `task.progress` / `task.ended`, `browser.frame`,
+//! `task.started` / `task.progress` / `task.ended` / `task.restarted`
+//! (`properties` carries `{ taskID, reason, attempt }`), `browser.frame`,
 //! `agent.list.changed`, `config.changed`, `pty.exited` and
 //! `plugin.changed` (plugin declaration installed / enabled / disabled:
 //! `properties` carries `{ name, change }` with `change` one of

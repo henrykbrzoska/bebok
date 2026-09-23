@@ -130,15 +130,38 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(fleet) = v.get("fleet") {
         cfg.fleet = parse_fleet(fleet);
     }
-    // `delegation` carries only `max_concurrent` (project overrides global).
+    // `delegation` carries `max_concurrent` + watchdog knobs
+    // (`max_restarts`, `watchdog_secs`); project overrides global.
     if let Some(d) = v.get("delegation") {
         apply_delegation(&mut cfg.delegation, d);
+    }
+    // Sampling overrides merge per key (project wins per key): global
+    // fields (`{ "temperature": 0.5 }`) and per-agent sections
+    // (`{ "code": { "temperature": 0.2 } }`) alike.
+    if let Some(map) = v.get("sampling").and_then(|x| x.as_object()) {
+        if let Some(existing) = cfg.sampling.as_object_mut() {
+            for (k, val) in map {
+                match (existing.get_mut(k), val.as_object()) {
+                    (Some(Value::Object(old)), Some(obj)) => {
+                        for (fk, fv) in obj {
+                            old.insert(fk.clone(), fv.clone());
+                        }
+                    }
+                    _ => {
+                        existing.insert(k.clone(), val.clone());
+                    }
+                }
+            }
+        } else {
+            cfg.sampling = Value::Object(map.clone());
+        }
     }
 }
 
 /// Apply one layer's `delegation` section on top of the current value.
-/// Only `max_concurrent` (`maxConcurrent`) is honoured; the removed legacy
-/// keys `mode`, `model_policy`/`modelPolicy` are ignored with a warning.
+/// `max_concurrent` (`maxConcurrent`), `max_restarts` (`maxRestarts`) and
+/// `watchdog_secs` (`watchdogSecs`) are honoured; the removed legacy keys
+/// `mode`, `model_policy`/`modelPolicy` are ignored with a warning.
 pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
     let Some(obj) = v.as_object() else {
         return;
@@ -158,6 +181,21 @@ pub fn apply_delegation(cfg: &mut DelegationConfig, v: &Value) {
         && n > 0
     {
         cfg.max_concurrent = (n as usize).min(super::model::MAX_DELEGATION_MAX_CONCURRENT);
+    }
+    if let Some(n) = obj
+        .get("max_restarts")
+        .or_else(|| obj.get("maxRestarts"))
+        .and_then(|x| x.as_u64())
+    {
+        cfg.max_restarts = (n as u32).min(10);
+    }
+    if let Some(n) = obj
+        .get("watchdog_secs")
+        .or_else(|| obj.get("watchdogSecs"))
+        .and_then(|x| x.as_u64())
+        && n > 0
+    {
+        cfg.watchdog_secs = n.clamp(10, 600);
     }
 }
 

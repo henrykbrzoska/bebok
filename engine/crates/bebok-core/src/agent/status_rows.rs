@@ -79,6 +79,14 @@ pub fn progress_text(task: &ChildTask, progress: &TaskProgress, tokens: u64) -> 
     )
 }
 
+/// `api-orders restarted (attempt 1): child verdict: looping — …`.
+pub fn restarted_text(name: &str, reason: &str, attempt: u32) -> String {
+    format!(
+        "{name} restarted (attempt {attempt}): {}",
+        truncate(reason, 200)
+    )
+}
+
 /// `api-orders finished in 4m20s · 151k tok · 3 files changed`,
 /// `api-orders failed after 12s · 3k tok: <error>`, `… aborted after …`.
 pub fn ended_text(
@@ -161,6 +169,7 @@ mod tests {
             status: status.into(),
             background: true,
             prompt_hash: None,
+            restarts: 0,
         }
     }
 

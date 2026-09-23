@@ -687,6 +687,10 @@ async fn run_member(
         max_concurrent: cfg.delegation.effective_max_concurrent(),
         background: false,
         origin: "fleet",
+        // Fleet broadcast fans one prompt out to N members: per-member
+        // sampling override is deliberately unsupported; every member
+        // inherits defaults + config (conscious limitation).
+        sampling: super::task_tool::resolve_subagent_sampling(cfg, agent_name, None),
     };
     let prepared = match prepare_child(spec).await {
         Ok(p) => p,

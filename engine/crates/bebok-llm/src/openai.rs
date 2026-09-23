@@ -54,6 +54,36 @@ pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
             Value::String(effort.to_string()),
         );
     }
+    // Sampling params: only send what is set, clamped so a bad float
+    // cannot blow the request up with a 400. `top_k` is Anthropic-only
+    // and intentionally omitted here.
+    if let Value::Object(map) = &mut body {
+        let s = &req.sampling;
+        if let Some(t) = s.temperature {
+            map.insert(
+                "temperature".to_string(),
+                serde_json::json!(t.clamp(0.0, 2.0)),
+            );
+        }
+        if let Some(p) = s.top_p {
+            map.insert("top_p".to_string(), serde_json::json!(p.clamp(0.0, 1.0)));
+        }
+        if let Some(p) = s.frequency_penalty {
+            map.insert(
+                "frequency_penalty".to_string(),
+                serde_json::json!(p.clamp(-2.0, 2.0)),
+            );
+        }
+        if let Some(p) = s.presence_penalty {
+            map.insert(
+                "presence_penalty".to_string(),
+                serde_json::json!(p.clamp(-2.0, 2.0)),
+            );
+        }
+        if let Some(seed) = s.seed {
+            map.insert("seed".to_string(), serde_json::json!(seed));
+        }
+    }
     body
 }
 
@@ -588,7 +618,7 @@ mod tests {
         apply_known_tools_without_reasoning, needs_tools_without_reasoning_retry, openai_body,
         remember_tools_without_reasoning,
     };
-    use crate::provider::{ChatMessage, ChatRequest, Thinking};
+    use crate::provider::{ChatMessage, ChatRequest, Sampling, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {
@@ -598,6 +628,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking,
+            sampling: Sampling::default(),
         }
     }
 
@@ -614,6 +645,59 @@ mod tests {
 
         let max = openai_body(&req(Thinking::Max), "gpt-5");
         assert_eq!(max["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn body_maps_sampling_params() {
+        let mut request = req(Thinking::Off);
+        request.sampling = Sampling {
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            frequency_penalty: Some(0.5),
+            presence_penalty: Some(-0.5),
+            seed: Some(42),
+            top_k: Some(40), // Anthropic-only: must NOT leak into OpenAI body
+        };
+        let body = openai_body(&request, "gpt-5");
+        assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 1e-6);
+        assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 1e-6);
+        assert!((body["frequency_penalty"].as_f64().unwrap() - 0.5).abs() < 1e-6);
+        assert!((body["presence_penalty"].as_f64().unwrap() + 0.5).abs() < 1e-6);
+        assert_eq!(body["seed"], 42);
+        assert!(body.get("top_k").is_none());
+    }
+
+    #[test]
+    fn body_clamps_sampling_params() {
+        let mut request = req(Thinking::Off);
+        request.sampling = Sampling {
+            temperature: Some(5.0),
+            top_p: Some(1.5),
+            frequency_penalty: Some(-5.0),
+            presence_penalty: Some(5.0),
+            seed: None,
+            top_k: None,
+        };
+        let body = openai_body(&request, "gpt-5");
+        assert_eq!(body["temperature"], 2.0);
+        assert_eq!(body["top_p"], 1.0);
+        assert_eq!(body["frequency_penalty"], -2.0);
+        assert_eq!(body["presence_penalty"], 2.0);
+    }
+
+    #[test]
+    fn body_omits_sampling_when_empty() {
+        let body = openai_body(&req(Thinking::Off), "gpt-5");
+        for key in [
+            "temperature",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "top_k",
+        ] {
+            assert!(body.get(key).is_none(), "{key} must be omitted");
+        }
     }
 
     #[test]

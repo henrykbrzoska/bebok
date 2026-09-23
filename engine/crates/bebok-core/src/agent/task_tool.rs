@@ -42,6 +42,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
+use crate::config::ResolvedConfig;
 use crate::provider::build_provider;
 use crate::store::InstanceStore;
 
@@ -78,6 +79,14 @@ struct TaskArgs {
     /// subtask onto the parent's own model.
     #[serde(default)]
     model: Option<String>,
+    /// Optional sampling override for the sub-agent (any subset of
+    /// `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`,
+    /// `seed`, `top_k`). Raise temperature for exploration/architecture,
+    /// lower it (0.1–0.2) for repetitive mechanical work. Unset fields fall
+    /// back to `sampling.<agent>` / global `sampling` config, then the
+    /// hardcoded per-agent default.
+    #[serde(default)]
+    sampling: Option<SamplingArgs>,
     /// Short, kebab-case name for this subtask (e.g. `auth-flow-audit`).
     /// Engine guarantees uniqueness within the session; if omitted or taken
     /// the engine assigns `<agent>-<n>`.
@@ -92,6 +101,59 @@ struct TaskArgs {
     /// sub-agent finishes and returns its report directly.
     #[serde(default)]
     background: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SamplingArgs {
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default)]
+    top_p: Option<f32>,
+    #[serde(default)]
+    frequency_penalty: Option<f32>,
+    #[serde(default)]
+    presence_penalty: Option<f32>,
+    #[serde(default)]
+    seed: Option<i64>,
+    #[serde(default)]
+    top_k: Option<u32>,
+}
+
+impl SamplingArgs {
+    fn is_empty(&self) -> bool {
+        self.temperature.is_none()
+            && self.top_p.is_none()
+            && self.frequency_penalty.is_none()
+            && self.presence_penalty.is_none()
+            && self.seed.is_none()
+            && self.top_k.is_none()
+    }
+
+    fn into_sampling(self) -> bebok_llm::Sampling {
+        bebok_llm::Sampling {
+            temperature: self.temperature,
+            top_p: self.top_p,
+            frequency_penalty: self.frequency_penalty,
+            presence_penalty: self.presence_penalty,
+            seed: self.seed,
+            top_k: self.top_k,
+        }
+    }
+}
+
+/// Resolve the effective sampling for a sub-agent: hardcoded per-agent
+/// default → global `sampling` config → `sampling.<agent>` config →
+/// explicit per-call override (each layer wins per-field).
+pub fn resolve_subagent_sampling(
+    cfg: &ResolvedConfig,
+    agent_name: &str,
+    call_override: Option<bebok_llm::Sampling>,
+) -> bebok_llm::Sampling {
+    let base = cfg.sampling_for(agent_name);
+    match call_override {
+        Some(o) => base.merge(o),
+        None => base,
+    }
 }
 
 #[async_trait]
@@ -128,6 +190,18 @@ impl Tool for TaskTool {
                 "model": {
                     "type": "string",
                     "description": "Optional model override for the sub-agent: \"heavy\" = your own (parent) model for a demanding part (large refactor, architecture, multi-file debugging). Omit for the configured model (`models.<agent>` when set, else the parent's model)."
+                },
+                "sampling": {
+                    "type": "object",
+                    "properties": {
+                        "temperature": { "type": "number", "description": "Sampling temperature 0-2. Raise for exploration/architecture, lower (0.1-0.2) for repetitive mechanical work." },
+                        "top_p": { "type": "number", "description": "Nucleus sampling 0-1." },
+                        "frequency_penalty": { "type": "number", "description": "Frequency penalty -2-2." },
+                        "presence_penalty": { "type": "number", "description": "Presence penalty -2-2." },
+                        "seed": { "type": "integer", "description": "Deterministic seed." },
+                        "top_k": { "type": "integer", "description": "Top-k (Anthropic only)." }
+                    },
+                    "description": "Optional sampling override for the sub-agent. Unset fields fall back to sampling.<agent> / global sampling config, then the per-agent default."
                 },
                 "name": {
                     "type": "string",
@@ -243,6 +317,16 @@ impl Tool for TaskTool {
             |a| cfg.model_for(a),
             args.model.as_deref(),
         );
+        // Sampling follows the same override chain: per-agent default →
+        // config → explicit per-call `sampling` (per-field merge).
+        let call_sampling = args.sampling.map(|s| {
+            if s.is_empty() {
+                bebok_llm::Sampling::default()
+            } else {
+                s.into_sampling()
+            }
+        });
+        let sampling = resolve_subagent_sampling(&cfg, &agent_name, call_sampling);
 
         // Ground the sub-agent in AGENTS.md + enabled skills (same as the
         // server's prompt assembly, minus the parent-only context notes).
@@ -280,6 +364,7 @@ impl Tool for TaskTool {
             max_concurrent: cfg.delegation.effective_max_concurrent(),
             background: args.background,
             origin: "task",
+            sampling,
         };
 
         let prepared = match prepare_child(spec).await {

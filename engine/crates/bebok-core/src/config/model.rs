@@ -151,19 +151,30 @@ impl BuildTestMode {
 pub const DEFAULT_DELEGATION_MAX_CONCURRENT: usize = 3;
 /// Hard ceiling for `delegation.max_concurrent` (guards against typos).
 pub const MAX_DELEGATION_MAX_CONCURRENT: usize = 16;
+/// Default cap on watchdog-triggered restarts per child.
+pub const DEFAULT_DELEGATION_MAX_RESTARTS: u32 = 2;
+/// Default watchdog tick (seconds) for child supervision.
+pub const DEFAULT_DELEGATION_WATCHDOG_SECS: u64 = 60;
 
-/// `delegation` config section: just the concurrency cap.
+/// `delegation` config section: concurrency cap + watchdog knobs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DelegationConfig {
     /// Upper bound on concurrently *running* children; extra ones queue.
     pub max_concurrent: usize,
+    /// Max watchdog-triggered restarts per child before the orchestrator
+    /// gets an error and takes over itself.
+    pub max_restarts: u32,
+    /// Watchdog supervision tick in seconds.
+    pub watchdog_secs: u64,
 }
 
 impl Default for DelegationConfig {
     fn default() -> Self {
         Self {
             max_concurrent: DEFAULT_DELEGATION_MAX_CONCURRENT,
+            max_restarts: DEFAULT_DELEGATION_MAX_RESTARTS,
+            watchdog_secs: DEFAULT_DELEGATION_WATCHDOG_SECS,
         }
     }
 }
@@ -172,6 +183,21 @@ impl DelegationConfig {
     /// `max_concurrent` clamped to `1..=MAX_DELEGATION_MAX_CONCURRENT`.
     pub fn effective_max_concurrent(&self) -> usize {
         self.max_concurrent.clamp(1, MAX_DELEGATION_MAX_CONCURRENT)
+    }
+}
+
+/// Parse a `Sampling` from a config JSON value (`{ "temperature": 0.5,
+/// "top_p": 0.9, "frequency_penalty": 0.0, "presence_penalty": 0.0,
+/// "seed": 42, "top_k": 40 }`). Unknown/mistyped fields are ignored.
+fn sampling_from_value(v: &Value) -> bebok_llm::Sampling {
+    let get_f = |k: &str| v.get(k).and_then(Value::as_f64).map(|f| f as f32);
+    bebok_llm::Sampling {
+        temperature: get_f("temperature"),
+        top_p: get_f("top_p"),
+        frequency_penalty: get_f("frequency_penalty"),
+        presence_penalty: get_f("presence_penalty"),
+        seed: v.get("seed").and_then(Value::as_i64),
+        top_k: v.get("top_k").and_then(Value::as_u64).map(|k| k as u32),
     }
 }
 
@@ -189,6 +215,11 @@ pub struct ResolvedConfig {
     pub api_key: Option<String>,
     /// Per-agent-type model overrides (`{ "code": "openai/gpt-4o", ... }`).
     pub models: Value,
+    /// Sampling overrides: global fields (`{ "temperature": 0.5, ... }`)
+    /// and/or per-agent sections (`{ "code": { "temperature": 0.2 } }`).
+    /// Merged per key (global, then project overrides).
+    #[serde(default)]
+    pub sampling: Value,
     /// Provider registry (merged with built-ins; see `resolve_providers`).
     pub providers: Vec<ProviderSpec>,
     /// Context budget (tokens) before pruning/compaction.
@@ -239,6 +270,7 @@ impl Default for ResolvedConfig {
             thinking: bebok_llm::Thinking::Off,
             api_key: None,
             models: Value::Object(serde_json::Map::new()),
+            sampling: Value::Object(serde_json::Map::new()),
             providers: Vec::new(),
             context_budget: DEFAULT_CONTEXT_BUDGET,
             tool_output_cap: DEFAULT_TOOL_OUTPUT_CAP,
@@ -284,6 +316,18 @@ impl ResolvedConfig {
             .and_then(|m| m.as_str())
             .map(str::to_string)
             .unwrap_or_else(|| self.model.clone())
+    }
+
+    /// The effective sampling params for an agent type. Precedence (each    /// layer wins per-field via `Sampling::merge`):
+    /// hardcoded per-agent default → global `sampling` → `sampling.<agent>`.
+    /// (An explicit `task`-call override merges on top at the call site.)
+    pub fn sampling_for(&self, agent_type: &str) -> bebok_llm::Sampling {
+        let mut out = super::super::agent::sampling_defaults::default_sampling(agent_type);
+        out = out.merge(sampling_from_value(&self.sampling));
+        if let Some(per_agent) = self.sampling.get(agent_type) {
+            out = out.merge(sampling_from_value(per_agent));
+        }
+        out
     }
 
     /// Whether the parallel-agents fleet is enabled. Capability gate: the

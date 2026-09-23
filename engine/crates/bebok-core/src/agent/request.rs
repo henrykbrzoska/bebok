@@ -8,7 +8,9 @@
 
 use std::collections::HashSet;
 
-use bebok_llm::{ChatMessage, ChatRequest, ChatRole, ContentPart, Thinking, ToolDef, ToolResult};
+use bebok_llm::{
+    ChatMessage, ChatRequest, ChatRole, ContentPart, Sampling, Thinking, ToolDef, ToolResult,
+};
 use bebok_tools::ToolRegistry;
 
 use super::preset::Agent;
@@ -34,6 +36,7 @@ pub struct RequestBuilder<'a> {
     pub model: &'a str,
     pub max_tokens: u32,
     pub thinking: Thinking,
+    pub sampling: Sampling,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -52,7 +55,15 @@ impl<'a> RequestBuilder<'a> {
             model,
             max_tokens,
             thinking,
+            sampling: Sampling::default(),
         }
+    }
+
+    /// Builder-style override for sampling params (orchestrator `task`
+    /// override / per-agent config resolution happens at the call site).
+    pub fn with_sampling(mut self, sampling: Sampling) -> Self {
+        self.sampling = sampling;
+        self
     }
 
     /// Build the provider request from the session transcript.
@@ -225,6 +236,7 @@ impl<'a> RequestBuilder<'a> {
             tools: tool_defs,
             max_tokens: self.max_tokens,
             thinking: self.thinking,
+            sampling: self.sampling.clone(),
         })
     }
 

@@ -40,6 +40,10 @@ pub struct TurnRunner {
     pub bus: EventBus,
     pub abort: CancellationToken,
     pub model: String,
+    /// Explicit sampling (delegated children: resolved at spawn; see
+    /// `task_tool::resolve_subagent_sampling`). `None` = resolve from
+    /// config (`sampling_for`) like a normal user turn.
+    pub sampling_override: Option<bebok_llm::Sampling>,
 }
 
 impl TurnRunner {
@@ -63,7 +67,15 @@ impl TurnRunner {
             bus,
             abort,
             model,
+            sampling_override: None,
         }
+    }
+
+    /// Delegated children: pin the spawn-time resolved sampling
+    /// (defaults → config → explicit `task` override).
+    pub fn with_sampling(mut self, sampling: bebok_llm::Sampling) -> Self {
+        self.sampling_override = Some(sampling);
+        self
     }
 
     /// Run a full turn: build request -> stream SSE -> append parts -> pending
@@ -80,6 +92,7 @@ impl TurnRunner {
             bus,
             abort,
             model,
+            sampling_override,
         } = self;
         let model_ref = model.as_str();
         let config = state.config_snapshot();
@@ -99,6 +112,9 @@ impl TurnRunner {
                 break;
             }
 
+            let sampling = sampling_override
+                .clone()
+                .unwrap_or_else(|| config.sampling_for(&agent.name));
             let builder = RequestBuilder::new(
                 &state,
                 &agent,
@@ -106,7 +122,8 @@ impl TurnRunner {
                 model_ref,
                 config.max_tokens,
                 config.thinking,
-            );
+            )
+            .with_sampling(sampling);
             let mut req = builder.build().await?;
             // Plugin hook: inspect / mutate the request before it is sent.
             builder.apply_request_hook(&mut req).await;
@@ -1330,7 +1347,8 @@ mod retry_tests {
 
     use async_trait::async_trait;
     use bebok_llm::{
-        ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, Thinking, Usage,
+        ChatMessage, ChatRequest, LlmError, Provider, Sampling, StreamEvent, StreamResult,
+        Thinking, Usage,
     };
     use futures::stream::{self, BoxStream};
 
@@ -1410,6 +1428,7 @@ mod retry_tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking: Thinking::Off,
+            sampling: Sampling::default(),
         }
     }
 

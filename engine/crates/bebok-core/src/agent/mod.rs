@@ -32,11 +32,13 @@ pub mod observe;
 pub mod preset;
 pub mod prompt_env;
 pub mod request;
+pub mod sampling_defaults;
 pub mod status_rows;
 pub mod supervision_tools;
 pub mod task_tool;
 pub mod turn;
 pub mod verify_prompt;
+pub mod watchdog;
 
 #[cfg(test)]
 mod tests;

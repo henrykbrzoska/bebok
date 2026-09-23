@@ -1227,6 +1227,7 @@ if __name__ == "__main__":
             prompt_hash: None,
             status: "running".to_string(),
             background: false,
+            restarts: 0,
         };
         let json = serde_json::to_value(&task).unwrap();
         assert!(json.get("taskID").is_some(), "expected camelCase taskID");
@@ -1468,6 +1469,7 @@ wrote orders.ts",
             max_concurrent: 3,
             background: true,
             origin: "task",
+            sampling: bebok_llm::Sampling::default(),
         };
         let prepared = prepare_child(spec).await.unwrap();
         let outcome = run_child(prepared).await;

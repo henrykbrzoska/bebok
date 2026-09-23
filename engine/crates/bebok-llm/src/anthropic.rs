@@ -105,6 +105,23 @@ pub fn anthropic_body(req: &ChatRequest, model: &str) -> Value {
             serde_json::json!({ "type": "enabled", "budget_tokens": budget }),
         );
     }
+    // Sampling params: only send what is set, clamped so a bad float
+    // cannot blow the request up with a 400.
+    if let Value::Object(map) = &mut body {
+        let s = &req.sampling;
+        if let Some(t) = s.temperature {
+            map.insert(
+                "temperature".to_string(),
+                serde_json::json!(t.clamp(0.0, 2.0)),
+            );
+        }
+        if let Some(p) = s.top_p {
+            map.insert("top_p".to_string(), serde_json::json!(p.clamp(0.0, 1.0)));
+        }
+        if let Some(k) = s.top_k {
+            map.insert("top_k".to_string(), serde_json::json!(k));
+        }
+    }
     body
 }
 
@@ -359,7 +376,7 @@ impl AnthropicParser {
 #[cfg(test)]
 mod tests {
     use super::anthropic_body;
-    use crate::provider::{ChatMessage, ChatRequest, ChatRole, Thinking};
+    use crate::provider::{ChatMessage, ChatRequest, ChatRole, Sampling, Thinking};
 
     fn req(thinking: Thinking) -> ChatRequest {
         ChatRequest {
@@ -369,6 +386,7 @@ mod tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking,
+            sampling: Sampling::default(),
         }
     }
 
@@ -383,6 +401,51 @@ mod tests {
 
         let max = anthropic_body(&req(Thinking::Max), "claude-sonnet");
         assert_eq!(max["thinking"]["budget_tokens"], 8192);
+    }
+
+    #[test]
+    fn body_maps_sampling_params() {
+        let mut request = req(Thinking::Off);
+        request.sampling = Sampling {
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            frequency_penalty: None, // OpenAI-only: must NOT leak into Anthropic body
+            presence_penalty: None,
+            seed: None,
+            top_k: Some(40),
+        };
+        let body = anthropic_body(&request, "claude-sonnet");
+        assert!((body["temperature"].as_f64().unwrap() - 0.7).abs() < 1e-6);
+        assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 1e-6);
+        assert_eq!(body["top_k"], 40);
+        assert!(body.get("frequency_penalty").is_none());
+        assert!(body.get("presence_penalty").is_none());
+        assert!(body.get("seed").is_none());
+    }
+
+    #[test]
+    fn body_clamps_sampling_params() {
+        let mut request = req(Thinking::Off);
+        request.sampling = Sampling {
+            temperature: Some(5.0),
+            top_p: Some(1.5),
+            frequency_penalty: None,
+            presence_penalty: None,
+            seed: None,
+            top_k: Some(10),
+        };
+        let body = anthropic_body(&request, "claude-sonnet");
+        assert_eq!(body["temperature"], 2.0);
+        assert_eq!(body["top_p"], 1.0);
+        assert_eq!(body["top_k"], 10);
+    }
+
+    #[test]
+    fn body_omits_sampling_when_empty() {
+        let body = anthropic_body(&req(Thinking::Off), "claude-sonnet");
+        for key in ["temperature", "top_p", "top_k"] {
+            assert!(body.get(key).is_none(), "{key} must be omitted");
+        }
     }
 
     #[test]

@@ -678,6 +678,9 @@ pub struct ChildSpec {
     pub background: bool,
     /// `task` | `fleet` - only used in messages.
     pub origin: &'static str,
+    /// Effective sampling params (resolved at spawn; see
+    /// `task_tool::resolve_subagent_sampling`).
+    pub sampling: bebok_llm::Sampling,
 }
 
 /// What happened to a child (also what `task_wait` hands back).
@@ -809,6 +812,139 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
     })
 }
 
+/// Run one child turn under the orchestrator watchdog. The watchdog loop
+/// (see `super::watchdog`) ticks every `watchdog_secs` and signals through
+/// a channel when the child loops, wanders or goes silent. On signal the
+/// turn is aborted and the child is respawned IN THE SAME SESSION (history
+/// is kept so the model sees it looped; the prompt gains a "change
+/// strategy" note) — a fresh session is used only when the child produced
+/// no ticks at all. A restart never takes a new `SlotGate` slot: the child
+/// keeps the one it already holds. After `max_restarts` the turn ends with
+/// an error for the orchestrator ("child X got stuck N times, take over
+/// yourself") instead of restarting.
+#[allow(clippy::too_many_arguments)]
+async fn run_child_turn_with_watchdog(
+    spec: &ChildSpec,
+    child: &Arc<SessionState>,
+    info: &ChildTask,
+    bus: &EventBus,
+    abort: &CancellationToken,
+    task_id: &str,
+    mut restarts: u32,
+) -> Result<(), crate::error::CoreError> {
+    let max_restarts = spec.parent.config_snapshot().delegation.max_restarts;
+    let watchdog_secs = spec.parent.config_snapshot().delegation.watchdog_secs;
+
+    loop {
+        let stop = CancellationToken::new();
+        let reporter = spawn_progress_reporter(
+            bus.clone(),
+            child.clone(),
+            spec.parent.clone(),
+            info.clone(),
+            stop.clone(),
+        );
+
+        // Watchdog: snapshot tool_calls + steps + verdict each tick.
+        let (wd_tx, mut wd_rx) = tokio::sync::mpsc::channel::<String>(1);
+        let wd_done = stop.clone();
+        let wd_child = child.clone();
+        let wd_handle = tokio::spawn(super::watchdog::watchdog_loop(
+            move || {
+                // Best-effort sync snapshot: the loop only needs counters.
+                let (tool_calls, steps, verdict) = match wd_child.try_read_messages_snapshot() {
+                    Some(messages) => {
+                        let p = summarize_progress(&messages);
+                        (p.tool_calls, p.steps, p.verdict)
+                    }
+                    None => (0, 0, "ok".to_string()),
+                };
+                (
+                    super::watchdog::ProgressSnapshot { tool_calls, steps },
+                    verdict,
+                )
+            },
+            wd_done,
+            wd_tx,
+            max_restarts,
+            restarts,
+            watchdog_secs,
+        ));
+
+        let turn_fut = super::turn::TurnRunner::new(
+            child.clone(),
+            spec.agent.clone(),
+            spec.instance.tools.clone(),
+            spec.provider.clone(),
+            spec.instance.permission.clone(),
+            bus.clone(),
+            abort.clone(),
+            spec.model.clone(),
+        )
+        .with_sampling(spec.sampling.clone())
+        .run();
+        tokio::pin!(turn_fut);
+        enum TurnEnd {
+            Done(Result<(), crate::error::CoreError>),
+            Restart(String),
+        }
+        let end = tokio::select! {
+            r = &mut turn_fut => TurnEnd::Done(r),
+            reason = wd_rx.recv() => match reason {
+                Some(reason) => TurnEnd::Restart(reason),
+                // Watchdog exited without a signal (child done).
+                None => TurnEnd::Done((&mut turn_fut).await),
+            },
+        };
+        stop.cancel();
+        let _ = reporter.await;
+        let _ = wd_handle.await;
+        match end {
+            TurnEnd::Done(r) => return r,
+            TurnEnd::Restart(reason) => {
+                // Stop the stuck turn before respawning.
+                abort.cancel();
+                if restarts >= max_restarts {
+                    return Err(crate::error::CoreError::BadRequest(format!(
+                        "child {task_id} got stuck {} times ({reason}); take over yourself",
+                        restarts + 1
+                    )));
+                }
+                restarts += 1;
+                spec.parent.set_restarts(task_id, restarts).await;
+                bus.publish(
+                    Event::new("task.restarted", &spec.directory, &spec.parent_session_id)
+                        .with_properties(serde_json::json!({
+                            "taskID": task_id,
+                            "reason": reason,
+                            "attempt": restarts,
+                        })),
+                );
+                super::status_rows::push_status(
+                    bus,
+                    &spec.parent,
+                    "task.restarted",
+                    super::status_rows::restarted_text(&info.name, &reason, restarts),
+                    Some(info),
+                )
+                .await;
+                // Same session + strategy note (fresh session only
+                // when the child produced no ticks at all).
+                let had_ticks = child
+                    .try_read_messages_snapshot()
+                    .is_some_and(|m| !m.is_empty());
+                if had_ticks {
+                    let note = format!(
+                        "Poprzednia próba utknęła: {reason}. Zmień strategię, nie powtarzaj tych samych wywołań."
+                    );
+                    let _ = child.append_user_message(&note).await;
+                }
+                // The slot is kept (no new acquire); loop respawns the turn.
+            }
+        }
+    }
+}
+
 /// Run a prepared child to completion: wait for a slot if queued, stream
 /// progress, run the turn, persist the outcome, emit `task.ended`, and record
 /// the result on the parent when it was a background task.
@@ -844,29 +980,7 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
     let result = if abort.is_cancelled() {
         Ok(())
     } else {
-        let stop = CancellationToken::new();
-        let reporter = spawn_progress_reporter(
-            bus.clone(),
-            child.clone(),
-            spec.parent.clone(),
-            info.clone(),
-            stop.clone(),
-        );
-        let result = super::turn::TurnRunner::new(
-            child.clone(),
-            spec.agent,
-            spec.instance.tools.clone(),
-            spec.provider,
-            spec.instance.permission.clone(),
-            bus.clone(),
-            abort.clone(),
-            spec.model.clone(),
-        )
-        .run()
-        .await;
-        stop.cancel();
-        let _ = reporter.await;
-        result
+        run_child_turn_with_watchdog(&spec, &child, &info, &bus, &abort, &task_id, 0).await
     };
 
     if holds_slot {

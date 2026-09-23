@@ -42,6 +42,10 @@ pub struct ChildTask {
     /// WP-DELEGATION: `true` when spawned with `background: true` (the parent
     /// collects the result later via `task_wait`).
     pub background: bool,
+    /// Watchdog-triggered restarts so far (capped by
+    /// `delegation.max_restarts`).
+    #[serde(default)]
+    pub restarts: u32,
 }
 
 /// Normalise a `task` prompt for duplicate detection: trim, collapse
@@ -219,6 +223,13 @@ impl SessionState {
 
     pub async fn messages_snapshot(&self) -> Vec<Message> {
         self.messages.read().await.clone()
+    }
+
+    /// Non-blocking snapshot for the orchestrator watchdog (called from a
+    /// `FnMut` tick closure that cannot await). Returns `None` when the
+    /// lock is contended — the watchdog treats it as "no data this tick".
+    pub fn try_read_messages_snapshot(&self) -> Option<Vec<Message>> {
+        self.messages.try_read().ok().map(|g| g.clone())
     }
 
     pub(crate) fn note_message_index(&self, idx: usize) {
@@ -588,6 +599,7 @@ impl SessionState {
             prompt_hash: None,
             status: "running".to_string(),
             background: false,
+            restarts: 0,
         };
         self.child_tasks
             .lock()
@@ -656,6 +668,7 @@ impl SessionState {
             prompt_hash: prompt.map(|p| task_prompt_hash(p, agent)),
             status: status.to_string(),
             background,
+            restarts: 0,
         };
         self.child_tasks
             .lock()
@@ -669,6 +682,14 @@ impl SessionState {
         let mut tasks = self.child_tasks.lock().await;
         let (_, info) = tasks.get_mut(task_id)?;
         info.status = status.to_string();
+        Some(info.clone())
+    }
+
+    /// Watchdog: record a restart of a live child.
+    pub async fn set_restarts(&self, task_id: &str, restarts: u32) -> Option<ChildTask> {
+        let mut tasks = self.child_tasks.lock().await;
+        let (_, info) = tasks.get_mut(task_id)?;
+        info.restarts = restarts;
         Some(info.clone())
     }
 

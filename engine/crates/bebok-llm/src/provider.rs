@@ -396,6 +396,50 @@ impl Thinking {
     }
 }
 
+/// Provider-neutral sampling parameters for a request. Every field is
+/// `Option`: `None` means "omit, keep the provider default". `Default` is
+/// all-`None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Sampling {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    /// Anthropic-only (`top_k`); ignored by the OpenAI mapping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+}
+
+impl Sampling {
+    /// True when every field is `None` (nothing to send).
+    pub fn is_empty(&self) -> bool {
+        self.temperature.is_none()
+            && self.top_p.is_none()
+            && self.frequency_penalty.is_none()
+            && self.presence_penalty.is_none()
+            && self.seed.is_none()
+            && self.top_k.is_none()
+    }
+
+    /// Per-field merge: `Some` fields of `o` win, `None` keeps `self`.
+    pub fn merge(self, o: Sampling) -> Sampling {
+        Sampling {
+            temperature: o.temperature.or(self.temperature),
+            top_p: o.top_p.or(self.top_p),
+            frequency_penalty: o.frequency_penalty.or(self.frequency_penalty),
+            presence_penalty: o.presence_penalty.or(self.presence_penalty),
+            seed: o.seed.or(self.seed),
+            top_k: o.top_k.or(self.top_k),
+        }
+    }
+}
+
 /// The request the agent loop builds for a turn.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRequest {
@@ -406,6 +450,8 @@ pub struct ChatRequest {
     pub max_tokens: u32,
     /// Requested reasoning/thinking effort (provider-mapped; `Off` = default).
     pub thinking: Thinking,
+    /// Sampling parameters (`Default` = omit all, provider defaults apply).
+    pub sampling: Sampling,
 }
 
 /// Token/cost usage reported by a provider.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+- Sampling parameters: `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed` (OpenAI + Anthropic) and `top_k` (Anthropic) flow from per-agent defaults (code/debug 0.2, ask/plan 0.4, orchestrator 0.7) through the new `sampling` / `sampling.<agent>` config keys to an optional per-call `task` override.
+- Orchestrator watchdog: child sub-agents stuck in a loop, wandering or silent are aborted and restarted in the same session (new `task.restarted` event), up to `delegation.max_restarts` (default 2) with `delegation.watchdog_secs` (default 60).
+
 ### Fixes
 - `fetch` now returns the readable text of web pages instead of raw HTML, so long pages no longer lose their middle to output truncation.
 
