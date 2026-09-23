@@ -687,6 +687,10 @@ async fn run_member(
         max_concurrent: cfg.delegation.effective_max_concurrent(),
         background: false,
         origin: "fleet",
+        // Fleet broadcast fans one prompt out to N members: per-member
+        // sampling override is deliberately unsupported; every member
+        // inherits defaults + config (conscious limitation).
+        sampling: super::task_tool::resolve_subagent_sampling(cfg, agent_name, None),
     };
     let prepared = match prepare_child(spec).await {
         Ok(p) => p,
@@ -758,6 +762,14 @@ fn assemble_prompt(
     // WP-AUTOVERIFY (F8-1): browser + dev-server capabilities and the
     // `verify.frontend` policy (skipped for presets without browser tools).
     if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+    // Pre-computed code map (`code_map.enabled`): fleet members get the same
+    // "what is where" orientation as the main thread.
+    if let Some(section) = super::code_map_prompt::code_map_section(&instance.root, cfg) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+    if let Some(section) = super::code_graph_prompt::code_graph_section(&instance.root, cfg) {
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
     // WP-DELEGATION: a worker's brief, not the main thread's policy.

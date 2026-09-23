@@ -703,6 +703,7 @@ mod tests {
                 status: "running".into(),
                 background: true,
                 prompt_hash: None,
+                restarts: 0,
             },
             progress: TaskProgress {
                 last_tool: Some("write_file".into()),

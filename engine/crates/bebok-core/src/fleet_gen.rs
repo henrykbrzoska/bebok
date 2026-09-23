@@ -201,6 +201,7 @@ async fn try_llm_generate(
         tools: vec![],
         max_tokens: 2048,
         thinking: bebok_llm::Thinking::Off,
+        sampling: bebok_llm::Sampling::default(),
     };
 
     let stream = tokio::time::timeout(

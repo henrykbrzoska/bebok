@@ -17,6 +17,7 @@ use futures::StreamExt;
 use futures::future::join_all;
 use tokio_util::sync::CancellationToken;
 
+use super::build_test_gate::check_build_test_policy;
 use super::exec::{ExecCtx, ToolOutcome, exec_gated_call, fail_tool};
 use super::gate::{GateCtx, resolve_permission};
 use super::observe::{emit_message, emit_part, emit_session};
@@ -40,6 +41,10 @@ pub struct TurnRunner {
     pub bus: EventBus,
     pub abort: CancellationToken,
     pub model: String,
+    /// Explicit sampling (delegated children: resolved at spawn; see
+    /// `task_tool::resolve_subagent_sampling`). `None` = resolve from
+    /// config (`sampling_for`) like a normal user turn.
+    pub sampling_override: Option<bebok_llm::Sampling>,
 }
 
 impl TurnRunner {
@@ -63,7 +68,15 @@ impl TurnRunner {
             bus,
             abort,
             model,
+            sampling_override: None,
         }
+    }
+
+    /// Delegated children: pin the spawn-time resolved sampling
+    /// (defaults → config → explicit `task` override).
+    pub fn with_sampling(mut self, sampling: bebok_llm::Sampling) -> Self {
+        self.sampling_override = Some(sampling);
+        self
     }
 
     /// Run a full turn: build request -> stream SSE -> append parts -> pending
@@ -80,6 +93,7 @@ impl TurnRunner {
             bus,
             abort,
             model,
+            sampling_override,
         } = self;
         let model_ref = model.as_str();
         let config = state.config_snapshot();
@@ -99,6 +113,9 @@ impl TurnRunner {
                 break;
             }
 
+            let sampling = sampling_override
+                .clone()
+                .unwrap_or_else(|| config.sampling_for(&agent.name));
             let builder = RequestBuilder::new(
                 &state,
                 &agent,
@@ -106,7 +123,8 @@ impl TurnRunner {
                 model_ref,
                 config.max_tokens,
                 config.thinking,
-            );
+            )
+            .with_sampling(sampling);
             let mut req = builder.build().await?;
             // Plugin hook: inspect / mutate the request before it is sent.
             builder.apply_request_hook(&mut req).await;
@@ -404,6 +422,24 @@ impl TurnRunner {
                         agent_name: &agent.name,
                         assistant_idx,
                     };
+                    // Build-test policy gate: when `verify.buildTest` is
+                    // `Off`, block bash commands that look like test
+                    // runners *before* the permission engine so that a
+                    // catch-all `allow` rule cannot bypass it.
+                    if let Some(denied) = check_build_test_policy(&config, &tool_name, &input) {
+                        fail_tool(
+                            &state,
+                            &bus,
+                            assistant_idx,
+                            &call_id,
+                            match denied {
+                                ToolOutcome::Denied(msg) => msg,
+                                _ => "blocked by build-test policy",
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
                     match resolve_permission(&gate, &call_id, &tool_name, &input).await {
                         ToolOutcome::Denied(message) => {
                             fail_tool(&state, &bus, assistant_idx, &call_id, message).await;
@@ -1330,7 +1366,8 @@ mod retry_tests {
 
     use async_trait::async_trait;
     use bebok_llm::{
-        ChatMessage, ChatRequest, LlmError, Provider, StreamEvent, StreamResult, Thinking, Usage,
+        ChatMessage, ChatRequest, LlmError, Provider, Sampling, StreamEvent, StreamResult,
+        Thinking, Usage,
     };
     use futures::stream::{self, BoxStream};
 
@@ -1410,6 +1447,7 @@ mod retry_tests {
             tools: Vec::new(),
             max_tokens: 128,
             thinking: Thinking::Off,
+            sampling: Sampling::default(),
         }
     }
 

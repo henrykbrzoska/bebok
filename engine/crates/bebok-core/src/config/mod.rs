@@ -21,16 +21,18 @@ pub mod writer;
 
 // --- model (ResolvedConfig + Default + model_for/provider_spec, Builder) ---
 pub use model::{
-    BuildTestMode, DEFAULT_CONTEXT_BUDGET, DEFAULT_DELEGATION_MAX_CONCURRENT, DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL, DEFAULT_TOOL_OUTPUT_CAP, DelegationConfig, FleetConfig, FleetMember,
-    MAX_CUSTOM_CSS_FILES, MAX_CUSTOM_CSS_LEN, MAX_DELEGATION_MAX_CONCURRENT, ResolvedConfig,
-    ResolvedConfigBuilder, UiConfig,
+    BuildTestMode, CodeGraphConfig, CodeMapConfig, DEFAULT_CODE_GRAPH_MAX_FILES,
+    DEFAULT_CODE_MAP_MAX_DEPTH, DEFAULT_CODE_MAP_MAX_TOKENS, DEFAULT_CONTEXT_BUDGET,
+    DEFAULT_DELEGATION_MAX_CONCURRENT, DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_TOOL_OUTPUT_CAP,
+    DelegationConfig, FleetConfig, FleetMember, MAX_CUSTOM_CSS_FILES, MAX_CUSTOM_CSS_LEN,
+    MAX_DELEGATION_MAX_CONCURRENT, ResolvedConfig, ResolvedConfigBuilder, UiConfig,
 };
 
 // --- loader (load/load_with_global/apply/apply_file/merge_providers/...) ---
 pub use loader::{
-    apply, apply_delegation, apply_file, global_config_path, load, load_with_global,
-    merge_providers, parse_thinking, project_config_path, provider_from_model, read_layer_json,
+    apply, apply_code_graph, apply_code_map, apply_delegation, apply_file, global_config_path,
+    load, load_with_global, merge_providers, parse_thinking, project_config_path,
+    provider_from_model, read_layer_json,
 };
 
 // --- writer (deltas + full, JSONC round-trip only) ---

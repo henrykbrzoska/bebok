@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Features
+- Module dependency graph: when `code_graph.enabled` is true in the project config, Bebok scans Rust `use`/`mod` declarations into a per-project graph (`.bebok/code_graph.json`) and injects a summary into the system prompt. Agents can query it via `code_graph_depends` (what a module imports), `code_graph_dependents` (reverse dependencies) and `code_graph_impact` (change blast-radius analysis). Inspect via `GET /code-graph`, force a rescan via `POST /code-graph/regenerate`. Off by default.
+- Pre-computed code map: when `code_map.enabled` is true in the project config, Bebok generates a concise directory-to-description map and injects it into the system prompt so the model immediately knows "what is where" without file-system exploration. Manual overrides via `code_map.overrides`, size cap via `code_map.max_tokens`, scan depth via `code_map.max_depth`, cache in `.bebok/code-map.json` (stale after 24 h, regenerate on demand via `POST /code-map/regenerate`; inspect via `GET /code-map`). Off by default — nothing is generated or injected until you turn it on.
+- Sampling parameters: `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed` (OpenAI + Anthropic) and `top_k` (Anthropic) flow from per-agent defaults (code/debug 0.2, ask/plan 0.4, orchestrator 0.7) through the new `sampling` / `sampling.<agent>` config keys to an optional per-call `task` override.
+- Orchestrator watchdog: child sub-agents stuck in a loop, wandering or silent are aborted and restarted in the same session (new `task.restarted` event), up to `delegation.max_restarts` (default 2) with `delegation.watchdog_secs` (default 60).
+- Build-test policy enforcement: when `verify.buildTest` is `"off"`, bash commands that look like test runners (`cargo test`, `npm test`, `pytest`, `go test`, `make test`, etc.) are blocked with a clear message suggesting `"auto"` or `"ask"`. Detection covers shell prefixes (`sudo`, `env VAR=x`, `nohup`), wrappers (`python -m`, `npx`), and shell operators (`|`, `&&`, `||`, `;`).
+
 ### Fixes
 - `fetch` now returns the readable text of web pages instead of raw HTML, so long pages no longer lose their middle to output truncation.
 

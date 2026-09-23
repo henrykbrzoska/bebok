@@ -17,9 +17,14 @@
 //! Public surface is unchanged: `crate::agent::{Agent, AgentCatalog, ...,
 //! run_turn, build_request, ...}` keep resolving here.
 
+pub mod build_test_gate;
 pub mod build_test_prompt;
 pub mod catalog;
+pub mod code_graph_prompt;
+pub mod code_graph_tools;
 pub mod code_index_tools;
+pub mod code_map_gen;
+pub mod code_map_prompt;
 pub mod delegation;
 pub mod delegation_policy;
 pub mod exec;
@@ -32,18 +37,24 @@ pub mod observe;
 pub mod preset;
 pub mod prompt_env;
 pub mod request;
+pub mod sampling_defaults;
 pub mod status_rows;
 pub mod supervision_tools;
 pub mod task_tool;
 pub mod turn;
 pub mod verify_prompt;
+pub mod watchdog;
 
 #[cfg(test)]
 mod tests;
 
+pub use build_test_gate::check_build_test_policy;
 pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
+pub use code_graph_prompt::code_graph_section;
+pub use code_graph_tools::{CodeGraphDependents, CodeGraphDepends, CodeGraphImpact};
 pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
+pub use code_map_prompt::code_map_section;
 pub use delegation::{
     LOOP_MIN_REPEAT, LOOP_WINDOW, LoopHit, TaskProgress, WANDER_MIN_DISTINCT_READS,
     WANDER_NO_ADVANCE_WINDOW, WANDER_READ_RATIO, WanderHit, summarize_progress,

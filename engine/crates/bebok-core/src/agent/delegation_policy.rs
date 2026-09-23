@@ -222,7 +222,10 @@ mod tests {
     use super::*;
 
     fn cfg() -> DelegationConfig {
-        DelegationConfig { max_concurrent: 3 }
+        DelegationConfig {
+            max_concurrent: 3,
+            ..DelegationConfig::default()
+        }
     }
 
     /// Fleet as this project actually configures it: orchestrator + members.
