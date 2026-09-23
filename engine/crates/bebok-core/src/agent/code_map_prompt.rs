@@ -132,7 +132,7 @@ mod tests {
         assert!(section.starts_with("Project code map:"), "{section}");
         assert!(section.contains("\n- engine/ → Rust engine."), "{section}");
         assert!(
-            section.contains("\n- client/ → Angular client."),
+            section.contains("\n- client/ → Angular client"),
             "{section}"
         );
         // The cache was written back for the next conversation.

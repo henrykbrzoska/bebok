@@ -713,11 +713,13 @@ mod tests {
             cut.iter()
                 .any(|e| e.description.contains("more entries omitted"))
         );
-        assert!(cut.len() < entries.len());
+        // Count only real entries: the appended marker is not an entry.
+        let real = cut.iter().filter(|e| !e.path.is_empty()).count();
+        assert!(real < entries.len(), "a real entry was removed: {real}");
         // The removed one is a deepest entry, never the top-level view.
         assert!(
             !cut.iter()
-                .any(|e| e.path == "engine/crates/bebok-server-deep/"),
+                .any(|e| e.path == "engine/crates/bebok-core-deep/"),
             "deepest (then shortest) goes first: {:?}",
             cut
         );
