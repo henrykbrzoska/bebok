@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- `fetch` now returns the readable text of web pages instead of raw HTML, so long pages no longer lose their middle to output truncation.
+
 ## 1.8.4 — 2026-09-21
 
 ### Features
