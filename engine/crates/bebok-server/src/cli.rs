@@ -113,10 +113,21 @@ pub fn parse_cli(args: &[String]) -> anyhow::Result<BindSpec> {
 
 #[cfg(test)]
 mod tests {
+
+    /// All tests in this module observe the same process-global
+    /// environment (`BEBOK_PORT` / `BEBOK_TOKEN`), while the test runner
+    /// is multi-threaded: serialize them so one test's `set_var` cannot
+    /// land inside another test's parse. Poisoning is ignored so a single
+    /// failing test doesn't cascade into the rest.
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
     use super::*;
 
     #[test]
     fn parse_global_flag() {
+        let _env = env_guard();
         let args: Vec<String> = ["--global", "--port", "0"]
             .iter()
             .map(|s| s.to_string())
@@ -128,18 +139,21 @@ mod tests {
 
     #[test]
     fn without_global_flag_global_is_false() {
+        let _env = env_guard();
         let spec = parse_cli(&[]).unwrap();
         assert!(!spec.global);
     }
 
     #[test]
     fn port_default_is_8787() {
+        let _env = env_guard();
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 8787);
     }
 
     #[test]
     fn port_flag_overrides_env() {
+        let _env = env_guard();
         let args: Vec<String> = ["--port", "9999"].iter().map(|s| s.to_string()).collect();
         unsafe { std::env::set_var("BEBOK_PORT", "42") };
         let spec = parse_cli(&args).unwrap();
@@ -149,6 +163,7 @@ mod tests {
 
     #[test]
     fn bebok_port_env_fallback() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "3000") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 3000);
@@ -157,6 +172,7 @@ mod tests {
 
     #[test]
     fn bebok_port_env_invalid_fails() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "not-a-number") };
         let err = parse_cli(&[]).unwrap_err();
         assert!(err.to_string().contains("BEBOK_PORT"));
@@ -165,6 +181,7 @@ mod tests {
 
     #[test]
     fn bebok_port_env_empty_falls_back_to_default() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 8787);
@@ -173,6 +190,7 @@ mod tests {
 
     #[test]
     fn token_flag_parsed() {
+        let _env = env_guard();
         let args: Vec<String> = ["--token", "my-stable-token"]
             .iter()
             .map(|s| s.to_string())
@@ -183,12 +201,14 @@ mod tests {
 
     #[test]
     fn no_token_flag_returns_none() {
+        let _env = env_guard();
         let spec = parse_cli(&[]).unwrap();
         assert!(spec.token.is_none());
     }
 
     #[test]
     fn token_flag_with_port() {
+        let _env = env_guard();
         let args: Vec<String> = ["--token", "abc", "--port", "1234"]
             .iter()
             .map(|s| s.to_string())
@@ -200,6 +220,7 @@ mod tests {
 
     #[test]
     fn bebok_port_zero_is_valid() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "0") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 0);
@@ -208,6 +229,7 @@ mod tests {
 
     #[test]
     fn bebok_port_max_is_valid() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "65535") };
         let spec = parse_cli(&[]).unwrap();
         assert_eq!(spec.port, 65535);
@@ -216,6 +238,7 @@ mod tests {
 
     #[test]
     fn bebok_port_overflow_fails() {
+        let _env = env_guard();
         unsafe { std::env::set_var("BEBOK_PORT", "99999") };
         let err = parse_cli(&[]).unwrap_err();
         assert!(err.to_string().contains("BEBOK_PORT"));
