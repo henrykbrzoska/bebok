@@ -17,6 +17,7 @@ use futures::StreamExt;
 use futures::future::join_all;
 use tokio_util::sync::CancellationToken;
 
+use super::build_test_gate::check_build_test_policy;
 use super::exec::{ExecCtx, ToolOutcome, exec_gated_call, fail_tool};
 use super::gate::{GateCtx, resolve_permission};
 use super::observe::{emit_message, emit_part, emit_session};
@@ -421,6 +422,24 @@ impl TurnRunner {
                         agent_name: &agent.name,
                         assistant_idx,
                     };
+                    // Build-test policy gate: when `verify.buildTest` is
+                    // `Off`, block bash commands that look like test
+                    // runners *before* the permission engine so that a
+                    // catch-all `allow` rule cannot bypass it.
+                    if let Some(denied) = check_build_test_policy(&config, &tool_name, &input) {
+                        fail_tool(
+                            &state,
+                            &bus,
+                            assistant_idx,
+                            &call_id,
+                            match denied {
+                                ToolOutcome::Denied(msg) => msg,
+                                _ => "blocked by build-test policy",
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
                     match resolve_permission(&gate, &call_id, &tool_name, &input).await {
                         ToolOutcome::Denied(message) => {
                             fail_tool(&state, &bus, assistant_idx, &call_id, message).await;

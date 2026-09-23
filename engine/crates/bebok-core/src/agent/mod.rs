@@ -17,6 +17,7 @@
 //! Public surface is unchanged: `crate::agent::{Agent, AgentCatalog, ...,
 //! run_turn, build_request, ...}` keep resolving here.
 
+pub mod build_test_gate;
 pub mod build_test_prompt;
 pub mod catalog;
 pub mod code_index_tools;
@@ -43,6 +44,7 @@ pub mod watchdog;
 #[cfg(test)]
 mod tests;
 
+pub use build_test_gate::check_build_test_policy;
 pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
 pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
