@@ -334,6 +334,16 @@ pub async fn require_token(req: Request, next: Next) -> Response {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    /// All tests in this module observe the same process-global
+    /// environment (`BEBOK_PORT` / `BEBOK_TOKEN`), while the test runner
+    /// is multi-threaded: serialize them so one test's `set_var` cannot
+    /// land inside another test's parse. Poisoning is ignored so a single
+    /// failing test doesn't cascade into the rest.
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
     use super::*;
     use crate::routes::build_api_router;
     use crate::state::AppState;
@@ -390,6 +400,7 @@ pub(crate) mod tests {
 
     #[test]
     fn token_is_random_and_long() {
+        let _env = env_guard();
         // 2 x v4 UUID in simple form.
         assert_eq!(token().len(), 64);
         assert!(token().chars().all(|c| c.is_ascii_hexdigit()));
@@ -397,6 +408,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ct_eq_matches_eq() {
+        let _env = env_guard();
         assert!(ct_eq("abc", "abc"));
         assert!(!ct_eq("abc", "abd"));
         assert!(!ct_eq("abc", "ab"));
@@ -407,16 +419,18 @@ pub(crate) mod tests {
     /// `--token` flag takes highest precedence over BEBOK_TOKEN env and file.
     #[test]
     fn cli_token_takes_precedence() {
+        let _env = env_guard();
         // Set up env to verify it's overridden by cli_token.
-        std::env::set_var("BEBOK_TOKEN", "env-token-value");
+        unsafe { std::env::set_var("BEBOK_TOKEN", "env-token-value") };
         let result = resolve_token(Some("cli-token-value"));
         assert_eq!(result, "cli-token-value");
-        std::env::remove_var("BEBOK_TOKEN");
+        unsafe { std::env::remove_var("BEBOK_TOKEN") };
     }
 
     /// `BEBOK_TOKEN` env wins over the persistent file / memory fallback.
     #[test]
     fn bebok_token_env_overrides_file() {
+        let _env = env_guard();
         let result = resolve_token(None);
         // Result is the env var value (or file/memory if unset) — we just
         // verify resolve_token doesn't panic and returns something.
@@ -426,6 +440,7 @@ pub(crate) mod tests {
     /// `--token` with blank value is ignored (falls through to env/file).
     #[test]
     fn cli_token_blank_is_ignored() {
+        let _env = env_guard();
         let result = resolve_token(Some(""));
         assert!(!result.is_empty());
     }
@@ -433,12 +448,15 @@ pub(crate) mod tests {
     /// `--token` whitespace is trimmed.
     #[test]
     fn cli_token_whitespace_trimmed() {
+        let _env = env_guard();
         let result = resolve_token(Some("  my-token  "));
         assert_eq!(result, "my-token");
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn session_requires_token() {
+        let _env = env_guard();
         let dir = temp_project();
         assert_eq!(
             status(get("/session")).await,
@@ -468,14 +486,18 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn session_ok_with_token() {
+        let _env = env_guard();
         let dir = temp_project();
         let uri = format!("/session?directory={}", urlencode(&dir));
         assert_eq!(status(get_auth(&uri)).await, StatusCode::OK);
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn fs_requires_token() {
+        let _env = env_guard();
         let dir = temp_project();
         let uri = format!("/fs/tree?directory={}", urlencode(&dir));
         assert_eq!(status(get(&uri)).await, StatusCode::UNAUTHORIZED);
@@ -483,13 +505,17 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn config_requires_token() {
+        let _env = env_guard();
         assert_eq!(status(get("/config")).await, StatusCode::UNAUTHORIZED);
     }
 
     #[cfg(not(target_os = "android"))]
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn pty_requires_token() {
+        let _env = env_guard();
         // Listing terminals: 401 without, 200 with.
         assert_eq!(status(get("/pty")).await, StatusCode::UNAUTHORIZED);
         assert_eq!(status(get_auth("/pty")).await, StatusCode::OK);
@@ -527,6 +553,7 @@ pub(crate) mod tests {
     #[cfg(not(target_os = "android"))]
     #[test]
     fn pty_connect_is_the_only_exempt_route() {
+        let _env = env_guard();
         let connect = HttpRequest::builder()
             .uri("/pty/abc/connect?ticket=nope")
             .body(Body::empty())
@@ -550,7 +577,9 @@ pub(crate) mod tests {
     /// unusable upgrade (426) or an unknown ticket (403) on its own.
     #[cfg(not(target_os = "android"))]
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn pty_connect_is_not_blocked_by_the_token_layer() {
+        let _env = env_guard();
         let req = HttpRequest::builder()
             .method(Method::GET)
             .uri("/pty/abc/connect?ticket=nope")
@@ -571,7 +600,9 @@ pub(crate) mod tests {
     /// SSE is consumed with `fetch`, so it carries the header like any REST
     /// call: 401 without, 200 (stream open) with.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn sse_event_stream_requires_token() {
+        let _env = env_guard();
         assert_eq!(status(get("/event")).await, StatusCode::UNAUTHORIZED);
         let res = test_app().oneshot(get_auth("/event")).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
@@ -585,7 +616,9 @@ pub(crate) mod tests {
 
     /// Header-less clients may pass `?token=`; a wrong value still fails.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn query_token_is_accepted_and_verified() {
+        let _env = env_guard();
         assert_eq!(
             status(get(&format!("/pty?token={}", token()))).await,
             StatusCode::OK
@@ -597,7 +630,9 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // own current-thread runtime per test: safe across .await
     async fn wrong_scheme_or_value_is_rejected() {
+        let _env = env_guard();
         let req = HttpRequest::builder()
             .uri("/pty")
             .header(header::AUTHORIZATION, format!("Basic {}", token()))
@@ -616,6 +651,7 @@ pub(crate) mod tests {
     /// Percent-encoded `?token=` values decode before comparison.
     #[test]
     fn percent_decode_basics() {
+        let _env = env_guard();
         assert_eq!(percent_decode("abc"), "abc");
         assert_eq!(percent_decode("a%2Fb"), "a/b");
         assert_eq!(percent_decode("a+b"), "a b");
