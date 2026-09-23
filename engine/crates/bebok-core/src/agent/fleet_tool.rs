@@ -769,6 +769,9 @@ fn assemble_prompt(
     if let Some(section) = super::code_map_prompt::code_map_section(&instance.root, cfg) {
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
+    if let Some(section) = super::code_graph_prompt::code_graph_section(&instance.root, cfg) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
     // WP-DELEGATION: a worker's brief, not the main thread's policy.
     agent.prompt = format!(
         "{}\n\n{}",

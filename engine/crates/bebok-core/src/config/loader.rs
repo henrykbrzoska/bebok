@@ -10,7 +10,7 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
+use super::model::{CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -141,6 +141,10 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(cm) = v.get("code_map") {
         apply_code_map(&mut cfg.code_map, cm);
     }
+    // Code graph: project overrides global per-field.
+    if let Some(cg) = v.get("code_graph") {
+        apply_code_graph(&mut cfg.code_graph, cg);
+    }
     // Sampling overrides merge per key (project wins per key): global
     // fields (`{ "temperature": 0.5 }`) and per-agent sections
     // (`{ "code": { "temperature": 0.2 } }`) alike.
@@ -184,6 +188,24 @@ pub fn apply_code_map(cfg: &mut super::model::CodeMapConfig, v: &Value) {
                 cfg.overrides.insert(k.clone(), desc.to_string());
             }
         }
+    }
+}
+
+/// Apply one layer's `code_graph` section on top of the current value.
+/// `enabled` accepts bool only; `ignore_patterns` accepts an array of strings;
+/// `max_files` clamps to `100..=50_000`.
+pub fn apply_code_graph(cfg: &mut CodeGraphConfig, v: &Value) {
+    if let Some(enabled) = v.get("enabled").and_then(|x| x.as_bool()) {
+        cfg.enabled = enabled;
+    }
+    if let Some(patterns) = v.get("ignore_patterns").and_then(|x| x.as_array()) {
+        cfg.ignore_patterns = patterns
+            .iter()
+            .filter_map(|p| p.as_str().map(str::to_string))
+            .collect();
+    }
+    if let Some(n) = v.get("max_files").and_then(|x| x.as_u64()) {
+        cfg.max_files = (n as usize).clamp(100, 50_000);
     }
 }
 

@@ -105,6 +105,35 @@ pub const DEFAULT_CODE_MAP_MAX_TOKENS: usize = 400;
 /// Default directory depth scanned for the code map (root children = 1).
 pub const DEFAULT_CODE_MAP_MAX_DEPTH: usize = 3;
 
+/// Default max files for the code graph index.
+pub const DEFAULT_CODE_GRAPH_MAX_FILES: usize = 5000;
+
+/// Code-graph configuration (`code_graph`).
+///
+/// When `enabled`, the engine indexes project source files and derives
+/// structural summaries for faster retrieval and navigation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CodeGraphConfig {
+    /// Master toggle: when false, no indexing happens (zero I/O).
+    pub enabled: bool,
+    /// Glob patterns to exclude from the index (e.g. `**/node_modules/**`).
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+    /// Maximum number of files to index.
+    pub max_files: usize,
+}
+
+impl Default for CodeGraphConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ignore_patterns: Vec::new(),
+            max_files: DEFAULT_CODE_GRAPH_MAX_FILES,
+        }
+    }
+}
+
 /// Pre-computed project code map configuration (`code_map`).
 ///
 /// When `enabled`, the engine scans the project tree, derives a one-sentence
@@ -300,6 +329,9 @@ pub struct ResolvedConfig {
     /// Pre-computed project code map (off by default; opt-in per project).
     #[serde(default)]
     pub code_map: CodeMapConfig,
+    /// Code-graph indexing config (off by default; opt-in per project).
+    #[serde(default)]
+    pub code_graph: CodeGraphConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -329,6 +361,7 @@ impl Default for ResolvedConfig {
             tool_safety: Value::Object(serde_json::Map::new()),
             delegation: DelegationConfig::default(),
             code_map: CodeMapConfig::default(),
+            code_graph: CodeGraphConfig::default(),
         }
     }
 }
@@ -520,6 +553,11 @@ impl ResolvedConfigBuilder {
 
     pub fn code_map(mut self, code_map: CodeMapConfig) -> Self {
         self.inner.code_map = code_map;
+        self
+    }
+
+    pub fn code_graph(mut self, code_graph: CodeGraphConfig) -> Self {
+        self.inner.code_graph = code_graph;
         self
     }
 

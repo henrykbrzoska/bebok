@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod change_tracking;
+pub mod code_graph;
 pub mod config;
 pub mod context;
 pub mod debug;

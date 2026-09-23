@@ -13,6 +13,7 @@ pub mod agents;
 pub mod browser;
 pub mod browser_remote;
 pub mod changes;
+pub mod code_graph;
 pub mod code_map;
 pub mod common;
 pub mod config;
@@ -117,6 +118,12 @@ pub fn build_api_router() -> Router<AppState> {
         // for debugging/UI + forced regeneration of `.bebok/code-map.json`.
         .route("/code-map", get(code_map::get_code_map))
         .route("/code-map/regenerate", post(code_map::regenerate_code_map))
+        // Module dependency graph (opt-in via `code_graph.enabled`).
+        .route("/code-graph", get(code_graph::get_code_graph))
+        .route(
+            "/code-graph/regenerate",
+            post(code_graph::regenerate_code_graph),
+        )
         .route("/plugins", get(plugins::list_plugins))
         .route("/plugins/registry", get(plugins::plugin_registry))
         .route("/plugins/{name}/install", post(plugins::install_plugin))

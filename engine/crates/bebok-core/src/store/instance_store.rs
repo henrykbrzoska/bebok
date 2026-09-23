@@ -508,6 +508,17 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::CodeIndexSearch));
+            // In-process code-graph tools: read-only queries over
+            // `<project>/.bebok/code_graph.json`.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphDepends));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphDependents));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphImpact));
         }
 
         // Async side effects: connect enabled MCP servers and register their

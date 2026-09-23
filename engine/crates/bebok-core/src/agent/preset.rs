@@ -236,6 +236,9 @@ impl Agent {
                 "fetch".to_string(),
                 "code_index_status".to_string(),
                 "code_index_search".to_string(),
+                "code_graph_depends".to_string(),
+                "code_graph_dependents".to_string(),
+                "code_graph_impact".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -294,6 +297,9 @@ impl Agent {
                 "fetch".to_string(),
                 "code_index_status".to_string(),
                 "code_index_search".to_string(),
+                "code_graph_depends".to_string(),
+                "code_graph_dependents".to_string(),
+                "code_graph_impact".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -352,6 +358,9 @@ impl Agent {
                 "fetch".to_string(),
                 "code_index_status".to_string(),
                 "code_index_search".to_string(),
+                "code_graph_depends".to_string(),
+                "code_graph_dependents".to_string(),
+                "code_graph_impact".to_string(),
             ],
             permissions: vec![
                 Rule {

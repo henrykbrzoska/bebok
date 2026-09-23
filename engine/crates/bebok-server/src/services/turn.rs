@@ -333,6 +333,13 @@ fn assemble_prompt(
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
+    // Module dependency graph (`code_graph.enabled`, opt-in): summary +
+    // query hints for the code_graph_* tools.
+    if let Some(section) = bebok_core::agent::code_graph_section(&instance.root, cfg) {
+        tracing::debug!("code graph section added to the system prompt");
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
+
     // Fleet-only delegation: the orchestrator note (fleet roster, spawn rule,
     // cap, supervision tools), main-thread sessions only; the text lives in
     // `bebok_core::agent::delegation_policy`, and the `Fleet:` paragraph is
