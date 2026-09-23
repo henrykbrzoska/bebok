@@ -466,7 +466,7 @@ pub fn truncate_to_budget(entries: &[CodeMapEntry], max_tokens: usize) -> Vec<Co
     let mut out: Vec<CodeMapEntry> = entries
         .iter()
         .zip(&removed)
-        .filter(|(_, &r)| !r)
+        .filter(|&(_, &r)| !r)
         .map(|(e, _)| e.clone())
         .collect();
     let n = removed.iter().filter(|&&r| r).count();
