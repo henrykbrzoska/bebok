@@ -10,9 +10,9 @@
 
 use std::path::Path;
 
+use axum::Json;
 use axum::extract::{Query, State};
 use axum::response::Response;
-use axum::Json;
 
 use bebok_core::agent::code_map_gen;
 use bebok_core::config::ResolvedConfig;
@@ -22,7 +22,11 @@ use crate::routes::common::DirectoryQuery;
 use crate::state::AppState;
 
 /// Payload for both endpoints: `{ enabled, map, section }`.
-fn code_map_payload(root: &Path, cfg: &ResolvedConfig, regenerate: bool) -> Json<serde_json::Value> {
+fn code_map_payload(
+    root: &Path,
+    cfg: &ResolvedConfig,
+    regenerate: bool,
+) -> Json<serde_json::Value> {
     if !cfg.code_map.enabled {
         return Json(serde_json::json!({ "enabled": false, "map": null, "section": null }));
     }
@@ -93,7 +97,8 @@ mod tests {
     use bebok_core::config::CodeMapConfig;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let base = std::env::temp_dir().join(format!("bebok-cm-route-{tag}-{}", uuid::Uuid::new_v4()));
+        let base =
+            std::env::temp_dir().join(format!("bebok-cm-route-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&base).unwrap();
         base
     }

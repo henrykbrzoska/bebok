@@ -436,8 +436,16 @@ pub fn truncate_to_budget(entries: &[CodeMapEntry], max_tokens: usize) -> Vec<Co
     let is_root = |i: usize| depth(i) == 0;
     let mut order: Vec<usize> = (0..entries.len()).collect();
     order.sort_by(|&a, &b| {
-        (is_root(a) as u8, std::cmp::Reverse(depth(a)), entries[a].description.len())
-            .cmp(&(is_root(b) as u8, std::cmp::Reverse(depth(b)), entries[b].description.len()))
+        (
+            is_root(a) as u8,
+            std::cmp::Reverse(depth(a)),
+            entries[a].description.len(),
+        )
+            .cmp(&(
+                is_root(b) as u8,
+                std::cmp::Reverse(depth(b)),
+                entries[b].description.len(),
+            ))
     });
 
     // Keep at least one root-level entry (always a top-level view).
@@ -488,7 +496,8 @@ mod tests {
     use super::*;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("bebok-codemap-gen-{tag}-{}", uuid::Uuid::new_v4()));
+        let base =
+            std::env::temp_dir().join(format!("bebok-codemap-gen-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&base).unwrap();
         base
     }
@@ -599,7 +608,14 @@ mod tests {
     #[test]
     fn ignores_dotfiles_and_build_dirs() {
         let root = temp_root("skip");
-        for dir in [".git", "node_modules", "target", "dist", ".bebok", ".hidden"] {
+        for dir in [
+            ".git",
+            "node_modules",
+            "target",
+            "dist",
+            ".bebok",
+            ".hidden",
+        ] {
             std::fs::create_dir_all(root.join(dir)).unwrap();
             std::fs::write(root.join(dir).join("f.txt"), "x").unwrap();
         }
@@ -623,7 +639,10 @@ mod tests {
         assert!(path.is_file(), "cache file must exist after generation");
         let read = read_cache(&path).unwrap();
         assert_eq!(read.entries, cache.entries);
-        assert!(!path.with_extension("json.tmp").exists(), "tmp file renamed away");
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "tmp file renamed away"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -631,7 +650,10 @@ mod tests {
     fn empty_cache_when_no_dirs() {
         let root = temp_root("empty");
         let cache = generate_code_map(&root, &config()).unwrap();
-        assert!(cache.entries.is_empty(), "empty root -> empty map, no crash");
+        assert!(
+            cache.entries.is_empty(),
+            "empty root -> empty map, no crash"
+        );
         let rendered = render_to_prompt(&cache.entries);
         assert_eq!(rendered, "Project code map:");
         // Missing root -> None (caller reports no map).
@@ -669,8 +691,14 @@ mod tests {
         let entries = vec![
             entry("engine/", "Rust engine."),
             entry("engine/crates/", "Crates."),
-            entry("engine/crates/bebok-core-deep/", "Deep entry with a long description here."),
-            entry("engine/crates/bebok-server-deep/", "Another deep entry with a long description."),
+            entry(
+                "engine/crates/bebok-core-deep/",
+                "Deep entry with a long description here.",
+            ),
+            entry(
+                "engine/crates/bebok-server-deep/",
+                "Another deep entry with a long description.",
+            ),
             entry("client/", "Angular client."),
         ];
         let full: usize = entries
@@ -681,11 +709,15 @@ mod tests {
         // Root-level entries survive, a deep one does not.
         assert!(cut.iter().any(|e| e.path == "engine/"));
         assert!(cut.iter().any(|e| e.path == "client/"));
-        assert!(cut.iter().any(|e| e.description.contains("more entries omitted")));
+        assert!(
+            cut.iter()
+                .any(|e| e.description.contains("more entries omitted"))
+        );
         assert!(cut.len() < entries.len());
         // The removed one is a deepest entry, never the top-level view.
         assert!(
-            !cut.iter().any(|e| e.path == "engine/crates/bebok-server-deep/"),
+            !cut.iter()
+                .any(|e| e.path == "engine/crates/bebok-server-deep/"),
             "deepest (then shortest) goes first: {:?}",
             cut
         );

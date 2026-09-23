@@ -666,8 +666,14 @@ mod tests {
     fn code_map_defaults_disabled() {
         let cfg = ResolvedConfig::default();
         assert!(!cfg.code_map.enabled);
-        assert_eq!(cfg.code_map.max_tokens, super::super::model::DEFAULT_CODE_MAP_MAX_TOKENS);
-        assert_eq!(cfg.code_map.max_depth, super::super::model::DEFAULT_CODE_MAP_MAX_DEPTH);
+        assert_eq!(
+            cfg.code_map.max_tokens,
+            super::super::model::DEFAULT_CODE_MAP_MAX_TOKENS
+        );
+        assert_eq!(
+            cfg.code_map.max_depth,
+            super::super::model::DEFAULT_CODE_MAP_MAX_DEPTH
+        );
         assert!(cfg.code_map.overrides.is_empty());
     }
 
@@ -740,13 +746,25 @@ mod tests {
     #[test]
     fn code_map_max_tokens_clamped() {
         let mut cfg = ResolvedConfig::default();
-        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_tokens": 99999 } }));
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "max_tokens": 99999 } }),
+        );
         assert_eq!(cfg.code_map.max_tokens, 2000);
-        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_tokens": 1 } }));
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "max_tokens": 1 } }),
+        );
         assert_eq!(cfg.code_map.max_tokens, 100);
-        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_depth": 0 } }));
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "max_depth": 0 } }),
+        );
         assert_eq!(cfg.code_map.max_depth, 1);
-        apply(&mut cfg, &serde_json::json!({ "code_map": { "max_depth": 99 } }));
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "code_map": { "max_depth": 99 } }),
+        );
         assert_eq!(cfg.code_map.max_depth, 6);
     }
 }

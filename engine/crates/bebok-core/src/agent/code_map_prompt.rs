@@ -21,8 +21,9 @@ use std::path::Path;
 
 use crate::config::ResolvedConfig;
 
-use super::code_map_gen::{self, CodeMapCache, apply_overrides, render_to_prompt,
-    truncate_to_budget};
+use super::code_map_gen::{
+    self, CodeMapCache, apply_overrides, render_to_prompt, truncate_to_budget,
+};
 
 /// The heading every renderer starts with (tests and readers grep for it);
 /// defined once in [`code_map_gen`] where the renderer lives.
@@ -85,7 +86,8 @@ mod tests {
     use crate::config::ResolvedConfig;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let base = std::env::temp_dir().join(format!("bebok-code-map-{tag}-{}", uuid::Uuid::new_v4()));
+        let base =
+            std::env::temp_dir().join(format!("bebok-code-map-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&base).unwrap();
         base
     }
@@ -121,12 +123,18 @@ mod tests {
     fn enabled_without_cache_generates_on_the_fly() {
         let root = temp_root("lazy");
         write_file(&root.join("engine/lib.rs"), "//! Rust engine.");
-        write_file(&root.join("client/package.json"), r#"{ "description": "Angular client" }"#);
+        write_file(
+            &root.join("client/package.json"),
+            r#"{ "description": "Angular client" }"#,
+        );
 
         let section = code_map_section(&root, &enabled_cfg()).unwrap();
         assert!(section.starts_with("Project code map:"), "{section}");
         assert!(section.contains("\n- engine/ → Rust engine."), "{section}");
-        assert!(section.contains("\n- client/ → Angular client."), "{section}");
+        assert!(
+            section.contains("\n- client/ → Angular client."),
+            "{section}"
+        );
         // The cache was written back for the next conversation.
         assert!(code_map_gen::cache_path(&root).is_file());
         let _ = std::fs::remove_dir_all(&root);
@@ -164,7 +172,10 @@ mod tests {
         // Root-level entry always survives.
         assert!(section.contains("\n- a/ → "), "{section}");
         let full_chars = section.chars().count();
-        assert!(full_chars < 4000, "map must respect the budget: {full_chars}");
+        assert!(
+            full_chars < 4000,
+            "map must respect the budget: {full_chars}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -203,7 +214,10 @@ mod tests {
         code_map_gen::write_cache(&code_map_gen::cache_path(&root), &cache).unwrap();
 
         let section = code_map_section(&root, &enabled_cfg()).unwrap();
-        assert!(!section.contains("<project-root>"), "placeholder resolved: {section}");
+        assert!(
+            !section.contains("<project-root>"),
+            "placeholder resolved: {section}"
+        );
         assert!(section.contains(&root.to_string_lossy().to_string()));
         let _ = std::fs::remove_dir_all(&root);
     }
