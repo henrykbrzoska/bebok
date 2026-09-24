@@ -125,14 +125,16 @@ mod tests {
     /// SKIPPED (passes without doing anything, printing `SKIP: ...`) when:
     /// * no Chrome / Edge / Chromium executable can be found
     ///   (see `discovery::discover_binary` and `BEBOK_BROWSER`), or
-    /// * `BEBOK_SKIP_BROWSER_TESTS` is set.
+    /// * `BEBOK_SKIP_BROWSER_TESTS` is set (CI sets it on runners whose image
+    ///   ships a non-launchable chromium stub — ubuntu-22.04's
+    ///   `/usr/bin/chromium` times out launching).
     ///
     /// On a CI image without a browser this test therefore never exercises
     /// the driver; check the test output for the `SKIP:` line to know whether
     /// it ran. `BEBOK_BROWSER_NO_SANDBOX=1` is needed when the runner is root.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn headless_roundtrip_open_click_type_text_screenshot() {
-        if std::env::var_os("BEBOK_SKIP_BROWSER_TESTS").is_some() {
+        if std::env::var("BEBOK_SKIP_BROWSER_TESTS").is_ok_and(|v| !v.trim().is_empty()) {
             eprintln!("SKIP: BEBOK_SKIP_BROWSER_TESTS is set");
             return;
         }
