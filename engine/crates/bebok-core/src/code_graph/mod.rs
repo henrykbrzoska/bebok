@@ -823,12 +823,23 @@ mod tests {
 
     #[test]
     fn save_graph_returns_error_string() {
-        // Save to a non-existent root that we can't create (read-only path).
-        let bad = Path::new("/nonexistent_root_xyz/graph_test");
+        use std::fs;
+
+        // Platform-independent failure: use a regular FILE as the root, so
+        // create_dir_all(<file>/.bebok) fails on both Linux and Windows
+        // (a path component is a file, not a directory).
+        let dir = std::env::temp_dir().join(format!("bebok-cg-bad-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let blocker = dir.join("blocker");
+        fs::write(&blocker, b"x").unwrap();
+
         let g = sample_graph();
-        let result = save_graph(bad, &g);
-        assert!(result.is_err());
+        let result = save_graph(&blocker, &g);
+        assert!(result.is_err(), "saving under a file path should fail");
         let err = result.unwrap_err();
-        assert!(err.is_empty() || !err.is_empty()); // just confirming it's a String
+        assert!(!err.is_empty());
+
+        // Clean up.
+        fs::remove_dir_all(&dir).ok();
     }
 }
