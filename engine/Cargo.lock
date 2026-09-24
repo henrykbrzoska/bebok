@@ -156,7 +156,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bebok-ast-cli"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "anyhow",
  "ignore",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-core"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-llm"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-mcp"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "async-trait",
  "bebok-tools",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-pty"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-server"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "anyhow",
  "axum",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-skills"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "dirs",
  "serde",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "bebok-tools"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
