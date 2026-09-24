@@ -79,19 +79,13 @@ impl Tool for CodeAstSearch {
         let parsed: AstArgs = match serde_json::from_value(args) {
             Ok(a) => a,
             Err(e) => {
-                return ToolOutput::new(
-                    format!("code_ast: invalid arguments: {e}"),
-                    "code_ast",
-                );
+                return ToolOutput::new(format!("code_ast: invalid arguments: {e}"), "code_ast");
             }
         };
 
         let kind = parsed.kind.trim().to_string();
         if kind.is_empty() {
-            return ToolOutput::new(
-                "code_ast: `kind` must not be empty",
-                "code_ast",
-            );
+            return ToolOutput::new("code_ast: `kind` must not be empty", "code_ast");
         }
 
         // Check that ast_search is enabled in config.
@@ -256,9 +250,7 @@ mod tests {
     fn schema_has_all_enums() {
         let tool = CodeAstSearch;
         let schema = tool.parameters_schema();
-        let enums = schema["properties"]["kind"]["enum"]
-            .as_array()
-            .unwrap();
+        let enums = schema["properties"]["kind"]["enum"].as_array().unwrap();
         assert!(enums.contains(&json!("impl")));
         assert!(enums.contains(&json!("struct")));
         assert!(enums.contains(&json!("fn")));
@@ -328,8 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_empty_kind() {
-        let root =
-            std::env::temp_dir().join(format!("bebok-ast-empty-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("bebok-ast-empty-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join(".bebok")).unwrap();
         std::fs::write(
             root.join(".bebok").join("config.json"),
@@ -342,9 +333,7 @@ mod tests {
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch
-            .execute(ctx, json!({ "kind": "  " }))
-            .await;
+        let out = CodeAstSearch.execute(ctx, json!({ "kind": "  " })).await;
         assert!(out.text.contains("must not be empty"), "got: {}", out.text);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -352,10 +341,8 @@ mod tests {
 
     #[tokio::test]
     async fn returns_disabled_when_declaration_disabled() {
-        let root = std::env::temp_dir().join(format!(
-            "bebok-ast-decl-disabled-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("bebok-ast-decl-disabled-{}", uuid::Uuid::new_v4()));
         let plugins_dir = root.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();
         std::fs::create_dir_all(root.join(".bebok")).unwrap();

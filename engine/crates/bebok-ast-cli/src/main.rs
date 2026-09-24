@@ -104,10 +104,7 @@ fn main() {
     let ts_lang = ts_lang::TsLang::new().unwrap();
 
     for path in &files {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let lang: Option<&dyn query::LanguageHandler> = match ext {
             "rs" => Some(&rust_lang),

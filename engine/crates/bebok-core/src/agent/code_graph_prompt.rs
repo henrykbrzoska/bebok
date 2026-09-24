@@ -76,17 +76,22 @@ mod tests {
             "meta": {"root": "", "files_scanned": 1, "build_duration_ms": 1,
                      "built_at": "2025-01-01T00:00:00Z"}
         });
-        std::fs::write(
-            crate::code_graph::graph_file_path(&root),
-            graph.to_string(),
-        )
-        .unwrap();
+        std::fs::write(crate::code_graph::graph_file_path(&root), graph.to_string()).unwrap();
 
         let section = code_graph_section(&root, &cfg).unwrap();
         assert!(section.contains("1 modules, 0 edges"), "{section}");
-        assert!(section.contains("`code_graph_depends(module)`"), "{section}");
-        assert!(section.contains("`code_graph_dependents(module)`"), "{section}");
-        assert!(section.contains("`code_graph_impact(module, max_depth?)`"), "{section}");
+        assert!(
+            section.contains("`code_graph_depends(module)`"),
+            "{section}"
+        );
+        assert!(
+            section.contains("`code_graph_dependents(module)`"),
+            "{section}"
+        );
+        assert!(
+            section.contains("`code_graph_impact(module, max_depth?)`"),
+            "{section}"
+        );
         assert!(section.contains("project-relative paths"), "{section}");
         let _ = std::fs::remove_dir_all(&root);
     }

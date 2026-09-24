@@ -17,9 +17,7 @@ impl Filters {
     pub fn from_value(v: &Value) -> Self {
         let obj = v.as_object();
         let get_str = |key: &str| -> Option<String> {
-            obj?.get(key)
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
+            obj?.get(key).and_then(|v| v.as_str()).map(str::to_string)
         };
         let get_re = |key: &str| -> Option<Regex> {
             let s = get_str(key)?;
