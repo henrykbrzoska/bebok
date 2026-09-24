@@ -76,6 +76,8 @@ mod tests {
             "meta": {"root": "", "files_scanned": 1, "build_duration_ms": 1,
                      "built_at": "2025-01-01T00:00:00Z"}
         });
+        std::fs::create_dir_all(crate::code_graph::graph_file_path(&root).parent().unwrap())
+            .unwrap();
         std::fs::write(crate::code_graph::graph_file_path(&root), graph.to_string()).unwrap();
 
         let section = code_graph_section(&root, &cfg).unwrap();
