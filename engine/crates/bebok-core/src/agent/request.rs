@@ -74,7 +74,15 @@ impl<'a> RequestBuilder<'a> {
         for msg in messages.iter() {
             match msg.role {
                 Role::User => {
-                    let text = msg.text_content();
+                    let mut text = msg.text_content();
+                    for (media_type, name, contents) in msg.file_parts() {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&format!(
+                            "\n[Attached file: {name}; {media_type}]\n{contents}\n[End of file: {name}]"
+                        ));
+                    }
                     let content_parts: Vec<ContentPart> = msg
                         .image_parts()
                         .into_iter()
@@ -672,6 +680,83 @@ mod image_tests {
         assert_eq!(blocks[0]["source"]["data"], PNG_1X1);
         assert_eq!(blocks[1]["source"]["media_type"], "image/jpeg");
         assert_eq!(blocks[1]["source"]["data"], JPEG_MIN);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Manual-preview guard (krok 6): the full assembly path — built request
+    /// + `apply_request_hook` — carries exactly one section of each kind and
+    /// never a hard-coded absolute project root. Simulates a `code` agent
+    /// with `verify.frontend=auto`, `verify.buildTest=auto` and the
+    /// `bebok-index` plugin slot present.
+    #[tokio::test]
+    async fn assembled_request_hook_carries_exactly_one_section_of_each_kind() {
+        let base = std::env::temp_dir().join(format!("bebok-hook-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        let slot = project.join(".bebok").join("plugins").join("bebok-index");
+        std::fs::create_dir_all(&slot).unwrap();
+        let store = crate::store::InstanceStore::with_data_dir(base.join("data"));
+        let session = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        session.append_user_message("hi").await.unwrap();
+
+        let cfg = crate::config::ResolvedConfig::default();
+        let mut agent = Agent::code();
+        // Same order as `services/turn.rs::assemble_prompt` (dynamic parts only).
+        agent.prompt = format!("{}\n\n{}", agent.prompt, super::super::host_os_note());
+        if let Some(section) = super::super::verification_section(&cfg, &agent) {
+            agent.prompt = format!("{}\n\n{section}", agent.prompt);
+        }
+        if let Some(section) = super::super::build_test_section(&cfg) {
+            agent.prompt = format!("{}\n\n{section}", agent.prompt);
+        }
+        if let Some(section) = super::super::delegation_policy_note(
+            &cfg.delegation,
+            &super::super::FleetContext::from_config(&cfg, &agent.name, false),
+        ) {
+            agent.prompt = format!("{}\n\n{section}", agent.prompt);
+        }
+
+        // NB: keep the assembled `agent` above — `test_state` would shadow it
+        // with a fresh `Agent::code()` and drop every appended section.
+        let (_s, _fresh, tools) = test_state(&store, &session);
+        let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
+        let mut req = builder.build().await.unwrap();
+        builder.apply_request_hook(&mut req).await;
+
+        let system = &req.system;
+        for name in [
+            "Host OS: ",
+            "Verification capabilities",
+            "Build & test policy",
+            "Code index first",
+        ] {
+            assert_eq!(
+                system.matches(name).count(),
+                1,
+                "exactly one {name:?} section, got: {system}"
+            );
+        }
+        // The section substitutes the *normalized* session directory
+        // (canonicalized: Windows CI temp paths carry 8.3 components like
+        // `RUNNER~1` that expand under `canonicalize`), not the raw path.
+        let root = crate::util::normalize_path(&project);
+        assert!(
+            system.contains(&root),
+            "index section must carry the concrete project root ({root}); got: {system}"
+        );
+        assert!(
+            !system.contains("/home/rajner/bebok"),
+            "no hard-coded project root: {system}"
+        );
+        // Order: the index section lands last, after the delegation note.
+        let host = system.find("Host OS: ").unwrap();
+        let verification = system.find("Verification capabilities").unwrap();
+        let build_test = system.find("Build & test policy").unwrap();
+        let index = system.find("Code index first").unwrap();
+        assert!(host < verification && verification < build_test && build_test < index);
 
         let _ = std::fs::remove_dir_all(&base);
     }

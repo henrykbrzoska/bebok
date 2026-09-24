@@ -13,6 +13,7 @@ import { ActivatedRoute } from '@angular/router';
 import { EngineClient } from '../../core/engine-client.service';
 import { ProcessInfo } from '../../core/engine.dtos';
 import { ProcessesStore, type ProcessTone, formatUptime, processTone } from '../../core/processes.store';
+import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../chat/chat-session.store';
 import { ProcessLogTab } from './process-log-tab';
@@ -41,6 +42,7 @@ export class TerminalView implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly i18n = inject(I18nService);
   private readonly session = inject(ChatSessionStore);
+  private readonly project = inject(ProjectSessionsStore);
   readonly procs = inject(ProcessesStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -86,26 +88,49 @@ export class TerminalView implements OnInit, OnDestroy {
 
   constructor() {
     // Follow the chat's active session while it matches this directory.
-    effect(() => {
-      const meta = this.session.meta();
-      const dir = this.directory();
-      if (meta && (!dir || meta.directory === dir)) {
-        this.resolvedSessionId.set(meta.id);
-      }
-    });
-    effect(() => {
-      const id = this.resolvedSessionId();
-      if (id && this.procs.sessionId() !== id) {
-        void this.procs.load(id);
-      }
-    });
+    effect(
+      () => {
+        const meta = this.session.meta();
+        const dir = this.directory();
+        if (meta && (!dir || meta.directory === dir)) {
+          this.resolvedSessionId.set(meta.id);
+        }
+      },
+      { allowSignalWrites: true },
+    );
+    effect(
+      () => {
+        const id = this.resolvedSessionId();
+        if (id && this.procs.sessionId() !== id) {
+          void this.procs.load(id);
+        }
+      },
+      { allowSignalWrites: true },
+    );
     // Drawer handoff: a selection made elsewhere opens that log tab here.
-    effect(() => {
-      const selected = this.procs.selected();
-      if (selected && this.activeLogId() !== selected) {
-        this.openLog(selected);
-      }
-    });
+    effect(
+      () => {
+        const selected = this.procs.selected();
+        if (selected && this.activeLogId() !== selected) {
+          this.openLog(selected);
+        }
+      },
+      { allowSignalWrites: true },
+    );
+    // A project switch while Terminal is open reloads the tabs for the new
+    // project (otherwise new terminals spawn in the previous project's dir).
+    effect(
+      () => {
+        const dir = this.project.directory();
+        if (dir && dir !== this.directory()) {
+          this.directory.set(dir);
+          this.resolvedSessionId.set(null);
+          void this.refresh();
+          void this.refreshProcesses();
+        }
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   /** Status word paired with every tab's colored dot (never color alone). */

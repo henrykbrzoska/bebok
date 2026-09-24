@@ -20,8 +20,8 @@
 pub mod build_test_gate;
 pub mod build_test_prompt;
 pub mod catalog;
-pub mod code_graph_prompt;
 pub mod code_ast_tools;
+pub mod code_graph_prompt;
 pub mod code_graph_tools;
 pub mod code_index_tools;
 pub mod code_map_gen;
@@ -29,6 +29,7 @@ pub mod code_map_prompt;
 pub mod delegation;
 pub mod delegation_policy;
 pub mod exec;
+pub mod files;
 pub mod fleet_tool;
 pub mod gate;
 pub mod images;
@@ -52,8 +53,8 @@ mod tests;
 pub use build_test_gate::check_build_test_policy;
 pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
-pub use code_graph_prompt::code_graph_section;
 pub use code_ast_tools::CodeAstSearch;
+pub use code_graph_prompt::code_graph_section;
 pub use code_graph_tools::{CodeGraphDependents, CodeGraphDepends, CodeGraphImpact};
 pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
 pub use code_map_prompt::code_map_section;
@@ -66,6 +67,7 @@ pub use delegation_policy::{
     subagent_note,
 };
 pub use exec::{ToolOutcome, fail_tool};
+pub use files::{AgentFileInput, validate_files};
 pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};
 pub use images::{

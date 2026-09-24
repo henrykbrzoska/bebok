@@ -22,10 +22,7 @@ pub fn collect_files(root: &Path, exts: &[String], max_files: usize) -> Vec<std:
             continue;
         }
         let path = entry.path();
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if ext_set.contains(ext) {
             results.push(path.to_path_buf());
             if results.len() >= max_files {

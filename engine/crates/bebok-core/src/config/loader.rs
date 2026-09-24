@@ -10,7 +10,9 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
+use super::model::{
+    AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig,
+};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -857,7 +859,10 @@ mod tests {
             &mut cfg,
             &serde_json::json!({ "ast_search": { "enabled": "yes", "max_files": "lots", "languages": 42 } }),
         );
-        assert!(!cfg.ast_search.enabled, "non-bool enabled keeps the default");
+        assert!(
+            !cfg.ast_search.enabled,
+            "non-bool enabled keeps the default"
+        );
         assert_eq!(cfg.ast_search.max_files, 500);
         assert_eq!(cfg.ast_search.languages, vec!["rs", "ts", "tsx"]);
         // A non-object section is a no-op.

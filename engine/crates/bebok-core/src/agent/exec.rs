@@ -146,6 +146,13 @@ pub async fn exec_gated_call(
         }
     }
 
+    // Do not start another tool once the turn has been cancelled. This closes
+    // the common force-send race: a batch queued behind the cancelled tool is
+    // discarded immediately rather than waiting for the outer loop to notice.
+    if ctx.abort.is_cancelled() {
+        return false;
+    }
+
     let tool_ctx = bebok_tools::ToolCtx {
         root: ctx.state.directory().into(),
         session_id: ctx.state.id().to_string(),

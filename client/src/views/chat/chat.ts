@@ -23,6 +23,7 @@ import {
   Message,
   PromptBody,
   PromptImage,
+  PromptFile,
   SessionMeta,
 } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
@@ -51,6 +52,13 @@ export const MESSAGE_WINDOW = 60;
 const DRAFT_KEY = 'bebok.sessionDrafts';
 const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const TEXT_FILE_TYPES = new Set([
+  'application/json', 'application/xml', 'application/javascript',
+  'application/x-yaml', 'application/yaml', 'application/x-sh',
+]);
+const TEXT_FILE_EXTENSIONS = /\.(txt|md|markdown|json|jsonc|csv|tsv|log|ya?ml|toml|xml|html?|css|scss|js|jsx|ts|tsx|py|rs|go|java|c|cc|cpp|h|hpp|cs|sh|bash|zsh|ps1|sql|ini|conf|env|gitignore)$/i;
 const ACCEPTED_IMAGE_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -100,6 +108,7 @@ interface PendingPrompt {
   id: string;
   text: string;
   images?: PromptImage[];
+  files?: PromptFile[];
   /** "sending" until accepted by the engine, then "sent". */
   state: 'sending' | 'sent';
   ts: number;
@@ -109,6 +118,7 @@ interface PendingPrompt {
 export interface QueuedPrompt {
   text: string;
   images: PromptImage[];
+  files: PromptFile[];
   /** Agent selected when this message was queued. */
   agent: string;
   /** Explicit model selected when this message was queued, if any. */
@@ -124,11 +134,13 @@ export function queuePrompt(
   agent: string,
   selectedModel: string,
   fleet = false,
+  files: PromptFile[] = [],
 ): QueuedPrompt {
   const model = selectedModel.trim();
   return {
     text,
     images,
+    files,
     agent,
     ...(model ? { model } : {}),
     ...(fleet ? { fleet: true } : {}),
@@ -142,6 +154,7 @@ export function queuedPromptBody(prompt: QueuedPrompt): PromptBody {
     agent: prompt.agent,
     ...(prompt.model ? { model: prompt.model } : {}),
     ...(prompt.images.length ? { images: prompt.images } : {}),
+    ...(prompt.files.length ? { files: prompt.files } : {}),
     ...(prompt.fleet ? { fleet: true } : {}),
   };
 }
@@ -154,6 +167,8 @@ export interface StagedAttachment {
   base64: string;
   name: string;
   size: number;
+  /** Present for text-file attachments; images use dataUrl/base64 instead. */
+  fileBase64?: string;
 }
 
 /** Per-session drafts persisted to localStorage (survive tab switches). */
@@ -221,6 +236,10 @@ export class ChatView implements OnInit, OnDestroy {
   readonly error = signal<string | null>(null);
   readonly running = signal(false);
   readonly sending = signal(false);
+  /** An abort request is waiting for the engine to release the turn slot. */
+  readonly aborting = signal(false);
+  /** Force-send is stopping the current turn and dispatching the queue. */
+  readonly forceSending = signal(false);
   readonly draft = signal('');
   readonly follow = signal(true);
 
@@ -374,6 +393,8 @@ export class ChatView implements OnInit, OnDestroy {
   private refreshTimer: number | undefined;
   private lastReconnectVersion = 0;
   private routeSub: Subscription | null = null;
+  /** Unlisten for the Tauri window `drag-drop` event (desktop shell only). */
+  private tauriDropUnlisten: (() => void) | null = null;
   /** Monotonic load generation: stale fetches from a previous tab never win. */
   private loadSeq = 0;
 
@@ -423,7 +444,7 @@ export class ChatView implements OnInit, OnDestroy {
       if (this.loading()) {
         return;
       }
-      if (!running && this.queue().length > 0) {
+      if (!running && this.queue().length > 0 && !this.aborting() && !this.forceSending()) {
         void this.drainQueue();
       }
     });
@@ -474,6 +495,65 @@ export class ChatView implements OnInit, OnDestroy {
     this.routeSub = this.route.paramMap.subscribe((params) => {
       void this.switchSession(params.get('sessionID') ?? '');
     });
+    // Tauri desktop: the webview does not populate HTML `dataTransfer.files`
+    // for OS-level drops, so listen to the window's native `drag-drop` event
+    // (file paths) and read the files via the fs plugin. One subscription per
+    // component lifetime; the handler no-ops when the drop lands outside the
+    // composer or no session is open.
+    void this.listenTauriDrop();
+  }
+
+  /**
+   * Subscribe to the Tauri window `drag-drop` event (desktop shell only).
+   * In the Tauri webview an OS file drop never reaches the DOM `drop`
+   * handler with populated `dataTransfer.files`, so dropped files would be
+   * silently ignored without this native listener.
+   */
+  private async listenTauriDrop(): Promise<void> {
+    if (!this.engine.isTauri()) {
+      return;
+    }
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      this.tauriDropUnlisten = await getCurrentWindow().onDragDropEvent((event) => {
+        if (event.payload.type !== 'drop' || event.payload.paths.length === 0) {
+          return;
+        }
+        if (!this.sessionID()) {
+          return;
+        }
+        void this.addTauriPaths(event.payload.paths);
+      });
+    } catch {
+      // Tauri API unavailable (browser mode, tests): HTML handlers cover it.
+      this.tauriDropUnlisten = null;
+    }
+  }
+
+  /** Read OS paths from a Tauri `drag-drop` event into staged attachments. */
+  private async addTauriPaths(paths: string[]): Promise<void> {
+    try {
+      const { readFile, stat } = await import('@tauri-apps/plugin-fs');
+      const files: File[] = [];
+      for (const path of paths) {
+        try {
+          const info = await stat(path);
+          if (info.isDirectory) {
+            continue;
+          }
+          const bytes = await readFile(path);
+          const name = path.split(/[/\\]/).pop() ?? path;
+          files.push(new File([bytes as unknown as BlobPart], name));
+        } catch {
+          // Unreadable entry: skip, keep the readable ones.
+        }
+      }
+      if (files.length > 0) {
+        await this.addFiles(files);
+      }
+    } catch {
+      this.attachError.set(this.t('chat.dropReadFailed'));
+    }
   }
 
   ngOnDestroy(): void {
@@ -481,6 +561,8 @@ export class ChatView implements OnInit, OnDestroy {
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();
     this.routeSub = null;
+    this.tauriDropUnlisten?.();
+    this.tauriDropUnlisten = null;
     if (this.refreshTimer !== undefined) {
       window.clearTimeout(this.refreshTimer);
     }
@@ -571,7 +653,15 @@ export class ChatView implements OnInit, OnDestroy {
       this.selectedAgent.set(meta.agent);
       this.selectedModel.set(meta.model ?? '');
       // Restore this session's draft (per-session input, survives tab switches).
-      this.draft.set(this.drafts[sessionID] ?? '');
+      this.setComposerText(this.drafts[sessionID] ?? '');
+      // `autofocus` only fires on a full page load; after SPA navigation
+      // (start -> chat, tab switch) focus the composer explicitly so
+      // keyboard shortcuts (incl. native Ctrl/Cmd+Z) work right away.
+      requestAnimationFrame(() => {
+        if (sessionID === this.sessionID()) {
+          this.composerInput()?.nativeElement.focus({ preventScroll: true });
+        }
+      });
       // Nav tab: open (or refresh the title of) this session's tab.
       if (!this.tabs.get(meta.id)) {
         this.tabs.open(meta.id, meta.title ?? null, meta.alias ?? null);
@@ -734,9 +824,16 @@ export class ChatView implements OnInit, OnDestroy {
         break;
       }
       case 'session.updated': {
-        const running = event.properties?.['running'] === true;
+        // Bare session updates are metadata changes, not turn transitions.
+        // Only an explicit `running` property may change the live state.
+        const running = event.properties?.['running'];
+        if (typeof running !== 'boolean') {
+          break;
+        }
         this.running.set(running);
         if (!running) {
+          this.aborting.set(false);
+          this.forceSending.set(false);
           this.scheduleRefresh();
           void this.refreshMeta();
           this.activeTasks.set([]);
@@ -884,12 +981,16 @@ export class ChatView implements OnInit, OnDestroy {
     if (this.permissionBlocked()) {
       return;
     }
-    this.draft.set('');
-    this.saveDraft('');
-    const images: PromptImage[] = staged.map((a) => ({
+    this.setComposerText('');
+    const images: PromptImage[] = staged.filter((a) => !a.fileBase64).map((a) => ({
       media_type: a.media_type,
       data: a.base64,
       ...(a.name ? { name: a.name } : {}),
+    }));
+    const files: PromptFile[] = staged.filter((a) => a.fileBase64).map((a) => ({
+      media_type: a.media_type,
+      data: a.fileBase64!,
+      name: a.name,
     }));
     this.attachments.set([]);
     this.attachError.set(null);
@@ -903,7 +1004,7 @@ export class ChatView implements OnInit, OnDestroy {
     // later rather than the model the user chose before pressing Send.
     this.queue.update((q) => [
       ...q,
-      queuePrompt(text, images, this.selectedAgent(), this.selectedModel(), fleet),
+      queuePrompt(text, images, this.selectedAgent(), this.selectedModel(), fleet, files),
     ]);
     this.pending.update((p) => [
       ...p,
@@ -911,6 +1012,7 @@ export class ChatView implements OnInit, OnDestroy {
         id: `pending-${++pendingSeq}`,
         text,
         ...(images.length ? { images } : {}),
+        ...(files.length ? { files } : {}),
         state: 'sending',
         ts: Date.now(),
       },
@@ -996,20 +1098,41 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Force-send: abort the running turn and send the queued message now. */
   async forceSend(): Promise<void> {
-    if (this.queue().length === 0) {
+    if (this.queue().length === 0 || this.forceSending() || this.aborting()) {
       return;
     }
     const sessionID = this.sessionID();
+    this.forceSending.set(true);
+    this.error.set(null);
     try {
-      await this.engine.abort(sessionID);
-    } catch {
-      /* abort is best-effort */
+      const result = await this.engine.abort(sessionID);
+      if (sessionID !== this.sessionID()) {
+        return;
+      }
+      this.running.set(result.stopped ? false : this.running());
+      // The engine normally waits for the old slot before returning. If a
+      // tool overran its grace period, retry through the short 409 window.
+      for (let attempt = 0; result.timedOut && attempt < 12; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (sessionID !== this.sessionID()) {
+          return;
+        }
+        await this.drainQueue();
+        if (!this.running() && !this.sending()) {
+          return;
+        }
+      }
+      this.running.set(false);
+      await this.drainQueue();
+    } catch (err) {
+      if (sessionID === this.sessionID()) {
+        this.error.set(this.describe(err));
+      }
+    } finally {
+      if (sessionID === this.sessionID()) {
+        this.forceSending.set(false);
+      }
     }
-    if (sessionID !== this.sessionID()) {
-      return;
-    }
-    this.running.set(false);
-    await this.drainQueue();
   }
 
   /** Remove a single message from the queue by index. */
@@ -1081,6 +1204,8 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
+  readonly composerInput = viewChild<ElementRef<HTMLTextAreaElement>>('composerInput');
+
   /** Save the draft for this session (called on every input change). */
   saveDraft(text: string): void {
     const sessionID = this.sessionID();
@@ -1089,6 +1214,30 @@ export class ChatView implements OnInit, OnDestroy {
     }
     this.drafts[sessionID] = text;
     persistDrafts(this.drafts);
+  }
+
+  /**
+   * Uncontrolled composer input: the textarea owns its value so the browser
+   * keeps its native undo stack (Ctrl/Cmd+Z). The signal only mirrors the
+   * text for send/queue logic — it never writes back into the DOM, so typing
+   * and undo are never clobbered by a re-render.
+   */
+  onComposerInput(event: Event, el: HTMLTextAreaElement): void {
+    const value = (event.target as HTMLTextAreaElement | null)?.value ?? el.value;
+    this.draft.set(value);
+    this.saveDraft(value);
+    this.autoGrow(el);
+  }
+
+  /** Write a value into the composer without breaking the native undo stack. */
+  private setComposerText(text: string): void {
+    this.draft.set(text);
+    this.saveDraft(text);
+    const el = this.composerInput()?.nativeElement;
+    if (el && el.value !== text) {
+      el.value = text;
+      this.autoGrow(el);
+    }
   }
 
   /** Persist a thinking change for the session's directory; applies on save. */
@@ -1152,13 +1301,25 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   async abortTurn(): Promise<void> {
+    if (!this.running() || this.aborting() || this.forceSending()) {
+      return;
+    }
     const sessionID = this.sessionID();
-    this.running.set(false);
+    this.aborting.set(true);
     this.error.set(null);
     try {
-      await this.engine.abort(sessionID);
+      const result = await this.engine.abort(sessionID);
+      if (sessionID === this.sessionID()) {
+        this.running.set(result.stopped ? false : this.running());
+      }
     } catch (err) {
-      this.error.set(this.describe(err));
+      if (sessionID === this.sessionID()) {
+        this.error.set(this.describe(err));
+      }
+    } finally {
+      if (sessionID === this.sessionID()) {
+        this.aborting.set(false);
+      }
     }
   }
 
@@ -1220,8 +1381,7 @@ export class ChatView implements OnInit, OnDestroy {
           return;
         }
         const next = this.draft() ? `${this.draft()} ${text.trim()}` : text.trim();
-        this.draft.set(next);
-        this.saveDraft(next);
+        this.setComposerText(next);
       };
       recognition.onend = () => this.dictating.set(false);
       recognition.onerror = () => this.dictating.set(false);
@@ -1267,97 +1427,190 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   onComposerDragOver(event: DragEvent): void {
-    if (this.hasImageDrag(event)) {
-      event.preventDefault();
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
     }
   }
 
   onComposerDrop(event: DragEvent): void {
-    if (!this.hasImageDrag(event)) {
-      return;
-    }
     event.preventDefault();
-    const files = [...(event.dataTransfer?.files ?? [])];
+    event.stopPropagation();
+    const dt = event.dataTransfer;
+    const files = [...(dt?.files ?? [])];
     if (files.length > 0) {
       void this.addFiles(files);
+      return;
+    }
+    // Folder drop (or files without File entries): read entries via webkitGetAsEntry.
+    const entries = [...(dt?.items ?? [])]
+      .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+      .filter((e): e is FileSystemEntry => e !== null && e.isFile);
+    if (entries.length > 0) {
+      void this.addEntryFiles(entries as FileSystemFileEntry[]);
     }
   }
 
   onComposerPaste(event: ClipboardEvent): void {
-    const files = [...(event.clipboardData?.files ?? [])].filter((f) =>
-      f.type.startsWith('image/'),
-    );
+    const cd = event.clipboardData;
+    if (!cd) {
+      return;
+    }
+    const files = [...(cd.files ?? [])];
     if (files.length > 0) {
+      event.preventDefault();
       void this.addFiles(files);
+      return;
+    }
+    // Chrome/Electron expose pasted images only via items (files is empty).
+    const itemFiles = [...(cd.items ?? [])]
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (itemFiles.length > 0) {
+      event.preventDefault();
+      void this.addFiles(itemFiles);
+      return;
+    }
+    // Plain-text paste stays native (keeps the undo stack intact).
+    // Tauri webview fallback: the sync clipboardData is often empty for
+    // images, so try the async Clipboard API (needs clipboard-read
+    // permission / focus; failure simply keeps the native paste).
+    void this.pasteFromAsyncClipboard();
+  }
+
+  /**
+   * Tauri webview fallback for image paste: `clipboardData` arrives empty,
+   * but `navigator.clipboard.read()` can still see the image. Only stages
+   * files when something readable is found; otherwise leaves the native
+   * (text) paste untouched.
+   */
+  private async pasteFromAsyncClipboard(): Promise<void> {
+    const clipboard = navigator.clipboard as unknown as {
+      read?: () => Promise<Array<{ types: string[]; getType: (t: string) => Promise<Blob> }>>;
+    } | undefined;
+    if (typeof clipboard?.read !== 'function') {
+      return;
+    }
+    try {
+      const items = await clipboard.read();
+      const files: File[] = [];
+      for (const item of items ?? []) {
+        for (const type of item.types ?? []) {
+          if (!type.startsWith('image/')) {
+            continue;
+          }
+          try {
+            const blob = await item.getType(type);
+            const ext = type.split('/')[1] ?? 'png';
+            files.push(new File([blob], `pasted-image.${ext}`, { type }));
+          } catch {
+            // Unreadable type: try the next one.
+          }
+        }
+      }
+      if (files.length > 0) {
+        await this.addFiles(files);
+      }
+    } catch {
+      // Denied/unsupported: the native paste already handled text.
     }
   }
 
-  /** Only intercept drags that actually carry image files (keeps any
-   *  drag-to-resize/scroll behaviors on other drags untouched). */
-  private hasImageDrag(event: DragEvent): boolean {
-    const items = event.dataTransfer?.items;
-    if (!items || items.length === 0) {
-      return false;
-    }
-    return [...items].some(
-      (item) => item.kind === 'file' && item.type.startsWith('image/'),
+  /** Read dropped FileSystemFileEntry objects into File attachments. */
+  private async addEntryFiles(entries: FileSystemFileEntry[]): Promise<void> {
+    const files = await Promise.all(
+      entries.map(
+        (entry) =>
+          new Promise<File | null>((resolve) => {
+            entry.file(
+              (f) => resolve(f),
+              () => resolve(null),
+            );
+          }),
+      ),
     );
+    const valid = files.filter((f): f is File => f !== null);
+    if (valid.length > 0) {
+      await this.addFiles(valid);
+    }
   }
 
-  /** Validate + stage image files (reads them as base64 data URLs). */
+  /** Validate and stage image or UTF-8 text-file attachments. */
   async addFiles(files: File[]): Promise<void> {
     for (const file of files) {
-      if (this.attachments().length >= MAX_IMAGES) {
-        this.attachError.set(
-          this.t('chat.tooManyImages').replace('{n}', String(MAX_IMAGES)),
-        );
-        break;
-      }
-      const mime = file.type || 'image/png';
-      if (!ACCEPTED_IMAGE_TYPES.has(mime)) {
-        this.attachError.set(
-          this.t('chat.unsupportedImageType').replace('{name}', file.name || mime),
-        );
+      const mime = (file.type || '').toLowerCase() || 'application/octet-stream';
+      if (file.size === 0) {
+        // Zero-byte File with a name usually means an unsupported drop shape
+        // (e.g. a dropped folder entry); skip silently instead of an error.
+        if (!file.name) {
+          this.attachError.set(this.t('chat.emptyAttachment'));
+        }
         continue;
       }
-      if (file.size > MAX_IMAGE_BYTES) {
-        this.attachError.set(
-          this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
-        );
+      const isImage = mime.startsWith('image/') || ACCEPTED_IMAGE_TYPES.has(mime);
+      if (!isImage && !TEXT_FILE_TYPES.has(mime) && !TEXT_FILE_EXTENSIONS.test(file.name)) {
+        // MIME allow-list by prefix: many editors report text/*, extension-less
+        // files (LICENSE, Dockerfile) still pass via the text/* prefix.
+        if (!mime.startsWith('text/')) {
+          this.attachError.set(this.t('chat.unsupportedFileType').replace('{name}', file.name));
+          continue;
+        }
+      }
+      if (!isImage && file.size > MAX_FILE_BYTES) {
+        this.attachError.set(this.t('chat.fileTooLarge').replace('{name}', file.name));
+        continue;
+      }
+      if (isImage && this.attachments().filter((a) => !a.fileBase64).length >= MAX_IMAGES) {
+        this.attachError.set(this.t('chat.tooManyImages').replace('{n}', String(MAX_IMAGES)));
+        continue;
+      }
+      if (!isImage && this.attachments().filter((a) => a.fileBase64).length >= MAX_FILES) {
+        this.attachError.set(this.t('chat.tooManyFiles').replace('{n}', String(MAX_FILES)));
         continue;
       }
       try {
-        const prepared = await prepareImage(file, mime);
-        if (prepared.size > MAX_IMAGE_BYTES) {
-          this.attachError.set(
-            this.t('chat.imageTooLarge').replace('{name}', file.name || mime),
-          );
-          continue;
+        let dataUrl: string;
+        let fileData: string;
+        let size: number;
+        if (isImage) {
+          const prepared = await prepareImage(file, mime);
+          if (prepared.size > MAX_IMAGE_BYTES) {
+            this.attachError.set(this.t('chat.imageTooLarge').replace('{name}', file.name));
+            continue;
+          }
+          dataUrl = prepared.dataUrl;
+          size = prepared.size;
+        } else {
+          fileData = await readAsDataUrl(file);
+          try {
+            const comma = fileData.indexOf(',');
+            const bytes = Uint8Array.from(atob(fileData.slice(comma + 1)), (c) => c.charCodeAt(0));
+            new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          } catch {
+            this.attachError.set(this.t('chat.invalidTextFile').replace('{name}', file.name));
+            continue;
+          }
+          dataUrl = fileData;
+          size = file.size;
         }
-        // Split `data:<mime>;base64,<payload>`: send raw base64 only.
-        const comma = prepared.dataUrl.indexOf(',');
-        const base64 =
-          comma >= 0 ? prepared.dataUrl.slice(comma + 1) : prepared.dataUrl;
-        // The engine validates and trusts the *payload bytes*; label the
-        // attachment with what the bytes actually are so a mislabelled file
-        // (e.g. a JPEG named .png) is not rejected for a MIME mismatch.
-        const media_type = sniffMediaType(base64) ?? prepared.media_type;
+        const comma = dataUrl.indexOf(',');
+        const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
         this.attachError.set(null);
         this.attachments.update((list) => [
           ...list,
           {
             id: `attach-${++attachmentSeq}`,
-            media_type,
-            dataUrl: prepared.dataUrl,
+            media_type: isImage ? (sniffMediaType(base64) ?? mime) : mime,
+            dataUrl,
             base64,
-            name: file.name || `image-${attachmentSeq}`,
-            size: prepared.size,
+            name: file.name || `attachment-${attachmentSeq}`,
+            size,
+            ...(isImage ? {} : { fileBase64: base64 }),
           },
         ]);
       } catch {
-        this.attachError.set(
-          this.t('chat.unsupportedImageType').replace('{name}', file.name || mime),
-        );
+        this.attachError.set(this.t('chat.unsupportedFileType').replace('{name}', file.name));
       }
     }
   }

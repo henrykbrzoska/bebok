@@ -1296,8 +1296,7 @@ mod tests {
     /// project config enables the feature (same pattern as `code_ast`).
     #[tokio::test]
     async fn code_graph_tools_follow_the_config_toggle() {
-        let base =
-            std::env::temp_dir().join(format!("bebok-cg-gate-{}", uuid::Uuid::new_v4()));
+        let base = std::env::temp_dir().join(format!("bebok-cg-gate-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
         std::fs::create_dir_all(project.join(".bebok")).unwrap();
         let store = InstanceStore::with_data_dir(base.join("data"));
@@ -1310,8 +1309,15 @@ mod tests {
             .await
             .unwrap();
         let initial = names(&instance);
-        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
-            assert!(!initial.contains(&tool.to_string()), "{tool} registered while disabled");
+        for tool in [
+            "code_graph_depends",
+            "code_graph_dependents",
+            "code_graph_impact",
+        ] {
+            assert!(
+                !initial.contains(&tool.to_string()),
+                "{tool} registered while disabled"
+            );
         }
 
         // Enable in the project config and reload.
@@ -1325,8 +1331,15 @@ mod tests {
             .await
             .unwrap();
         let after = names(&reloaded);
-        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
-            assert!(after.contains(&tool.to_string()), "{tool} missing after enable");
+        for tool in [
+            "code_graph_depends",
+            "code_graph_dependents",
+            "code_graph_impact",
+        ] {
+            assert!(
+                after.contains(&tool.to_string()),
+                "{tool} missing after enable"
+            );
         }
 
         // Disable again -> tools are unregistered.
@@ -1335,10 +1348,20 @@ mod tests {
             r#"{ "code_graph": { "enabled": false } }"#,
         )
         .unwrap();
-        let off = store.reload_instance(project.to_str().unwrap()).await.unwrap();
+        let off = store
+            .reload_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
         let final_names = names(&off);
-        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
-            assert!(!final_names.contains(&tool.to_string()), "{tool} still registered after disable");
+        for tool in [
+            "code_graph_depends",
+            "code_graph_dependents",
+            "code_graph_impact",
+        ] {
+            assert!(
+                !final_names.contains(&tool.to_string()),
+                "{tool} still registered after disable"
+            );
         }
 
         let _ = std::fs::remove_dir_all(&base);

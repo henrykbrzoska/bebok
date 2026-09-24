@@ -31,7 +31,7 @@ import { ExplorerSelectionStore } from '../../../core/explorer-selection.store';
 import { EngineClient } from '../../../core/engine-client.service';
 import { FsEntry } from '../../../core/engine.dtos';
 import { I18nService } from '../../../i18n/i18n.service';
-import { ChatSessionStore } from '../../../views/chat/chat-session.store';
+import { ProjectSessionsStore } from '../../shell/project-sessions.store';
 
 interface FsNode {
   name: string;
@@ -263,14 +263,14 @@ const UNC_PREFIX = '\\\\?\\';
 export class ExplorerPanel {
   private readonly i18n = inject(I18nService);
   private readonly engine = inject(EngineClient);
-  private readonly session = inject(ChatSessionStore);
+  private readonly projects = inject(ProjectSessionsStore);
   private readonly selection = inject(ExplorerSelectionStore);
   private readonly router = inject(Router);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly directory = computed(
-    () => this.session.directory() ?? this.engine.readLastDirectory(),
+    () => this.projects.directory() ?? this.engine.readLastDirectory(),
   );
   /** The engine normalizes to the Win32 `\\?\C:\dir` form - show it plain. */
   readonly prettyDirectory = computed(() => {

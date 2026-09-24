@@ -20,7 +20,10 @@ impl TsLang {
 
 impl LanguageHandler for TsLang {
     fn supports_kind(&self, kind: &str) -> bool {
-        matches!(kind, "impl" | "struct" | "fn" | "enum" | "type_alias" | "test")
+        matches!(
+            kind,
+            "impl" | "struct" | "fn" | "enum" | "type_alias" | "test"
+        )
     }
 
     fn query(&self, content: &str, kind: &str, filters: &Filters) -> Vec<MatchResult> {
@@ -100,44 +103,46 @@ impl LanguageHandler for TsLang {
 
 fn ts_query_for_kind(kind: &str) -> &str {
     match kind {
-        "impl" => "[
+        "impl" => {
+            "[
             (class_declaration) @item
             (abstract_class_declaration) @item
-        ]",
-        "struct" => "[
+        ]"
+        }
+        "struct" => {
+            "[
             (class_declaration) @item
             (interface_declaration) @item
-        ]",
-        "fn" => "[
+        ]"
+        }
+        "fn" => {
+            "[
             (function_declaration) @item
             (arrow_function) @item
             (method_definition) @item
-        ]",
+        ]"
+        }
         "enum" => "(enum_declaration) @item",
         "type_alias" => "(type_alias_declaration) @item",
-        "test" => "[
+        "test" => {
+            "[
             (call_expression) @item
-        ]",
+        ]"
+        }
         _ => "(function_declaration) @item",
     }
 }
 
 fn extract_ts_name(node: tree_sitter::Node, source: &[u8]) -> String {
     if let Some(child) = node.child_by_field_name("name") {
-        return child
-            .utf8_text(source)
-            .unwrap_or("")
-            .to_string();
+        return child.utf8_text(source).unwrap_or("").to_string();
     }
 
     // For call_expression (test), extract the function name.
     if node.kind() == "call_expression"
         && let Some(fn_node) = node.child_by_field_name("function")
     {
-        return fn_node
-            .utf8_text(source)
-            .unwrap_or("")
-            .to_string();
+        return fn_node.utf8_text(source).unwrap_or("").to_string();
     }
 
     "<?>".to_string()

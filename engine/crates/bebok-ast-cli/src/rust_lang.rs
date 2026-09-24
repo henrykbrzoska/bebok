@@ -17,8 +17,17 @@ impl LanguageHandler for RustLang {
     fn supports_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
-            "impl" | "struct" | "fn" | "enum" | "trait" | "type_alias" | "const" | "static"
-                | "mod" | "use" | "test"
+            "impl"
+                | "struct"
+                | "fn"
+                | "enum"
+                | "trait"
+                | "type_alias"
+                | "const"
+                | "static"
+                | "mod"
+                | "use"
+                | "test"
         )
     }
 
@@ -130,10 +139,7 @@ fn rust_query_for_kind(kind: &str) -> &str {
 fn extract_name(node: tree_sitter::Node, source: &[u8]) -> String {
     // Try common name fields.
     if let Some(child) = node.child_by_field_name("name") {
-        return child
-            .utf8_text(source)
-            .unwrap_or("")
-            .to_string();
+        return child.utf8_text(source).unwrap_or("").to_string();
     }
     // For use_declaration, extract the full text up to a reasonable length.
     if node.kind() == "use_declaration" {

@@ -33,7 +33,11 @@ fn run_cli(request: Value) -> Value {
         .expect("failed to write request to bebok-ast stdin");
     let output = child.wait_with_output().expect("failed to run bebok-ast");
 
-    assert!(output.status.success(), "CLI exited with error: {:?}", output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI exited with error: {:?}",
+        output.stderr
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     serde_json::from_str(&stdout).unwrap()
 }
@@ -63,7 +67,10 @@ fn query_struct_derive_serialize() {
     }));
     assert!(resp["ok"].as_bool().unwrap());
     let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find struct Bar with #[derive(Serialize)]");
+    assert!(
+        !results.is_empty(),
+        "should find struct Bar with #[derive(Serialize)]"
+    );
 }
 
 #[test]

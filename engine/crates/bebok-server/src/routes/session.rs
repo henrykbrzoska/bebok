@@ -1,6 +1,8 @@
 //! Session routes (Facade leaves; thin `extract -> service -> json`).
 //! Covers `/session*` incl. prompt/abort/task-abort/permission/export/compact/truncate.
 
+use std::time::Duration;
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -66,6 +68,9 @@ pub struct PromptBody {
     /// Optional image attachments (raw base64, no `data:` URL prefix required).
     #[serde(default)]
     pub images: Vec<ImageInput>,
+    /// Optional UTF-8 text-file attachments (raw base64, no `data:` prefix).
+    #[serde(default)]
+    pub files: Vec<bebok_core::agent::AgentFileInput>,
 }
 
 /// One image attached to a prompt: raw base64 payload + MIME type.
@@ -339,21 +344,45 @@ pub async fn abort(
 
     let cancelled = match session.abort_token().await {
         Some(token) => {
+            state.store.bus().publish(
+                bebok_core::event::Event::new(
+                    "session.updated",
+                    session.directory(),
+                    &id.to_string(),
+                )
+                .with_properties(serde_json::json!({
+                    "running": session.is_running(),
+                    "aborting": true,
+                })),
+            );
             token.cancel();
+            // The token is a request to stop, not proof that the turn has
+            // released its slot. Wait briefly so force-send does not race the
+            // old turn and immediately receive a spurious 409.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            while session.is_running() && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
             true
         }
         None => false,
     };
+    let stopped = !session.is_running();
 
-    state.store.bus().publish(bebok_core::event::Event::new(
-        "session.updated",
-        session.directory(),
-        &id.to_string(),
-    ));
+    state.store.bus().publish(
+        bebok_core::event::Event::new("session.updated", session.directory(), &id.to_string())
+            .with_properties(serde_json::json!({
+                "running": session.is_running(),
+                "aborted": cancelled,
+                "stopped": stopped,
+            })),
+    );
 
     Ok(Json(serde_json::json!({
         "sessionID": id.to_string(),
         "aborted": cancelled,
+        "stopped": stopped,
+        "timedOut": cancelled && !stopped,
     })))
 }
 

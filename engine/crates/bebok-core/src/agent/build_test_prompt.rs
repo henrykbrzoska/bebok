@@ -101,4 +101,24 @@ mod tests {
             build_test_section(&ResolvedConfig::default()).unwrap()
         );
     }
+
+    #[test]
+    fn assembled_prompt_contains_exactly_one_variant() {
+        for (mode, own, other) in [
+            (BuildTestMode::Auto, "(auto)", "(ask)"),
+            (BuildTestMode::Ask, "(ask)", "(auto)"),
+        ] {
+            let section = render(mode).unwrap();
+            assert!(section.contains(own), "{mode:?} section must contain {own}");
+            assert!(
+                section.matches(own).count() == 1,
+                "{mode:?} section must contain {own} exactly once"
+            );
+            assert!(
+                !section.contains(other),
+                "{mode:?} section must not contain {other} (never hold both)"
+            );
+        }
+        assert!(render(BuildTestMode::Off).is_none());
+    }
 }

@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use super::build_test_gate::check_build_test_policy;
 use super::exec::{ExecCtx, ToolOutcome, exec_gated_call, fail_tool};
 use super::gate::{GateCtx, resolve_permission};
-use super::observe::{emit_message, emit_part, emit_session};
+use super::observe::{emit_message, emit_part, emit_session_running};
 use super::preset::Agent;
 use super::request::RequestBuilder;
 use crate::error::Result;
@@ -512,7 +512,7 @@ impl TurnRunner {
             hooks.run_hook(Hook::TURN_END, &mut payload).await;
         }
 
-        emit_session(&bus, &state, "session.updated");
+        emit_session_running(&bus, &state, false);
         Ok(())
     }
 }

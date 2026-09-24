@@ -66,10 +66,11 @@
     <button
       class="tb-abort"
       type="button"
+      data-testid="abort-turn"
       (click)="abortTurn()"
-      [disabled]="!running()"
+      [disabled]="!running() || aborting() || forceSending()"
       [title]="running() ? t('chat.abort') : t('chat.abortIdle')"
-    >{{ t('chat.abort') }}</button>
+    >{{ aborting() ? t('chat.aborting') : t('chat.abort') }}</button>
   </header>
 
   <div class="chat-main">
@@ -202,23 +203,31 @@
       <footer
         class="composer"
         (dragover)="onComposerDragOver($event)"
+        (dragenter)="onComposerDragOver($event)"
         (drop)="onComposerDrop($event)"
         (paste)="onComposerPaste($event)"
       >
         <input
           #filePicker
           type="file"
-          accept="image/*"
+          accept="image/*,.txt,.md,.markdown,.json,.jsonc,.csv,.tsv,.log,.yaml,.yml,.toml,.xml,.html,.htm,.css,.scss,.js,.jsx,.ts,.tsx,.py,.rs,.go,.java,.c,.cc,.cpp,.h,.hpp,.cs,.sh,.bash,.zsh,.ps1,.sql,.ini,.conf,.env"
           multiple
           hidden
           (change)="onFilesPicked($event)"
         />
         @if (attachments().length > 0) {
-          <div class="attach-count">{{ attachCount() }}/5 &middot; {{ t('chat.attachReady') }}</div>
+          <div class="attach-count">{{ attachCount() }} &middot; {{ t('chat.attachReady') }}</div>
           <div class="attach-strip">
             @for (a of attachments(); track a.id) {
-              <div class="attach-thumb">
-                <img [src]="a.dataUrl" [alt]="a.name" />
+              <div class="attach-thumb" [class.file]="!!a.fileBase64">
+                @if (a.fileBase64) {
+                  <div class="attach-file-card" [title]="a.name">
+                    <span aria-hidden="true">📄</span>
+                    <span class="attach-file-name">{{ a.name }}</span>
+                  </div>
+                } @else {
+                  <img [src]="a.dataUrl" [alt]="a.name" />
+                }
                 <button
                   class="icon-btn danger attach-remove"
                   (click)="removeAttachment(a.id)"
@@ -238,10 +247,10 @@
           #composerInput
           rows="1"
           class="composer-input"
+          autofocus
           [placeholder]="t('chat.composerPlaceholder')"
           [attr.aria-label]="t('chat.composerPlaceholder')"
-          [ngModel]="draft()"
-          (ngModelChange)="draft.set($event); saveDraft($event); autoGrow(composerInput)"
+          (input)="onComposerInput($event, composerInput)"
           (keydown)="onComposerKeydown($event)"
           [disabled]="loading()"
         ></textarea>
@@ -297,7 +306,7 @@
             (click)="filePicker.click()"
             [title]="t('chat.attachImage')"
             [attr.aria-label]="t('chat.attachImage')"
-            [disabled]="loading() || attachments().length >= 5"
+            [disabled]="loading() || attachments().length >= 15"
           >📎</button>
           <button
             class="icon-action mic"
@@ -310,7 +319,12 @@
             [disabled]="!micSupported() || loading()"
           >🎙</button>
           @if (queue().length > 0) {
-            <button class="danger" (click)="forceSend()">{{ t('chat.forceSend') }}</button>
+            <button
+              class="danger"
+              data-testid="force-send"
+              (click)="forceSend()"
+              [disabled]="forceSending() || aborting()"
+            >{{ forceSending() ? t('chat.forceSending') : t('chat.forceSend') }}</button>
           }
           <button
             class="primary send"

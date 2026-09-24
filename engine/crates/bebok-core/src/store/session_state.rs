@@ -289,22 +289,33 @@ impl SessionState {
 
     /// Append the user prompt message and persist it. Returns its index.
     pub async fn append_user_message(&self, text: &str) -> Result<usize> {
-        self.append_user_message_with_images(text, Vec::new()).await
+        self.append_user_message_with_attachments(text, Vec::new())
+            .await
     }
 
-    /// Append a user message carrying text plus image parts, persist it.
+    /// Append a user message carrying text plus image/file parts, persist it.
+    pub async fn append_user_message_with_attachments(
+        &self,
+        text: &str,
+        attachments: Vec<crate::session::Part>,
+    ) -> Result<usize> {
+        let idx = {
+            let mut messages = self.messages.write().await;
+            messages.push(Message::user_with_attachments(text, attachments));
+            messages.len() - 1
+        };
+        self.persist_message_at(idx).await;
+        Ok(idx)
+    }
+
+    /// Backward-compatible alias for image-only callers.
     pub async fn append_user_message_with_images(
         &self,
         text: &str,
         images: Vec<crate::session::Part>,
     ) -> Result<usize> {
-        let idx = {
-            let mut messages = self.messages.write().await;
-            messages.push(Message::user_with_images(text, images));
-            messages.len() - 1
-        };
-        self.persist_message_at(idx).await;
-        Ok(idx)
+        self.append_user_message_with_attachments(text, images)
+            .await
     }
 
     /// F9-7: append a status row to the latest assistant message, persist

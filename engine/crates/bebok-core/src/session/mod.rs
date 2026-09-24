@@ -39,6 +39,13 @@ pub enum Part {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+    /// A validated UTF-8 text attachment. Text is stored directly in the
+    /// transcript; large binary payloads never enter a session.
+    File {
+        media_type: String,
+        name: String,
+        text: String,
+    },
     Thinking {
         text: String,
     },
@@ -188,13 +195,18 @@ impl Message {
         m
     }
 
-    /// A user message carrying text plus pre-built image parts.
+    /// Backward-compatible alias for image-only callers.
     pub fn user_with_images(text: impl Into<String>, images: Vec<Part>) -> Self {
+        Self::user_with_attachments(text, images)
+    }
+
+    /// A user message carrying text plus pre-built attachment parts.
+    pub fn user_with_attachments(text: impl Into<String>, attachments: Vec<Part>) -> Self {
         let mut m = Self::new(Role::User);
         m.parts.push(Part::Text { text: text.into() });
-        for img in images {
-            if matches!(img, Part::Image { .. }) {
-                m.parts.push(img);
+        for part in attachments {
+            if matches!(part, Part::Image { .. } | Part::File { .. }) {
+                m.parts.push(part);
             }
         }
         m
@@ -280,6 +292,21 @@ impl Message {
                     data,
                     name,
                 } => Some((media_type.clone(), data.clone(), name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// File parts as `(media_type, name, decoded text)`.
+    pub fn file_parts(&self) -> Vec<(String, String, String)> {
+        self.parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::File {
+                    media_type,
+                    name,
+                    text,
+                } => Some((media_type.clone(), name.clone(), text.clone())),
                 _ => None,
             })
             .collect()

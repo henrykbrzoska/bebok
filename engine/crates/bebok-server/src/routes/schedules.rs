@@ -266,6 +266,7 @@ async fn execute_task(state: &AppState, task: &ScheduledTask) -> Result<(), ApiE
         agent: Some(agent.to_string()),
         model: None,
         images: vec![],
+        files: vec![],
     };
 
     let _ = prompt_turn(state, session.id(), body).await?;

@@ -18,11 +18,14 @@ import {
   OnDestroy,
   OnInit,
   computed,
+  effect,
   inject,
+  untracked,
 } from '@angular/core';
 
 import { EngineEvent, StatsBucket, StatsSessionRow, StatsToolRow } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
+import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { formatCost, formatTokens } from '../chat/chat-session.store';
 import { StatsColumn, StatsTable, formatNumber } from './stats-table';
@@ -53,6 +56,7 @@ const BUCKET_TAIL: StatsColumn<StatsBucket>[] = [
 export class StatsView implements OnInit, OnDestroy {
   readonly store = inject(StatsStore);
   private readonly events = inject(EventsStore);
+  private readonly project = inject(ProjectSessionsStore);
   private readonly i18n = inject(I18nService);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -195,6 +199,20 @@ export class StatsView implements OnInit, OnDestroy {
   });
 
   private unsubscribe: (() => void) | null = null;
+
+  constructor() {
+    // A project switch while Stats is open reloads the "current" scope for
+    // the new project (otherwise it keeps showing the previous project's
+    // numbers).
+    effect(
+      () => {
+        if (this.project.directory() && untracked(() => this.store.scope()) === 'current') {
+          void this.store.load();
+        }
+      },
+      { allowSignalWrites: true },
+    );
+  }
 
   ngOnInit(): void {
     void this.store.load();

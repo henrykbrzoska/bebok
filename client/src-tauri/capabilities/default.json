@@ -4,8 +4,18 @@
   "windows": ["main", "browser-viewer-*"],
   "permissions": [
     "core:default",
+    "core:event:default",
+    "core:window:default",
     "dialog:default",
     "shell:default",
+    "fs:allow-read-file",
+    "fs:allow-read",
+    "fs:allow-stat",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "**" }]
+    },
     {
       "identifier": "shell:allow-spawn",
       "allow": [

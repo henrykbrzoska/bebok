@@ -412,6 +412,7 @@ export class EngineClient {
             ...((body.agent ?? agent) ? { agent: (body.agent ?? agent) as string } : {}),
             ...((body.model ?? model) ? { model: (body.model ?? model) as string } : {}),
             ...(body.images?.length ? { images: body.images } : {}),
+            ...(body.files?.length ? { files: body.files } : {}),
             ...((body.fleet ?? fleet) ? { fleet: true } : {}),
           };
     return this.request('POST', `/session/${id}/prompt`, payload);
