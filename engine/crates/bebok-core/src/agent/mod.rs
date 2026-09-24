@@ -29,6 +29,7 @@ pub mod code_map_prompt;
 pub mod delegation;
 pub mod delegation_policy;
 pub mod exec;
+pub mod files;
 pub mod fleet_tool;
 pub mod gate;
 pub mod images;
@@ -66,6 +67,7 @@ pub use delegation_policy::{
     subagent_note,
 };
 pub use exec::{ToolOutcome, fail_tool};
+pub use files::{AgentFileInput, validate_files};
 pub use fleet_tool::FleetTool;
 pub use gate::{GateCtx, ask_for_permission, fire_permission_hook, resolve_permission};
 pub use images::{

@@ -2,6 +2,7 @@ import { Component, input } from '@angular/core';
 
 import { Part } from '../../../core/engine.dtos';
 import { ImagePartComponent } from './image-part';
+import { FilePartComponent } from './file-part';
 import { StatusPartComponent } from './status-part';
 import { TextPartComponent } from './text-part';
 import { ThinkingPartComponent } from './thinking-part';
@@ -17,6 +18,7 @@ import { UsagePartComponent } from './usage-part';
     ToolPartComponent,
     UsagePartComponent,
     ImagePartComponent,
+    FilePartComponent,
     StatusPartComponent,
   ],
   template: `
@@ -35,6 +37,9 @@ import { UsagePartComponent } from './usage-part';
       }
       @case ('image') {
         <app-image-part [part]="part()" />
+      }
+      @case ('file') {
+        <app-file-part [part]="part()" />
       }
       @case ('status') {
         <app-status-part [part]="part()" />

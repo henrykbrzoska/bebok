@@ -16,6 +16,7 @@ import { ActivatedRoute } from '@angular/router';
 import { EngineClient } from '../../core/engine-client.service';
 import { FsEntry } from '../../core/engine.dtos';
 import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
+import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.service';
 import { FindStore } from '../../core/find.store';
@@ -54,6 +55,7 @@ export class ExplorerView implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly i18n = inject(I18nService);
   private readonly selection = inject(ExplorerSelectionStore);
+  private readonly project = inject(ProjectSessionsStore);
   private readonly shell = inject(ShellStore);
   private readonly codeHighlight = inject(CodeHighlightService);
   readonly find = inject(FindStore);
@@ -70,19 +72,35 @@ export class ExplorerView implements OnInit {
     // `directory()` as a dependency means this waits, without polling, for
     // `ngOnInit` to set it from the matching query param before opening the
     // file - whichever of the two settles last re-triggers the effect.
-    effect(() => {
-      const req = this.selection.openRequest();
-      const dir = this.directory();
-      if (!req || req.nonce === this.lastOpenNonce || dir !== req.directory) {
-        return;
-      }
-      this.lastOpenNonce = req.nonce;
-      this.selection.clearOpenRequest();
-      void this.openFile({ name: '', path: req.path, is_dir: false, depth: 0, expanded: false });
-      // E2E R9: also expand the tree down to the file so it is highlighted in
-      // context instead of every folder staying collapsed.
-      void this.revealPath(req.path);
-    });
+    effect(
+      () => {
+        const req = this.selection.openRequest();
+        const dir = this.directory();
+        if (!req || req.nonce === this.lastOpenNonce || dir !== req.directory) {
+          return;
+        }
+        this.lastOpenNonce = req.nonce;
+        this.selection.clearOpenRequest();
+        void this.openFile({ name: '', path: req.path, is_dir: false, depth: 0, expanded: false });
+        // E2E R9: also expand the tree down to the file so it is highlighted in
+        // context instead of every folder staying collapsed.
+        void this.revealPath(req.path);
+      },
+      { allowSignalWrites: true },
+    );
+    // A project switch while Explorer is open reloads the tree for the new
+    // project (otherwise it keeps showing the previous project's files).
+    effect(
+      () => {
+        const dir = this.project.directory();
+        if (dir && dir !== this.directory()) {
+          this.directory.set(dir);
+          this.resetState();
+          void this.loadRoot();
+        }
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   readonly directory = signal<string | null>(null);
@@ -101,6 +119,20 @@ export class ExplorerView implements OnInit {
   /** Directory state keyed by path ('' = root). */
   private readonly dirs = signal<Record<string, DirState>>({});
   private readonly version = signal(0);
+
+  /** Drop the tree + file state of the previous project on a switch. */
+  private resetState(): void {
+    this.dirs.set({});
+    this.version.update((v) => v + 1);
+    this.selectedPath.set(null);
+    this.fileContent.set('');
+    this.draftContent.set('');
+    this.editing.set(false);
+    this.htmlPreview.set(null);
+    this.imageData.set(null);
+    this.imageMime.set(null);
+    this.error.set(null);
+  }
 
   /** Flattened, visible tree rows. */
   readonly rows = computed<FsNode[]>(() => {

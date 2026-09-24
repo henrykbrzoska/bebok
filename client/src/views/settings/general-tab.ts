@@ -12,7 +12,7 @@
  * by the engine.
  */
 
-import { Component, OnDestroy, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnDestroy, effect, inject, signal, computed } from '@angular/core';
 import { Router } from '@angular/router';
 
 import { DeclaredPlugin, IndexStatusResponse, RegistryPlugin } from '../../core/engine.dtos';
@@ -42,7 +42,7 @@ export interface PluginRow {
   templateUrl: './general-tab.html',
   styleUrls: ['./settings-shared.css', './general-tab.css'],
 })
-export class GeneralTab implements OnInit, OnDestroy {
+export class GeneralTab implements OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
   private readonly toasts = inject(ToastStore);
@@ -93,6 +93,25 @@ export class GeneralTab implements OnInit, OnDestroy {
       };
     });
   });
+
+  constructor() {
+    // A project switch while Settings is open reloads the plugin list and
+    // the index card for the new project (otherwise both keep showing the
+    // previous project's data).
+    effect(
+      () => {
+        const directory = this.store.directory();
+        if (directory) {
+          this.indexStatus.set(null);
+          this.indexError.set(null);
+          this.consecutiveFailures = 0;
+          void this.refreshPlugins();
+          void this.refreshIndexStatus();
+        }
+      },
+      { allowSignalWrites: true },
+    );
+  }
 
   ngOnInit(): void {
     void this.refreshPlugins();

@@ -122,7 +122,7 @@ export interface StatusPart {
   childSessionID?: string;
 }
 
-export type Part = TextPart | ThinkingPart | ToolPart | UsagePart | ImagePart | StatusPart;
+export type Part = TextPart | ThinkingPart | ToolPart | UsagePart | ImagePart | FilePart | StatusPart;
 
 /** An image attached to a message (engine `Part` union member). */
 export interface ImagePart {
@@ -132,6 +132,20 @@ export interface ImagePart {
   data: string;
   name?: string;
   bytes?: number;
+}
+
+export interface FilePart {
+  type: 'file';
+  media_type: string;
+  name: string;
+  text: string;
+}
+
+/** One UTF-8 text file attached to an outgoing prompt (raw base64, max 20 MB). */
+export interface PromptFile {
+  media_type: string;
+  data: string;
+  name: string;
 }
 
 export interface MessageMeta {
@@ -252,6 +266,7 @@ export interface PromptBody {
   agent?: string;
   model?: string;
   images?: PromptImage[];
+  files?: PromptFile[];
   /** Per-prompt fan-out to the parallel fleet (solo turn when absent/false). */
   fleet?: boolean;
 }
@@ -259,6 +274,10 @@ export interface PromptBody {
 export interface AbortResponse {
   sessionID: string;
   aborted: boolean;
+  /** The running turn released its slot before the response was produced. */
+  stopped: boolean;
+  /** Cancellation was accepted but the turn exceeded the five-second grace period. */
+  timedOut: boolean;
 }
 
 export interface AbortTaskResponse {

@@ -176,6 +176,7 @@ name = "bebok-core"
 version = "1.8.4"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bebok-llm",
  "bebok-mcp",
  "bebok-skills",

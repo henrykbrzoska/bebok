@@ -2,7 +2,18 @@
 
 ## Unreleased
 
+### Fixes
+
+- Fixed the code index never rebuilding after file writes: the auto-rescan plugin now lazily registers `bebok-index` from disk before invoking the rebuild, instead of silently skipping it after every engine restart.
+- Switching projects (and launching Bebok) now replays a programmatic disable→enable of the project's enabled plugins before rebuilding the code index — the same toggle that manually revives a stale index.
+- The right-drawer Explorer panel now follows the current project's directory instead of the open chat session's directory.
+- Rebuild and refresh the code index when Bebok starts and whenever the current project changes.
+- Reload the Settings screen and its code-index card when the project changes while Settings is open.
+- Reload the plugin list, Explorer tree, Terminal tabs and the Stats "current" scope when the project changes while those screens are open.
+
 ### Features
+- The chat composer now accepts pasted, dropped, or picked UTF-8 text files alongside images. Text attachments are validated, shown in the transcript, and supplied to the model as clearly delimited file content; native Ctrl/Cmd+Z and Ctrl/Cmd+V remain available in the prompt.
+- Desktop (Tauri) composer attachments: OS file drops are read through the window's native `drag-drop` event (the webview never populates HTML `dataTransfer.files`), image paste falls back to the async Clipboard API when `clipboardData` arrives empty, and the prompt field is focused after navigation so native Ctrl/Cmd+Z works immediately.
 - AST-aware structural search (`code_ast`): find `impl Trait for X`, structs with specific derives, functions returning a given type, annotated items, and test functions across Rust and TypeScript files. Opt-in per project via `ast_search.enabled = true` in `.bebok/config.json`.
 - Module dependency graph: when `code_graph.enabled` is true in the project config, Bebok scans Rust `use`/`mod` declarations into a per-project graph (`.bebok/code_graph.json`) and injects a summary into the system prompt. Agents can query it via `code_graph_depends` (what a module imports), `code_graph_dependents` (reverse dependencies) and `code_graph_impact` (change blast-radius analysis). Inspect via `GET /code-graph`, force a rescan via `POST /code-graph/regenerate`. Off by default.
 - Pre-computed code map: when `code_map.enabled` is true in the project config, Bebok generates a concise directory-to-description map and injects it into the system prompt so the model immediately knows "what is where" without file-system exploration. Manual overrides via `code_map.overrides`, size cap via `code_map.max_tokens`, scan depth via `code_map.max_depth`, cache in `.bebok/code-map.json` (stale after 24 h, regenerate on demand via `POST /code-map/regenerate`; inspect via `GET /code-map`). Off by default — nothing is generated or injected until you turn it on.
@@ -11,6 +22,7 @@
 - Build-test policy enforcement: when `verify.buildTest` is `"off"`, bash commands that look like test runners (`cargo test`, `npm test`, `pytest`, `go test`, `make test`, etc.) are blocked with a clear message suggesting `"auto"` or `"ask"`. Detection covers shell prefixes (`sudo`, `env VAR=x`, `nohup`), wrappers (`python -m`, `npx`), and shell operators (`|`, `&&`, `||`, `;`).
 
 ### Fixes
+- Abort and force-send now react immediately: the engine waits for the cancelled turn to release its session, explicit running-state events prevent false idle states, and queued prompts survive a short slow-tool race.
 - `fetch` now returns the readable text of web pages instead of raw HTML, so long pages no longer lose their middle to output truncation.
 - Fleet generation (`POST /fleet/generate`) no longer biases toward the cheapest models: the candidate pool is ordered alphabetically, prices in the planner prompt are informational only, and models are chosen on merit for each role.
 

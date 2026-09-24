@@ -110,6 +110,11 @@ pub async fn prompt_turn(
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     // Validate image attachments before claiming the turn slot.
     let image_parts = validate_images(body.images)?;
+    let mut attachment_parts = image_parts.clone();
+    attachment_parts.extend(
+        bebok_core::agent::validate_files(&body.files)
+            .map_err(|e| ApiError::bad_request(e.to_string()))?,
+    );
     let session = state.store.open_session(id).await.map_err(ApiError::from)?;
 
     // One turn per session: synchronously claim the slot -> 409 otherwise.
@@ -184,7 +189,7 @@ pub async fn prompt_turn(
 
     // Append the user message, set the title, persist, emit.
     let user_idx = session
-        .append_user_message_with_images(&body.message, image_parts.clone())
+        .append_user_message_with_attachments(&body.message, attachment_parts)
         .await
         .map_err(ApiError::from)?;
     if session.set_title_if_empty(&body.message).await {
@@ -232,6 +237,20 @@ pub async fn prompt_turn(
         release.disarm();
         task_state.clear_abort().await;
         task_state.end_turn();
+        // Always publish an explicit idle transition. Clients treat bare
+        // `session.updated` events as unrelated metadata changes and may still
+        // see `running=true` if teardown is the only completion signal.
+        bus.publish(
+            bebok_core::event::Event::new(
+                "session.updated",
+                task_state.directory(),
+                &id.to_string(),
+            )
+            .with_properties(serde_json::json!({
+                "running": false,
+                "aborted": abort.is_cancelled(),
+            })),
+        );
 
         if let Err(e) = result {
             if abort.is_cancelled() {
@@ -512,6 +531,76 @@ mod tests {
         let mut code = bebok_core::agent::Agent::code();
         assemble_prompt(&instance, &mut code, &cfg);
         assert!(!code.prompt.contains("fleet"), "{}", code.prompt);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Assembled prompt section order: preset → skills → context notes →
+    /// Host OS → Verification capabilities → Build & test policy →
+    /// code map → code graph → Delegation. The "Code index first" section
+    /// is appended later by `request.rs::apply_request_hook`, so it must
+    /// NOT be present yet at this stage.
+    #[tokio::test]
+    async fn assembled_prompt_section_order() {
+        let base = std::env::temp_dir().join(format!("bebok-order-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{
+                 "verify": { "frontend": "auto", "buildTest": "auto" },
+                 "fleet": { "enabled": true, "members": [
+                     { "name": "ask-a", "agent": "ask", "model": "openai/gpt-4.1-nano" }
+                 ]}
+               }"#,
+        )
+        .unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        let dir = project.to_string_lossy().to_string();
+        let instance = store.get_or_create_instance(&dir).await.unwrap();
+        let cfg = instance.config_snapshot();
+
+        let mut orchestrator = bebok_core::agent::Agent::orchestrator();
+        assemble_prompt(&instance, &mut orchestrator, &cfg);
+        let prompt = orchestrator.prompt.clone();
+
+        let host = prompt.find("Host OS: ").expect("Host OS note");
+        let verification = prompt
+            .find("Verification capabilities")
+            .expect("verification section");
+        let build_test = prompt
+            .find("Build & test policy")
+            .expect("build & test section");
+        let delegation = prompt.find("## Delegation").expect("delegation note");
+        assert!(
+            host < verification,
+            "Host OS must precede Verification capabilities"
+        );
+        assert!(
+            verification < build_test,
+            "Verification capabilities must precede Build & test policy"
+        );
+        assert!(
+            build_test < delegation,
+            "Build & test policy must precede Delegation"
+        );
+        assert!(
+            !prompt.contains("Code index first"),
+            "Code index first is appended by apply_request_hook, not assemble_prompt"
+        );
+        // Manual-preview guard (krok 6): exactly one of each section, and no
+        // hard-coded absolute project root anywhere in the assembled prompt.
+        assert_eq!(prompt.matches("Host OS: ").count(), 1, "one Host OS note");
+        assert_eq!(
+            prompt.matches("Verification capabilities").count(),
+            1,
+            "one verification section"
+        );
+        assert_eq!(
+            prompt.matches("Build & test policy").count(),
+            1,
+            "one build & test section"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

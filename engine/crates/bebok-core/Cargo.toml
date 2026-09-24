@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64.workspace = true
 blake3.workspace = true
 dirs.workspace = true
 flate2.workspace = true

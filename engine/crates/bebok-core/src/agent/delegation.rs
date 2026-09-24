@@ -748,7 +748,7 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
         .map_err(|e| format!("cannot create sub-session: {e}"))?;
 
     child
-        .append_user_message_with_images(&spec.prompt, spec.images.clone())
+        .append_user_message_with_attachments(&spec.prompt, spec.images.clone())
         .await
         .map_err(|e| format!("cannot record subtask: {e}"))?;
 

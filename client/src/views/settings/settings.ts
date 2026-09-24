@@ -10,13 +10,14 @@
  * selection. Everything else lives in `SettingsStore`, which it provides.
  */
 
-import { Component, OnInit, effect, inject } from '@angular/core';
+import { Component, OnInit, effect, inject, untracked } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { EventsStore } from '../../core/events.store';
+import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { MessageKey } from '../../i18n';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
@@ -68,6 +69,7 @@ export class SettingsView implements OnInit {
   private readonly engine = inject(EngineClient);
   private readonly route = inject(ActivatedRoute);
   private readonly events = inject(EventsStore);
+  private readonly project = inject(ProjectSessionsStore);
   private readonly i18n = inject(I18nService);
   private readonly catalog = inject(ProviderCatalog);
 
@@ -86,7 +88,19 @@ export class SettingsView implements OnInit {
   constructor() {
     // A `?tab=` deep link (command palette) selects the rail entry, also when
     // the user is already on this screen.
-    effect(() => this.applyRequestedTab());
+    effect(() => this.applyRequestedTab(), { allowSignalWrites: true });
+    // A project switch while Settings is open reloads the screen for the new
+    // project (otherwise the config and the code-index card keep showing the
+    // previous project's data).
+    effect(
+      () => {
+        const directory = this.project.directory();
+        if (directory && directory !== untracked(() => this.store.directory())) {
+          void this.store.load(directory);
+        }
+      },
+      { allowSignalWrites: true },
+    );
   }
 
   async ngOnInit(): Promise<void> {

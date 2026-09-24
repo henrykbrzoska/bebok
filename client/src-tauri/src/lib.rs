@@ -315,7 +315,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(engine_state.clone())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(desktop)]
     let builder = builder

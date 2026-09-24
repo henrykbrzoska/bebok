@@ -34,6 +34,14 @@ export class ProjectSessionsStore {
   private refreshVersion = 0;
 
   constructor() {
+    // A Bebok launch refreshes the index for the last selected project.
+    // This is intentionally fire-and-forget: indexing must never block the
+    // initial session list, and a missing/disabled index plugin is harmless.
+    const initialDirectory = this.directory();
+    if (initialDirectory) {
+      void this.refreshCodeIndex(initialDirectory);
+    }
+
     // Engine-side session changes (create/delete/title) invalidate the cache.
     this.events.onEvent((event) => {
       if (event.type.startsWith('session.')) {
@@ -72,11 +80,65 @@ export class ProjectSessionsStore {
     this.directory.set(directory);
     if (directory) {
       this.engine.saveDirectory(directory);
+      if (changedDirectory) {
+        // Debug trace: project switch triggers code-index rebuild + refresh.
+        console.info(`[project] switched to ${directory} — rebuilding code index + refreshing`);
+        void this.refreshCodeIndex(directory);
+      }
     } else {
       this.sessions.set([]);
       this.agents.set([]);
     }
     await this.refresh();
+  }
+
+  /** Rebuild the selected project's code index, then refresh its status. */
+  private async refreshCodeIndex(directory: string): Promise<void> {
+    try {
+      await this.engine.connect();
+      // Manual disable→enable in Settings is what revives a stale index, so
+      // a project switch (and launch) replays it programmatically: toggle
+      // OFF unregisters the plugin from the global host, toggle ON registers
+      // it back from this project's slot dir. Best-effort — indexing must
+      // not prevent Bebok or project switching from loading.
+      await this.rebindProjectPlugins(directory);
+      const rebuild = await this.engine.rebuildIndex(directory);
+      console.info(`[project] index rebuild for ${directory}:`, rebuild);
+      const status = await this.engine.getIndexStatus(directory);
+      console.info(`[project] index status for ${directory}:`, status);
+    } catch (err) {
+      // Indexing is best-effort: a missing, disabled or unavailable plugin
+      // must not prevent Bebok or project switching from loading.
+      console.warn(`[project] code index refresh failed for ${directory}`, err);
+    }
+  }
+
+  /**
+   * Programmatic disable→enable of this project's enabled plugins: replays
+   * the manual Settings toggle that revives a stale index (toggle OFF
+   * unregisters the plugin globally, toggle ON re-registers it from this
+   * project's slot dir). Failures are logged and swallowed — best-effort.
+   */
+  private async rebindProjectPlugins(directory: string): Promise<void> {
+    let declared;
+    try {
+      declared = (await this.engine.listPlugins(directory)).declared ?? [];
+    } catch (err) {
+      console.warn(`[project] plugin list failed for ${directory}`, err);
+      return;
+    }
+    for (const plugin of declared) {
+      if (!plugin.enabled) {
+        continue;
+      }
+      try {
+        await this.engine.togglePlugin(directory, plugin.name, false);
+        await this.engine.togglePlugin(directory, plugin.name, true);
+        console.info(`[project] rebound plugin ${plugin.name} for ${directory}`);
+      } catch (err) {
+        console.warn(`[project] rebind failed for plugin ${plugin.name}`, err);
+      }
+    }
   }
 
   async refresh(): Promise<void> {

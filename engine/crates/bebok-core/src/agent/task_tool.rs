@@ -480,6 +480,11 @@ fn assemble_prompt(
     if let Some(section) = super::verify_prompt::verification_section(cfg, agent) {
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
+    // `verify.buildTest` policy: same order as the main thread
+    // (`services/turn.rs::assemble_prompt`).
+    if let Some(section) = super::build_test_prompt::build_test_section(cfg) {
+        agent.prompt = format!("{}\n\n{section}", agent.prompt);
+    }
     // Pre-computed code map (`code_map.enabled`): sub-agents get the same
     // "what is where" orientation as the main thread.
     if let Some(section) = super::code_map_prompt::code_map_section(&instance.root, cfg) {

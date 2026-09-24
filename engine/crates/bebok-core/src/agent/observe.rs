@@ -37,6 +37,19 @@ pub fn emit_session(bus: &EventBus, state: &SessionState, kind: &str) {
     bus.publish(Event::new(kind, state.directory(), &state.id().to_string()));
 }
 
+/// Publish a turn-state transition with an explicit `running` property so
+/// clients never have to infer idle/running from a bare event.
+pub fn emit_session_running(bus: &EventBus, state: &SessionState, running: bool) {
+    bus.publish(
+        Event::new(
+            "session.updated",
+            state.directory(),
+            &state.id().to_string(),
+        )
+        .with_properties(serde_json::json!({ "running": running })),
+    );
+}
+
 /// Summarize a session into a title (first user text) - M1 heuristic.
 pub fn title_from(session: &Session, first_prompt: &str) -> Option<String> {
     if session.title.is_some() {
