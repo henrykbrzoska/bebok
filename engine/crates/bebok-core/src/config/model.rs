@@ -211,6 +211,37 @@ impl BuildTestMode {
     }
 }
 
+/// AST-aware structural search config (`ast_search`).
+///
+/// When `enabled`, the agent can use the `code_ast` tool to query the AST shape
+/// of source files (impl blocks, structs with derives, functions returning a
+/// type, annotated items, test functions, etc.). Off by default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AstSearchConfig {
+    /// Master toggle: when false, the `code_ast` tool is not registered (zero I/O).
+    pub enabled: bool,
+    /// Max files to parse per query (safety cap).
+    pub max_files: usize,
+    /// File extensions to include (without dot).
+    #[serde(default = "default_ast_languages")]
+    pub languages: Vec<String>,
+}
+
+fn default_ast_languages() -> Vec<String> {
+    vec!["rs".into(), "ts".into(), "tsx".into()]
+}
+
+impl Default for AstSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_files: 500,
+            languages: default_ast_languages(),
+        }
+    }
+}
+
 /// WP-DELEGATION: concurrency cap for sub-agent fan-out. Sub-agents are only
 /// ever spawned from the configured fleet list; this is the only remaining
 /// `delegation` knob. Legacy keys (`mode`, `model_policy`/`modelPolicy`) are
@@ -332,6 +363,9 @@ pub struct ResolvedConfig {
     /// Code-graph indexing config (off by default; opt-in per project).
     #[serde(default)]
     pub code_graph: CodeGraphConfig,
+    /// AST-aware structural search (off by default; opt-in per project).
+    #[serde(default)]
+    pub ast_search: AstSearchConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -362,6 +396,7 @@ impl Default for ResolvedConfig {
             delegation: DelegationConfig::default(),
             code_map: CodeMapConfig::default(),
             code_graph: CodeGraphConfig::default(),
+            ast_search: AstSearchConfig::default(),
         }
     }
 }
@@ -561,6 +596,11 @@ impl ResolvedConfigBuilder {
         self
     }
 
+    pub fn ast_search(mut self, ast_search: AstSearchConfig) -> Self {
+        self.inner.ast_search = ast_search;
+        self
+    }
+
     pub fn ui(mut self, ui: UiConfig) -> Self {
         self.inner.ui = ui;
         self
@@ -684,5 +724,39 @@ mod tests {
                 .build_test_mode(),
             BuildTestMode::Auto
         );
+    }
+
+    #[test]
+    fn ast_search_config_defaults() {
+        let cfg = AstSearchConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.max_files, 500);
+        assert_eq!(cfg.languages, vec!["rs", "ts", "tsx"]);
+    }
+
+    #[test]
+    fn ast_search_config_serde_round_trip() {
+        let cfg = AstSearchConfig {
+            enabled: true,
+            max_files: 200,
+            languages: vec!["rs".into()],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: AstSearchConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg, parsed);
+    }
+
+    #[test]
+    fn resolved_config_builder_ast_search() {
+        let cfg = ResolvedConfig::builder()
+            .ast_search(AstSearchConfig {
+                enabled: true,
+                max_files: 100,
+                languages: vec!["rs".into()],
+            })
+            .build();
+        assert!(cfg.ast_search.enabled);
+        assert_eq!(cfg.ast_search.max_files, 100);
+        assert_eq!(cfg.ast_search.languages, vec!["rs"]);
     }
 }

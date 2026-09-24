@@ -8,6 +8,7 @@ members = [
     "crates/bebok-mcp",
     "crates/bebok-skills",
     "crates/bebok-pty",
+    "crates/bebok-ast-cli",
 ]
 default-members = ["crates/bebok-server"]
 
@@ -51,3 +52,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+tree-sitter = "0.25"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"

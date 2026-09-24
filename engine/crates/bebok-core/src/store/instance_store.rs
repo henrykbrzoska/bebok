@@ -508,17 +508,24 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::CodeIndexSearch));
-            // In-process code-graph tools: read-only queries over
-            // `<project>/.bebok/code_graph.json`.
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphDepends));
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphDependents));
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+            // In-process code-graph tools: gated on code_graph.enabled.
+            if instance.config_snapshot().code_graph.enabled {
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphDepends));
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphDependents));
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+            }
+            // AST-aware structural search (opt-in per project).
+            if instance.config_snapshot().ast_search.enabled {
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeAstSearch));
+            }
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -551,6 +558,32 @@ impl InstanceStore {
             .permission
             .set_browser_auto(config.frontend_verify().auto_allows_browser());
         configure_browser(&instance.root, &config);
+
+        // AST search tool: register/unregister based on config toggle.
+        if config.ast_search.enabled {
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeAstSearch));
+        } else {
+            instance.tools.unregister_tool("code_ast");
+        }
+
+        // Code graph tools: register/unregister based on config toggle.
+        if config.code_graph.enabled {
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphDepends));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphDependents));
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+        } else {
+            instance.tools.unregister_tool("code_graph_depends");
+            instance.tools.unregister_tool("code_graph_dependents");
+            instance.tools.unregister_tool("code_graph_impact");
+        }
 
         let specs = McpServerSpec::parse_all(&config.mcp);
         let runtimes = Runtimes::from_config(&config.runtimes);
@@ -1254,6 +1287,59 @@ mod tests {
             bebok_tools::resolve_in_root(&instance.root, "sub/file.txt").is_ok(),
             "relative path inside global sandbox must be accepted"
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `code_graph` tool gating follows `code_graph.enabled`: disabled by
+    /// default (no tools), and `reload_instance` registers them after the
+    /// project config enables the feature (same pattern as `code_ast`).
+    #[tokio::test]
+    async fn code_graph_tools_follow_the_config_toggle() {
+        let base =
+            std::env::temp_dir().join(format!("bebok-cg-gate-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+
+        let names = |inst: &std::sync::Arc<crate::store::instance::Instance>| inst.tools.names();
+
+        // Default config: code_graph disabled -> no graph tools.
+        let instance = store
+            .get_or_create_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        let initial = names(&instance);
+        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
+            assert!(!initial.contains(&tool.to_string()), "{tool} registered while disabled");
+        }
+
+        // Enable in the project config and reload.
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "code_graph": { "enabled": true } }"#,
+        )
+        .unwrap();
+        let reloaded = store
+            .reload_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        let after = names(&reloaded);
+        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
+            assert!(after.contains(&tool.to_string()), "{tool} missing after enable");
+        }
+
+        // Disable again -> tools are unregistered.
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "code_graph": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let off = store.reload_instance(project.to_str().unwrap()).await.unwrap();
+        let final_names = names(&off);
+        for tool in ["code_graph_depends", "code_graph_dependents", "code_graph_impact"] {
+            assert!(!final_names.contains(&tool.to_string()), "{tool} still registered after disable");
+        }
 
         let _ = std::fs::remove_dir_all(&base);
     }

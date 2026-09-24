@@ -21,6 +21,7 @@ import { MessageKey } from '../../i18n';
 import { I18nService } from '../../i18n/i18n.service';
 import { ToastStore } from '../../ui/toast/toast.store';
 import { SettingsStore } from './settings.store';
+import { CodeFeaturesCard } from './code-features-card';
 
 /** One plugin row: registry catalogue entry + per-project declared state. */
 export interface PluginRow {
@@ -37,6 +38,7 @@ export interface PluginRow {
 
 @Component({
   selector: 'app-settings-general',
+  imports: [CodeFeaturesCard],
   templateUrl: './general-tab.html',
   styleUrls: ['./settings-shared.css', './general-tab.css'],
 })

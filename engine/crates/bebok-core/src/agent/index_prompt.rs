@@ -35,7 +35,9 @@ e.g. body='{\"query\": \"...\", \"limit\": 5}', and reach for \
 `read_file` / `grep` / `glob` only when that retry also returns ok:false. \
 If the index is available but returns no results for a well-formed query, \
 fall back to `read_file` / `grep` / `glob`. \
-Never start with grep/glob when the index is available.";
+Never start with grep/glob when the index is available. \
+For structural queries (impl blocks, derives, return types), also use `code_ast` when \
+available — it parses ASTs instead of regex matching.";
 
 /// Heading grep-able in tests and other modules.
 pub const SECTION_HEADING: &str = "Code index first";
@@ -316,19 +318,26 @@ mod tests {
     }
 
     #[test]
-    fn ask_and_plan_prompts_document_raw_body_retry() {
+    fn ask_and_plan_prompts_use_search_strategy_without_fetch_retry() {
         for (name, prompt) in [("ask", &ASK_PROMPT), ("plan", &PLAN_PROMPT)] {
+            // The compact search strategy names the native tools.
             assert!(
-                prompt.contains("query is required and must not be empty"),
-                "{name} preset must document the dropped-body error"
+                prompt.contains("code_index_search"),
+                "{name} preset must mention the native index search"
             );
             assert!(
-                prompt.contains("retry once with the query as a raw JSON string"),
-                "{name} preset must document the raw-body retry"
+                prompt.contains("code_ast"),
+                "{name} preset must mention the AST search tool"
+            );
+            // The fetch raw-body retry lives only in FALLBACK_SECTION — the
+            // static presets must not duplicate it (dynamic section wins).
+            assert!(
+                !prompt.contains("query is required and must not be empty"),
+                "{name} preset must not duplicate the dropped-body retry text"
             );
             assert!(
-                prompt.contains("only when that retry also returns ok:false"),
-                "{name} preset must gate grep/glob on the retry failing"
+                !prompt.contains("plugins/bebok-index/"),
+                "{name} preset must not hard-code plugin fetch URLs"
             );
         }
     }

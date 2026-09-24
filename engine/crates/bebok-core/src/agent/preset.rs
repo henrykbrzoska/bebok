@@ -31,6 +31,9 @@ Tools:
   - Mutate: `write_file`, `append_file`, `edit_file`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `ln`, `chmod`, `gzip`.
 - `read_file` accepts `offset`/`limit` (1-based lines): read a fragment instead of `head`/`sed`.
 - `append_file` grows a file without re-sending its whole content; `diff` compares two files (or a file against text) so you can verify an edit landed.
+- `code_ast` finds structural code patterns (impl blocks, derives, return types) — use it for structural queries instead of regex grep.
+- `code_index_search(query, limit?)` searches a full-text code index (fastest way to answer "where is X?"); check availability with `code_index_status`.
+- `code_graph_depends` / `code_graph_dependents` / `code_graph_impact` map module dependencies — use for blast-radius analysis and understanding what a change affects.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
 - Reach for `bash` only when no native tool fits: builds, tests, git, package managers.
 - For a direct coding task, do the implementation yourself. Use `task` only for a substantial, independent subtask that benefits from a separate agent; do not delegate routine workspace inspection.
@@ -49,18 +52,14 @@ modify files or run shell commands. Prefer quoting the relevant code over
 describing it; cite file paths. Verify path existence with `stat` or `list_dir`
 instead of guessing from a shell error.
 
-Code-index: FIRST use the native tools (no args needed — they use the session root).
-- `code_index_status`: check the index is ready.
-- `code_index_search` (args: `query`, optional `limit`): search the index.
-If native tools are unavailable, fall back to `fetch`:
-- Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
-- Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
-  {"query": "<terms>", "limit": N} and header Content-Type: application/json.
-- Retry: if the search replies {"ok": false, "error": "query is required and must not be empty"}
-  (the client lost the JSON body), retry once with the query as a raw JSON string in the `body`
-  parameter with header Content-Type: application/json, e.g. body='{"query": "<terms>", "limit": N}',
-  and fall back to grep/glob only when that retry also returns ok:false.
-Prefer the index for "where is X?" over grep/glob.
+Search strategy: before falling back to grep/glob, use the code search tools that are
+available in this project (tools not listed are not enabled):
+- `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
+- `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
+  signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
+  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex), optional `limit`.
+- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
+  — module dependency analysis. Modules are project-relative paths.
 "#;
 
 pub(crate) const PLAN_PROMPT: &str = r#"You are Bebok in "plan" mode.
@@ -69,18 +68,14 @@ search the codebase to ground the plan in the actual code. Do not modify files;
 return the plan in your answer. Use native `stat` or `list_dir` to verify paths;
 do not run shell commands or infer that a path is absent from a command error.
 
-Code-index: FIRST use the native tools (no args needed — they use the session root).
-- `code_index_status`: check the index is ready.
-- `code_index_search` (args: `query`, optional `limit`): search the index.
-If native tools are unavailable, fall back to `fetch`:
-- Status: GET /plugins/bebok-index/status?directory=<project-root> → ok, status, files, symbols.
-- Search: POST /plugins/bebok-index/search?directory=<project-root> with JSON
-  {"query": "<terms>", "limit": N} and header Content-Type: application/json.
-- Retry: if the search replies {"ok": false, "error": "query is required and must not be empty"}
-  (the client lost the JSON body), retry once with the query as a raw JSON string in the `body`
-  parameter with header Content-Type: application/json, e.g. body='{"query": "<terms>", "limit": N}',
-  and fall back to grep/glob only when that retry also returns ok:false.
-Prefer the index for "where is X?" over grep/glob.
+Search strategy: before falling back to grep/glob, use the code search tools that are
+available in this project (tools not listed are not enabled):
+- `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
+- `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
+  signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
+  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex), optional `limit`.
+- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
+  — module dependency analysis. Modules are project-relative paths.
 "#;
 
 pub(crate) const HUB_PROMPT: &str = r#"You are Bebok in "hub" mode: a multi-project operator and inbox manager.
@@ -103,9 +98,9 @@ Delegation:
   a self-contained prompt that includes the project root path and goal.
 - Do not execute writes directly; let the delegated `code` agent do the edits.
 
-Code-index:
-- Use `code_index_status` and `code_index_search` to find code locations.
-- If native tools are unavailable, fall back to `fetch` as documented in `ask` mode.
+Search strategy: prefer native code search tools (`code_index_search`, `code_ast`,
+`code_graph_*` when available) over grep/glob. Tools not listed in your tool set are not
+enabled for this project.
 "#;
 
 pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
@@ -239,6 +234,7 @@ impl Agent {
                 "code_graph_depends".to_string(),
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
+                "code_ast".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -300,6 +296,7 @@ impl Agent {
                 "code_graph_depends".to_string(),
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
+                "code_ast".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -361,6 +358,7 @@ impl Agent {
                 "code_graph_depends".to_string(),
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
+                "code_ast".to_string(),
             ],
             permissions: vec![
                 Rule {

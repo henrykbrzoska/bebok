@@ -592,6 +592,25 @@ export interface ResolvedConfig {
   tool_safety?: Record<string, string>;
   /** WP-AUTOVERIFY (F8-1): autonomous frontend verification policy. */
   verify?: VerifyConfig;
+  /** Pre-computed project code map injected into the system prompt (opt-in). */
+  code_map?: {
+    enabled?: boolean;
+    max_tokens?: number;
+    max_depth?: number;
+    overrides?: Record<string, string>;
+  };
+  /** Module dependency graph for the code_graph_* tools (opt-in). */
+  code_graph?: {
+    enabled?: boolean;
+    max_files?: number;
+    ignore_patterns?: string[];
+  };
+  /** AST-aware structural search backing the code_ast tool (opt-in). */
+  ast_search?: {
+    enabled?: boolean;
+    max_files?: number;
+    languages?: string[];
+  };
 }
 
 /** `verify` config section (WP-AUTOVERIFY / F8-1). */
@@ -1143,6 +1162,22 @@ export interface IndexRebuildResponse {
   rebuild: boolean;
   /** Failure flag echoed by the plugin (`false` = rebuild did not start). */
   ok?: boolean;
+}
+
+/** `GET /code-map` / `POST /code-map/regenerate` payload. */
+export interface CodeMapResponse {
+  enabled: boolean;
+  /** `{ version, generated_at, root, entries: [...] }` when a cache exists. */
+  map?: unknown;
+  /** Rendered prompt section (null when the feature is off or empty). */
+  section: string | null;
+}
+
+/** `GET /code-graph` / `POST /code-graph/regenerate` payload. */
+export interface CodeGraphResponse {
+  enabled: boolean;
+  /** `{ meta, modules, edges }` when a graph is cached. */
+  graph?: unknown;
 }
 
 /** `process.output` event properties (coalesced, at most ~3/s per process). */

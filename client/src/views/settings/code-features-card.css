@@ -1,0 +1,32 @@
+/* "Code intelligence" card (Settings -> General): one row per feature,
+   mirroring .plugin-row / .index-row from general-tab.css. */
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  padding: var(--space-10) var(--space-12);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.feature-info {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feature-name {
+  font-weight: 600;
+}
+
+.feature-actions {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+}

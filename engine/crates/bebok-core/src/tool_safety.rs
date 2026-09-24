@@ -120,6 +120,8 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("code_graph_depends", SafetyCategory::Safe),
     ("code_graph_dependents", SafetyCategory::Safe),
     ("code_graph_impact", SafetyCategory::Safe),
+    // AST-aware structural search: read-only queries.
+    ("code_ast", SafetyCategory::Safe),
     ("base64", SafetyCategory::Caution),
     ("browser_open", SafetyCategory::Caution),
     ("browser_screenshot", SafetyCategory::Caution),
@@ -406,6 +408,8 @@ mod tests {
         // And the two core dynamic tools.
         assert_eq!(builtin_default("task"), Some(SafetyCategory::Caution));
         assert_eq!(builtin_default("fleet"), Some(SafetyCategory::Caution));
+        // AST-aware search: read-only, opt-in.
+        assert_eq!(builtin_default("code_ast"), Some(SafetyCategory::Safe));
     }
 
     #[test]
@@ -419,6 +423,7 @@ mod tests {
             "find",
             "stat",
             "browser_get_text",
+            "code_ast",
         ] {
             assert_eq!(builtin_default(name), Some(SafetyCategory::Safe), "{name}");
         }

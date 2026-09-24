@@ -1,0 +1,25 @@
+[package]
+name = "bebok-ast-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bebok-ast"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+ignore.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-typescript.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

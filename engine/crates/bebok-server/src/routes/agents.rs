@@ -84,12 +84,12 @@ pub struct FleetGenerateQuery {
     pub directory: String,
 }
 
-/// `POST /fleet/generate?directory=` — ask a cheap configured LLM to plan a
+/// `POST /fleet/generate?directory=` — ask a configured LLM to plan a
 /// fleet of sub-agents (min. 3 members per type: code/ask/plan/debug), picking
-/// models from the configured provider pool with a bias against expensive
-/// ones. A deterministic cheapest-first fallback fills any gap (or the whole
-/// fleet when the LLM call fails), so the response always satisfies the
-/// minimum — `fallback: true` + `warning` say which path was taken.
+/// models from the configured provider pool on merit for each role. A
+/// deterministic fallback (pool order) fills any gap (or the whole fleet when
+/// the LLM call fails), so the response always satisfies the minimum —
+/// `fallback: true` + `warning` say which path was taken.
 ///
 /// Body (all optional): `{ "minPerType": 3, "types": ["code","ask","plan","debug"] }`.
 pub async fn generate_fleet(

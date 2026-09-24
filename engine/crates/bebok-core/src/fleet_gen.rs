@@ -1,4 +1,4 @@
-//! Fleet generation: use a cheap LLM to plan a set of sub-agents for a
+//! Fleet generation: use a configured LLM to plan a set of sub-agents for a
 //! directory, choosing models from the configured provider pool.
 //!
 //! The public entry point is [`generate_fleet`]. All types are designed so the
@@ -123,11 +123,8 @@ fn build_candidate_pool(cfg: &ResolvedConfig) -> Vec<Candidate> {
         }
     }
 
-    candidates.sort_by(|a, b| {
-        a.blended
-            .partial_cmp(&b.blended)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Stable alphabetical sort by model name for deterministic, provider-order-agnostic behavior.
+    candidates.sort_by(|a, b| a.model.cmp(&b.model));
     candidates
 }
 
@@ -158,7 +155,7 @@ pub async fn generate_fleet(cfg: &ResolvedConfig, opts: FleetGenOptions) -> Resu
     // Build pool.
     let candidates = build_candidate_pool(cfg);
 
-    // Find cheapest candidate with supports_tools for generation.
+    // Pick the first candidate from the pool (alphabetically first configured model with tools).
     let generation_model = candidates.first().map(|c| c.model.clone()).ok_or_else(|| {
         CoreError::BadRequest("no configured providers with usable models".into())
     })?;
@@ -251,18 +248,6 @@ async fn try_llm_generate(
 fn build_user_prompt(candidates: &[Candidate], types: &[String], min_per_type: usize) -> String {
     let total_needed = types.len() * min_per_type;
 
-    // Mark the top tercile as EXPENSIVE.
-    let expensive_threshold = if candidates.is_empty() {
-        0.0
-    } else {
-        let len = candidates.len();
-        let tercyl_start = len * 2 / 3;
-        candidates
-            .get(tercyl_start)
-            .map(|c| c.blended)
-            .unwrap_or(f64::MAX)
-    };
-
     let mut prompt = String::new();
 
     prompt.push_str(&format!(
@@ -274,23 +259,20 @@ fn build_user_prompt(candidates: &[Candidate], types: &[String], min_per_type: u
         prompt.push_str(&format!("- {}: {}\n", t, agent_description(t)));
     }
 
-    prompt.push_str("\nAvailable models (sorted cheapest first):\n");
+    prompt.push_str("\nAvailable models:\n");
     for c in candidates {
-        let tag = if c.blended >= expensive_threshold && c.blended != f64::MAX {
-            " [EXPENSIVE]"
-        } else if c.blended == f64::MAX {
-            " [no pricing]"
+        if c.blended != f64::MAX {
+            prompt.push_str(&format!("- {} (${:.2}/1M)\n", c.model, c.blended));
         } else {
-            ""
-        };
-        prompt.push_str(&format!("- {} (${:.2}/1M){}\n", c.model, c.blended, tag));
+            prompt.push_str(&format!("- {}\n", c.model));
+        }
     }
 
     prompt.push_str(&format!(
         "\nRules:\n\
         - Minimum {min_per_type} members per type.\n\
         - Within each type, use DIFFERENT models.\n\
-        - Prefer cheapest models. Avoid EXPENSIVE when possible.\n\
+        - Choose models on merit for each role (e.g. stronger models for code/debug, lighter ones are fine for simple research). Prices are informational only.\n\
         - Names must be unique, format: \"<type>-<provider>-<shortmodel>\"\n\
         - Model must be one from the list above (full \"provider/model\" form).\n\
         - Respond with ONLY the JSON object, no other text.\n"
@@ -394,7 +376,7 @@ fn validate_and_repair(
         used_names.insert(name.clone());
 
         // Within a type, prefer distinct models: if this model is already
-        // used for this type, swap to the cheapest unused model from the pool.
+        // used for this type, swap to the first unused model from the pool.
         let models_this_type = used_models_per_type.entry(agent.clone()).or_default();
         if models_this_type.contains(&model_str) {
             if let Some(swap) = candidates
@@ -427,8 +409,8 @@ fn validate_and_repair(
         });
     }
 
-    // Second pass: fill shortfalls per type with cheapest available models.
-    let all_models: Vec<&Candidate> = candidates.iter().collect(); // already sorted cheap-first.
+    // Second pass: fill shortfalls per type with first available models from pool.
+    let all_models: Vec<&Candidate> = candidates.iter().collect(); // already sorted by name.
 
     for ty in types {
         let current_count = members.iter().filter(|m| m.agent == *ty).count();
@@ -452,7 +434,7 @@ fn validate_and_repair(
                     // All models used in this type — allow reuse.
                     let idx = (round_robin_idx - all_models.len()) % all_models.len();
                     warnings.push(format!(
-                        "only {} distinct cheap models available; some members share a model",
+                        "only {} distinct models available; some members share a model",
                         all_models.len()
                     ));
                     break all_models[idx].model.clone();
@@ -529,9 +511,9 @@ fn deterministic_fallback(
     let mut used_names: HashSet<String> = HashSet::new();
 
     for ty in types {
-        // Round-robin over the pool STARTING AT this type's offset, so each
-        // type begins on a different cheap model (cheapest for code, second
-        // cheapest for ask, ...). Cycles when min_per_type exceeds the pool.
+        // Round-robin over the pool starting at this type's offset, so each
+        // type begins on a different model (first for code, second for ask,
+        // ...). Cycles when min_per_type exceeds the pool.
         let type_idx = types.iter().position(|t| t == ty).unwrap_or(0);
         let mut round_robin_idx = type_idx % candidates.len().max(1);
         let mut type_count = 0;
@@ -624,50 +606,20 @@ mod tests {
     }
 
     #[test]
-    fn pool_sorts_cheap_first() {
-        let catalog = bebok_llm::ModelCatalog::global();
-        // Find a cheap and an expensive model from the catalog.
-        let mut cheap = None;
-        let mut expensive = None;
-        for provider in &["deepseek", "openai"] {
-            for m in catalog.provider_models(provider) {
-                let full = format!("{provider}/{m}");
-                if let Some(p) = catalog.pricing(&full) {
-                    let blended = p.input + p.output;
-                    if cheap.is_none() && blended < 5.0 && catalog.get(&full).supports_tools {
-                        cheap = Some((full, blended));
-                    } else if blended > 20.0 && catalog.get(&full).supports_tools {
-                        expensive = Some((full, blended));
-                    }
-                }
-            }
-        }
-        if let (Some((cheap_model, cheap_price)), Some((exp_model, exp_price))) = (cheap, expensive)
-        {
-            let cfg = fake_config(vec![
-                fake_spec(
-                    cheap_model.split('/').next().unwrap(),
-                    bebok_llm::ProviderKind::Openai,
-                    vec![cheap_model.split('/').nth(1).unwrap()],
-                ),
-                fake_spec(
-                    exp_model.split('/').next().unwrap(),
-                    bebok_llm::ProviderKind::Openai,
-                    vec![exp_model.split('/').nth(1).unwrap()],
-                ),
-            ]);
-            let pool = build_candidate_pool(&cfg);
-            if pool.len() >= 2 {
-                let cheap_idx = pool.iter().position(|c| c.model == cheap_model);
-                let exp_idx = pool.iter().position(|c| c.model == exp_model);
-                if let (Some(ci), Some(ei)) = (cheap_idx, exp_idx) {
-                    assert!(
-                        ci < ei,
-                        "cheap ({cheap_model} ${cheap_price}) should be before expensive ({exp_model} ${exp_price})"
-                    );
-                }
-            }
-        }
+    fn pool_sorts_alphabetically() {
+        // Build a fake config with two providers whose names sort out of catalog order.
+        let cfg = fake_config(vec![
+            fake_spec("zebra", bebok_llm::ProviderKind::Openai, vec!["z-model"]),
+            fake_spec("alpha", bebok_llm::ProviderKind::Openai, vec!["a-model"]),
+            fake_spec("middle", bebok_llm::ProviderKind::Openai, vec!["m-model"]),
+        ]);
+        let pool = build_candidate_pool(&cfg);
+        assert_eq!(pool.len(), 3, "all three providers have keys");
+        let names: Vec<&str> = pool.iter().map(|c| c.model.as_str()).collect();
+        // Expect alphabetical sort: alpha < middle < zebra
+        assert_eq!(names[0], "alpha/a-model");
+        assert_eq!(names[1], "middle/m-model");
+        assert_eq!(names[2], "zebra/z-model");
     }
 
     // ── JSON parsing tests ───────────────────────────────────────────────
@@ -879,11 +831,11 @@ Hope this helps!"#;
     }
 
     #[test]
-    fn fallback_uses_cheapest_models() {
+    fn fallback_uses_pool_order() {
         let candidates = make_candidates();
         let types = vec!["code".into()];
         let result = deterministic_fallback(&candidates, &types, 3, "test-model", "timeout");
-        // Round-robin from the cheapest (candidates are pre-sorted cheap-first).
+        // Round-robin from the first model in the pool (alphabetically sorted).
         assert_eq!(result.members[0].model, "deepseek/deepseek-chat");
         for m in &result.members {
             assert!(

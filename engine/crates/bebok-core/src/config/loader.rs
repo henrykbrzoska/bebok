@@ -10,7 +10,7 @@ use serde_json::Value;
 use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
-use super::model::{CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
+use super::model::{AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig};
 
 /// Load and resolve configuration for a project directory.
 pub fn load(directory: &Path) -> ResolvedConfig {
@@ -145,6 +145,10 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(cg) = v.get("code_graph") {
         apply_code_graph(&mut cfg.code_graph, cg);
     }
+    // AST search: project overrides global per-field.
+    if let Some(as_cfg) = v.get("ast_search") {
+        apply_ast_search(&mut cfg.ast_search, as_cfg);
+    }
     // Sampling overrides merge per key (project wins per key): global
     // fields (`{ "temperature": 0.5 }`) and per-agent sections
     // (`{ "code": { "temperature": 0.2 } }`) alike.
@@ -206,6 +210,28 @@ pub fn apply_code_graph(cfg: &mut CodeGraphConfig, v: &Value) {
     }
     if let Some(n) = v.get("max_files").and_then(|x| x.as_u64()) {
         cfg.max_files = (n as usize).clamp(100, 50_000);
+    }
+}
+
+/// Apply one layer's `ast_search` section on top of the current value.
+/// `enabled` accepts bool only; `max_files` clamps to `10..=5000`;
+/// `languages` accepts an array of strings (file extensions without dot).
+pub fn apply_ast_search(cfg: &mut AstSearchConfig, v: &Value) {
+    if let Some(enabled) = v.get("enabled").and_then(|x| x.as_bool()) {
+        cfg.enabled = enabled;
+    }
+    if let Some(n) = v.get("max_files").and_then(|x| x.as_u64()) {
+        cfg.max_files = (n as usize).clamp(10, 5000);
+    }
+    if let Some(langs) = v.get("languages").and_then(|x| x.as_array()) {
+        let filtered: Vec<String> = langs
+            .iter()
+            .filter_map(|l| l.as_str().map(str::to_string))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !filtered.is_empty() {
+            cfg.languages = filtered;
+        }
     }
 }
 
@@ -788,5 +814,85 @@ mod tests {
             &serde_json::json!({ "code_map": { "max_depth": 99 } }),
         );
         assert_eq!(cfg.code_map.max_depth, 6);
+    }
+
+    // -- ast_search ---------------------------------------------------------
+
+    #[test]
+    fn ast_search_defaults_disabled() {
+        let cfg = ResolvedConfig::default();
+        assert!(!cfg.ast_search.enabled);
+        assert_eq!(cfg.ast_search.max_files, 500);
+        assert_eq!(cfg.ast_search.languages, vec!["rs", "ts", "tsx"]);
+    }
+
+    #[test]
+    fn ast_search_project_overrides_global() {
+        let base = std::env::temp_dir().join(format!("bebok-astsearch-{}", uuid::Uuid::new_v4()));
+        let global = base.join("global.json");
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        std::fs::write(&global, r#"{ "ast_search": { "enabled": true } }"#).unwrap();
+
+        // Global on, project silent -> on.
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(cfg.ast_search.enabled);
+
+        // Project flips it off (per-field override).
+        std::fs::write(
+            project_dir.join(".bebok").join("config.json"),
+            r#"{ "ast_search": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let cfg = load_with_global(&project_dir, Some(&global));
+        assert!(!cfg.ast_search.enabled);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn ast_search_malformed_values_ignored() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ast_search": { "enabled": "yes", "max_files": "lots", "languages": 42 } }),
+        );
+        assert!(!cfg.ast_search.enabled, "non-bool enabled keeps the default");
+        assert_eq!(cfg.ast_search.max_files, 500);
+        assert_eq!(cfg.ast_search.languages, vec!["rs", "ts", "tsx"]);
+        // A non-object section is a no-op.
+        apply(&mut cfg, &serde_json::json!({ "ast_search": "on" }));
+        assert!(!cfg.ast_search.enabled);
+    }
+
+    #[test]
+    fn ast_search_max_files_clamped() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ast_search": { "max_files": 99999 } }),
+        );
+        assert_eq!(cfg.ast_search.max_files, 5000);
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ast_search": { "max_files": 1 } }),
+        );
+        assert_eq!(cfg.ast_search.max_files, 10);
+    }
+
+    #[test]
+    fn ast_search_languages_filter() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ast_search": { "languages": ["rs", ""] } }),
+        );
+        assert_eq!(cfg.ast_search.languages, vec!["rs"]);
+        // Empty list is ignored (keeps default).
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ast_search": { "languages": [] } }),
+        );
+        assert_eq!(cfg.ast_search.languages, vec!["rs"]);
     }
 }

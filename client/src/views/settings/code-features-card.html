@@ -1,0 +1,95 @@
+<div class="card" data-testid="code-features-card">
+  <h3>{{ t('settings.codeFeaturesTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.codeFeaturesHint') }}</p>
+
+  <div class="feature-row" data-testid="code-map-row">
+    <span
+      class="dot"
+      [class.ok]="codeMapEnabled()"
+      [class.idle]="!codeMapEnabled()"
+      aria-hidden="true"
+    ></span>
+    <span class="feature-info">
+      <span class="feature-name">{{ t('settings.codeMapTitle') }}</span>
+      <span class="feature-hint small faint">{{ t('settings.codeMapHint') }}</span>
+      @if (codeMapEnabled() && codeMapEntries() !== null) {
+        <span class="feature-meta small muted mono" data-testid="code-map-entries">
+          {{ t('settings.codeMapEntries', { n: codeMapEntries() ?? 0 }) }}
+        </span>
+      }
+    </span>
+    <span class="feature-actions">
+      @if (codeMapEnabled()) {
+        <button
+          type="button"
+          class="ghost"
+          data-testid="code-map-regenerate"
+          [disabled]="saving() || codeMapRegenerating()"
+          (click)="regenerateCodeMap()"
+        >{{ codeMapRegenerating() ? t('settings.codeMapRegenerating') : t('settings.codeMapRegenerate') }}</button>
+      }
+      <button
+        type="button"
+        data-testid="code-map-toggle"
+        [disabled]="saving()"
+        (click)="toggleCodeMap(!codeMapEnabled())"
+      >{{ codeMapEnabled() ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
+    </span>
+  </div>
+
+  <div class="feature-row" data-testid="code-graph-row">
+    <span
+      class="dot"
+      [class.ok]="codeGraphEnabled()"
+      [class.idle]="!codeGraphEnabled()"
+      aria-hidden="true"
+    ></span>
+    <span class="feature-info">
+      <span class="feature-name">{{ t('settings.codeGraphTitle') }}</span>
+      <span class="feature-hint small faint">{{ t('settings.codeGraphHint') }}</span>
+      @if (codeGraphEnabled() && codeGraphModules() !== null) {
+        <span class="feature-meta small muted mono" data-testid="code-graph-meta">
+          {{ t('settings.codeGraphModules', { n: codeGraphModules() ?? 0, m: codeGraphEdges() ?? 0 }) }}
+        </span>
+      }
+    </span>
+    <span class="feature-actions">
+      @if (codeGraphEnabled()) {
+        <button
+          type="button"
+          class="ghost"
+          data-testid="code-graph-regenerate"
+          [disabled]="saving() || codeGraphRegenerating()"
+          (click)="regenerateCodeGraph()"
+        >{{ codeGraphRegenerating() ? t('settings.codeGraphRegenerating') : t('settings.codeGraphRegenerate') }}</button>
+      }
+      <button
+        type="button"
+        data-testid="code-graph-toggle"
+        [disabled]="saving()"
+        (click)="toggleCodeGraph(!codeGraphEnabled())"
+      >{{ codeGraphEnabled() ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
+    </span>
+  </div>
+
+  <div class="feature-row" data-testid="ast-search-row">
+    <span
+      class="dot"
+      [class.ok]="astSearchEnabled()"
+      [class.idle]="!astSearchEnabled()"
+      aria-hidden="true"
+    ></span>
+    <span class="feature-info">
+      <span class="feature-name">{{ t('settings.astSearchTitle') }}</span>
+      <span class="feature-hint small faint">{{ t('settings.astSearchHint') }}</span>
+    </span>
+    <span class="feature-actions">
+      <button
+        type="button"
+        data-testid="ast-search-toggle"
+        [disabled]="saving()"
+        (click)="toggleAstSearch(!astSearchEnabled())"
+      >{{ astSearchEnabled() ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
+    </span>
+  </div>
+</div>

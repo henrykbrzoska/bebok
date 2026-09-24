@@ -67,6 +67,8 @@ import {
   BrowserState,
   IndexRebuildResponse,
   IndexStatusResponse,
+  CodeMapResponse,
+  CodeGraphResponse,
   ScheduleTask,
 } from './engine.dtos';
 import { ConnectionProfile, EngineConnection, TransportStrategy } from './transport.strategy';
@@ -599,6 +601,46 @@ export class EngineClient {
     return this.request<IndexRebuildResponse>(
       'POST',
       `/plugins/bebok-index/rebuild?directory=${encodeURIComponent(directory)}`,
+      {},
+    );
+  }
+
+  /**
+   * `GET /code-map?directory=` -> cache status + rendered section.
+   * Answers 404 (surfaced as an error) when no cache exists.
+   */
+  getCodeMap(directory: string): Promise<CodeMapResponse> {
+    return this.request<CodeMapResponse>(
+      'GET',
+      `/code-map?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /** `POST /code-map/regenerate?directory=` -> rebuilt cache. */
+  regenerateCodeMap(directory: string): Promise<CodeMapResponse> {
+    return this.request<CodeMapResponse>(
+      'POST',
+      `/code-map/regenerate?directory=${encodeURIComponent(directory)}`,
+      {},
+    );
+  }
+
+  /**
+   * `GET /code-graph?directory=` -> cached graph meta (module/edge counts).
+   * Answers 404 (surfaced as an error) when no graph was built yet.
+   */
+  getCodeGraph(directory: string): Promise<CodeGraphResponse> {
+    return this.request<CodeGraphResponse>(
+      'GET',
+      `/code-graph?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /** `POST /code-graph/regenerate?directory=` -> rebuilt graph. */
+  regenerateCodeGraph(directory: string): Promise<CodeGraphResponse> {
+    return this.request<CodeGraphResponse>(
+      'POST',
+      `/code-graph/regenerate?directory=${encodeURIComponent(directory)}`,
       {},
     );
   }
