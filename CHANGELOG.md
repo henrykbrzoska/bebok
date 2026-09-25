@@ -2,6 +2,10 @@
 
 ## 1.8.6 — 2026-09-25
 
+### Features
+
+- Agent prompts now steer the model to use `code_ast` before `grep` for structural questions ("where is X defined", "who implements trait Y", "functions returning T"), with copy-pasteable call examples — previously the tool was documented but models defaulted to regex `grep` out of habit.
+
 ### Fixes
 
 - `code_ast` filters (`name_regex`, `path_regex`, …) are now also accepted flat at the top level of the tool arguments, not only nested under `filters` (nested wins on conflict) — previously flat keys were silently dropped and the query returned unfiltered results.
