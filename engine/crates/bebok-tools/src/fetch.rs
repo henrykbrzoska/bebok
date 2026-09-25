@@ -309,7 +309,8 @@ impl Tool for Fetch {
                     "additionalProperties": { "type": "string" }
                 },
                 "json": {
-                    "description": "Request body sent as JSON (sets Content-Type: application/json). Use instead of `body` when sending structured data."
+                    "type": "object",
+                    "description": "Request body sent as JSON object (sets Content-Type: application/json). Use instead of `body` when sending structured data; for arrays or raw payloads use `body` with a JSON string."
                 },
                 "body": {
                     "type": "string",
@@ -422,6 +423,23 @@ impl Tool for Fetch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: every property in the `fetch` schema must declare a
+    /// `type`. A typeless property (like the old `json` body) means "any
+    /// JSON", which OpenRouter's request-grammar folding rejects with
+    /// `400 ... more than one JSON reading of the same emitted value`
+    /// on Qwen free models — failing every turn before any tool runs.
+    #[test]
+    fn every_schema_property_declares_a_type() {
+        let schema = Fetch.parameters_schema();
+        let props = schema["properties"].as_object().unwrap();
+        for (name, prop) in props {
+            assert!(
+                prop.get("type").and_then(Value::as_str).is_some(),
+                "fetch schema property {name:?} must declare a type"
+            );
+        }
+    }
 
     #[test]
     fn only_get_and_head_are_read_only() {

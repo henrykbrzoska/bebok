@@ -17,6 +17,7 @@
 //! Public surface is unchanged: `crate::agent::{Agent, AgentCatalog, ...,
 //! run_turn, build_request, ...}` keep resolving here.
 
+pub mod ast_search;
 pub mod build_test_gate;
 pub mod build_test_prompt;
 pub mod catalog;

@@ -18,6 +18,7 @@ use crate::error::{CoreError, Result};
 use crate::plugin::{Hook, PluginHost, RequestHook, RequestMessage};
 use crate::session::{Role, ToolState};
 use crate::store::SessionState;
+use crate::util::scrub_secrets;
 
 /// Delegation tool sets: the orchestrator owns fleet fan-out plus the
 /// supervision tools; every other agent (and every sub-agent) gets none of
@@ -235,7 +236,13 @@ impl<'a> RequestBuilder<'a> {
         // prune old tool outputs down to a compact digest (non-destructive: the
         // full history stays on disk).
         let budget = self.state.config_snapshot().context_budget;
-        let chat = prune_for_budget(chat, &self.agent.prompt, budget);
+        let mut chat = prune_for_budget(chat, &self.agent.prompt, budget);
+
+        // Secret scrub (second layer): the persisted transcript of older
+        // sessions may already contain API keys (written before exec-time
+        // scrubbing existed). Mask them here so they never reach the model.
+        // Non-destructive: the on-disk transcript is untouched.
+        scrub_request_messages(&mut chat);
 
         Ok(ChatRequest {
             model: self.model.to_string(),
@@ -380,6 +387,52 @@ pub fn prune_for_budget(
     }
 
     chat
+}
+
+/// Mask secrets in an already-built request (in place). Covers message
+/// content, tool results, tool-call inputs and text content parts — every
+/// string field that can carry transcript text into the model. Images are
+/// binary and skipped.
+///
+/// This is the second scrub layer (the first runs in `exec.rs` at capture
+/// time): it protects sessions whose persisted transcript already contains
+/// secrets written before capture-time scrubbing existed. Non-destructive —
+/// the on-disk transcript is untouched.
+pub fn scrub_request_messages(chat: &mut [ChatMessage]) {
+    for msg in chat.iter_mut() {
+        msg.content = scrub_secrets(&msg.content);
+        for tr in msg.tool_results.iter_mut() {
+            tr.content = scrub_secrets(&tr.content);
+        }
+        for tc in msg.tool_calls.iter_mut() {
+            scrub_json_value(&mut tc.input);
+        }
+        for part in msg.content_parts.iter_mut() {
+            if let ContentPart::Text { text } = part {
+                *text = scrub_secrets(text);
+            }
+        }
+    }
+}
+
+/// Recursively scrub string values inside a tool-call input JSON value.
+fn scrub_json_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => {
+            *s = scrub_secrets(s);
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                scrub_json_value(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values_mut() {
+                scrub_json_value(v);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Find the tool name for a given tool_use_id in the chat history.
@@ -759,5 +812,72 @@ mod image_tests {
         assert!(host < verification && verification < build_test && build_test < index);
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn scrubbed_chat() -> Vec<ChatMessage> {
+        vec![ChatMessage {
+            role: ChatRole::User,
+            content: r#"{ "api_key": "sk-or-v1-leaked" }"#.to_string(),
+            tool_calls: vec![bebok_llm::ToolCall {
+                id: "c1".to_string(),
+                name: "bash".to_string(),
+                input: serde_json::json!({"command": "echo sk-ant-bare-token-xyz"}),
+            }],
+            tool_results: vec![ToolResult {
+                tool_use_id: "c1".to_string(),
+                content: "key=ghp_secretvalue123 tail".to_string(),
+                is_error: false,
+            }],
+            content_parts: vec![ContentPart::Text {
+                text: "plain sk-12345678 here".to_string(),
+            }],
+        }]
+    }
+
+    #[test]
+    fn scrub_request_messages_masks_all_string_fields() {
+        let mut chat = scrubbed_chat();
+        scrub_request_messages(&mut chat);
+        let flat = format!(
+            "{} {} {} {}",
+            chat[0].content,
+            chat[0].tool_calls[0].input,
+            chat[0].tool_results[0].content,
+            match &chat[0].content_parts[0] {
+                ContentPart::Text { text } => text.clone(),
+                ContentPart::Image { .. } => String::new(),
+            }
+        );
+        for leaked in [
+            "sk-or-v1-leaked",
+            "sk-ant-bare-token-xyz",
+            "ghp_secretvalue123",
+            "sk-12345678",
+        ] {
+            assert!(!flat.contains(leaked), "leaked {leaked}: {flat}");
+        }
+        assert!(
+            flat.contains(crate::util::SECRET_PLACEHOLDER),
+            "placeholder expected: {flat}"
+        );
+    }
+
+    #[test]
+    fn scrub_request_messages_leaves_images_alone() {
+        let mut chat = vec![ChatMessage {
+            role: ChatRole::User,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: vec![ContentPart::Image {
+                media_type: "image/png".to_string(),
+                data: "aGVsbG8=".to_string(),
+            }],
+        }];
+        scrub_request_messages(&mut chat);
+        assert!(matches!(
+            chat[0].content_parts[0],
+            ContentPart::Image { .. }
+        ));
     }
 }

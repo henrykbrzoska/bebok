@@ -14,6 +14,10 @@ futures.workspace = true
 globset.workspace = true
 ignore.workspace = true
 notify.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-typescript.workspace = true
+anyhow.workspace = true
 
 bebok-llm = { path = "../bebok-llm" }
 bebok-mcp = { path = "../bebok-mcp" }

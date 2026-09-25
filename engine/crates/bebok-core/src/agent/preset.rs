@@ -56,7 +56,8 @@ available in this project (tools not listed are not enabled):
 - `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
-  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex), optional `limit`.
+  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
+  flat at the top level), optional `limit`.
 - `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
   — module dependency analysis. Modules are project-relative paths.
 "#;
@@ -72,7 +73,8 @@ available in this project (tools not listed are not enabled):
 - `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
-  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex), optional `limit`.
+  `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
+  flat at the top level), optional `limit`.
 - `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
   — module dependency analysis. Modules are project-relative paths.
 "#;

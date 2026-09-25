@@ -55,3 +55,20 @@ chrono = { version = "0.4", features = ["serde"] }
 tree-sitter = "0.25"
 tree-sitter-rust = "0.23"
 tree-sitter-typescript = "0.23"
+
+# Keep engine/target small: full debug info dominates it (every dependency
+# rlib and test binary carries it, which is how the dir used to grow to 40+ GB
+# of mixed generations). line-tables-only keeps line numbers for tests,
+# backtraces and source-level debugging; only variable-location info is
+# dropped. Use `CARGO_PROFILE_DEV_DEBUG=2` (or `cargo clean`) for a session
+# that needs the full debuginfo.
+[profile.dev]
+debug = "line-tables-only"
+# No dev builds in the local loop (release-only: engine --release + tauri
+# build), so if a debug dir ever reappears (tauri dev, cargo test) keep it
+# from ballooning with per-change incremental generations.
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false

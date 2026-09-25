@@ -1,10 +1,5 @@
-//! `code_ast` tool: AST-aware structural search that delegates to the
-//! `bebok-ast` plugin via [`crate::plugin::PluginHost`].
-//!
-//! This tool lives in `bebok-core` (not `bebok-tools`) to avoid a cyclic
-//! dependency (`core → tools → mcp → core`). It follows the same pattern as
-//! [`super::code_index_tools`]: implement [`bebok_tools::Tool`], register
-//! via `instance_store.rs`.
+//! `code_ast` tool: AST-aware structural search using the embedded
+//! [`super::ast_search`] module (tree-sitter, no external binary).
 
 use async_trait::async_trait;
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
@@ -18,12 +13,50 @@ pub struct CodeAstSearch;
 struct AstArgs {
     /// AST node kind to search for (required).
     kind: String,
-    /// Optional filters.
+    /// Optional filters (nested object).
     #[serde(default)]
     filters: Value,
     /// Max results to return (default 20).
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Flat filter fallback: also accepted at the top level for callers
+    /// that do not nest them under `filters`. `filters` wins on conflict.
+    #[serde(default)]
+    r#trait: Option<String>,
+    #[serde(default)]
+    derive: Option<String>,
+    #[serde(default)]
+    return_type: Option<String>,
+    #[serde(default)]
+    annotation: Option<String>,
+    #[serde(default)]
+    name_regex: Option<String>,
+    #[serde(default)]
+    path_regex: Option<String>,
+    #[serde(default)]
+    ext: Option<String>,
+}
+
+impl AstArgs {
+    /// Merge flat top-level filter keys into `filters` (nested wins).
+    fn merged_filters(&self) -> Value {
+        let mut obj = self.filters.as_object().cloned().unwrap_or_default();
+        for (key, val) in [
+            ("trait", &self.r#trait),
+            ("derive", &self.derive),
+            ("return_type", &self.return_type),
+            ("annotation", &self.annotation),
+            ("name_regex", &self.name_regex),
+            ("path_regex", &self.path_regex),
+            ("ext", &self.ext),
+        ] {
+            if let Some(v) = val {
+                obj.entry(key.to_string())
+                    .or_insert(Value::String(v.clone()));
+            }
+        }
+        Value::Object(obj)
+    }
 }
 
 fn default_limit() -> usize {
@@ -37,11 +70,13 @@ impl Tool for CodeAstSearch {
     }
 
     fn description(&self) -> &str {
-        "AST-aware structural search: find impl blocks, structs with specific \
-         derives, functions returning a given type, annotated items, and test \
-         functions. Parameters: kind (impl/struct/fn/enum/trait/test/…), \
-         optional filters (trait, derive, return_type, annotation, name_regex, \
-         ext, path_regex), optional limit."
+        "AST-aware structural search over the session directory (ctx.root — \
+         not necessarily the project root; the response echoes it as `root`): \
+         find impl blocks, structs with specific derives, functions returning \
+         a given type, annotated items, and test functions. Parameters: kind \
+         (impl/struct/fn/enum/trait/test/…), optional filters object (trait, \
+         derive, return_type, annotation, name_regex, ext, path_regex — also \
+         accepted flat at the top level), optional limit."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -101,57 +136,33 @@ impl Tool for CodeAstSearch {
             );
         }
 
-        // Cross-project safety: a disabled declaration blocks backend access.
-        if crate::plugin_decl::is_disabled(&ctx.root, "bebok-ast") {
-            return ToolOutput::new(
-                serde_json::to_string(&json!({
-                    "ok": false,
-                    "error": "bebok-ast plugin is disabled"
-                }))
-                .unwrap_or_default(),
-                "code_ast",
-            );
-        }
-
-        // Lazy registration: after an engine restart the plugin is only on
-        // disk (declaration + slot) until something registers it.
-        if !ensure_ast_plugin(&ctx.root).await {
-            let error_msg = plugin_not_registered_error("bebok-ast", &ctx.root);
-            return ToolOutput::new(
-                serde_json::to_string(&json!({
-                    "ok": false,
-                    "error": error_msg
-                }))
-                .unwrap_or_default(),
-                "code_ast",
-            );
-        }
-
-        let directory = ctx.root.to_string_lossy().to_string();
-        let input = json!({
-            "root": directory,
-            "kind": kind,
-            "filters": parsed.filters,
-            "limit": parsed.limit,
-        });
+        // The `ast_search.enabled` config flag is the only gate: the tool is
+        // registered conditionally (see instance_store) and refuses to run
+        // when disabled. There is no plugin-declaration gate — `code_ast` is
+        // a built-in tool, not an external plugin.
+        let root = ctx.root.clone();
+        let filters = crate::agent::ast_search::Filters::from_value(&parsed.merged_filters());
+        let limit = parsed.limit;
+        let max_files = config.ast_search.max_files;
+        let languages = config.ast_search.languages.clone();
 
         tokio::select! {
             _ = ctx.abort.cancelled() => {
                 return ToolOutput::new("code_ast: aborted", "code_ast");
             }
-            result = invoke_plugin("bebok-ast", "query", &input) => {
+            result = tokio::task::spawn_blocking(move || {
+                crate::agent::ast_search::search(&root, &kind, &filters, limit, max_files, &languages)
+            }) => {
                 match result {
-                    Some(value) => {
-                        let text = serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| value.to_string());
+                    Ok(resp) => {
+                        let text = serde_json::to_string_pretty(&resp).unwrap_or_default();
                         ToolOutput::new(text, "code_ast")
                     }
-                    None => {
-                        let error_msg = plugin_not_registered_error("bebok-ast", &ctx.root);
+                    Err(e) => {
                         ToolOutput::new(
                             serde_json::to_string(&json!({
                                 "ok": false,
-                                "error": error_msg
+                                "error": format!("search panicked: {e}")
                             })).unwrap_or_default(),
                             "code_ast",
                         )
@@ -159,67 +170,6 @@ impl Tool for CodeAstSearch {
                 }
             }
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async fn invoke_plugin(name: &str, action: &str, input: &Value) -> Option<Value> {
-    crate::plugin::PluginHost::global()
-        .invoke(name, action, input)
-        .await
-}
-
-/// Lazily register the `bebok-ast` plugin on the global host from its
-/// on-disk declaration + slot dir.
-async fn ensure_ast_plugin(root: &std::path::Path) -> bool {
-    const NAME: &str = "bebok-ast";
-    if crate::plugin_decl::is_disabled(root, NAME) {
-        return false;
-    }
-    let decl_path = crate::plugin_decl::decl_path(root, NAME);
-    if !decl_path.is_file() {
-        return false;
-    }
-    let host = crate::plugin::PluginHost::global();
-    if host.names().await.iter().any(|n| n == NAME) {
-        return true;
-    }
-    let slot_dir = crate::plugin_decl::install_dir(root, NAME);
-    if !slot_dir.is_dir() {
-        return false;
-    }
-    match crate::plugin_process::load_dynamic_plugin(&slot_dir) {
-        Ok(dyn_plugin) => {
-            tracing::info!(
-                "lazy-registering plugin '{NAME}' for agent tools from {}",
-                slot_dir.display()
-            );
-            host.register(std::sync::Arc::new(dyn_plugin)).await;
-            true
-        }
-        Err(e) => {
-            tracing::warn!(
-                "cannot load plugin '{NAME}' from {}: {e}",
-                slot_dir.display()
-            );
-            false
-        }
-    }
-}
-
-fn plugin_not_registered_error(name: &str, root: &std::path::Path) -> String {
-    let slot = crate::plugin_decl::install_dir(root, name);
-    if slot.is_dir() {
-        let (_, binary) = crate::plugin_decl::slot_state(root, name, true);
-        if binary == "missing" {
-            return format!("{name} plugin binary is missing — run Update in Settings");
-        }
-        format!("{name} plugin is not registered")
-    } else {
-        format!("{name} plugin is not registered")
     }
 }
 
@@ -293,9 +243,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_error_when_plugin_absent() {
+    async fn ignores_stale_plugin_declaration() {
+        // `code_ast` is a built-in tool gated only by `ast_search.enabled`:
+        // even a disabled `bebok-ast` declaration file must not block it.
         let root =
-            std::env::temp_dir().join(format!("bebok-ast-noplugin-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("bebok-ast-decl-ignored-{}", uuid::Uuid::new_v4()));
+        let plugins_dir = root.join(".bebok").join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
         std::fs::create_dir_all(root.join(".bebok")).unwrap();
         std::fs::write(
             root.join(".bebok").join("config.json"),
@@ -303,17 +257,30 @@ mod tests {
         )
         .unwrap();
 
+        // Write a disabled declaration for bebok-ast.
+        let decl = crate::plugin_decl::PluginDecl {
+            name: "bebok-ast".to_string(),
+            repo: "test/repo".to_string(),
+            url: "https://example.com/test/repo".to_string(),
+            enabled: false,
+            asset_url: None,
+            asset_sha256: None,
+        };
+        std::fs::write(
+            plugins_dir.join("bebok-ast.json"),
+            serde_json::to_string_pretty(&decl).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(root.join("test.rs"), "fn hello() {}\n").unwrap();
+
         let ctx = ToolCtx {
             root: root.clone(),
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
         let out = CodeAstSearch.execute(ctx, json!({ "kind": "fn" })).await;
-        assert!(
-            out.text.contains("not registered") || out.text.contains("disabled"),
-            "got: {}",
-            out.text
-        );
+        assert!(out.text.contains("\"ok\": true"), "got: {}", out.text);
+        assert!(out.text.contains("hello"), "got: {}", out.text);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -340,30 +307,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_disabled_when_declaration_disabled() {
-        let root =
-            std::env::temp_dir().join(format!("bebok-ast-decl-disabled-{}", uuid::Uuid::new_v4()));
-        let plugins_dir = root.join(".bebok").join("plugins");
-        std::fs::create_dir_all(&plugins_dir).unwrap();
+    async fn returns_results_when_enabled() {
+        let root = std::env::temp_dir().join(format!("bebok-ast-results-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join(".bebok")).unwrap();
         std::fs::write(
             root.join(".bebok").join("config.json"),
             r#"{ "ast_search": { "enabled": true } }"#,
         )
         .unwrap();
-
-        // Write a disabled declaration for bebok-ast.
-        let decl = crate::plugin_decl::PluginDecl {
-            name: "bebok-ast".to_string(),
-            repo: "test/repo".to_string(),
-            url: "https://example.com/test/repo".to_string(),
-            enabled: false,
-            asset_url: None,
-            asset_sha256: None,
-        };
         std::fs::write(
-            plugins_dir.join("bebok-ast.json"),
-            serde_json::to_string_pretty(&decl).unwrap(),
+            root.join("test.rs"),
+            r#"
+fn hello() {}
+pub fn world() -> i32 { 42 }
+"#,
         )
         .unwrap();
 
@@ -373,7 +330,68 @@ mod tests {
             abort: CancellationToken::new(),
         };
         let out = CodeAstSearch.execute(ctx, json!({ "kind": "fn" })).await;
-        assert!(out.text.contains("disabled"), "got: {}", out.text);
+        assert!(out.text.contains("\"ok\": true"), "got: {}", out.text);
+        assert!(out.text.contains("hello"), "got: {}", out.text);
+        assert!(out.text.contains("world"), "got: {}", out.text);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn flat_filters_merge_into_filters_object() {
+        // Callers may pass filter keys flat at the top level; they land in
+        // the merged filters object.
+        let args: AstArgs = serde_json::from_value(json!({
+            "kind": "fn",
+            "name_regex": "^hello$",
+            "limit": 5,
+        }))
+        .unwrap();
+        let merged = args.merged_filters();
+        assert_eq!(merged["name_regex"], json!("^hello$"));
+    }
+
+    #[test]
+    fn nested_filters_win_over_flat_ones() {
+        let args: AstArgs = serde_json::from_value(json!({
+            "kind": "fn",
+            "filters": { "name_regex": "^nested$" },
+            "name_regex": "^flat$",
+        }))
+        .unwrap();
+        let merged = args.merged_filters();
+        assert_eq!(merged["name_regex"], json!("^nested$"));
+    }
+
+    #[tokio::test]
+    async fn flat_name_regex_filters_end_to_end() {
+        // Regression: flat filter keys used to be silently dropped, so a
+        // `name_regex` query returned every function in the tree.
+        let root = std::env::temp_dir().join(format!("bebok-ast-flat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".bebok")).unwrap();
+        std::fs::write(
+            root.join(".bebok").join("config.json"),
+            r#"{ "ast_search": { "enabled": true } }"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("test.rs"), "fn hello() {}\nfn world() {}\n").unwrap();
+
+        let ctx = ToolCtx {
+            root: root.clone(),
+            session_id: "test".to_string(),
+            abort: CancellationToken::new(),
+        };
+        let out = CodeAstSearch
+            .execute(ctx, json!({ "kind": "fn", "name_regex": "^hello$" }))
+            .await;
+        let v: serde_json::Value = serde_json::from_str(&out.text).unwrap();
+        let names: Vec<&str> = v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["hello"], "got: {}", out.text);
 
         let _ = std::fs::remove_dir_all(&root);
     }

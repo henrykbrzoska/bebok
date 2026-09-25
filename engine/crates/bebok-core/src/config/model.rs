@@ -108,6 +108,9 @@ pub const DEFAULT_CODE_MAP_MAX_DEPTH: usize = 3;
 /// Default max files for the code graph index.
 pub const DEFAULT_CODE_GRAPH_MAX_FILES: usize = 5000;
 
+/// Default max files parsed per `code_ast` query.
+pub const DEFAULT_AST_SEARCH_MAX_FILES: usize = 2000;
+
 /// Code-graph configuration (`code_graph`).
 ///
 /// When `enabled`, the engine indexes project source files and derives
@@ -236,7 +239,7 @@ impl Default for AstSearchConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            max_files: 500,
+            max_files: DEFAULT_AST_SEARCH_MAX_FILES,
             languages: default_ast_languages(),
         }
     }
@@ -730,7 +733,7 @@ mod tests {
     fn ast_search_config_defaults() {
         let cfg = AstSearchConfig::default();
         assert!(!cfg.enabled);
-        assert_eq!(cfg.max_files, 500);
+        assert_eq!(cfg.max_files, DEFAULT_AST_SEARCH_MAX_FILES);
         assert_eq!(cfg.languages, vec!["rs", "ts", "tsx"]);
     }
 

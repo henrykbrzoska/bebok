@@ -6,6 +6,8 @@
 //   npm run full-build-app [-- flags]    engine (release) + sidecar + Tauri bundles for this OS
 //   npm run engine         [-- flags]    build + run the engine only
 //   npm run client         [-- flags]    `ng serve` only
+//   npm run engine:sweep   [-- --dry-run] trim engine/target to the size cap (cargo-sweep)
+//   npm run engine:clean                 cargo clean - wipe engine/target
 //
 // Plain Node >= 20 (22 recommended), no dependencies: child processes are
 // spawned with `shell: false` and platform-aware entry points (`node.exe`
@@ -42,6 +44,12 @@ const DEFAULT_ENGINE_PORT = 8787;
 const DEFAULT_CLIENT_PORT = 4200;
 const READY_TIMEOUT_MS = 90_000;
 const CLIENT_TIMEOUT_MS = 240_000;
+
+// engine/target size cap for the automatic post-build trim (cargo-sweep
+// --maxsize). A fresh build lands well under this; garbage (old dependency
+// generations, superseded binaries) pushes the dir over it and then the
+// oldest units are dropped first - cargo just rebuilds what is missing.
+const SWEEP_MAXSIZE = process.env.BEBOK_SWEEP_MAXSIZE || '12GB';
 
 // ---------------------------------------------------------------------------
 // Output helpers (colour only on a TTY, honours NO_COLOR)
@@ -166,6 +174,26 @@ function runStep(tag, cmd, args, opts = {}) {
       if (shuttingDown) return resolve();
       if (code !== 0) fail(`${shown} exited with ${signal ?? code}`, code || 1);
       resolve();
+    });
+  });
+}
+
+/**
+ * Like runStep, but never fails the script: resolves with the exit code
+ * (-1 on spawn error) so callers can treat a failure as optional.
+ */
+function runOptional(tag, cmd, args, opts = {}) {
+  const shown = [path.basename(cmd), ...args].join(' ');
+  log(`${c.dim('$')} ${shown}${opts.cwd ? c.dim(`  (in ${path.relative(ROOT, opts.cwd) || '.'})`) : ''}`);
+  return new Promise((resolve) => {
+    const child = spawnTagged(tag, cmd, args, opts);
+    child.on('error', (err) => {
+      warn(`${shown}: ${err.message}`);
+      resolve(-1);
+    });
+    child.on('exit', (code) => {
+      if (shuttingDown) return resolve(0);
+      resolve(code === 0 ? 0 : (code ?? -1));
     });
   });
 }
@@ -327,6 +355,34 @@ function engineBinary(profile, triple) {
   return path.join(dir, `bebok-server${EXE}`);
 }
 
+/**
+ * Trim engine/target and src-tauri/target down to SWEEP_MAXSIZE with
+ * cargo-sweep (cap applies per directory). The sweep is unit-granular
+ * (a removed unit takes its .fingerprint entry with it), so cargo simply
+ * rebuilds whatever was dropped - never a broken build.
+ * Best-effort: returns false (instead of failing) when cargo-sweep is
+ * missing or the sweep itself fails, unless `required` is set.
+ */
+async function sweepEngine({ dryRun = false, required = false } = {}) {
+  const bin = cargoBin('cargo-sweep');
+  const found = path.isAbsolute(bin) ? existsSync(bin) : !!findOnPath(bin);
+  if (!found) {
+    if (required) fail('cargo-sweep not found - install it with: cargo install cargo-sweep');
+    warn('cargo-sweep not found - target auto-trim disabled (one-off: cargo install cargo-sweep)');
+    return false;
+  }
+  let ok = true;
+  for (const dir of [ENGINE_DIR, TAURI_DIR]) {
+    const args = ['sweep', ...(dryRun ? ['--dry-run'] : []), '--maxsize', SWEEP_MAXSIZE, dir];
+    const code = await runOptional(TAGS.cargo, bin, args, { cwd: dir });
+    if (code !== 0) {
+      if (required) fail(`cargo-sweep exited with ${code} (${dir})`);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 async function buildEngine({ release = false, triple = null } = {}) {
   const args = ['build', '-p', 'bebok-server'];
   if (release) args.push('--release');
@@ -334,6 +390,9 @@ async function buildEngine({ release = false, triple = null } = {}) {
   await runStep(TAGS.cargo, cargoBin('cargo'), args, { cwd: ENGINE_DIR });
   const bin = engineBinary(release ? 'release' : 'debug', triple);
   if (!existsSync(bin)) fail(`engine binary not found after build: ${bin}`);
+  // Best-effort cleanup: drop artifact generations older than the size cap
+  // so engine/target stops growing across builds (never fails the build).
+  await sweepEngine();
   return bin;
 }
 
@@ -479,6 +538,18 @@ async function cmdClient(flags) {
   if (flags.open) openBrowser(url);
 }
 
+async function cmdSweep(flags) {
+  const dryRun = !!flags['dry-run'];
+  const ok = await sweepEngine({ dryRun, required: true });
+  if (ok) log(`${dryRun ? 'dry-run done' : 'sweep done'} (target cap per dir: ${SWEEP_MAXSIZE})`);
+}
+
+async function cmdClean() {
+  await runStep(TAGS.cargo, cargoBin('cargo'), ['clean'], { cwd: ENGINE_DIR });
+  await runStep(TAGS.cargo, cargoBin('cargo'), ['clean'], { cwd: TAURI_DIR });
+  log('engine/target and src-tauri/target removed - the next build starts from scratch');
+}
+
 function defaultBundles() {
   if (isWin) return 'nsis,msi';
   if (isMac) return 'dmg';
@@ -583,6 +654,8 @@ async function cmdDoctor() {
   add('client deps', hasClientDeps(), hasClientDeps() ? 'client/node_modules present' : 'run `npm ci` in client/ (full-build-* does it)', false);
   const tauriVer = existsSync(TAURI_JS) ? probe(process.execPath, [TAURI_JS, '--version']) : null;
   add('tauri cli', !!tauriVer, tauriVer ?? 'client/node_modules/@tauri-apps/cli missing (npm ci in client/)', false);
+  const sweep = probe(cargoBin('cargo-sweep'), ['sweep', '--version']);
+  add('cargo-sweep', !!sweep, sweep ?? 'not installed (cargo install cargo-sweep) - engine/target auto-trim disabled', false);
 
   if (isWin) {
     const keys = [
@@ -644,6 +717,11 @@ commands
   full-build-app   engine release + sidecar + Tauri bundles for this OS (+ SHA256 report)
   engine           build + run the engine only (prints the bootstrap URL)
   client           ng serve only
+  sweep            trim engine/target + src-tauri/target to the size cap (BEBOK_SWEEP_MAXSIZE, default ${SWEEP_MAXSIZE})
+  clean            cargo clean - remove both target dirs entirely
+
+flags (sweep)
+  --dry-run        only report what would be removed
 
 flags (full-build-dev / engine / client)
   --port <n>          engine port            (default ${DEFAULT_ENGINE_PORT})
@@ -680,6 +758,7 @@ async function main() {
         bundles: { type: 'string' },
         'skip-engine': { type: 'boolean', default: false },
         'skip-tauri': { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
     });
@@ -713,6 +792,10 @@ async function main() {
       return cmdEngine(flags);
     case 'client':
       return cmdClient(flags);
+    case 'sweep':
+      return cmdSweep(flags);
+    case 'clean':
+      return cmdClean();
     default:
       process.stderr.write(`unknown command '${command}'\n\n${USAGE}`);
       process.exit(2);

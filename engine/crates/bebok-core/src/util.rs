@@ -204,6 +204,55 @@ pub fn compress_tool_output(text: &str) -> String {
     collapse_whitespace(&stripped)
 }
 
+/// Placeholder substituted for detected secrets.
+pub const SECRET_PLACEHOLDER: &str = "[REDACTED SECRET]";
+
+/// Scrub secrets from tool output before it enters the transcript (and from
+/// there, the next LLM request). Masks:
+/// - `"api_key": "<value>"` / `'api_key': '<value>'` / `api_key=<value>`
+///   JSON-ish assignments (value replaced, key kept for context),
+/// - bare tokens starting with known vendor prefixes (`sk-or-v1-`,
+///   `sk-ant-`, `sk-`, `xoxb-`, `xoxp-`, `ghp_`, `gho_`, `github_pat_`,
+///   `AKIA`, `AIza`, `xai-`).
+///
+/// Runs on the compressed text in `exec.rs` before `mark_tool_completed`, so
+/// neither the persisted transcript nor the model ever sees the raw value.
+pub fn scrub_secrets(text: &str) -> String {
+    let mut out = text.to_string();
+
+    // 1. JSON-ish `"api_key": "value"` / `'api_key': 'value'` / `api_key=value`.
+    //    Keep the key, replace the value.
+    let assignment = regex::Regex::new(
+        r#"(?i)("api_key"|'api_key'|\bapi_key)\s*[:=]\s*("([^"\\]|\\.)*"|'[^']*'|[^\s,}\]]+)"#,
+    );
+    if let Ok(re) = assignment {
+        out = re
+            .replace_all(&out, |caps: &regex::Captures| {
+                let key = caps.get(1).map(|m| m.as_str()).unwrap_or("api_key");
+                let quote = caps
+                    .get(2)
+                    .map(|m| m.as_str().chars().next().unwrap_or('"'))
+                    .unwrap_or('"');
+                let (open, close) = match quote {
+                    '\'' => ("'", "'"),
+                    _ => ("\"", "\""),
+                };
+                format!("{key}: {open}{SECRET_PLACEHOLDER}{close}")
+            })
+            .into_owned();
+    }
+
+    // 2. Bare tokens with known vendor prefixes.
+    let token = regex::Regex::new(
+        r"(sk-or-v1-[A-Za-z0-9_-]+|sk-ant-[A-Za-z0-9_-]+|xox[bpas]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]+|gho_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xai-[A-Za-z0-9_-]+|\bsk-[A-Za-z0-9_-]{8,})",
+    );
+    if let Ok(re) = token {
+        out = re.replace_all(&out, SECRET_PLACEHOLDER).into_owned();
+    }
+
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Tool output truncation (smart head+tail)
 // ---------------------------------------------------------------------------
@@ -410,5 +459,34 @@ mod tests {
         // Static cap keeps full output; old dynamic cap would have truncated.
         assert_eq!(persist_result, long_output);
         assert!(old_result.len() < long_output.len());
+    }
+
+    #[test]
+    fn scrub_masks_json_api_key_assignment() {
+        let out = scrub_secrets(r#"{ "name": "openrouter", "api_key": "sk-or-v1-abc123" }"#);
+        assert!(!out.contains("sk-or-v1-abc123"), "got: {out}");
+        assert!(out.contains("api_key"), "key kept for context, got: {out}");
+        assert!(out.contains(SECRET_PLACEHOLDER), "got: {out}");
+    }
+
+    #[test]
+    fn scrub_masks_bare_vendor_tokens() {
+        for token in [
+            "sk-or-v1-TESTFIXTURE000000000000000000000000000000000000000001",
+            "sk-ant-TESTFIXTURE0000000000000000000000000001",
+            "ghp_TESTFIXTURE0000000000000000000001",
+            "AKIAIOSFODNN7TESTFIXT",
+            "AIzaTESTFIXTURE000000000000000000000000001",
+        ] {
+            let out = scrub_secrets(&format!("key={token} end"));
+            assert!(!out.contains(token), "leaked {token}, got: {out}");
+            assert!(out.contains(SECRET_PLACEHOLDER), "got: {out}");
+        }
+    }
+
+    #[test]
+    fn scrub_leaves_benign_text_alone() {
+        let text = "fn compile(rules: &[Rule]) -> Self { builder }";
+        assert_eq!(scrub_secrets(text), text);
     }
 }

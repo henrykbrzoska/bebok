@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- `code_ast` filters (`name_regex`, `path_regex`, …) are now also accepted flat at the top level of the tool arguments, not only nested under `filters` (nested wins on conflict) — previously flat keys were silently dropped and the query returned unfiltered results.
+- `code_ast` applies `path_regex` before the `max_files` cap (and returns files in sorted order), so a path-filtered query can no longer miss matches that fall beyond the cap; the response now echoes the search `root`, reports `scanned_files`, and sets `truncated` when `max_files`/`limit` cut the result set short. Default `ast_search.max_files` raised from 500 to 2000.
+- `code_ast` is no longer gated by a `bebok-ast` plugin declaration (a built-in tool needs no plugin file): only `ast_search.enabled` in `.bebok/config.json` controls it.
+- Ask/Plan prompts now document that `code_ast` filters are also accepted flat at the top level.
+- Tool outputs are scrubbed for secrets (`api_key` assignments and known vendor token prefixes like `sk-or-v1-`, `sk-ant-`, `sk-`, `ghp_`, `AKIA`) before they enter the session transcript, so API keys can no longer leak into the next LLM request (previously blocked downstream by the provider's content filter with a 403).
+- Secrets are additionally scrubbed when the provider request is built (message content, tool results, tool-call inputs, text parts), so sessions whose persisted transcript already contains an API key no longer send it to the model. The on-disk transcript is left untouched.
+- Fixed `fetch` failing on Qwen free models via OpenRouter (`400 ... more than one JSON reading of the same emitted value`): the `json` body parameter now declares `type: object` instead of accepting any JSON value. For arrays or raw payloads, send a JSON string via `body`.
+
 ## 1.8.5 — 2026-09-24
 
 ### Fixes

@@ -30,6 +30,8 @@ npm run doctor                     # rustc/cargo, node/npm, tauri cli, OS-level 
 npm run full-build-dev -- --open   # cargo build -p bebok-server (debug) + start it + ng serve
 npm run full-build-app             # cargo build --release --target <triple> + sidecar:copy + tauri build
 npm run engine | npm run client    # one half only
+npm run engine:sweep [-- --dry-run] # trim engine/target to the size cap (default 12GB)
+npm run engine:clean               # cargo clean - wipe engine/target
 npm run release:check              # readiness list (read-only); release -- X.Y.Z runs it first
 npm run release -- X.Y.Z           # guided release: changelog + bump + release/X.Y.Z PR (CI does the rest)
 dev.cmd / ./dev.sh [tauri] [flags] # shortcuts for full-build-dev
@@ -42,6 +44,15 @@ strips it. Flags: `--port`, `--client-port`, `--no-auth` (`BEBOK_NO_AUTH=1`),
 `--diagnostic` (`BEBOK_DIAGNOSTIC=1`), `--open`, `--tauri`; `full-build-app`:
 `--bundles`, `--skip-engine`, `--skip-tauri`. The script always extends
 `BEBOK_CORS` with the ng-serve origin.
+
+Every orchestrated engine build auto-trims `engine/target` to
+`BEBOK_SWEEP_MAXSIZE` (default `12GB`) with `cargo-sweep`
+(`cargo install cargo-sweep`) — oldest artifact generations go first and
+cargo rebuilds what is missing, so the dir no longer grows without bound;
+`npm run engine:sweep` runs the same trim on demand (add `--dry-run` to
+preview). The dev/test profiles use `debug = "line-tables-only"`
+(`engine/Cargo.toml`) so fresh builds are far smaller; raise it per session
+with `CARGO_PROFILE_DEV_DEBUG=2` when you need full debuginfo.
 
 Manual steps still work: `cd engine && cargo run` (engine on `:8787`),
 `cd client && npm install && npm start` (`:4200`), desktop =
@@ -252,7 +263,9 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   (`client/src/i18n/*.ts`); keys are append-only — never rename or delete;
   a machine translation for the non-English locales is acceptable.
 - **Engine hygiene**: `cargo fmt` + `cargo clippy -D warnings` clean before a PR;
-  new tools go through `builtin_tools()` and the preset whitelists; new routes
+  new tools go through `builtin_tools()` and the preset whitelists (except
+  conditionally registered tools like `code_ast`, gated by its config flag in
+  `store/instance_store.rs`); new routes
   through `routes/mod.rs`; new config keys through `config/loader.rs::apply`
   plus the JSONC writers; new SSE event types documented in `event.rs`.
 - **Client hygiene**: signals over RxJS, no zone.js, `npm run build` must pass;

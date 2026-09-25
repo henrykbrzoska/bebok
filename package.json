@@ -12,6 +12,8 @@
     "full-build-app": "node scripts/bebok.mjs full-build-app",
     "engine": "node scripts/bebok.mjs engine",
     "client": "node scripts/bebok.mjs client",
+    "engine:sweep": "node scripts/bebok.mjs sweep",
+    "engine:clean": "node scripts/bebok.mjs clean",
     "release": "node scripts/release.mjs",
     "release:status": "node scripts/release.mjs status",
     "release:check": "node scripts/release.mjs check"

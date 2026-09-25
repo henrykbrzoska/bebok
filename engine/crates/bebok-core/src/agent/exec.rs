@@ -18,7 +18,7 @@ use crate::event::{Event, EventBus};
 use crate::permission::PermissionEngine;
 use crate::plugin::{FileWriteHook, Hook, PluginHost, ToolCallHook, ToolResultHook};
 use crate::store::SessionState;
-use crate::util::{compress_tool_output, now_ms, truncate_output};
+use crate::util::{compress_tool_output, now_ms, scrub_secrets, truncate_output};
 
 /// What the permission gate decided for one tool call.
 pub enum ToolOutcome {
@@ -164,11 +164,13 @@ pub async fn exec_gated_call(
     // `AFTER_FILE_WRITE` hook below (the index plugin rescan lives there).
 
     // Token-saving pipeline: compress first (strip ANSI, collapse whitespace),
+    // scrub secrets (api keys must never reach the transcript or the model),
     // then truncate against the configured static cap. The full output is
     // persisted at this size; request-time pruning (prune_for_budget) handles
     // further reduction when the transcript exceeds context_budget.
     let compressed = compress_tool_output(&output.text);
-    let text = truncate_output(&compressed, ctx.tool_output_cap);
+    let scrubbed = scrub_secrets(&compressed);
+    let text = truncate_output(&scrubbed, ctx.tool_output_cap);
 
     let ok = ctx
         .state

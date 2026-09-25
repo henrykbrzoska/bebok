@@ -175,6 +175,7 @@ dependencies = [
 name = "bebok-core"
 version = "1.8.5"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.22.1",
  "bebok-llm",
@@ -199,6 +200,9 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
  "uuid",
  "zip",
 ]
