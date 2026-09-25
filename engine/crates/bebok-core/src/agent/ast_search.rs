@@ -168,7 +168,7 @@ pub fn collect_files(
             .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         if !path_filter.matches_path(&rel) {
             continue;
         }
@@ -642,7 +642,7 @@ pub fn search(
             .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
 
         let is_tsx = ext == "tsx";
         let matched = match ext {
