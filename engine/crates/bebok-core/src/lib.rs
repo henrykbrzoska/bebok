@@ -2,6 +2,7 @@
 //! event bus, plugin host and the per-directory instance store.
 
 pub mod agent;
+pub mod batch;
 pub mod change_tracking;
 pub mod code_graph;
 pub mod config;
@@ -38,6 +39,9 @@ pub use permission::{
 pub use provider::build_provider;
 pub use store::{Instance, InstanceStore, SessionState};
 pub use tool_safety::{SafetyCategory, SafetyOverrides, ToolSafetyEntry};
+
+/// Batch processing types for asynchronous bulk LLM jobs.
+pub use batch::{BatchRecord, BatchState, BatchStore};
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{

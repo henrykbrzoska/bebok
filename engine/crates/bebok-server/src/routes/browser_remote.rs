@@ -494,6 +494,7 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             command_queue: std::sync::Arc::new(tokio::sync::Mutex::new(CommandRegistry::new())),
+            batches: std::sync::Arc::new(bebok_core::BatchStore::new()),
         }
     }
 

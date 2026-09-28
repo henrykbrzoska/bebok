@@ -396,6 +396,7 @@ mod tests {
                 command_queue: Arc::new(tokio::sync::Mutex::new(
                     crate::state::CommandRegistry::new(),
                 )),
+                batches: Arc::new(bebok_core::BatchStore::new()),
             };
             Self { base, root, state }
         }

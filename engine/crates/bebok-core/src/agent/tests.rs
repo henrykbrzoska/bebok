@@ -831,20 +831,34 @@ if __name__ == "__main__":
         std::fs::remove_dir_all(&base).ok();
     }
 
+    /// Probe that picks a Python 3 interpreter which can actually *run code*.
+    ///
+    /// `python3 --version` is not enough: an interpreter whose `PYTHONHOME`
+    /// points at a stale prefix (e.g. an AppImage mount without the stdlib)
+    /// prints its version fine but dies at startup with
+    /// `ModuleNotFoundError: No module named 'encodings'` as soon as it has to
+    /// execute something. That kills the fixture MCP server before
+    /// `tools/list` and turns a missing interpreter into a test failure.
+    const PYTHON_RUNS_CODE: &str =
+        "import encodings, json, sys; sys.exit(0 if sys.version_info[0] == 3 else 1)";
+
+    /// First `python3`/`python` that can run `PYTHON_RUNS_CODE`, if any.
+    fn working_python3() -> Option<&'static str> {
+        ["python3", "python"].into_iter().find(|command| {
+            std::process::Command::new(command)
+                .args(["-c", PYTHON_RUNS_CODE])
+                .output()
+                .is_ok_and(|output| output.status.success())
+        })
+    }
+
     #[tokio::test]
     async fn mcp_tool_goes_through_permission_gate() {
-        let python = ["python3", "python"].into_iter().find(|command| {
-            std::process::Command::new(command)
-                .arg("--version")
-                .output()
-                .is_ok_and(|output| {
-                    output.status.success()
-                        && (String::from_utf8_lossy(&output.stdout).starts_with("Python 3")
-                            || String::from_utf8_lossy(&output.stderr).starts_with("Python 3"))
-                })
-        });
-        let Some(python) = python else {
-            eprintln!("skipping MCP gate test: Python 3 is not available");
+        let Some(python) = working_python3() else {
+            eprintln!(
+                "skipping MCP gate test: no Python 3 interpreter able to run code \
+                 (broken PYTHONHOME/PYTHONPATH?)"
+            );
             return;
         };
         let base = std::env::temp_dir().join(format!("bebok-mcp-gate-{}", uuid::Uuid::new_v4()));

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bebok_core::{DebugLog, InstanceStore, LlmTrace};
+use bebok_core::{BatchStore, DebugLog, InstanceStore, LlmTrace};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -67,4 +67,6 @@ pub struct AppState {
     pub llm_trace: Arc<LlmTrace>,
     pub remote_extensions: Arc<tokio::sync::Mutex<HashMap<String, RemoteExtension>>>,
     pub command_queue: Arc<tokio::sync::Mutex<CommandRegistry>>,
+    /// In-memory batch records (OpenRouter Batch API); global, engine-wide.
+    pub batches: Arc<BatchStore>,
 }

@@ -55,11 +55,19 @@ if __name__ == "__main__":
     main()
 "#;
 
-fn stdio_spec(script: &str, enabled: bool) -> McpServerSpec {
+/// Interpreter that can actually run code — `python3 --version` is not enough:
+/// an interpreter with a stale `PYTHONHOME` (AppImage mount, orphaned venv)
+/// prints its version but dies at startup with
+/// `ModuleNotFoundError: No module named 'encodings'`, killing the fixture
+/// server before `tools/list`.
+const PYTHON_RUNS_CODE: &str =
+    "import encodings, json, sys; sys.exit(0 if sys.version_info[0] == 3 else 1)";
+
+fn stdio_spec(python: &str, script: &str, enabled: bool) -> McpServerSpec {
     McpServerSpec {
         name: "test".to_string(),
         transport: McpTransport::Stdio {
-            command: "python3".to_string(),
+            command: python.to_string(),
             args: vec![script.to_string()],
             env: Default::default(),
         },
@@ -69,6 +77,16 @@ fn stdio_spec(script: &str, enabled: bool) -> McpServerSpec {
 
 #[tokio::test]
 async fn connects_lists_calls_and_toggles_off() {
+    let Some(python) = ["python3", "python"].into_iter().find(|command| {
+        std::process::Command::new(command)
+            .args(["-c", PYTHON_RUNS_CODE])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }) else {
+        eprintln!("skipping MCP stdio test: no Python 3 interpreter able to run code");
+        return;
+    };
+
     let base = std::env::temp_dir().join(format!("bebok-mcp-it-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&base).unwrap();
     let script = base.join("server.py");
@@ -79,7 +97,7 @@ async fn connects_lists_calls_and_toggles_off() {
     // Connect.
     let tools = manager
         .sync(
-            &[stdio_spec(script.to_str().unwrap(), true)],
+            &[stdio_spec(&python, script.to_str().unwrap(), true)],
             &Runtimes::default(),
         )
         .await;
@@ -119,7 +137,7 @@ async fn connects_lists_calls_and_toggles_off() {
     // Toggle off -> tools disappear and status reflects disconnected.
     let tools_off = manager
         .sync(
-            &[stdio_spec(script.to_str().unwrap(), false)],
+            &[stdio_spec(&python, script.to_str().unwrap(), false)],
             &Runtimes::default(),
         )
         .await;

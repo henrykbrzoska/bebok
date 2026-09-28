@@ -4,6 +4,7 @@ mod deepseek;
 mod groq;
 mod ollama;
 mod openrouter;
+pub mod openrouter_batch;
 mod qwen;
 mod xai;
 

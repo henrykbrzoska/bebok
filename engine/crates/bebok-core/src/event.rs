@@ -8,10 +8,15 @@
 //! `message.part.updated`, `permission.asked` / `permission.resolved`,
 //! `task.started` / `task.progress` / `task.ended` / `task.restarted`
 //! (`properties` carries `{ taskID, reason, attempt }`), `browser.frame`,
-//! `agent.list.changed`, `config.changed`, `pty.exited` and
+//! `agent.list.changed`, `config.changed`, `pty.exited`,
 //! `plugin.changed` (plugin declaration installed / enabled / disabled:
 //! `properties` carries `{ name, change }` with `change` one of
-//! `installed` / `enabled` / `disabled`).
+//! `installed` / `enabled` / `disabled`),
+//! `plugin.install.progress` (`properties`: `{ name, stage, detail }`),
+//! `batch.submitted` (`properties`: `{ batchID, count }`),
+//! `batch.completed` (`properties`: `{ batchID, ok, failed }`),
+//! `batch.failed` (`properties`: `{ batchID, error }`), and
+//! `batch.progress` (`properties`: `{ batchID, done, total }`).
 
 use tokio::sync::broadcast;
 
@@ -60,6 +65,57 @@ impl Event {
             "name": name,
             "stage": stage,
             "detail": detail,
+        }))
+    }
+
+    /// Batch submitted: `batch.submitted` — items uploaded and job created.
+    pub fn batch_submitted(
+        directory: &str,
+        session_id: &str,
+        batch_id: &str,
+        count: usize,
+    ) -> Self {
+        Self::new("batch.submitted", directory, session_id).with_properties(serde_json::json!({
+            "batchID": batch_id,
+            "count": count,
+        }))
+    }
+
+    /// Batch completed: `batch.completed` — all items processed.
+    pub fn batch_completed(
+        directory: &str,
+        session_id: &str,
+        batch_id: &str,
+        ok: usize,
+        failed: usize,
+    ) -> Self {
+        Self::new("batch.completed", directory, session_id).with_properties(serde_json::json!({
+            "batchID": batch_id,
+            "ok": ok,
+            "failed": failed,
+        }))
+    }
+
+    /// Batch failed: `batch.failed` — unrecoverable top-level error.
+    pub fn batch_failed(directory: &str, session_id: &str, batch_id: &str, error: &str) -> Self {
+        Self::new("batch.failed", directory, session_id).with_properties(serde_json::json!({
+            "batchID": batch_id,
+            "error": error,
+        }))
+    }
+
+    /// Batch progress: `batch.progress` — periodic update while polling.
+    pub fn batch_progress(
+        directory: &str,
+        session_id: &str,
+        batch_id: &str,
+        done: usize,
+        total: usize,
+    ) -> Self {
+        Self::new("batch.progress", directory, session_id).with_properties(serde_json::json!({
+            "batchID": batch_id,
+            "done": done,
+            "total": total,
         }))
     }
 }
@@ -123,5 +179,47 @@ mod tests {
             event.properties["detail"],
             "https://example.com/bebok-index.zip"
         );
+    }
+
+    #[test]
+    fn batch_submitted_has_correct_kind_and_properties() {
+        let event = Event::batch_submitted("/projects/acme", "sess-1", "b-42", 10);
+        assert_eq!(event.kind, "batch.submitted");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.session_id, "sess-1");
+        assert_eq!(event.properties["batchID"], "b-42");
+        assert_eq!(event.properties["count"], 10);
+    }
+
+    #[test]
+    fn batch_completed_has_correct_kind_and_properties() {
+        let event = Event::batch_completed("/projects/acme", "sess-1", "b-42", 8, 2);
+        assert_eq!(event.kind, "batch.completed");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.session_id, "sess-1");
+        assert_eq!(event.properties["batchID"], "b-42");
+        assert_eq!(event.properties["ok"], 8);
+        assert_eq!(event.properties["failed"], 2);
+    }
+
+    #[test]
+    fn batch_failed_has_correct_kind_and_properties() {
+        let event = Event::batch_failed("/projects/acme", "sess-1", "b-42", "rate limit exceeded");
+        assert_eq!(event.kind, "batch.failed");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.session_id, "sess-1");
+        assert_eq!(event.properties["batchID"], "b-42");
+        assert_eq!(event.properties["error"], "rate limit exceeded");
+    }
+
+    #[test]
+    fn batch_progress_has_correct_kind_and_properties() {
+        let event = Event::batch_progress("/projects/acme", "sess-1", "b-42", 5, 10);
+        assert_eq!(event.kind, "batch.progress");
+        assert_eq!(event.directory, "/projects/acme");
+        assert_eq!(event.session_id, "sess-1");
+        assert_eq!(event.properties["batchID"], "b-42");
+        assert_eq!(event.properties["done"], 5);
+        assert_eq!(event.properties["total"], 10);
     }
 }

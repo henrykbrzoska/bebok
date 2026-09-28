@@ -117,6 +117,27 @@ impl ProviderSpec {
     pub fn is_configured(&self) -> bool {
         !self.needs_api_key() || self.has_key()
     }
+
+    /// The base API URL (without trailing slash) for this provider.
+    ///
+    /// Falls back to [`default_endpoint`] when no explicit endpoint is set.
+    pub fn base_url(&self) -> String {
+        self.endpoint
+            .as_deref()
+            .unwrap_or_else(|| default_endpoint(&self.name, self.kind))
+            .trim_end_matches('/')
+            .to_string()
+    }
+}
+
+/// Check whether a model name targets the batch API (suffix `:batch`).
+///
+/// The provider prefix is ignored and the check is case-insensitive. Examples:
+/// - `openrouter/deepseek/deepseek-chat:batch` → `true`
+/// - `openrouter/deepseek/deepseek-chat` → `false`
+/// - `openrouter/A:BATCH` → `true`
+pub fn is_batch_model(model: &str) -> bool {
+    model_name(model).to_ascii_lowercase().ends_with(":batch")
 }
 
 fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
@@ -939,5 +960,54 @@ mod extra_tests {
                 field.key
             );
         }
+    }
+
+    #[test]
+    fn is_batch_model_suffix() {
+        // Examples from the task brief.
+        assert!(is_batch_model("openrouter/deepseek/deepseek-chat:batch"));
+        assert!(!is_batch_model("openrouter/gpt-4o"));
+        assert!(is_batch_model("openrouter/A:BATCH"));
+        // Prefix ignored, suffix compared case-insensitively.
+        assert!(is_batch_model("deepseek-chat:BATCH"));
+        assert!(is_batch_model(":batch"));
+        // Plain models, empty suffixes and empty strings are not batch.
+        assert!(!is_batch_model("openrouter/deepseek/deepseek-chat"));
+        assert!(!is_batch_model("deepseek-chat"));
+        assert!(!is_batch_model("deepseek-chat:"));
+        assert!(!is_batch_model(""));
+    }
+
+    #[test]
+    fn base_url_for_openrouter() {
+        let openrouter = builtin_provider_specs()
+            .into_iter()
+            .find(|s| s.name == "openrouter")
+            .unwrap();
+        assert_eq!(
+            openrouter.base_url(),
+            "https://openrouter.ai/api/v1".to_string()
+        );
+    }
+
+    #[test]
+    fn base_url_strips_trailing_slash() {
+        let spec = ProviderSpec {
+            name: "custom".into(),
+            endpoint: Some("https://example.com/api/v1/".into()),
+            ..Default::default()
+        };
+        assert_eq!(spec.base_url(), "https://example.com/api/v1");
+    }
+
+    #[test]
+    fn base_url_falls_back_to_default() {
+        let spec = ProviderSpec {
+            name: "openai".into(),
+            kind: ProviderKind::Openai,
+            endpoint: None,
+            ..Default::default()
+        };
+        assert_eq!(spec.base_url(), "https://api.openai.com/v1");
     }
 }

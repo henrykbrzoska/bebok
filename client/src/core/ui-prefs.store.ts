@@ -56,6 +56,8 @@ export interface RightDrawerPanels {
   preview: boolean;
   /** WP-BROWSER (F6-19): headless-browser screenshot + URL. */
   browser: boolean;
+  /** Batch (OpenRouter Batch API): async bulk jobs, closed by default. */
+  batch: boolean;
 }
 
 const DEFAULT_PANELS: RightDrawerPanels = {
@@ -66,6 +68,7 @@ const DEFAULT_PANELS: RightDrawerPanels = {
   changes: false,
   preview: false,
   browser: false,
+  batch: false,
 };
 
 export type RightDrawerPanelId = keyof RightDrawerPanels;
@@ -78,6 +81,7 @@ export const RIGHT_DRAWER_PANEL_IDS: readonly RightDrawerPanelId[] = [
   'changes',
   'preview',
   'browser',
+  'batch',
 ];
 
 /** F9-2: collapsed (body hidden, header kept) state per stacked panel. */
@@ -91,6 +95,7 @@ const DEFAULT_COLLAPSED: RightDrawerCollapsed = {
   changes: false,
   preview: false,
   browser: false,
+  batch: false,
 };
 
 /**
@@ -163,6 +168,7 @@ function readPanels(): RightDrawerPanels {
       preview: typeof parsed['preview'] === 'boolean' ? parsed['preview'] : DEFAULT_PANELS.preview,
       browser:
         typeof parsed['browser'] === 'boolean' ? parsed['browser'] : DEFAULT_PANELS.browser,
+      batch: typeof parsed['batch'] === 'boolean' ? parsed['batch'] : DEFAULT_PANELS.batch,
     };
   } catch {
     return { ...DEFAULT_PANELS };
