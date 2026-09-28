@@ -97,7 +97,7 @@ async fn connects_lists_calls_and_toggles_off() {
     // Connect.
     let tools = manager
         .sync(
-            &[stdio_spec(&python, script.to_str().unwrap(), true)],
+            &[stdio_spec(python, script.to_str().unwrap(), true)],
             &Runtimes::default(),
         )
         .await;
@@ -137,7 +137,7 @@ async fn connects_lists_calls_and_toggles_off() {
     // Toggle off -> tools disappear and status reflects disconnected.
     let tools_off = manager
         .sync(
-            &[stdio_spec(&python, script.to_str().unwrap(), false)],
+            &[stdio_spec(python, script.to_str().unwrap(), false)],
             &Runtimes::default(),
         )
         .await;
