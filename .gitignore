@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+*.ovpn
 
 # ---- Rust build output ----
 engine/target/

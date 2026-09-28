@@ -36,6 +36,7 @@ import { RightDrawerPanelId } from '../../core/ui-prefs.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ShellStore } from '../shell/shell.store';
 import { AgentsPanel } from './panels/agents-panel';
+import { BatchPanel } from './panels/batch-panel';
 import { BrowserPanel } from './panels/browser-panel';
 import { ChangesPanel } from './panels/changes-panel';
 import { ExplorerPanel } from './panels/explorer-panel';
@@ -61,6 +62,7 @@ const REVEAL_SETTLE_MS = 2000;
     ChangesPanel,
     PreviewPanel,
     BrowserPanel,
+    BatchPanel,
   ],
   templateUrl: './right-drawer.html',
   styleUrl: './right-drawer.css',
@@ -84,7 +86,8 @@ export class RightDrawer {
       | 'drawer.agents'
       | 'drawer.changes'
       | 'drawer.preview'
-      | 'drawer.browser';
+      | 'drawer.browser'
+      | 'drawer.batch';
   }[] = [
     { id: 'session', labelKey: 'drawer.session' },
     { id: 'explorer', labelKey: 'drawer.explorer' },
@@ -93,6 +96,7 @@ export class RightDrawer {
     { id: 'changes', labelKey: 'drawer.changes' },
     { id: 'preview', labelKey: 'drawer.preview' },
     { id: 'browser', labelKey: 'drawer.browser' },
+    { id: 'batch', labelKey: 'drawer.batch' },
   ];
 
   private dragPointerId: number | null = null;

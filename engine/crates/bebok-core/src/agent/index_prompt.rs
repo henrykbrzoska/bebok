@@ -36,8 +36,11 @@ e.g. body='{\"query\": \"...\", \"limit\": 5}', and reach for \
 If the index is available but returns no results for a well-formed query, \
 fall back to `read_file` / `grep` / `glob`. \
 Never start with grep/glob when the index is available. \
-For structural queries (impl blocks, derives, return types), also use `code_ast` when \
-available — it parses ASTs instead of regex matching.";
+For structural queries (impl blocks, derives, return types), use `code_ast` BEFORE `grep` when \
+available — it parses ASTs instead of regex matching. Structural questions ('where is X defined', \
+'who implements trait Y', 'functions returning T') go to `code_ast` first, e.g. \
+{'kind':'fn','name_regex':'^handle_'} or {'kind':'impl','filters':{'trait':'Display'}}; \
+`grep` is only for free-text matches (string literals, comments, logs).";
 
 /// Heading grep-able in tests and other modules.
 pub const SECTION_HEADING: &str = "Code index first";

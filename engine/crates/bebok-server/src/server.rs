@@ -79,6 +79,7 @@ pub fn build_app() -> (Router, AppState) {
         llm_trace,
         remote_extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+        batches: Arc::new(bebok_core::BatchStore::new()),
     };
 
     // Scheduler: tick-loop that fires due tasks via create_session + prompt_turn.

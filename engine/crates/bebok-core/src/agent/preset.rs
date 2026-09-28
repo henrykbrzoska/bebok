@@ -31,6 +31,11 @@ Tools:
 - `read_file` accepts `offset`/`limit` (1-based lines): read a fragment instead of `head`/`sed`.
 - `append_file` grows a file without re-sending its whole content; `diff` compares two files (or a file against text) so you can verify an edit landed.
 - `code_ast` finds structural code patterns (impl blocks, derives, return types) — use it for structural queries instead of regex grep.
+  Use `code_ast` BEFORE `grep` whenever the question is about code *structure*: "where is X defined",
+  "who implements trait Y", "list all structs with derive Z", "functions returning T", "find tests for …".
+  Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
+  {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
+  (string literals, comments, logs).
 - `code_index_search(query, limit?)` searches a full-text code index (fastest way to answer "where is X?"); check availability with `code_index_status`.
 - `code_graph_depends` / `code_graph_dependents` / `code_graph_impact` map module dependencies — use for blast-radius analysis and understanding what a change affects.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
@@ -57,7 +62,12 @@ available in this project (tools not listed are not enabled):
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
   `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
-  flat at the top level), optional `limit`.
+  flat at the top level), optional `limit`. Use `code_ast` BEFORE `grep` whenever the question
+  is about code *structure*: "where is X defined", "who implements trait Y", "list all structs
+  with derive Z", "functions returning T", "find tests for …".
+  Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
+  {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
+  (string literals, comments, logs).
 - `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
   — module dependency analysis. Modules are project-relative paths.
 "#;
@@ -74,7 +84,12 @@ available in this project (tools not listed are not enabled):
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
   `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
-  flat at the top level), optional `limit`.
+  flat at the top level), optional `limit`. Use `code_ast` BEFORE `grep` whenever the question
+  is about code *structure*: "where is X defined", "who implements trait Y", "list all structs
+  with derive Z", "functions returning T", "find tests for …".
+  Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
+  {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
+  (string literals, comments, logs).
 - `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
   — module dependency analysis. Modules are project-relative paths.
 "#;

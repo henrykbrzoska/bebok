@@ -65,6 +65,7 @@ import {
   BrowserActionResult,
   BrowserFrame,
   BrowserState,
+  BatchRecord,
   IndexRebuildResponse,
   IndexStatusResponse,
   CodeMapResponse,
@@ -921,6 +922,46 @@ export class EngineClient {
   /** `POST /processes/{id}/kill` -> the process row after the kill (whole tree). */
   killProcess(id: string): Promise<ProcessInfo> {
     return this.request<ProcessInfo>('POST', `/processes/${encodeURIComponent(id)}/kill`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Batch (OpenRouter Batch API, async bulk jobs)
+  // ---------------------------------------------------------------------------
+
+  /** `POST /session/{id}/batch` -> `{ batchID }`. */
+  submitBatch(
+    sessionId: string,
+    body: { directory: string; model: string; items: { messages: unknown[] }[] },
+  ): Promise<{ batchID: string }> {
+    return this.request<{ batchID: string }>(
+      'POST',
+      `/session/${encodeURIComponent(sessionId)}/batch`,
+      body,
+    );
+  }
+
+  /** `GET /session/{id}/batches?directory=` -> batches of the session. */
+  sessionBatches(sessionId: string, directory: string): Promise<BatchRecord[]> {
+    return this.request<{ batches: BatchRecord[] }>(
+      'GET',
+      `/session/${encodeURIComponent(sessionId)}/batches?directory=${encodeURIComponent(directory)}`,
+    ).then((d) => d.batches ?? []);
+  }
+
+  /** `GET /batch/{id}?directory=` -> one batch record. */
+  getBatch(id: string, directory: string): Promise<BatchRecord> {
+    return this.request<BatchRecord>(
+      'GET',
+      `/batch/${encodeURIComponent(id)}?directory=${encodeURIComponent(directory)}`,
+    );
+  }
+
+  /** `POST /batch/{id}/cancel?directory=` -> `{ cancelled }`. */
+  cancelBatch(id: string, directory: string): Promise<{ cancelled: boolean }> {
+    return this.request<{ cancelled: boolean }>(
+      'POST',
+      `/batch/${encodeURIComponent(id)}/cancel?directory=${encodeURIComponent(directory)}`,
+    );
   }
 
   // ---------------------------------------------------------------------------

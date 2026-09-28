@@ -108,6 +108,7 @@ mod tests {
             llm_trace: bebok_core::LLM_TRACE.clone(),
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+            batches: Arc::new(bebok_core::BatchStore::new()),
         };
         build_api_router().layer(cors_layer(8787)).with_state(state)
     }
@@ -166,6 +167,7 @@ mod tests {
             llm_trace: bebok_core::LLM_TRACE.clone(),
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+            batches: Arc::new(bebok_core::BatchStore::new()),
         };
         let app = build_api_router().layer(cors_layer(9999)).with_state(state);
         let req = Request::builder()

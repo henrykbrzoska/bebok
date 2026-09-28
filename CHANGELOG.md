@@ -1,6 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- OpenRouter batch models (`:batch` suffix) now work via a new async Batch API: submit a bulk job with `POST /session/{id}/batch`, track it in the new right-drawer Batch panel (live progress via `batch.*` events, per-item results, cancel), without blocking the interactive chat turn. Endpoints: `GET /session/{id}/batches`, `GET /batch/{id}`, `POST /batch/{id}/cancel`.
+
 ## 1.8.6 — 2026-09-25
+
+### Features
+
+- Agent prompts now steer the model to use `code_ast` before `grep` for structural questions ("where is X defined", "who implements trait Y", "functions returning T"), with copy-pasteable call examples — previously the tool was documented but models defaulted to regex `grep` out of habit.
 
 ### Fixes
 

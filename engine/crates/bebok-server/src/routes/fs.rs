@@ -215,6 +215,7 @@ mod tests {
             llm_trace: Arc::new(bebok_core::LlmTrace::new(2)),
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+            batches: Arc::new(bebok_core::BatchStore::new()),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -267,6 +268,7 @@ mod tests {
             llm_trace: Arc::new(bebok_core::LlmTrace::new(2)),
             remote_extensions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
+            batches: Arc::new(bebok_core::BatchStore::new()),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

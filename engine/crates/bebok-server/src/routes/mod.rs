@@ -10,6 +10,7 @@ use axum::routing::{get, patch, post};
 use crate::state::AppState;
 
 pub mod agents;
+pub mod batch;
 pub mod browser;
 pub mod browser_remote;
 pub mod changes;
@@ -69,6 +70,11 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/processes/{id}/log", get(processes::process_log))
         .route("/processes/{id}/kill", post(processes::kill_process))
         .route("/session/{id}/truncate", post(session::truncate_session))
+        // OpenRouter Batch API (async bulk jobs; never take the turn lock).
+        .route("/session/{id}/batch", post(batch::submit_batch))
+        .route("/session/{id}/batches", get(batch::list_batches))
+        .route("/batch/{id}", get(batch::get_batch))
+        .route("/batch/{id}/cancel", post(batch::cancel_batch))
         .route(
             "/session/{id}/permission/{requestID}",
             post(session::permission_decision),

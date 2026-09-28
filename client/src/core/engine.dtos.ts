@@ -1216,6 +1216,61 @@ export interface ProcessExitedEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Batch (OpenRouter Batch API, async bulk jobs)
+// ---------------------------------------------------------------------------
+
+/** One item inside a batch record. */
+export interface BatchItem {
+  index: number;
+  model: string;
+  messages: unknown[];
+  status: string;
+  result?: string | null;
+  error?: string | null;
+}
+
+/** `GET /session/{id}/batches` / `GET /batch/{id}` record. */
+export interface BatchRecord {
+  id: string;
+  directory: string;
+  session_id: string;
+  provider: string;
+  model: string;
+  state: string;
+  job_id?: string | null;
+  items: BatchItem[];
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
+}
+
+/** `batch.submitted` event properties. */
+export interface BatchSubmittedEvent {
+  batchID: string;
+  count: number;
+}
+
+/** `batch.progress` event properties. */
+export interface BatchProgressEvent {
+  batchID: string;
+  done: number;
+  total: number;
+}
+
+/** `batch.completed` event properties. */
+export interface BatchCompletedEvent {
+  batchID: string;
+  ok: number;
+  failed: number;
+}
+
+/** `batch.failed` event properties. */
+export interface BatchFailedEvent {
+  batchID: string;
+  error: string;
+}
+
+// ---------------------------------------------------------------------------
 // Schedules (task scheduling / cron-like)
 // ---------------------------------------------------------------------------
 
