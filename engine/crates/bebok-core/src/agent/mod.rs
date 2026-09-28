@@ -35,6 +35,7 @@ pub mod fleet_tool;
 pub mod gate;
 pub mod images;
 pub mod index_prompt;
+pub mod jev_tool;
 pub mod model_policy;
 pub mod observe;
 pub mod preset;

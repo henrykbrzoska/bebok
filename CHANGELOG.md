@@ -4,6 +4,12 @@
 
 ### Features
 
+- New `before.permission.ask` plugin hook (`PermissionAskHook`): when the permission gate says "Ask", the gate first consults the `bebok-jev` dynamic plugin (lazy-registered from its declaration + slot dir) via a `decide` action; a confident `allow`/`deny` answer short-circuits the user popup, anything else falls through to the popup as before.
+
+## 1.9.0 — 2026-09-28
+
+### Features
+
 - OpenRouter batch models (`:batch` suffix) now work via a new async Batch API: submit a bulk job with `POST /session/{id}/batch`, track it in the new right-drawer Batch panel (live progress via `batch.*` events, per-item results, cancel), without blocking the interactive chat turn. Endpoints: `GET /session/{id}/batches`, `GET /batch/{id}`, `POST /batch/{id}/cancel`.
 
 ## 1.8.6 — 2026-09-25
