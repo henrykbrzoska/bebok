@@ -10,7 +10,7 @@ use crate::event::{Event, EventBus};
 use crate::permission::{
     CachedDecision, DecisionKey, Evaluation, PermissionEngine, Verdict, is_mutating,
 };
-use crate::plugin::{Hook, PermissionHook, PluginHost};
+use crate::plugin::{Hook, PermissionAskHook, PermissionHook, PluginHost};
 use crate::session::PermissionLevel;
 use crate::store::SessionState;
 use bebok_tools::ToolRegistry;
@@ -104,7 +104,38 @@ pub async fn resolve_permission(
                     fire_permission_hook(tool_name, &evaluation.pattern, "deny").await;
                     ToolOutcome::Denied("denied by user")
                 }
-                None => ask_for_permission(ctx, tool_name, input, &evaluation).await,
+                None => {
+                    // Plugin hook: let a dynamic plugin (e.g. `bebok-jev`)
+                    // auto-decide before the popup appears. The plugin sees
+                    // the tool call on stdin (JSON-lines) and returns
+                    // `{"decision": "allow"|"deny"}` or `{"decision": null}`
+                    // to fall through to the user popup.
+                    let ask_hook = PermissionAskHook {
+                        tool: tool_name.to_string(),
+                        input: input.clone(),
+                        pattern: evaluation.pattern.clone(),
+                        agent: ctx.agent_name.to_string(),
+                        directory: ctx.state.directory().to_string(),
+                        decision: None,
+                    };
+                    if let Some(decision) =
+                        crate::agent::jev_tool::query_jev_plugin(ctx.state, &ask_hook).await
+                    {
+                        let cached = if decision == "allow" {
+                            CachedDecision::Allow
+                        } else {
+                            CachedDecision::Deny
+                        };
+                        ctx.state.remember_decision(key, cached).await;
+                        fire_permission_hook(tool_name, &evaluation.pattern, &decision).await;
+                        return if decision == "allow" {
+                            ToolOutcome::Run
+                        } else {
+                            ToolOutcome::Denied("denied by plugin")
+                        };
+                    }
+                    ask_for_permission(ctx, tool_name, input, &evaluation).await
+                }
             }
         }
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- New `before.permission.ask` plugin hook (`PermissionAskHook`): when the permission gate says "Ask", the gate first consults the `bebok-jev` dynamic plugin (lazy-registered from its declaration + slot dir) via a `decide` action; a confident `allow`/`deny` answer short-circuits the user popup, anything else falls through to the popup as before.
+
 ## 1.9.0 — 2026-09-28
 
 ### Features

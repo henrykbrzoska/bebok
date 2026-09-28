@@ -54,6 +54,10 @@ impl Hook {
     /// After a store instance was created. Payload:
     /// [`InstanceCreatedHook`]. Emit-only today (no subscriber in-tree).
     pub const INSTANCE_CREATED: Hook = Hook("instance.created");
+    /// Before a permission popup is shown to the user. Payload:
+    /// [`PermissionAskHook`]: setting `decision` to `"allow"`/`"deny"`
+    /// short-circuits the popup. `None` (default) falls through to the user.
+    pub const BEFORE_PERMISSION_ASK: Hook = Hook("before.permission.ask");
 }
 
 impl fmt::Display for Hook {
@@ -129,6 +133,21 @@ pub struct ToolResultHook {
 pub struct TurnHook {
     pub ok: bool,
     pub messages: usize,
+}
+
+/// Payload for [`Hook::BEFORE_PERMISSION_ASK`]: lets a plugin
+/// auto-decide before the user popup appears.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionAskHook {
+    pub tool: String,
+    pub input: serde_json::Value,
+    pub pattern: String,
+    pub agent: String,
+    pub directory: String,
+    /// Override decision set by the plugin: `"allow"` | `"deny"`.
+    /// `None` = fall through to the user popup (default).
+    #[serde(default)]
+    pub decision: Option<String>,
 }
 
 /// Payload for [`Hook::PERMISSION_RESOLVED`].
@@ -391,6 +410,7 @@ pub fn hook_names() -> Vec<&'static str> {
         Hook::PERMISSION_RESOLVED.0,
         Hook::AFTER_FILE_WRITE.0,
         Hook::INSTANCE_CREATED.0,
+        Hook::BEFORE_PERMISSION_ASK.0,
     ]
 }
 

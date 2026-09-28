@@ -45,8 +45,8 @@ pub use batch::{BatchRecord, BatchState, BatchStore};
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{
-    BebokPlugin, Hook, HookResult, PermissionHook, PluginHost, RequestHook, RequestMessage,
-    ToolCallHook, ToolResultHook, TurnHook, hook_names,
+    BebokPlugin, Hook, HookResult, PermissionAskHook, PermissionHook, PluginHost, RequestHook,
+    RequestMessage, ToolCallHook, ToolResultHook, TurnHook, hook_names,
 };
 
 /// On-disk plugin declaration contract (`<project>/.bebok/plugins/*.json`).
