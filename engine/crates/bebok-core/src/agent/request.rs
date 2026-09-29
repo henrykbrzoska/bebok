@@ -258,9 +258,9 @@ impl<'a> RequestBuilder<'a> {
     /// Fire the `before.request` plugin hook and apply the (possibly mutated)
     /// system prompt back. Only the system prompt is applied back (messages
     /// stay canonical on disk). When the `bebok-index` plugin is available,
-    /// a "code index first" section is appended so every prompt (user
-    /// sessions and delegated sub-agents) instructs the model to query the
-    /// local code index before falling back to grep/glob.
+    /// a "code navigation" section is appended so every prompt (user
+    /// sessions and delegated sub-agents) instructs the model to orient via
+    /// code map → code graph → code AST before full-text index search.
     pub async fn apply_request_hook(&self, req: &mut ChatRequest) {
         let hooks = PluginHost::global();
         if hooks.has_plugins().await {
@@ -273,7 +273,7 @@ impl<'a> RequestBuilder<'a> {
             req.system = payload.system;
         }
 
-        // Central enforcement: inject the code-index-first section when the
+        // Central enforcement: inject the code-navigation section when the
         // plugin is available at this project's root.
         let root = std::path::Path::new(self.state.directory());
         if let Some(section) = super::index_section(root) {
@@ -784,7 +784,7 @@ mod image_tests {
             "Host OS: ",
             "Verification capabilities",
             "Build & test policy",
-            "Code index first",
+            "Code navigation",
         ] {
             assert_eq!(
                 system.matches(name).count(),
@@ -808,7 +808,7 @@ mod image_tests {
         let host = system.find("Host OS: ").unwrap();
         let verification = system.find("Verification capabilities").unwrap();
         let build_test = system.find("Build & test policy").unwrap();
-        let index = system.find("Code index first").unwrap();
+        let index = system.find("Code navigation").unwrap();
         assert!(host < verification && verification < build_test && build_test < index);
 
         let _ = std::fs::remove_dir_all(&base);

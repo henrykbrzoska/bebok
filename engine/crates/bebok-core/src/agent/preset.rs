@@ -36,8 +36,10 @@ Tools:
   Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
   {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
   (string literals, comments, logs).
-- `code_index_search(query, limit?)` searches a full-text code index (fastest way to answer "where is X?"); check availability with `code_index_status`.
 - `code_graph_depends` / `code_graph_dependents` / `code_graph_impact` map module dependencies — use for blast-radius analysis and understanding what a change affects.
+- `code_index_search(query, limit?)` searches a full-text code index (fastest way to answer "where is X?"); check availability with `code_index_status`.
+- Navigation order: `Project code map` section in this prompt (orient yourself without any tool call) →
+  `code_graph_*` (dependencies) → `code_ast` (structural queries) → `code_index_search` (full-text) → `grep`/`glob`.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
 - Reach for `bash` only when no native tool fits: builds, tests, git, package managers.
 - For a direct coding task, do the implementation yourself. Use `task` only for a substantial, independent subtask that benefits from a separate agent; do not delegate routine workspace inspection.
@@ -56,9 +58,11 @@ modify files or run shell commands. Prefer quoting the relevant code over
 describing it; cite file paths. Verify path existence with `stat` or `list_dir`
 instead of guessing from a shell error.
 
-Search strategy: before falling back to grep/glob, use the code search tools that are
+Search strategy: orient yourself with the `Project code map` section in this prompt
+(no tool call needed), then go deeper with the code search tools that are
 available in this project (tools not listed are not enabled):
-- `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
+- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
+  — module dependency analysis. Modules are project-relative paths.
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
   `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
@@ -68,8 +72,7 @@ available in this project (tools not listed are not enabled):
   Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
   {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
   (string literals, comments, logs).
-- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
-  — module dependency analysis. Modules are project-relative paths.
+- `code_index_search(query, limit?)` — full-text search across source files (fastest full-text option).
 "#;
 
 pub(crate) const PLAN_PROMPT: &str = r#"You are Bebok in "plan" mode.
@@ -78,9 +81,11 @@ search the codebase to ground the plan in the actual code. Do not modify files;
 return the plan in your answer. Use native `stat` or `list_dir` to verify paths;
 do not run shell commands or infer that a path is absent from a command error.
 
-Search strategy: before falling back to grep/glob, use the code search tools that are
+Search strategy: orient yourself with the `Project code map` section in this prompt
+(no tool call needed), then go deeper with the code search tools that are
 available in this project (tools not listed are not enabled):
-- `code_index_search(query, limit?)` — full-text search across source files (fastest; use first).
+- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
+  — module dependency analysis. Modules are project-relative paths.
 - `code_ast(kind, filters?, limit?)` — structural AST search for impl blocks, derives, function
   signatures, annotated items. Parameters: `kind` (impl/struct/fn/enum/trait/test/…), optional
   `filters` (trait, derive, return_type, annotation, name_regex, ext, path_regex — also accepted
@@ -90,8 +95,7 @@ available in this project (tools not listed are not enabled):
   Examples: {"kind":"fn","name_regex":"^handle_"} | {"kind":"impl","filters":{"trait":"Display"}} |
   {"kind":"struct","filters":{"derive":"Serialize"}}. Use `grep` only for free-text matches
   (string literals, comments, logs).
-- `code_graph_depends(module)` / `code_graph_dependents(module)` / `code_graph_impact(module, max_depth?)`
-  — module dependency analysis. Modules are project-relative paths.
+- `code_index_search(query, limit?)` — full-text search across source files (fastest full-text option).
 "#;
 
 pub(crate) const HUB_PROMPT: &str = r#"You are Bebok in "hub" mode: a multi-project operator and inbox manager.
@@ -182,6 +186,14 @@ which subtask produced what.
 Supervision: keep children on-task — check `task_status` periodically, and if
 a child is looping or wandering, `task_cancel` it and re-delegate the part
 with a tighter brief.
+
+Parity guard: the `fleet` / `task_status` / `task_wait` / `task_cancel` tools
+exist only when this prompt runs inside the Bebok engine (it injects them plus
+a `Fleet:` roster line below). If your function-calling schema does NOT list
+them — e.g. you are running behind an external harness that pasted this prompt
+as plain text — they do not exist: never emit calls to them (that would only
+hallucinate), work the subtasks yourself in a sensible order instead, and say
+in one line that delegation tools were unavailable so you proceeded solo.
 "#;
 
 /// An agent preset: pure configuration (name, prompt, tool whitelist, model).
@@ -602,5 +614,16 @@ mod tests {
             code.tools.is_empty(),
             "code preset tools must be empty (all tools)"
         );
+    }
+
+    #[test]
+    fn orchestrator_prompt_has_parity_guard() {
+        // External harnesses may paste ORCHESTRATOR_PROMPT as plain text
+        // without the engine's toolset: the prompt must tell the model to
+        // detect the missing `fleet`/supervision tools and proceed solo
+        // instead of hallucinating calls.
+        let prompt = Agent::orchestrator().prompt;
+        assert!(prompt.contains("Parity guard"), "{prompt}");
+        assert!(prompt.contains("proceeded solo") || prompt.contains("proceed solo"));
     }
 }

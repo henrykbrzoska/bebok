@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes
+
+- Plugin update is refused while the plugin process is running (disable it first), with a localised message; universal archives with a `sh -c` shim entrypoint are now correctly detected as installed.
+
+### Other
+
+- Orchestrator prompt now carries a parity guard: when it runs behind an external harness that pasted the prompt as plain text (no `fleet`/`task_status`/`task_wait`/`task_cancel` in the function schema), the model works subtasks itself and says so instead of hallucinating delegation calls.
+- Agent prompts now teach the full code-navigation chain (project code map → module dependency graph → `code_ast` → full-text index → `grep`/`glob`) instead of pushing the code index as the mandatory first step — models should orient via the map/graph/AST before reaching for index search.
+
 ### Features
 
 - New `before.permission.ask` plugin hook (`PermissionAskHook`): when the permission gate says "Ask", the gate first consults the `bebok-jev` dynamic plugin (lazy-registered from its declaration + slot dir) via a `decide` action; a confident `allow`/`deny` answer short-circuits the user popup, anything else falls through to the popup as before.

@@ -1,4 +1,4 @@
-//! "Code index first" system-prompt section.
+//! "Code navigation" system-prompt section.
 //!
 //! When the `bebok-index` plugin is available (slot directory exists or
 //! declaration `enabled != false`), every assembled prompt gets a section
@@ -20,10 +20,15 @@ use crate::plugin_decl;
 /// Built-in section text used when the plugin slot exists but no readable
 /// `AGENT_INDEX.md` (or custom `prompt_file`) is found.
 pub const FALLBACK_SECTION: &str = "\
-Code index first — MANDATORY: whenever you need to find code (where is X defined, \
-who calls Y, list files matching Z), FIRST use the native tools: \
-`code_index_status` (no args needed — uses the session root) to check the index is ready, \
-then `code_index_search` (args: `query` and optional `limit`) to search. \
+Code navigation — use the cheapest orienting tool first, then go deeper: \
+1) `Project code map` section in this prompt (what is where — orient yourself without any tool call); \
+2) `code_graph_depends` / `code_graph_dependents` / `code_graph_impact` for module dependencies and blast-radius analysis; \
+3) `code_ast` for structural queries BEFORE `grep` — it parses ASTs instead of regex matching ('where is X defined', \
+'who implements trait Y', 'functions returning T'), e.g. \
+{'kind':'fn','name_regex':'^handle_'} or {'kind':'impl','filters':{'trait':'Display'}}; \
+`grep` is only for free-text matches (string literals, comments, logs). \
+4) `code_index_search` (args: `query` and optional `limit`) for full-text search — check readiness with \
+`code_index_status` first (no args needed — uses the session root). \
 Only when the native tools are unavailable or the status reports not ready, \
 fall back to `fetch`: GET /plugins/bebok-index/status?directory=<project-root> \
 and POST /plugins/bebok-index/search?directory=<project-root> with JSON body \
@@ -35,15 +40,10 @@ e.g. body='{\"query\": \"...\", \"limit\": 5}', and reach for \
 `read_file` / `grep` / `glob` only when that retry also returns ok:false. \
 If the index is available but returns no results for a well-formed query, \
 fall back to `read_file` / `grep` / `glob`. \
-Never start with grep/glob when the index is available. \
-For structural queries (impl blocks, derives, return types), use `code_ast` BEFORE `grep` when \
-available — it parses ASTs instead of regex matching. Structural questions ('where is X defined', \
-'who implements trait Y', 'functions returning T') go to `code_ast` first, e.g. \
-{'kind':'fn','name_regex':'^handle_'} or {'kind':'impl','filters':{'trait':'Display'}}; \
-`grep` is only for free-text matches (string literals, comments, logs).";
+Never start with grep/glob when the index is available.";
 
 /// Heading grep-able in tests and other modules.
-pub const SECTION_HEADING: &str = "Code index first";
+pub const SECTION_HEADING: &str = "Code navigation";
 
 /// Return the code-index prompt section, or `None` when the plugin is not
 /// available.
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn fallback_section_contains_mandatory_keyword() {
-        assert!(FALLBACK_SECTION.contains("MANDATORY"));
+        assert!(FALLBACK_SECTION.contains("Code navigation"));
         assert!(FALLBACK_SECTION.contains(SECTION_HEADING));
         // Native tools are mentioned first.
         assert!(FALLBACK_SECTION.contains("code_index_status"));
@@ -306,6 +306,27 @@ mod tests {
         // Fetch fallback URLs still present.
         assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/status"));
         assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/search"));
+    }
+
+    #[test]
+    fn fallback_section_orders_map_graph_ast_before_index() {
+        // The navigation chain: orient (map) → dependencies (graph) →
+        // structure (AST) → full-text (index) → grep/glob fallback.
+        let positions = [
+            "Project code map",
+            "code_graph_depends",
+            "code_ast",
+            "code_index_search",
+        ]
+        .map(|needle| {
+            FALLBACK_SECTION
+                .find(needle)
+                .unwrap_or_else(|| panic!("FALLBACK_SECTION must mention {needle}"))
+        });
+        assert!(
+            positions.windows(2).all(|w| w[0] < w[1]),
+            "navigation order must be map → graph → AST → index: {positions:?}"
+        );
     }
 
     #[test]

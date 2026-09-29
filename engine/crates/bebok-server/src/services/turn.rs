@@ -537,7 +537,7 @@ mod tests {
 
     /// Assembled prompt section order: preset → skills → context notes →
     /// Host OS → Verification capabilities → Build & test policy →
-    /// code map → code graph → Delegation. The "Code index first" section
+    /// code map → code graph → Delegation. The "Code navigation" section
     /// is appended later by `request.rs::apply_request_hook`, so it must
     /// NOT be present yet at this stage.
     #[tokio::test]
@@ -585,8 +585,8 @@ mod tests {
             "Build & test policy must precede Delegation"
         );
         assert!(
-            !prompt.contains("Code index first"),
-            "Code index first is appended by apply_request_hook, not assemble_prompt"
+            !prompt.contains("Code navigation"),
+            "Code navigation is appended by apply_request_hook, not assemble_prompt"
         );
         // Manual-preview guard (krok 6): exactly one of each section, and no
         // hard-coded absolute project root anywhere in the assembled prompt.
