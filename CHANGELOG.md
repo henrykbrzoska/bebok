@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.9.1 — 2026-09-29
+
+### Features
+
+- New built-in provider **OpenCode Zen** (`opencode/*`, base URL `https://opencode.ai/zen/v1`, OpenAI Chat Completions, `OPENCODE_API_KEY`): appears in the Providers settings catalog and accepts the gateway model ids (e.g. `opencode/claude-opus-5`, `opencode/gpt-5.5`, `opencode/deepseek-v4-pro`).
 
 ### Fixes
 

@@ -66,6 +66,7 @@ export const BUILTIN_PROVIDER_IDS: readonly string[] = [
   'groq',
   'qwen',
   'openrouter',
+  'opencode',
   'ollama',
 ];
 

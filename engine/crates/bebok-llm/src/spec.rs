@@ -150,6 +150,7 @@ fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
             "xai" => "https://api.x.ai/v1",
             "deepseek" => "https://api.deepseek.com/v1",
             "openrouter" => "https://openrouter.ai/api/v1",
+            "opencode" => "https://opencode.ai/zen/v1",
             "ollama" => "http://localhost:11434/v1",
             "google" => "https://generativelanguage.googleapis.com/v1beta/openai",
             "mistralai" => "https://api.mistral.ai/v1",
@@ -244,6 +245,19 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             name: "openrouter".into(),
             kind: ProviderKind::Openai,
             endpoint: Some("https://openrouter.ai/api/v1".into()),
+            api_key: None,
+            models: Vec::new(),
+            extra: Map::new(),
+        },
+        // OpenCode Zen: a curated gateway in front of many vendors. It speaks
+        // the OpenAI Chat Completions protocol under /zen/v1 (some model
+        // families are also served over Anthropic Messages and Google-native
+        // paths), so the generic OpenAI adapter is used and the model id alone
+        // picks the upstream vendor.
+        ProviderSpec {
+            name: "opencode".into(),
+            kind: ProviderKind::Openai,
+            endpoint: Some("https://opencode.ai/zen/v1".into()),
             api_key: None,
             models: Vec::new(),
             extra: Map::new(),
@@ -384,6 +398,7 @@ fn provider_label(name: &str) -> String {
         "groq" => "Groq",
         "qwen" => "Qwen (DashScope)",
         "openrouter" => "OpenRouter",
+        "opencode" => "OpenCode Zen",
         "ollama" => "Ollama",
         other => return other.to_string(),
     }
@@ -594,7 +609,7 @@ mod catalog_tests {
         let specs = builtin_provider_specs();
         let catalog = provider_catalog();
         assert_eq!(catalog.len(), specs.len());
-        assert_eq!(catalog.len(), 11, "11 built-in providers today");
+        assert_eq!(catalog.len(), 12, "12 built-in providers today");
         let ids: Vec<&str> = catalog.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -609,6 +624,7 @@ mod catalog_tests {
                 "groq",
                 "qwen",
                 "openrouter",
+                "opencode",
                 "ollama",
             ]
         );
