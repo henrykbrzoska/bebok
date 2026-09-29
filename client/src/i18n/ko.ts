@@ -879,6 +879,7 @@ export const ko: Record<MessageKey, string> = {
   'settings.pluginUpdate': '업데이트',
   'settings.pluginUpdating': '업데이트 중…',
   'settings.pluginUpdated': '플러그인 "{name}" 업데이트됨.',
+  'settings.pluginRunningStopFirst': '플러그인이 실행 중입니다 — 먼저 비활성화한 뒤 업데이트하세요.',
   'settings.pluginBinaryMissing': '이 플랫폼용 바이너리가 없습니다',
   'settings.pluginNoAssetForPlatform': '이 플랫폼용 릴리스 바이너리가 없습니다.',
   'settings.pluginOfflineFallback': '다운로드 실패; 오프라인 대체본을 사용했습니다.',

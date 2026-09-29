@@ -879,6 +879,7 @@ export const zh: Record<MessageKey, string> = {
   'settings.pluginUpdate': '更新',
   'settings.pluginUpdating': '正在更新…',
   'settings.pluginUpdated': '插件“{name}”已更新。',
+  'settings.pluginRunningStopFirst': '插件正在运行 — 请先禁用，然后再更新。',
   'settings.pluginBinaryMissing': '此平台缺少二进制文件',
   'settings.pluginNoAssetForPlatform': '该版本没有适用于此平台的二进制文件。',
   'settings.pluginOfflineFallback': '下载失败；已使用离线回退版本。',

@@ -299,6 +299,7 @@ export class GeneralTab implements OnDestroy {
         await this.refreshIndexStatus();
       }
     } catch (err) {
+      console.error('plugin install failed', err);
       this.toasts.show(this.t('settings.pluginError', { msg: describeError(err) }), {
         kind: 'danger',
       });
@@ -357,6 +358,9 @@ export class GeneralTab implements OnDestroy {
       }
     } catch (err) {
       const raw = describeError(err);
+      // Full failure detail goes to the log (request line + status + body);
+      // the toast shows the localised short message only.
+      console.error('plugin update failed', err);
       const known = pluginUpdateErrorKey(raw);
       if (known) {
         // `offline_fallback` is a degraded success (bundled asset used), the
@@ -392,6 +396,7 @@ export class GeneralTab implements OnDestroy {
         await this.refreshIndexStatus();
       }
     } catch (err) {
+      console.error('plugin toggle failed', err);
       this.toasts.show(this.t('settings.pluginError', { msg: describeError(err) }), {
         kind: 'danger',
       });
@@ -492,6 +497,8 @@ function describeError(err: unknown): string {
 
 /** Failure patterns the update endpoint reports -> localised message keys. */
 const UPDATE_ERROR_PATTERNS: readonly (readonly [string, MessageKey])[] = [
+  ['is running', 'settings.pluginRunningStopFirst'],
+  ['stop it before updating', 'settings.pluginRunningStopFirst'],
   ['binary_missing', 'settings.pluginBinaryMissing'],
   ['binary is missing', 'settings.pluginBinaryMissing'],
   // TODO: the engine never sends these machine codes (only `binary_missing`

@@ -880,6 +880,7 @@ export const fr: Record<MessageKey, string> = {
   'settings.pluginUpdate': 'Mettre à jour',
   'settings.pluginUpdating': 'Mise à jour…',
   'settings.pluginUpdated': 'Plugin « {name} » mis à jour.',
+  'settings.pluginRunningStopFirst': 'Le plugin est en cours d’exécution — désactivez-le d’abord, puis mettez à jour.',
   'settings.pluginBinaryMissing': 'Binaire manquant pour cette plateforme',
   'settings.pluginNoAssetForPlatform': 'Aucun binaire de version pour cette plateforme.',
   'settings.pluginOfflineFallback': 'Téléchargement échoué ; version hors ligne utilisée.',

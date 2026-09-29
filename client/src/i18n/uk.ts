@@ -880,6 +880,7 @@ export const uk: Record<MessageKey, string> = {
   'settings.pluginUpdate': 'Оновити',
   'settings.pluginUpdating': 'Оновлення…',
   'settings.pluginUpdated': 'Плагін "{name}" оновлено.',
+  'settings.pluginRunningStopFirst': 'Плагін запущено — спочатку вимкніть його, потім оновіть.',
   'settings.pluginBinaryMissing': 'Немає двійкового файлу для цієї платформи',
   'settings.pluginNoAssetForPlatform': 'Випуск не містить двійкового файлу для цієї платформи.',
   'settings.pluginOfflineFallback': 'Завантаження не вдалося; використано офлайн-версію.',

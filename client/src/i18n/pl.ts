@@ -880,6 +880,7 @@ export const pl: Record<MessageKey, string> = {
   'settings.pluginUpdate': 'Aktualizuj',
   'settings.pluginUpdating': 'Aktualizowanie…',
   'settings.pluginUpdated': 'Wtyczka "{name}" zaktualizowana.',
+  'settings.pluginRunningStopFirst': 'Wtyczka jest uruchomiona — najpierw ją wyłącz, potem zaktualizuj.',
   'settings.pluginBinaryMissing': 'Brak pliku binarnego dla tej platformy',
   'settings.pluginNoAssetForPlatform': 'Wydanie nie zawiera pliku binarnego dla tej platformy.',
   'settings.pluginOfflineFallback': 'Pobieranie nie powiodło się; użyto wersji zapasowej.',

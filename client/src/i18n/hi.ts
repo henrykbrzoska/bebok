@@ -879,6 +879,7 @@ export const hi: Record<MessageKey, string> = {
   'settings.pluginUpdate': 'अपडेट करें',
   'settings.pluginUpdating': 'अपडेट हो रहा है…',
   'settings.pluginUpdated': 'प्लगइन "{name}" अपडेट किया गया।',
+  'settings.pluginRunningStopFirst': 'प्लगइन चल रहा है — पहले इसे अक्षम करें, फिर अपडेट करें।',
   'settings.pluginBinaryMissing': 'इस प्लेटफ़ॉर्म के लिए बाइनरी अनुपलब्ध है',
   'settings.pluginNoAssetForPlatform': 'इस प्लेटफ़ॉर्म के लिए कोई रिलीज़ बाइनरी नहीं है।',
   'settings.pluginOfflineFallback': 'डाउनलोड विफल; ऑफ़लाइन फ़ॉलबैक इस्तेमाल किया गया।',

@@ -890,6 +890,7 @@ export const en = {
   'settings.pluginUpdating': 'Updating…',
   'settings.pluginUpdated': 'Plugin "{name}" updated.',
   'settings.pluginBinaryMissing': 'Binary missing for this platform.',
+  'settings.pluginRunningStopFirst': 'Plugin is running — disable it first, then update.',
   'settings.pluginNoAssetForPlatform': 'No release binary for this platform.',
   'settings.pluginOfflineFallback': 'Download failed; used the offline fallback.',
   'settings.pluginChecksumMismatch': 'Downloaded binary failed the checksum check.',

@@ -181,30 +181,47 @@ pub fn slot_state(root: &Path, name: &str, installed: bool) -> (String, String) 
 /// manifest's platform entrypoint (`entrypoint_windows` on Windows,
 /// `entrypoint_unix` elsewhere, else generic `entrypoint`, else `<name>`),
 /// first word only, resolved against the slot dir (plus `.exe` on Windows).
+///
+/// Universal archives ship a `sh -c "..."` shim that picks the platform
+/// binary (`./<name>` vs `./<name>-macos`) at spawn time. Its first word is
+/// the system shell, so the plain check would always report `missing` —
+/// for that shape any `./<file>` referenced by the shim counts when the
+/// file exists in the slot.
 fn slot_has_binary(slot: &Path, name: &str) -> bool {
-    let cmd: String = match crate::plugin_registry::read_manifest(slot) {
+    let full: String = match crate::plugin_registry::read_manifest(slot) {
         Ok(m) => {
             #[cfg(windows)]
             let ep = m.entrypoint_windows.as_deref().or(m.entrypoint.as_deref());
             #[cfg(not(windows))]
             let ep = m.entrypoint_unix.as_deref().or(m.entrypoint.as_deref());
-            ep.unwrap_or(name)
-                .split_whitespace()
-                .next()
-                .unwrap_or(name)
-                .to_string()
+            ep.unwrap_or(name).to_string()
         }
         Err(_) => name.to_string(),
     };
-    if Path::new(&cmd).is_absolute() {
-        return Path::new(&cmd).exists();
+    let cmd: &str = full.split_whitespace().next().unwrap_or(name);
+    if Path::new(cmd).is_absolute() {
+        return Path::new(cmd).exists();
     }
-    if slot.join(&cmd).exists() {
+    if slot.join(cmd).exists() {
         return true;
     }
     #[cfg(windows)]
     if slot.join(format!("{cmd}.exe")).exists() {
         return true;
+    }
+    if cmd == "sh" {
+        let mut rest = full.as_str();
+        while let Some(i) = rest.find("./") {
+            let after = &rest[i + 2..];
+            let end = after
+                .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-' || c == '.'))
+                .unwrap_or(after.len());
+            let file = &after[..end];
+            if !file.is_empty() && slot.join(file).exists() {
+                return true;
+            }
+            rest = &after[end..];
+        }
     }
     false
 }
@@ -479,6 +496,37 @@ mod tests {
     fn is_disabled_false_when_no_declaration() {
         let root = temp_root("is-disabled-none");
         assert!(!is_disabled(&root, KNOWN_PLUGIN_NAME));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Regression: universal archives ship a `sh -c "..."` shim entrypoint
+    /// whose first word is the system shell. The slot must still report
+    /// `present` when the shim references a binary that exists in the slot
+    /// (bebok-jev / bebok-index layout).
+    #[test]
+    fn slot_state_reports_present_for_shim_entrypoint() {
+        let root = temp_root("shim");
+        let slot = install_dir(&root, "bebok-jev");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(
+            slot.join("bebok-plugin.json"),
+            r#"{"name":"bebok-jev","version":"0.1.0","entrypoint":"bebok-jev --plugin-server","entrypoint_unix":"sh -c \"if [ $(uname) = Darwin ]; then B=./bebok-jev-macos; else B=./bebok-jev; fi; chmod +x $B && exec $B --plugin-server\""}"#,
+        )
+        .unwrap();
+        std::fs::write(slot.join("bebok-jev"), "fake").unwrap();
+        let (version, binary) = slot_state(&root, "bebok-jev", true);
+        assert_eq!(version, "0.1.0");
+        assert_eq!(binary, "present");
+
+        // Shim without any slot file is still missing.
+        let slot2 = install_dir(&root, "other");
+        std::fs::create_dir_all(&slot2).unwrap();
+        std::fs::write(
+            slot2.join("bebok-plugin.json"),
+            r#"{"name":"other","entrypoint_unix":"sh -c \"exec ./other --x\""}"#,
+        )
+        .unwrap();
+        assert_eq!(slot_state(&root, "other", true).1, "missing");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

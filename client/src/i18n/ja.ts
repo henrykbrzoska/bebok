@@ -879,6 +879,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.pluginUpdate': '更新',
   'settings.pluginUpdating': '更新中…',
   'settings.pluginUpdated': 'プラグイン「{name}」を更新しました。',
+  'settings.pluginRunningStopFirst': 'プラグインが実行中です — 先に無効化してから更新してください。',
   'settings.pluginBinaryMissing': 'このプラットフォーム用のバイナリがありません',
   'settings.pluginNoAssetForPlatform': 'このプラットフォーム用のリリースバイナリがありません。',
   'settings.pluginOfflineFallback': 'ダウンロードに失敗しました。オフライン版を使用しました。',
