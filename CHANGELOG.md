@@ -2,6 +2,10 @@
 
 ## 1.9.1 — 2026-09-29
 
+### Features
+
+- New built-in provider **OpenCode Zen** (`opencode/*`, base URL `https://opencode.ai/zen/v1`, OpenAI Chat Completions, `OPENCODE_API_KEY`): appears in the Providers settings catalog and accepts the gateway model ids (e.g. `opencode/claude-opus-5`, `opencode/gpt-5.5`, `opencode/deepseek-v4-pro`).
+
 ### Fixes
 
 - Plugin update is refused while the plugin process is running (disable it first), with a localised message; universal archives with a `sh -c` shim entrypoint are now correctly detected as installed.

@@ -30,7 +30,7 @@ mod tests {
     async fn catalog_endpoint_returns_all_builtin_providers() {
         let Json(body) = provider_catalog().await;
         let providers = body["providers"].as_array().expect("providers array");
-        assert_eq!(providers.len(), 11, "11 built-in providers today");
+        assert_eq!(providers.len(), 12, "12 built-in providers today");
 
         for p in providers {
             for key in [
@@ -71,6 +71,7 @@ mod tests {
                 "groq",
                 "qwen",
                 "openrouter",
+                "opencode",
                 "ollama",
             ]
         );
