@@ -214,7 +214,11 @@ mod tests {
             .iter()
             .filter(|(n, _)| n == "x-opencode-request")
             .collect();
-        assert_eq!(req_ids.len(), 1, "x-opencode-request must appear exactly once");
+        assert_eq!(
+            req_ids.len(),
+            1,
+            "x-opencode-request must appear exactly once"
+        );
         assert!(
             req_ids[0].1.starts_with("msg_"),
             "request id must look real: {}",
@@ -251,7 +255,10 @@ mod tests {
             .unwrap()
             .1
             .clone();
-        assert_ne!(&req_ids[0].1, &second_req, "request ids must be unique per build");
+        assert_ne!(
+            &req_ids[0].1, &second_req,
+            "request ids must be unique per build"
+        );
     }
 
     #[test]
