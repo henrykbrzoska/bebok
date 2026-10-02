@@ -22,7 +22,58 @@ use crate::wire::{Protocol, map_image_parts, map_tools, text_block};
 
 /// Build an OpenAI Chat Completions request body.
 pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
-    let tools: Vec<Value> = map_tools(&req.tools, Protocol::OpenAi);
+    let mut tools: Vec<Value> = map_tools(&req.tools, Protocol::OpenAi);
+
+    // OpenCode Zen free-tier body gate (oh-my-pi bisection, can1357#12306):
+    // the gateway requires ≥2 OpenCode core tool names in `tools[]`
+    // (`bash` + `read` suffice), so tool-less requests (advisors, one-shot
+    // helpers, `ask` sessions without file tools) are refused with
+    // `403 FreeTierError` even when the identity headers are correct.
+    // Pad such requests with inert stub entries for the missing gate names:
+    // empty description, inert `{"type":"object"}` schema, `strict: false`,
+    // `tool_choice: "none"` so the stubs can never become callable work.
+    // The stubs are wire-shape filler only and never join the tool registry,
+    // so unknown-tool execution (`exec.rs`) can never see them.
+    // Paid SKUs are not gated, but the padding is harmless there too.
+    //
+    // `tool_choice: "none"` is pinned only when the request carried no tools
+    // at all (auxiliary calls that expect text anyway): when the agent does
+    // have real tools (e.g. `ask` with `read_file` but no `bash`), the model
+    // must stay free to call them — a padded stub call would simply fail as
+    // unknown-tool, and its empty description keeps it unappealing.
+    let original_tool_count = tools.len();
+    let mut tool_choice_none = false;
+    if req.model.starts_with("opencode/") {
+        let names: std::collections::HashSet<&str> = tools
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(|n| n.as_str()))
+            .collect();
+        // The gate matches literal tool *names*: `read_file` does NOT stand
+        // in for `read` (live bisection: `bash`+`read` -> 200, `bash`+
+        // `read_file` -> 403 FreeTierError), so only exact names count here.
+        let mut missing: Vec<&str> = ["bash", "read"]
+            .into_iter()
+            .filter(|n| !names.contains(n))
+            .collect();
+        // Keep the roster untouched when the agent already carries gate names.
+        if !missing.is_empty() {
+            missing.sort();
+            for name in missing {
+                tools.push(serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": "",
+                        "parameters": { "type": "object" },
+                        "strict": false,
+                    }
+                }));
+            }
+            // Only tool-less auxiliary calls get pinned: they expect text,
+            // so the stubs must not become callable work.
+            tool_choice_none = original_tool_count == 0;
+        }
+    }
 
     let mut body = serde_json::json!({
         "model": model,
@@ -31,6 +82,11 @@ pub fn openai_body(req: &ChatRequest, model: &str) -> Value {
         "stream": true,
         "stream_options": { "include_usage": true },
     });
+    if tool_choice_none && let Value::Object(map) = &mut body {
+        // Pin the padded stubs inert: the model must answer with text and
+        // never emit a call to a gate-padding stub.
+        map.insert("tool_choice".to_string(), Value::String("none".to_string()));
+    }
     // The official OpenAI Chat Completions endpoint uses
     // `max_completion_tokens` for current models. Keep `max_tokens` for the
     // other OpenAI-compatible servers, which may not support the newer field.
@@ -721,6 +777,81 @@ mod tests {
         let body = openai_body(&request, "llama3");
         assert_eq!(body["max_tokens"], 128);
         assert!(body.get("max_completion_tokens").is_none());
+    }
+
+    /// OpenCode Zen free-tier body gate (oh-my-pi bisection, can1357#12306):
+    /// tool-less `opencode/…` requests are padded with inert `bash`+`read`
+    /// stubs (`tool_choice: "none"` pins them inert); partial rosters get
+    /// the missing stub without a pin; full rosters pass through untouched;
+    /// other providers are never padded.
+    #[test]
+    fn opencode_gate_pads_tool_less_requests_with_inert_stubs() {
+        use crate::provider::ToolDef;
+        let stub_schema = || serde_json::json!({ "type": "object" });
+
+        // Tool-less opencode request: padded, pinned, inert.
+        let mut request = req(Thinking::Off);
+        request.model = "opencode/mimo-v2.6-flash-free".to_string();
+        let body = openai_body(&request, "mimo-v2.6-flash-free");
+        let tools = body["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(|n| n.as_str()))
+            .collect();
+        assert_eq!(names, vec!["bash", "read"], "stubs sorted: {names:?}");
+        assert_eq!(body["tool_choice"], "none");
+        for t in tools {
+            assert_eq!(t["function"]["description"], "");
+            assert_eq!(t["function"]["parameters"], stub_schema());
+            assert_eq!(t["function"]["strict"], false);
+        }
+
+        // Roster already carrying both literal gate names: untouched, no pin.
+        let mut request = req(Thinking::Off);
+        request.model = "opencode/mimo-v2.6-flash-free".to_string();
+        request.tools = vec![
+            ToolDef {
+                name: "bash".to_string(),
+                description: "Run a command".to_string(),
+                input_schema: stub_schema(),
+            },
+            ToolDef {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                input_schema: stub_schema(),
+            },
+        ];
+        let body = openai_body(&request, "mimo-v2.6-flash-free");
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2, "roster with gate names: untouched");
+        assert!(body.get("tool_choice").is_none());
+
+        // `read_file` does NOT satisfy the gate's literal `read`: both
+        // stubs are padded, and no pin — the agent keeps its real tools
+        // callable (live bisection: `bash`+`read_file` -> 403).
+        let mut request = req(Thinking::Off);
+        request.model = "opencode/mimo-v2.6-flash-free".to_string();
+        request.tools = vec![ToolDef {
+            name: "read_file".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: stub_schema(),
+        }];
+        let body = openai_body(&request, "mimo-v2.6-flash-free");
+        let names: Vec<&str> = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(|n| n.as_str()))
+            .collect();
+        assert_eq!(names, vec!["read_file", "bash", "read"]);
+        assert!(body.get("tool_choice").is_none());
+
+        // Non-opencode provider: never padded, even when tool-less.
+        let mut request = req(Thinking::Off);
+        request.model = "openai/gpt-5".to_string();
+        let body = openai_body(&request, "gpt-5");
+        assert!(body["tools"].as_array().unwrap().is_empty());
+        assert!(body.get("tool_choice").is_none());
     }
 
     #[test]

@@ -121,6 +121,23 @@ impl BatchStore {
         }
     }
 
+    /// Atomically mutate a record and map it to a value. Returns
+    /// `R::default()` when the record does not exist.
+    pub async fn update_and_map<R: Default>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut BatchRecord) -> R,
+    ) -> R {
+        let mut guard = self.inner.write().await;
+        if let Some(rec) = guard.get_mut(id) {
+            let out = f(rec);
+            rec.updated_at = Utc::now().to_rfc3339();
+            out
+        } else {
+            R::default()
+        }
+    }
+
     /// All records that belong to a given `(directory, session_id)` pair.
     pub async fn list_for_session(&self, directory: &str, session: &str) -> Vec<BatchRecord> {
         self.inner

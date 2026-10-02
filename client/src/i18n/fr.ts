@@ -242,6 +242,7 @@ export const fr: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': 'Filtrer les modèles…',
   'modelSelect.search': 'Rechercher un modèle…',
   'modelSelect.noMatch': 'Aucun modèle correspondant.',
+  'modelSelect.batchHint': 'Modèle batch — envoyer depuis le chat le met en file comme tâche batch (voir panneau Batch).',
   'settings.assignTo': 'affecter à',
   'settings.assign': 'Affecter',
   'settings.noProviderSelected': 'Sélectionnez un fournisseur à gauche.',
@@ -352,6 +353,7 @@ export const fr: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': 'Fermer la session',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'Mis en file comme tâche batch — suivi dans le panneau Batch.',
   'chat.forceSend': 'Force send',
   'chat.aborting': 'Arrêt…',
   'chat.forceSending': 'Envoi en cours…',
@@ -815,7 +817,7 @@ export const fr: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': 'Les sous-agents sont lancés avec l’outil task (en arrière-plan) et supervisés avec task_status, task_wait et task_cancel.',
+  'settings.delegationToolsNote': 'Les sous-agents sont lancés avec l’outil task (en arrière-plan) et supervisés avec task_status, task_wait, task_cancel et task_report.',
   'settings.delegationSaved': 'Réglages de délégation enregistrés.',
   'drawer.collapsePanel': 'Replier le panneau',
   'drawer.expandPanel': 'Déplier le panneau',

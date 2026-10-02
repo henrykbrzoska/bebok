@@ -26,11 +26,12 @@ pub use provider::{
     AdapterConfig, ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider,
     ProviderAdapter, ProviderErrorKind, Sampling, StreamEvent, StreamResult, Thinking, ToolCall,
     ToolDef, ToolResult, Usage, adapter_for, build_provider, classify_http,
-    retry_after_from_headers,
+    is_opencode_free_tier_denial, retry_after_from_headers,
 };
 pub use providers::adapter_config;
 pub use providers::openrouter_batch::{
-    BatchCounts, BatchJob, BatchStatus, download_output, get_batch, submit_batch, upload_batch_file,
+    BatchCounts, BatchJob, BatchRequest, BatchRequestBody, BatchResponse, BatchResult, BatchStatus,
+    BatchUsage, get_batch, submit_batch,
 };
 pub use spec::{
     ProviderAuth, ProviderExtraField, ProviderFieldType, ProviderKind, ProviderSpec,

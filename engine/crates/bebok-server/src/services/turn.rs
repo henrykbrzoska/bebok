@@ -182,6 +182,60 @@ pub async fn prompt_turn(
         )));
     }
 
+    // Batch models (:batch suffix) never touch chat/completions: submit the
+    // prompt as a batch job (Option A fallback) and return 202 with the
+    // batch id. The job runs alongside the session — the turn slot is
+    // released by Drop (`slot` is never disarmed here), so the session
+    // stays responsive while the batch runs for minutes/hours. Progress
+    // and results surface via `batch.*` SSE events + the Batch panel.
+    if bebok_llm::is_batch_model(&model) {
+        // The user message is appended first so the transcript keeps the
+        // prompt; then a marker assistant message points at the batch job.
+        session
+            .append_user_message_with_attachments(&body.message, attachment_parts)
+            .await
+            .map_err(ApiError::from)?;
+        if session.set_title_if_empty(&body.message).await {
+            session.touch().await;
+        }
+        let batch_id = super::batch::submit_batch_job(
+            state,
+            session.directory(),
+            id,
+            &model,
+            vec![crate::routes::batch::BatchItemRequest {
+                messages: vec![serde_json::json!({
+                    "role": "user",
+                    "content": body.message,
+                })],
+            }],
+        )
+        .await?;
+        let marker_idx = session
+            .append_assistant_text(
+                effective_agent,
+                &model,
+                &format!(
+                    "Sent as batch job {batch_id} — track progress and read the result in the Batch panel (batch.completed will arrive when the provider finishes)."
+                ),
+            )
+            .await;
+        session.touch().await;
+        let bus = state.store.bus();
+        bus.publish(
+            bebok_core::event::Event::new("message.updated", session.directory(), &id.to_string())
+                .with_properties(serde_json::json!({ "index": marker_idx })),
+        );
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "sessionID": id.to_string(),
+                "status": "batch",
+                "batchID": batch_id,
+            })),
+        ));
+    }
+
     let provider = build_provider(&cfg, &model).map_err(ApiError::from)?;
 
     // Whether this turn carried image attachments (drives the error hint below).
@@ -364,8 +418,15 @@ fn assemble_prompt(
     // `bebok_core::agent::delegation_policy`, and the `Fleet:` paragraph is
     // rendered from the *resolved config* so the model sees the members this
     // project actually has (or that the fleet is off) rather than a generic
-    // description it would have to guess names from.
-    let fleet = bebok_core::agent::FleetContext::from_config(cfg, &agent.name, false);
+    // description it would have to guess names from. The roster is only
+    // advertised when the `fleet` tool is actually registered — otherwise the
+    // prompt would promise fan-out the model cannot call.
+    let fleet = bebok_core::agent::FleetContext::from_config_and_tools(
+        cfg,
+        &agent.name,
+        false,
+        instance.tools.get("fleet").is_some(),
+    );
     if let Some(policy) = bebok_core::agent::delegation_policy_note(&cfg.delegation, &fleet) {
         agent.prompt = format!("{}\n\n{policy}", agent.prompt);
     }

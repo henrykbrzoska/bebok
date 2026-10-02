@@ -241,6 +241,7 @@ export const zh: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': '筛选模型…',
   'modelSelect.search': '搜索模型…',
   'modelSelect.noMatch': '没有匹配的模型。',
+  'modelSelect.batchHint': '批处理模型 — 从聊天发送会将其作为批处理任务排队（见 Batch 面板）。',
   'settings.assignTo': '分配给',
   'settings.assign': '分配',
   'settings.noProviderSelected': '请在左侧选择提供商。',
@@ -351,6 +352,7 @@ export const zh: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': '关闭会话',
   'chat.queued': 'queued',
+  'chat.batch.queued': '已作为批处理任务排队 — 请在 Batch 面板中跟踪。',
   'chat.forceSend': 'Force send',
   'chat.aborting': '正在停止…',
   'chat.forceSending': '正在立即发送…',
@@ -814,7 +816,7 @@ export const zh: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': '子代理通过 task 工具（后台）启动，并通过 task_status、task_wait 和 task_cancel 进行监督。',
+  'settings.delegationToolsNote': '子代理通过 task 工具（后台）启动，并通过 task_status、task_wait、task_cancel 和 task_report 进行监督。',
   'settings.delegationSaved': '委派设置已保存。',
   'drawer.collapsePanel': '折叠面板',
   'drawer.expandPanel': '展开面板',

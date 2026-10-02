@@ -21,11 +21,17 @@ use crate::store::SessionState;
 use crate::util::scrub_secrets;
 
 /// Delegation tool sets: the orchestrator owns fleet fan-out plus the
-/// supervision tools; every other agent (and every sub-agent) gets none of
-/// them. The plain `task` tool stays registered (it is not in these lists)
-/// so non-orchestrator agents and manual calls keep working as before.
-pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] =
-    &["fleet", "task_status", "task_wait", "task_cancel"];
+/// supervision tools (including `task_report`, the read-out of a child's
+/// work after an abort); every other agent (and every sub-agent) gets none
+/// of them. The plain `task` tool stays registered (it is not in these
+/// lists) so non-orchestrator agents and manual calls keep working as before.
+pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] = &[
+    "fleet",
+    "task_status",
+    "task_wait",
+    "task_cancel",
+    "task_report",
+];
 /// Back-compat alias for tests/callers iterating the full delegation set.
 pub const DELEGATION_TOOLS: &[&str] = ORCHESTRATOR_DELEGATION_TOOLS;
 
@@ -191,10 +197,10 @@ impl<'a> RequestBuilder<'a> {
         // rarely needed in a simple code-editing session).
         let used_tools = collect_used_tools(&messages);
         // The orchestrator owns fleet fan-out + supervision (`fleet`,
-        // `task_status`, `task_wait`, `task_cancel`); sub-agents of any
-        // parent are workers and get none of them. Every other agent keeps
-        // the plain `task` tool (registered, not gated here) but never sees
-        // the fleet/supervision set.
+        // `task_status`, `task_wait`, `task_cancel`, `task_report`);
+        // sub-agents of any parent are workers and get none of them. Every
+        // other agent keeps the plain `task` tool (registered, not gated
+        // here) but never sees the fleet/supervision set.
         let hide_delegation = self.state.meta_snapshot().await.parent.is_some()
             || self.agent.name != super::delegation_policy::FLEET_AGENT;
         let tool_defs: Vec<ToolDef> = self

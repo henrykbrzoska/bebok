@@ -241,6 +241,7 @@ export const hi: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': 'मॉडल फ़िल्टर करें…',
   'modelSelect.search': 'मॉडल खोजें…',
   'modelSelect.noMatch': 'कोई मिलता-जुलता मॉडल नहीं।',
+  'modelSelect.batchHint': 'बैच मॉडल — चैट से भेजने पर यह बैच जॉब के रूप में कतारबद्ध होता है (Batch पैनल देखें)।',
   'settings.assignTo': 'किसे सौंपें',
   'settings.assign': 'सौंपें',
   'settings.noProviderSelected': 'बाईं ओर से एक प्रदाता चुनें।',
@@ -351,6 +352,7 @@ export const hi: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': 'सत्र बंद करें',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'बैच जॉब के रूप में कतारबद्ध — Batch पैनल में ट्रैक करें।',
   'chat.forceSend': 'Force send',
   'chat.aborting': 'रोक रहा है…',
   'chat.forceSending': 'अभी भेज रहा है…',
@@ -814,7 +816,7 @@ export const hi: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': 'उप-एजेंट task टूल (पृष्ठभूमि) से शुरू होते हैं और task_status, task_wait और task_cancel से उनकी निगरानी होती है।',
+  'settings.delegationToolsNote': 'उप-एजेंट task टूल (पृष्ठभूमि) से शुरू होते हैं और task_status, task_wait, task_cancel और task_report से उनकी निगरानी होती है।',
   'settings.delegationSaved': 'प्रत्यायोजन सेटिंग सहेजी गईं।',
   'drawer.collapsePanel': 'पैनल समेटें',
   'drawer.expandPanel': 'पैनल फैलाएँ',

@@ -23,8 +23,9 @@ Companion read: `AGENTS.md` §4 "Agent loop" (the one-paragraph summary) and
   orchestrator.
 
 The split is enforced in `request.rs`: a session with a parent never gets the
-delegation/supervision tools — `DELEGATION_TOOLS = ["task", "fleet",
-"task_status", "task_wait", "task_cancel"]` are withheld from every child.
+delegation/supervision tools — `DELEGATION_TOOLS = ["fleet",
+"task_status", "task_wait", "task_cancel", "task_report"]` are withheld from
+every child (and from every non-orchestrator main-thread agent).
 So a child cannot re-delegate (no unbounded recursion); the depth guard is the
 backstop. The `fleet` tool is additionally orchestrator-only (`request.rs`
 withholds it from every agent except `FLEET_AGENT`).
@@ -74,15 +75,17 @@ Lifecycle of one child (`delegation.rs::run_child`):
 loop break, persists `[Turn aborted …]`, closes open tool calls, and the
 `task.ended` lands with status `aborted` + a `task.aborted` event carrying a
 `reason`. Cancelling a child also cancels the parent turn (`abort_children_and_parent`)
-so the orchestrator re-plans with the abort in context. **No engine work is
-needed to make abort work** — only to give the orchestrator the signals and the
-instruction to act.
+so the orchestrator re-plans with the abort in context. An aborted child's
+`TaskResult.text` is empty (only `completed` children get a report), so
+**`task_report`** reads the partial work straight out of the child transcript
+(work log, changed files, last output) — the orchestrator prompt and the
+`task_cancel` result both tell the model to call it before re-delegating.
 
 ---
 
 ## 3. Supervision tools (held only by the main thread)
 
-`supervision_tools.rs` gives the orchestrator three tools:
+`supervision_tools.rs` gives the orchestrator four tools:
 
 - **`task_status`** — a cheap, token-free listing of every child (live and
   finished). Live rows show `name`, `agent`, `model`, elapsed ms, `status`
@@ -95,6 +98,14 @@ instruction to act.
 - **`task_cancel`** — cancel a specific child by id/name with a `reason`.
   Cancels the child token, emits `task.aborted { reason }` on the parent, and
   (via the cascade) the parent turn.
+- **`task_report`** — read what a child actually did, by task id or name
+  (live or finished): header (status/tokens/`summarize_progress` flags), the
+  chronological tool-call work log (last 40 calls), the files it changed
+  (`change_tracking` `+/-` counts) and its last assistant output. This is the
+  follow-up to `task_cancel` — an aborted `TaskResult` carries no text, so the
+  partial work comes from here. Read-only (`is_read_only`), registered next to
+  the other supervision tools in `instance_store.rs`, `Safe` in
+  `tool_safety.rs`, withheld from every non-orchestrator agent.
 
 ---
 
@@ -158,9 +169,11 @@ config (labels the orchestrator copies into `fleet` `names`), plus the
   same call) and `wandering` (reading many unrelated files without advancing).
   Judge by agent type (see §4).
 - **Call to order.** When a child is flagged: `task_cancel` it (reason
-  `looping` / `wandering`) and *immediately* re-spawn it via `fleet` with a
-  corrective, tighter brief that names the failure ("you kept re-reading `x` /
-  read 15 unrelated files — read only these: …, then implement"). Don't just
+  `looping` / `wandering`), then `task_report` on that child to read its work
+  log, changed files and last output, and *immediately* re-spawn it via `fleet`
+  with a corrective, tighter brief that names the failure ("you kept re-reading
+  `x` / read 15 unrelated files — read only these: …, then implement") and
+  builds on the partial work instead of repeating it. Don't just
   discard it — re-delegate it.
 - **Escalation.** If the re-spawned child is flagged again, finish that part
   yourself with the normal tools.

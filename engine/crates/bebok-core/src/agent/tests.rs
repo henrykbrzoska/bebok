@@ -1365,6 +1365,7 @@ if __name__ == "__main__":
                     Arc::new(crate::agent::TaskWaitTool::new(Arc::downgrade(&store))),
                     Arc::new(crate::agent::TaskStatusTool::new(Arc::downgrade(&store))),
                     Arc::new(crate::agent::TaskCancelTool::new(Arc::downgrade(&store))),
+                    Arc::new(crate::agent::TaskReportTool::new(Arc::downgrade(&store))),
                 ] {
                     tools.register_tool(t);
                 }
@@ -1401,18 +1402,30 @@ if __name__ == "__main__":
         // Orchestrator parent: fleet + supervision, plus the plain task tool.
         let store = InstanceStore::with_data_dir(data.clone());
         let (parent_tools, child_tools) = build(&store, "orchestrator").await;
-        for t in ["fleet", "task_wait", "task_status", "task_cancel"] {
+        for t in [
+            "fleet",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
             assert!(parent_tools.iter().any(|n| n == t), "parent lacks {t}");
             assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
         }
         assert!(child_tools.iter().any(|n| n == "read_file"));
-        assert_eq!(DELEGATION_TOOLS.len(), 4);
+        assert_eq!(DELEGATION_TOOLS.len(), 5);
 
         // Non-orchestrator parent: no fleet/supervision tools (plain `task`
         // stays registered for manual use); its child gets none either.
         let store2 = InstanceStore::with_data_dir(base.join("data2"));
         let (code_tools, code_child) = build(&store2, "code").await;
-        for t in ["fleet", "task_wait", "task_status", "task_cancel"] {
+        for t in [
+            "fleet",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
             assert!(!code_tools.iter().any(|n| n == t), "code got {t}");
             assert!(!code_child.iter().any(|n| n == t), "code child got {t}");
         }

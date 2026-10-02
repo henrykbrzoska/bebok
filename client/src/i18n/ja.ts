@@ -241,6 +241,7 @@ export const ja: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': 'モデルを絞り込む…',
   'modelSelect.search': 'モデルを検索…',
   'modelSelect.noMatch': '一致するモデルがありません。',
+  'modelSelect.batchHint': 'バッチモデル — チャットから送信するとバッチジョブとしてキューに追加されます（Batchパネル参照）。',
   'settings.assignTo': '割り当て先',
   'settings.assign': '割り当て',
   'settings.noProviderSelected': '左側でプロバイダーを選択してください。',
@@ -351,6 +352,7 @@ export const ja: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': 'セッションを閉じる',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'バッチジョブとしてキューに追加しました — Batchパネルで確認できます。',
   'chat.forceSend': 'Force send',
   'chat.aborting': '停止中…',
   'chat.forceSending': '送信中…',
@@ -814,7 +816,7 @@ export const ja: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': 'サブエージェントは task ツール（バックグラウンド）で起動し、task_status、task_wait、task_cancel で監督します。',
+  'settings.delegationToolsNote': 'サブエージェントは task ツール（バックグラウンド）で起動し、task_status、task_wait、task_cancel、task_report で監督します。',
   'settings.delegationSaved': '委任設定を保存しました。',
   'drawer.collapsePanel': 'パネルを折りたたむ',
   'drawer.expandPanel': 'パネルを展開',

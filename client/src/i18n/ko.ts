@@ -241,6 +241,7 @@ export const ko: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': '모델 필터링…',
   'modelSelect.search': '모델 검색…',
   'modelSelect.noMatch': '일치하는 모델이 없습니다.',
+  'modelSelect.batchHint': '배치 모델 — 채팅에서 보내면 배치 작업으로 대기열에 추가됩니다(Batch 패널 참조).',
   'settings.assignTo': '할당 대상',
   'settings.assign': '할당',
   'settings.noProviderSelected': '왼쪽에서 공급자를 선택하세요.',
@@ -351,6 +352,7 @@ export const ko: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': '세션 닫기',
   'chat.queued': 'queued',
+  'chat.batch.queued': '배치 작업으로 대기열에 추가됨 — Batch 패널에서 확인하세요.',
   'chat.forceSend': 'Force send',
   'chat.aborting': '중지 중…',
   'chat.forceSending': '지금 전송 중…',
@@ -814,7 +816,7 @@ export const ko: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': '하위 에이전트는 task 도구(백그라운드)로 시작되며 task_status, task_wait, task_cancel로 감독합니다.',
+  'settings.delegationToolsNote': '하위 에이전트는 task 도구(백그라운드)로 시작되며 task_status, task_wait, task_cancel, task_report로 감독합니다.',
   'settings.delegationSaved': '위임 설정을 저장했습니다.',
   'drawer.collapsePanel': '패널 접기',
   'drawer.expandPanel': '패널 펼치기',

@@ -242,6 +242,7 @@ export const de: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': 'Modelle filtern…',
   'modelSelect.search': 'Modelle suchen…',
   'modelSelect.noMatch': 'Kein passendes Modell.',
+  'modelSelect.batchHint': 'Batch-Modell — Senden aus dem Chat reiht es als Batch-Job ein (siehe Batch-Panel).',
   'settings.assignTo': 'zuweisen an',
   'settings.assign': 'Zuweisen',
   'settings.noProviderSelected': 'Wähle links einen Anbieter.',
@@ -352,6 +353,7 @@ export const de: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': 'Sitzung schließen',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'Als Batch-Job eingereiht — im Batch-Panel verfolgen.',
   'chat.forceSend': 'Force send',
   'chat.aborting': 'Wird gestoppt…',
   'chat.forceSending': 'Wird jetzt gesendet…',
@@ -815,7 +817,7 @@ export const de: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': 'Sub-Agenten werden mit dem task-Werkzeug (im Hintergrund) gestartet und mit task_status, task_wait und task_cancel überwacht.',
+  'settings.delegationToolsNote': 'Sub-Agenten werden mit dem task-Werkzeug (im Hintergrund) gestartet und mit task_status, task_wait, task_cancel und task_report überwacht.',
   'settings.delegationSaved': 'Delegationseinstellungen gespeichert.',
   'drawer.collapsePanel': 'Panel einklappen',
   'drawer.expandPanel': 'Panel ausklappen',

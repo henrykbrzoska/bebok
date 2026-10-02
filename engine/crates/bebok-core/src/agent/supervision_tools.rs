@@ -8,8 +8,13 @@
 //!   are handed over once: a second `task_wait` for the same id says so.
 //! * `task_cancel` - cancel one child by task id or name. Only that child's
 //!   token is cancelled; the parent turn keeps going so the model can react.
+//! * `task_report` - read what a child actually DID: its tool-call work log,
+//!   the files it changed and its last output, straight from the child
+//!   transcript. This is the follow-up to `task_cancel`: an aborted child's
+//!   `TaskResult` carries no text (only `aborted` + error), so the partial
+//!   work has to be read out of the child session instead.
 //!
-//! All three are read-only for the permission gate (they never touch the
+//! All four are read-only for the permission gate (they never touch the
 //! workspace) and operate on the calling session only (`ctx.session_id`).
 
 use std::sync::{Arc, Weak};
@@ -22,6 +27,8 @@ use serde_json::{Value, json};
 use bebok_tools::{Tool, ToolCtx, ToolOutput};
 
 use super::delegation::{TaskProgress, summarize_progress};
+use crate::change_tracking::Tracker;
+use crate::session::{Message, Part, Role, ToolState};
 use crate::store::{ChildTask, InstanceStore, SessionState, TaskResult};
 
 /// Default / maximum `task_wait` timeout.
@@ -148,8 +155,16 @@ pub fn render_status(live: &[LiveTaskView], finished: &[TaskResult]) -> String {
                 .as_deref()
                 .map(|e| format!(" · error: {e}"))
                 .unwrap_or_default();
+            // A non-completed child has no report text (`TaskResult.text` is
+            // only filled for `completed`) — point the model at the tool that
+            // reads the partial work out of the child transcript.
+            let hint = if r.status == "completed" || !r.text.trim().is_empty() {
+                String::new()
+            } else {
+                " · call task_report for its work log".to_string()
+            };
             lines.push(format!(
-                "- {} [{}] {} · taskID={} · {}s · tokens in/out {}/{} · {}{}",
+                "- {} [{}] {} · taskID={} · {}s · tokens in/out {}/{} · {}{}{}",
                 r.name,
                 r.agent,
                 r.status,
@@ -158,7 +173,8 @@ pub fn render_status(live: &[LiveTaskView], finished: &[TaskResult]) -> String {
                 r.input_tokens,
                 r.output_tokens,
                 collected,
-                err
+                err,
+                hint
             ));
         }
     }
@@ -318,7 +334,11 @@ pub fn render_results(results: &[TaskResult], pending: &[String], timed_out: boo
                     r.text.clone()
                 }
             }
-            _ => format!("(no report) {}", r.error.clone().unwrap_or_default()),
+            _ => format!(
+                "(no report) {} — call `task_report` to read its work log, \
+                 changed files and last output",
+                r.error.clone().unwrap_or_default()
+            ),
         };
         sections.push(format!("{head}\n{body}"));
     }
@@ -594,7 +614,9 @@ impl Tool for TaskCancelTool {
         let mut out = ToolOutput::new(
             format!(
                 "task_cancel: cancellation requested for '{}' (taskID={}); its result will be \
-                 reported as aborted by task_wait/task_status.",
+                 reported as aborted by task_wait/task_status. Its report text is empty — call \
+                 `task_report` with that id to read what it did before stopping (work log, \
+                 changed files, last output), then re-delegate with a tighter brief.",
                 task.name, task.task_id
             ),
             "task_cancel",
@@ -603,6 +625,341 @@ impl Tool for TaskCancelTool {
             "taskID": task.task_id,
             "name": task.name,
             "cancelled": cancelled,
+        }));
+        out
+    }
+}
+
+// ---------------------------------------------------------------------------
+// task_report
+// ---------------------------------------------------------------------------
+
+/// Default cap on a rendered `task_report` (chars).
+pub const DEFAULT_REPORT_CHARS: usize = 8_000;
+/// Maximum cap on a rendered `task_report` (chars).
+pub const MAX_REPORT_CHARS: usize = 24_000;
+/// How many tool calls the report's work log keeps (oldest dropped first).
+pub const REPORT_LOG_MAX: usize = 40;
+
+#[derive(Debug, Deserialize)]
+struct ReportArgs {
+    /// Task id or name (live or finished child).
+    #[serde(alias = "taskID", alias = "task_id", alias = "name")]
+    id: String,
+    /// Cap on the rendered report length in chars (default 8000, max 24000).
+    #[serde(default)]
+    max_chars: Option<usize>,
+}
+
+/// Truncate `s` to `max` chars, appending `…` when cut.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('\u{2026}');
+    out
+}
+
+/// One `- tool(args) → state` line of the work log.
+fn tool_log_line(name: &str, state: &ToolState) -> String {
+    let label = match state {
+        ToolState::Pending { .. } => "pending".to_string(),
+        ToolState::Running { .. } => "running".to_string(),
+        ToolState::Completed { .. } => "completed".to_string(),
+        ToolState::Error { error, .. } => format!("error: {}", clip(error, 100)),
+    };
+    format!(
+        "- {name}({}) → {label}",
+        clip(&state.input().to_string(), 120)
+    )
+}
+
+/// Everything but the transcript that [`render_child_report`] needs.
+#[derive(Debug, Clone, Default)]
+pub struct ReportHeader {
+    pub name: String,
+    pub agent: String,
+    pub status: String,
+    pub task_id: String,
+    pub child_session_id: String,
+    pub error: Option<String>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub elapsed_ms: i64,
+    /// Whether the child is still live (report is a snapshot of a running child).
+    pub live: bool,
+    /// `(path, added, removed)` per file the child changed.
+    pub files: Vec<(String, i64, i64)>,
+}
+
+/// Render a child's work report: header (status/tokens/progress), the
+/// chronological tool-call log, the files it changed and its last output.
+/// Pure, so it is unit-testable; `max_chars` caps the whole report.
+pub fn render_child_report(h: &ReportHeader, messages: &[Message], max_chars: usize) -> String {
+    let progress = summarize_progress(messages);
+    let secs = (h.elapsed_ms / 1000).max(0);
+    let snapshot = if h.live {
+        " · snapshot of a still-running child"
+    } else {
+        ""
+    };
+    let mut out = format!(
+        "# {} [{}] {} · taskID={} · child session {} · {secs}s · tokens in/out {}/{}{snapshot}\n",
+        h.name, h.agent, h.status, h.task_id, h.child_session_id, h.input_tokens, h.output_tokens
+    );
+    if let Some(err) = h.error.as_deref().filter(|e| !e.trim().is_empty()) {
+        out.push_str(&format!("error: {err}\n"));
+    }
+    let mut extras: Vec<String> = Vec::new();
+    if let Some(t) = &progress.last_tool {
+        let st = progress.last_tool_state.as_deref().unwrap_or("?");
+        extras.push(format!("last={t} ({st})"));
+    }
+    if !progress.flags.is_empty() {
+        extras.push(format!("flags={}", progress.flags.join(",")));
+    }
+    let extras = if extras.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", extras.join(" · "))
+    };
+    out.push_str(&format!(
+        "progress: {} tool calls · {} steps{extras}\n",
+        progress.tool_calls, progress.steps
+    ));
+
+    // Work log: every tool call the child made, oldest first, capped.
+    let mut log: Vec<String> = Vec::new();
+    for m in messages {
+        for part in &m.parts {
+            if let Part::Tool { name, state, .. } = part {
+                log.push(tool_log_line(name, state));
+            }
+        }
+    }
+    let total = log.len();
+    let skipped = total.saturating_sub(REPORT_LOG_MAX);
+    let kept = total - skipped;
+    if skipped > 0 {
+        out.push_str(&format!(
+            "## Work log (last {kept} of {total} tool calls, earlier {skipped} omitted)\n"
+        ));
+    } else {
+        out.push_str(&format!("## Work log ({total} tool calls)\n"));
+    }
+    for line in log.into_iter().skip(skipped) {
+        out.push_str(&line);
+        out.push('\n');
+    }
+
+    out.push_str("\n## Files changed\n");
+    if h.files.is_empty() {
+        out.push_str("(no tracked files — the child wrote nothing)\n");
+    } else {
+        for (path, added, removed) in &h.files {
+            out.push_str(&format!("- {path} +{added} -{removed}\n"));
+        }
+    }
+
+    // Last output: the newest non-empty assistant text (an aborted child
+    // usually dies mid-tool, so skip tool-only messages).
+    let last = messages
+        .iter()
+        .rev()
+        .filter(|m| m.role == Role::Assistant)
+        .map(|m| m.text_content())
+        .find(|t| !t.trim().is_empty())
+        .unwrap_or_default();
+    out.push_str("\n## Last output\n");
+    if last.trim().is_empty() {
+        out.push_str("(the child produced no assistant text before it ended)\n");
+    } else {
+        let budget = (max_chars / 2).max(400).min(max_chars);
+        out.push_str(&clip(last.trim(), budget));
+        out.push('\n');
+    }
+    clip(&out, max_chars)
+}
+
+/// The child a report is about: still registered on the parent (live), or
+/// finished (its `TaskResult` recorded — including `aborted` ones).
+struct ReportTarget {
+    task_id: String,
+    child_session_id: String,
+    name: String,
+    agent: String,
+    status: String,
+    error: Option<String>,
+    started_at: i64,
+    ended_at: Option<i64>,
+    input_tokens: u64,
+    output_tokens: u64,
+    live: bool,
+}
+
+/// Resolve a task id or name to a report target: live children first (a
+/// child is unregistered the moment it finishes), then finished results
+/// (latest match wins for duplicate names).
+async fn resolve_report_target(parent: &SessionState, id: &str) -> Option<ReportTarget> {
+    if let Some(t) = parent.find_child_task(id).await {
+        return Some(ReportTarget {
+            task_id: t.task_id,
+            child_session_id: t.child_session_id,
+            name: t.name,
+            agent: t.agent,
+            status: t.status,
+            error: None,
+            started_at: t.started_at,
+            ended_at: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            live: true,
+        });
+    }
+    let finished = parent.task_results_snapshot().await;
+    finished
+        .iter()
+        .rev()
+        .find(|r| r.task_id == id || r.name == id)
+        .map(|r| ReportTarget {
+            task_id: r.task_id.clone(),
+            child_session_id: r.child_session_id.clone(),
+            name: r.name.clone(),
+            agent: r.agent.clone(),
+            status: r.status.clone(),
+            error: r.error.clone(),
+            started_at: r.started_at,
+            ended_at: Some(r.ended_at),
+            input_tokens: r.input_tokens,
+            output_tokens: r.output_tokens,
+            live: false,
+        })
+}
+
+pub struct TaskReportTool {
+    store: Weak<InstanceStore>,
+}
+
+impl TaskReportTool {
+    pub fn new(store: Weak<InstanceStore>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl Tool for TaskReportTool {
+    fn name(&self) -> &str {
+        "task_report"
+    }
+
+    fn description(&self) -> &str {
+        "Read what a sub-agent actually did, straight from its transcript: the chronological \
+         tool-call work log, the files it changed (+/- lines) and its last output. Call it after \
+         `task_cancel` (or on any errored/aborted child) to see the partial work before \
+         re-delegating, and on any live child for a fuller picture than `task_status`. Read-only; \
+         this session's own children only."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Task id (from task/task_status/task_cancel) or the child's name." },
+                "max_chars": { "type": "integer", "description": "Cap on the returned report length in chars (default 8000, max 24000)." }
+            },
+            "required": ["id"]
+        })
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, ctx: ToolCtx, args: Value) -> ToolOutput {
+        let args: ReportArgs = match serde_json::from_value(args) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolOutput::new(
+                    format!("task_report: invalid arguments: {e}"),
+                    "task_report",
+                );
+            }
+        };
+        let id = args.id.trim();
+        let max_chars = args
+            .max_chars
+            .unwrap_or(DEFAULT_REPORT_CHARS)
+            .clamp(400, MAX_REPORT_CHARS);
+        let (store, parent) = match open_parent(&self.store, &ctx, "task_report").await {
+            Ok(v) => v,
+            Err(out) => return out,
+        };
+        let Some(target) = resolve_report_target(&parent, id).await else {
+            return ToolOutput::new(
+                format!("task_report: no child task '{id}' on this session (see task_status)"),
+                "task_report",
+            );
+        };
+        let child = match store
+            .open_session(parse_uuid(&target.child_session_id))
+            .await
+        {
+            Ok(c) => c,
+            Err(_) => {
+                return ToolOutput::new(
+                    format!(
+                        "task_report: child session {} of '{}' is gone",
+                        target.child_session_id, target.name
+                    ),
+                    "task_report",
+                );
+            }
+        };
+        let messages = child.messages_snapshot().await;
+        let usage = child.meta_snapshot().await.usage;
+        // A finished result carries its recorded token counts; a live child
+        // is read straight off its own session meta.
+        let (input_tokens, output_tokens) = if target.live {
+            (usage.input_tokens, usage.output_tokens)
+        } else {
+            (target.input_tokens, target.output_tokens)
+        };
+        let elapsed_ms = target.ended_at.unwrap_or_else(crate::util::now_ms) - target.started_at;
+        let files: Vec<(String, i64, i64)> = Tracker::new(child.directory(), child.disk_dir())
+            .list()
+            .into_iter()
+            .map(|e| (e.path, e.added as i64, e.removed as i64))
+            .collect();
+        let header = ReportHeader {
+            name: target.name.clone(),
+            agent: target.agent.clone(),
+            status: target.status.clone(),
+            task_id: target.task_id.clone(),
+            child_session_id: target.child_session_id.clone(),
+            error: target.error.clone(),
+            input_tokens,
+            output_tokens,
+            elapsed_ms,
+            live: target.live,
+            files: files.clone(),
+        };
+        let report = render_child_report(&header, &messages, max_chars);
+        let mut out = ToolOutput::new(report.clone(), "task_report");
+        out.structured = Some(json!({
+            "taskID": header.task_id,
+            "name": header.name,
+            "agent": header.agent,
+            "status": header.status,
+            "live": header.live,
+            "childSessionID": header.child_session_id,
+            "error": header.error,
+            "tokens": { "input": input_tokens, "output": output_tokens },
+            "files": files
+                .iter()
+                .map(|(p, a, r)| json!({ "path": p, "added": a, "removed": r }))
+                .collect::<Vec<_>>(),
+            "report": report,
         }));
         out
     }
@@ -757,11 +1114,180 @@ mod tests {
         let s = TaskStatusTool::new(Weak::new());
         let w = TaskWaitTool::new(Weak::new());
         let c = TaskCancelTool::new(Weak::new());
-        assert!(s.is_read_only() && w.is_read_only() && c.is_read_only());
+        let r = TaskReportTool::new(Weak::new());
+        assert!(s.is_read_only() && w.is_read_only() && c.is_read_only() && r.is_read_only());
         assert_eq!(s.name(), "task_status");
         assert_eq!(w.name(), "task_wait");
         assert_eq!(c.name(), "task_cancel");
+        assert_eq!(r.name(), "task_report");
         assert!(w.parameters_schema()["properties"]["mode"]["enum"].is_array());
         assert_eq!(c.parameters_schema()["required"], json!(["id"]),);
+        assert_eq!(r.parameters_schema()["required"], json!(["id"]),);
+    }
+
+    fn report_header(status: &str) -> ReportHeader {
+        ReportHeader {
+            name: "fix-ci".into(),
+            agent: "code".into(),
+            status: status.into(),
+            task_id: "t1".into(),
+            child_session_id: "c1".into(),
+            error: Some("sub-task was cancelled".into()),
+            input_tokens: 120,
+            output_tokens: 34,
+            elapsed_ms: 12_500,
+            live: false,
+            files: vec![("src/lib.rs".into(), 12, 3)],
+        }
+    }
+
+    fn report_messages() -> Vec<Message> {
+        let mut m1 = Message::new(Role::Assistant);
+        m1.add_tool_call(
+            "c1".into(),
+            "write_file".into(),
+            json!({ "path": "src/lib.rs" }),
+        );
+        let mut m2 = Message::new(Role::Assistant);
+        m2.add_tool_call(
+            "c2".into(),
+            "bash".into(),
+            json!({ "command": "cargo test" }),
+        );
+        if let Some(Part::Tool { state, .. }) = m2.parts.last_mut() {
+            *state = ToolState::Error {
+                input: json!({ "command": "cargo test" }),
+                error: "exit 101".into(),
+            };
+        }
+        m2.parts.push(Part::Text {
+            text: "halfway there".into(),
+        });
+        vec![m1, m2]
+    }
+
+    /// The whole point of the tool: an aborted child's `TaskResult` has no
+    /// text, but the report must still show its work log, changed files and
+    /// last output.
+    #[test]
+    fn render_child_report_reads_partial_work_of_an_aborted_child() {
+        let out = render_child_report(&report_header("aborted"), &report_messages(), 8_000);
+        assert!(out.contains("# fix-ci [code] aborted · taskID=t1"), "{out}");
+        assert!(out.contains("error: sub-task was cancelled"), "{out}");
+        assert!(out.contains("progress: 2 tool calls"), "{out}");
+        assert!(out.contains("## Work log (2 tool calls)"), "{out}");
+        assert!(
+            out.contains("- write_file({\"path\":\"src/lib.rs\"}) → pending"),
+            "{out}"
+        );
+        assert!(
+            out.contains("- bash(") && out.contains("→ error: exit 101"),
+            "{out}"
+        );
+        assert!(out.contains("## Files changed"), "{out}");
+        assert!(out.contains("- src/lib.rs +12 -3"), "{out}");
+        assert!(out.contains("## Last output"), "{out}");
+        assert!(out.contains("halfway there"), "{out}");
+    }
+
+    #[test]
+    fn render_child_report_notes_empty_output_and_caps_length() {
+        // No assistant text at all (child died mid-tool).
+        let messages: Vec<Message> = report_messages()
+            .into_iter()
+            .map(|mut m| {
+                m.parts.retain(|p| !matches!(p, Part::Text { .. }));
+                m
+            })
+            .collect();
+        let out = render_child_report(&report_header("aborted"), &messages, 8_000);
+        assert!(
+            out.contains("(the child produced no assistant text before it ended)"),
+            "{out}"
+        );
+        // The cap bounds the whole report.
+        let header = report_header("running");
+        let messages = vec![Message::user("x".repeat(40_000))];
+        let out = render_child_report(&header, &messages, 1_000);
+        assert!(out.chars().count() <= 1_000, "len={}", out.chars().count());
+    }
+
+    #[tokio::test]
+    async fn task_report_reads_an_aborted_child_from_the_store() {
+        use tokio_util::sync::CancellationToken;
+
+        let base = std::env::temp_dir().join(format!("bebok-report-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let parent = store
+            .create_session(project.to_str().unwrap(), "orchestrator", None)
+            .await
+            .unwrap();
+        parent.append_user_message("delegate it").await.unwrap();
+        let child = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        child.append_user_message("do it").await.unwrap();
+        {
+            let mut messages = child.messages.write().await;
+            let mut m = Message::new(Role::Assistant);
+            m.add_tool_call(
+                "c1".into(),
+                "write_file".into(),
+                json!({ "path": "src/lib.rs" }),
+            );
+            messages.push(m);
+            let mut m2 = Message::new(Role::Assistant);
+            m2.parts.push(Part::Text {
+                text: "halfway there".into(),
+            });
+            messages.push(m2);
+        }
+        // Recorded exactly the way `run_child` records an aborted child:
+        // status `aborted`, error set, empty text.
+        parent
+            .push_task_result(TaskResult {
+                task_id: "t1".into(),
+                name: "fix-ci".into(),
+                agent: "code".into(),
+                child_session_id: child.id().to_string(),
+                status: "aborted".into(),
+                error: Some("sub-task was cancelled".into()),
+                text: String::new(),
+                input_tokens: 120,
+                output_tokens: 34,
+                started_at: 1_000,
+                ended_at: 13_500,
+                collected: false,
+            })
+            .await;
+
+        let tool = TaskReportTool::new(Arc::downgrade(&store));
+        let ctx = ToolCtx {
+            root: project.clone(),
+            session_id: parent.id().to_string(),
+            abort: CancellationToken::new(),
+        };
+        // Resolvable by name as well as by task id.
+        let out = tool.execute(ctx, json!({ "id": "fix-ci" })).await;
+        assert!(out.text.contains("# fix-ci [code] aborted"), "{}", out.text);
+        assert!(out.text.contains("- write_file("), "{}", out.text);
+        assert!(out.text.contains("halfway there"), "{}", out.text);
+        let structured = out.structured.expect("structured payload");
+        assert_eq!(structured["taskID"], json!("t1"));
+        assert_eq!(structured["status"], json!("aborted"));
+        assert_eq!(structured["live"], json!(false));
+
+        // Unknown id → a helpful error, not a panic.
+        let ctx = ToolCtx {
+            root: project.clone(),
+            session_id: parent.id().to_string(),
+            abort: CancellationToken::new(),
+        };
+        let out = tool.execute(ctx, json!({ "id": "nope" })).await;
+        assert!(out.text.contains("no child task 'nope'"), "{}", out.text);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

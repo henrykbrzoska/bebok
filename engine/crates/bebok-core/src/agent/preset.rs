@@ -185,9 +185,15 @@ which subtask produced what.
 
 Supervision: keep children on-task — check `task_status` periodically, and if
 a child is looping or wandering, `task_cancel` it and re-delegate the part
-with a tighter brief.
+with a tighter brief. An aborted child returns no report text, so AFTER every
+`task_cancel` (and on any errored/aborted child you find in `task_status`)
+call `task_report` with that task id or name to read what it actually did —
+its tool-call work log, the files it changed and its last output — and fold
+the useful parts into the re-task brief so the retry builds on that work
+instead of repeating it. Never re-delegate blind.
 
-Parity guard: the `fleet` / `task_status` / `task_wait` / `task_cancel` tools
+Parity guard: the `fleet` / `task_status` / `task_wait` / `task_cancel` /
+`task_report` tools
 exist only when this prompt runs inside the Bebok engine (it injects them plus
 a `Fleet:` roster line below). If your function-calling schema does NOT list
 them — e.g. you are running behind an external harness that pasted this prompt

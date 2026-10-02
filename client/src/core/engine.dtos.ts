@@ -250,7 +250,13 @@ export interface SessionListResponse {
 export interface PromptResponse {
   sessionID: string;
   messageIndex: number;
-  status: string;
+  /**
+   * `running` = a live turn was started (default), `batch` = the prompt was
+   * queued into an async Batch job and no turn is running for it.
+   */
+  status?: 'running' | 'batch';
+  /** Batch job the prompt was queued into (only when `status` is `batch`). */
+  batchID?: string;
 }
 
 /** One image attached to an outgoing prompt (raw base64, no `data:` prefix; max 5 images, 5 MB each, png/jpeg/webp/gif). */

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Sending a chat prompt with a `:batch` model no longer fails with a 400: the prompt is queued as a Batch API job (toast + marker in the transcript, progress in the Batch panel) while the session stays responsive.
+- New `task_report` supervision tool: the orchestrator can now read what a sub-agent actually did — its tool-call work log, the files it changed and its last output — straight from the child transcript. Called after `task_cancel` (or on any aborted/errored child, whose result carries no report text), it lets the re-task brief build on the partial work instead of repeating it; the orchestrator prompt, the delegation policy and the `task_cancel` result all point at it.
+
+### Fixes
+
+- OpenCode Zen free-tier gate (oh-my-pi bisection, `312022151125/oh-my-pi#1` → `can1357#12306`): `opencode/*` requests now send the canonical `opencode/<version>` User-Agent, pad tool-less bodies with inert `bash`+`read` stubs (`tool_choice: "none"`), and scope a `403 FreeTierError` denial as model policy instead of an auth failure — free models (e.g. `opencode/mimo-v2.6-flash-free`) work from Bebok like in the oh-my-pi client.
+- Chat turn rejects `:batch` models up front with a hint (use the Batch panel or the same model without the suffix) instead of sending them to `chat/completions`, where OpenRouter answers `404 ... cannot be used with the chat/completions endpoint`.
+- Batch-only models are tagged with a `batch` badge and tooltip in the model picker so they are not mistaken for chat models.
+- Batch jobs now use OpenRouter's native batch API (inline `requests` in a single `POST /batches` call) instead of the legacy file-upload flow — `:batch` models no longer fail with `404 ... cannot be used with the chat/completions endpoint`.
+
 ## 1.9.1 — 2026-09-29
 
 ### Features

@@ -501,6 +501,11 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::TaskCancelTool::new(weak.clone())));
+            // Read-out of a child's work (work log + changed files + last
+            // output) — the follow-up to `task_cancel` for aborted children.
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::TaskReportTool::new(weak.clone())));
             // In-process code-index tools: delegate to the `bebok-index` plugin.
             instance
                 .tools

@@ -47,6 +47,7 @@ import {
   ProcessInfo,
   ProcessLogResponse,
   PromptBody,
+  PromptResponse,
   PtyInfo,
   PtyListResponse,
   PtyTicketResponse,
@@ -399,7 +400,7 @@ export class EngineClient {
     );
   }
 
-  prompt(id: string, body: PromptBody | string, agent?: string, model?: string, fleet?: boolean): Promise<unknown> {
+  prompt(id: string, body: PromptBody | string, agent?: string, model?: string, fleet?: boolean): Promise<PromptResponse> {
     const payload: PromptBody =
       typeof body === 'string'
         ? {
@@ -416,7 +417,7 @@ export class EngineClient {
             ...(body.files?.length ? { files: body.files } : {}),
             ...((body.fleet ?? fleet) ? { fleet: true } : {}),
           };
-    return this.request('POST', `/session/${id}/prompt`, payload);
+    return this.request<PromptResponse>('POST', `/session/${id}/prompt`, payload);
   }
 
   abort(id: string): Promise<AbortResponse> {
