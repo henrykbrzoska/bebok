@@ -1,4 +1,4 @@
-# Bebok 1.5.0
+# Bebok 1.9.2
 
 Bebok is a local-first AI coding agent. A headless Rust engine (axum + tokio,
 HTTP + SSE + WebSocket) owns sessions, tools, permissions, sub-agents and
@@ -7,7 +7,9 @@ app (Tauri 2, engine bundled as a sidecar) or in the browser against an engine
 you start yourself. Everything runs on your machine; the only network traffic
 is to the LLM providers you configure.
 
-Roadmap: 1.6.0 adds an Android app (chat + remote follow).
+Roadmap: Android app (chat + remote follow) in progress — Capacitor shell +
+`EngineLauncher` plugin exist in `client/android/` but no binaries are bundled
+yet and nothing is released.
 
 ![Chat with collapsed tool groups, context meter and the right drawer](docs/screenshots/chat-tool-groups.png)
 
@@ -43,6 +45,9 @@ Roadmap: 1.6.0 adds an Android app (chat + remote follow).
 - **Terminal** - engine-owned PTYs (xterm.js, 1 MiB scrollback, survive GUI
   restarts) plus **Processes**: background `bash` jobs with log tailing and kill.
 - **Agents** - live sub-agent list with a read-only streaming transcript overlay.
+- **Batch** - OpenRouter `:batch` jobs: progress, per-item results, cancel.
+- **Schedules** - recurring tasks (interval / daily / weekly per project, prompt
+  + agent preset, toggle, run-now, history).
 - **Changes** - files modified by tools, unified/split diff against git HEAD or a
   first-write snapshot, "Open in Explorer", confirmed revert (sub-agent sessions included).
 - **Preview** - Markdown renderer with file picker, pin and modified-on-disk notice.
@@ -52,9 +57,15 @@ Roadmap: 1.6.0 adds an Android app (chat + remote follow).
 - Presets `code`, `ask`, `plan`, `debug`, `orchestrator` plus your own
   `<config dir>/bebok/agent/*.md` and `<project>/.bebok/agent/*.md` (hot reload).
 - Delegation with supervision: sub-agents spawn only via `fleet` from the
-  configured fleet roster, capped by `delegation.max_concurrent`; supervised
-  with `task_status`, `task_wait`, `task_cancel`; token-free progress rows in
-  the parent transcript.
+  configured fleet roster (LLM-backed generation via "Generate fleet" in
+  Settings > Agents), capped by `delegation.max_concurrent`; supervised
+  with `task_status`, `task_wait`, `task_cancel`, `task_report` (read what an
+  aborted child did and build the re-task on it); token-free progress rows in
+  the parent transcript; orchestrator watchdog restarts looping/wandering
+  children (`delegation.max_restarts`, `delegation.watchdog_secs`).
+- OpenRouter batch models (`:batch` suffix): async Batch API — submit with
+  `POST /session/{id}/batch`, track in the right-drawer Batch panel
+  (live `batch.*` events, per-item results, cancel).
 - Autonomous frontend verification (`verify.frontend`): the sub-agent starts every
   dependency on its own non-default port, waits for readiness, screenshots the
   loaded page, checks the API, fixes and re-verifies, and must report
@@ -97,13 +108,28 @@ Roadmap: 1.6.0 adds an Android app (chat + remote follow).
   gate as `mcp__<server>__<tool>`.
 
 ### Also
-- **Stats** screen (`GET /stats`): per-project / per-model / per-day usage and cost
-  with sortable tables.
-- **About** page ("What is Bebok?") with the Silesian legend, in all 12 UI languages.
-- MCP bridge (`rmcp`, stdio + streamable HTTP), `AGENTS.md` + `skill/*/SKILL.md`
-  prompt assembly, in-process plugin hooks, JSONC config with comment-preserving writers.
-- Chrome extension (Phase 1): port scan discovery (8780–8790), server status dot
-  in popup, start command copy, fixed port control.
+- **Stats** screen: per-project / per-model / per-day usage and cost
+  with sortable tables (sidebar button now opens Schedules; Stats moved to a
+  card in Settings → General).
+- Code navigation: local full-text code index (tantivy, auto-rebuild after
+  writes, `code_index_status` / `code_index_search` tools), AST-aware
+  structural search (`code_ast`, opt-in via `ast_search.enabled`),
+  module dependency graph (`code_graph_*`, opt-in via `code_graph.enabled`),
+  pre-computed code map (`code_map.*`, opt-in).
+- Skills: bundled layer (`skills/<name>/SKILL.md`) overridable per-user and
+  per-project; ships with `remote-browser-extension`.
+- Dynamic plugins: external plugin binaries as subprocesses (JSON-lines over
+  stdio), install/toggle/update from Settings → General.
+- Chrome companion extension (`client/chrome-extension`, MV3, unpacked): ask
+  the local engine about the page you read (popup, "Ask Bebok about
+  selection", Options with Test connection), plus remote piloting of the
+  user's own tabs (`POST /browser/remote/*`, `session_id=extension`) with
+  pinned token + port search for stable reconnects.
+- Sampling parameters (`temperature`, `top_p`, `frequency_penalty`,
+  `presence_penalty`, `seed`, `top_k`) via `sampling` / `sampling.<agent>`.
+- Searchable model picker (filterable combobox, grouped by provider).
+- Auto-update: desktop shell checks on start + every 6 h, non-modal banner
+  with progress, Updates screen (`/updates`); `GET /version`.
 - Built-in cross-platform tools: `read_file`, `write_file`, `edit_file`,
   `append_file`, `sed`, `fetch`, `bash` and native ports of `pwd`, `list_dir`,
   `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`,
@@ -129,22 +155,23 @@ The API key comes from the provider entry in config, else `<NAME>_API_KEY`
 | `groq` | openai | `https://api.groq.com/openai/v1` |
 | `qwen` | openai | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
 | `openrouter` | openai | `https://openrouter.ai/api/v1` |
+| `opencode` | openai | `https://opencode.ai/zen/v1` (`OPENCODE_API_KEY`; `muse-spark`/`gpt`/`grok` families route to `/responses`) |
 | `ollama` | openai | `http://localhost:11434/v1` (no key) |
 
 Any other OpenAI-compatible or Anthropic-compatible server can be added as a
 custom provider (name, kind, endpoint, key) in Settings > Providers.
 
-## Downloads (1.5.0)
+## Downloads (1.9.2)
 
-Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.5.0>
-(all assets built by the release workflow from commit `28d673b`; checksums in `SHA256SUMS.txt`).
+Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.9.2>
+(all assets built by the release workflow; checksums in `SHA256SUMS.txt`).
 
 | OS | Desktop app | Headless engine |
 |---|---|---|
-| Windows x64 | `bebok_1.5.0_x64-setup.exe` (NSIS), `bebok_1.5.0_x64_en-US.msi`, `bebok-1.5.0-windows-x64-portable.zip` | `bebok-server-1.5.0-windows-x64.exe` |
-| Linux x64 | `bebok_1.5.0_amd64.deb`, `bebok_1.5.0_amd64.AppImage`, `bebok-1.5.0-linux-x64-portable.tar.gz` | `bebok-server-1.5.0-linux-x64` |
-| macOS Apple silicon | `bebok_1.5.0_aarch64.dmg`, `bebok_1.5.0_aarch64.app.tar.gz` | `bebok-server-1.5.0-macos-arm64` |
-| macOS Intel | `bebok_1.5.0_x64.dmg`, `bebok_1.5.0_x64.app.tar.gz` | `bebok-server-1.5.0-macos-x64` |
+| Windows x64 | `bebok_1.9.2_x64-setup.exe` (NSIS), `bebok_1.9.2_x64_en-US.msi`, `bebok-1.9.2-windows-x64-portable.zip` | `bebok-server-1.9.2-windows-x64.exe` |
+| Linux x64 | `bebok_1.9.2_amd64.deb`, `bebok_1.9.2_amd64.AppImage`, `bebok-1.9.2-linux-x64-portable.tar.gz` | `bebok-server-1.9.2-linux-x64` |
+| macOS Apple silicon | `bebok_1.9.2_aarch64.dmg`, `bebok_1.9.2_aarch64.app.tar.gz` | `bebok-server-1.9.2-macos-arm64` |
+| macOS Intel | `bebok_1.9.2_x64.dmg`, `bebok_1.9.2_x64.app.tar.gz` | `bebok-server-1.9.2-macos-x64` |
 
 The builds are **unsigned**. macOS: Gatekeeper blocks the first launch -
 right-click > Open, or `xattr -dr com.apple.quarantine /Applications/bebok.app`.
@@ -219,7 +246,8 @@ Environment variables read by the engine:
 |---|---|
 | `BEBOK_ADDR` | bind address `IP:PORT` (default `127.0.0.1:8787`; CLI flags win) |
 | `BEBOK_NO_AUTH=1` | disable the capability token (local API unauthenticated - logged loudly) |
-| `BEBOK_TOKEN` | use this token instead of generating one per launch |
+| `BEBOK_TOKEN` | use this token instead of generating one per launch (`--token` flag wins) |
+| `BEBOK_PORT` | port for the engine / desktop sidecar (with u16 validation) |
 | `BEBOK_CORS` | extra allowed origins, comma separated |
 | `BEBOK_DIAGNOSTIC=1` | enable `GET/DELETE /debug/log` (redacted LLM + HTTP trace; 404 otherwise) |
 | `BEBOK_SHELL` | shell for `bash` and the terminal (default `cmd /C` on Windows, `sh -c` elsewhere) |
@@ -245,8 +273,11 @@ Main sections (all editable in Settings; the GUI writes deltas atomically):
   "tool_output_cap": 32768,                  // per-tool-output truncation (bytes)
   "yolo": false,                             // auto-allow every tool call (dangerous)
 
-  "delegation": { "max_concurrent": 3 },
-  "verify": { "frontend": "auto" },          // auto | ask | off
+  "delegation": { "max_concurrent": 3, "max_restarts": 2, "watchdog_secs": 60 },
+  "verify": { "frontend": "auto", "buildTest": "auto" },  // auto | ask | off
+  "allowed_paths": ["/srv/hub-a", "/srv/hub-b"],          // multi-workspace allowlist
+  "sampling": { "temperature": 0.2 },                     // + sampling.<agent> overrides
+  "ast_search": { "enabled": false }, "code_graph": { "enabled": false }, "code_map": { "enabled": false },
   "tool_safety": { "fetch": "safe", "mcp__github__*": "caution" },     // per-tool overrides
   "permission": { "rules": [
     { "pattern": "bash(git *)", "action": "allow" },
@@ -270,16 +301,23 @@ or a rule says otherwise.
 
 ```text
 engine/                    Rust workspace (edition 2024; default-members = bebok-server)
-  crates/bebok-core/       config/, session/, agent/ (presets, delegation, verify prompts), permission/,
-                           store/, change_tracking, git, stats, tool_safety, plugin, context, event bus
+  crates/bebok-core/       config/, session/, agent/ (presets, delegation, fleet_gen, verify prompts),
+                           permission/, store/, change_tracking, git, stats, tool_safety, plugin,
+                           context, event bus, code_index tools
   crates/bebok-server/     binary: cli, auth (token), cors, middleware, routes/ (route table), services/
-  crates/bebok-tools/      Tool trait + built-ins, browser/ (CDP), processes (background bash), pathguard
-  crates/bebok-llm/        providers, protocols (openai_chat, anthropic_messages), model_catalog, cost, cache_policy
+  crates/bebok-tools/      Tool trait + built-ins, browser/ (CDP + remote pull queue),
+                           processes (background bash), pathguard
+  crates/bebok-llm/        providers (incl. opencode, openrouter_batch), protocols
+                           (openai_chat, openai_responses, anthropic_messages), model_catalog, cost, cache_policy
   crates/bebok-mcp/        rmcp bridge        crates/bebok-skills/  AGENTS.md + skills
   crates/bebok-pty/        PTY manager (portable-pty, scrollback ring, tickets)
 client/                    Angular 20.3 (standalone, signals, zoneless) + Tauri 2 shell (src-tauri/)
-  src/app | core | views (start, chat, explorer, terminal, settings, stats, about, debug, browser-view)
-  src/ui (shell, sidebar, right-drawer/panels, command-palette, diff-view, ...) | src/i18n (12 languages)
+  src/app | core | views (start, chat, explorer, terminal, settings, stats, about, debug,
+    browser-view, updates, schedules) | src/ui (shell, sidebar, right-drawer/panels,
+    command-palette, diff-view, ...) | src/i18n (12 languages)
+  chrome-extension/        Companion MV3 extension (popup, options, remote piloting)
+  android/                 Capacitor shell + EngineLauncher plugin (unreleased scaffolding)
+skills/                    bundled skills (e.g. remote-browser-extension)
 scripts/bebok.mjs          doctor / full-build-dev / full-build-app / engine / client
 scripts/release.md         release runbook        .github/workflows/{ci,release}.yml
 ```
@@ -287,9 +325,9 @@ scripts/release.md         release runbook        .github/workflows/{ci,release}
 Tests:
 
 ```bash
-cd engine && cargo test --workspace                      # ~550 tests (1.5.0 QA: 0 failures)
+cd engine && cargo test --workspace                      # engine suite (1.5.0 QA: 550 tests / 0 failures)
 cd engine && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
-cd client && npm test                                    # ng test (Karma + Jasmine, ~63 spec files)
+cd client && npm test                                    # ng test (Karma + Jasmine; 1.5.0 QA: 576 tests / 0)
 cd client && npm run build                               # type-check + bundle
 ```
 
