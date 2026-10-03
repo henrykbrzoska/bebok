@@ -36,6 +36,8 @@ import { ModelSelect } from '../../ui/model-select/model-select';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ToastHost } from '../../ui/toast/toast-host';
+import { ToastStore } from '../../ui/toast/toast.store';
+import { ShellStore } from '../../ui/shell/shell.store';
 import { ChatSessionStore } from './chat-session.store';
 import { resolveEffectiveModel } from './effective-model';
 import { MessageRowComponent } from './parts/message-row';
@@ -217,6 +219,8 @@ export class ChatView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly tabs = inject(OpenSessionsStore);
   private readonly activity = inject(SessionActivityStore);
+  private readonly toasts = inject(ToastStore);
+  private readonly shell = inject(ShellStore);
   private readonly sessionStore = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -1066,7 +1070,7 @@ export class ChatView implements OnInit, OnDestroy {
     this.sending.set(true);
     this.error.set(null);
     try {
-      await this.engine.prompt(
+      const result = await this.engine.prompt(
         sessionID,
         queuedPromptBody(head),
       );
@@ -1076,6 +1080,14 @@ export class ChatView implements OnInit, OnDestroy {
       }
       this.markPending(head.text, 'sent');
       this.queue.update((q) => q.slice(1));
+      if (result?.status === 'batch') {
+        // Queued into an async Batch job: no turn is running for it, so the
+        // transcript must not be marked running - point the user at the panel.
+        this.running.set(false);
+        this.toasts.show(this.t('chat.batch.queued'), { kind: 'success' });
+        this.shell.revealRightDrawerPanel('batch');
+        return;
+      }
       this.running.set(true);
     } catch (err) {
       if (sessionID !== this.sessionID()) {

@@ -16,9 +16,9 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use bebok_core::batch::{BatchItem, BatchItemStatus, BatchRecord, BatchState, BatchStore};
+use bebok_core::batch::{BatchItem, BatchItemStatus, BatchState, BatchStore};
 use bebok_core::event::Event;
-use bebok_llm::{ProviderSpec, is_batch_model};
+use bebok_llm::{LlmError, ProviderSpec};
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -57,8 +57,8 @@ pub struct SubmitBatchRequest {
 /// `POST /session/{id}/batch` -> `{ batchID }`.
 ///
 /// Validates the model carries the `:batch` suffix, stores the record, spawns
-/// the background driver (upload -> submit -> poll -> download) and returns
-/// immediately. The interactive turn lock is never touched.
+/// the background driver (submit inline requests -> poll -> inline results)
+/// and returns immediately. The interactive turn lock is never touched.
 pub async fn submit_batch(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -69,66 +69,12 @@ pub async fn submit_batch(
         .clone()
         .filter(|d| !d.trim().is_empty())
         .ok_or_else(|| ApiError::bad_request("missing directory").into_response())?;
-    if !is_batch_model(&body.model) {
-        return Err(ApiError::bad_request(format!(
-            "model '{}' is not a batch model: batch jobs need the ':batch' suffix (e.g. 'openrouter/deepseek/deepseek-chat:batch')",
-            body.model
-        ))
-        .into_response());
-    }
-    if body.items.is_empty() {
-        return Err(ApiError::bad_request("batch needs at least one item").into_response());
-    }
-    let provider = body
-        .model
-        .split_once('/')
-        .map(|(p, _)| p.to_string())
-        .unwrap_or_else(|| "openrouter".to_string());
-
-    // Resolve the provider spec now (fail fast on missing key / unknown
-    // provider) so the background task starts from a known-good spec.
-    let spec = provider_spec(&state, &directory, &provider).await?;
-
-    let record = BatchRecord {
-        id: String::new(),
-        directory: directory.clone(),
-        session_id: id.to_string(),
-        provider: provider.clone(),
-        model: body.model.clone(),
-        state: BatchState::Created,
-        job_id: None,
-        items: body
-            .items
-            .into_iter()
-            .enumerate()
-            .map(|(index, item)| BatchItem {
-                index: index as u32,
-                model: body.model.clone(),
-                messages: item.messages,
-                status: BatchItemStatus::Pending,
-                result: None,
-                error: None,
-            })
-            .collect(),
-        created_at: String::new(),
-        updated_at: String::new(),
-        error: None,
-    };
-    let batch_id = state.batches.insert(record).await;
-    let count = state
-        .batches
-        .get(&batch_id)
-        .await
-        .map(|r| r.items.len())
-        .unwrap_or(0);
-    state.store.bus().publish(Event::batch_submitted(
-        &directory,
-        &id.to_string(),
-        &batch_id,
-        count,
-    ));
-
-    spawn_batch_driver(state.clone(), batch_id.clone(), spec);
+    // Shared submission path (also used by the `:batch` chat fallback in
+    // `services::turn`): validate, store, emit `batch.submitted`, spawn.
+    let batch_id =
+        crate::services::batch::submit_batch_job(&state, &directory, id, &body.model, body.items)
+            .await
+            .map_err(|e| e.into_response())?;
     Ok(Json(serde_json::json!({ "batchID": batch_id })))
 }
 
@@ -185,35 +131,35 @@ pub async fn cancel_batch(
     Ok(Json(serde_json::json!({ "cancelled": true })))
 }
 
-/// Look up the provider spec from the instance's resolved config.
-async fn provider_spec(
+/// Look up the provider spec from the instance's resolved config (built-ins
+/// merged with global/project `providers`, so `openai`, `openrouter`, … work
+/// even with no explicit config entry).
+///
+/// Shared with `services::batch::submit_batch_job` (the `:batch` chat
+/// fallback); route handlers map the `ApiError` into a response.
+pub(crate) async fn provider_spec(
     state: &AppState,
     directory: &str,
     provider: &str,
-) -> Result<ProviderSpec, axum::response::Response> {
+) -> Result<ProviderSpec, ApiError> {
     let instance = state
         .store
         .get_or_create_instance(directory)
         .await
-        .map_err(|e| ApiError::internal(format!("instance error: {e}")).into_response())?;
+        .map_err(|e| ApiError::internal(format!("instance error: {e}")))?;
     let config = instance.config_snapshot();
     config
-        .providers
-        .iter()
-        .find(|p| p.name == provider)
-        .cloned()
-        .ok_or_else(|| {
-            ApiError::bad_request(format!("unknown provider '{provider}'")).into_response()
-        })
+        .provider_spec(provider)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown provider '{provider}'")))
 }
 
-/// Background driver: upload JSONL -> submit -> poll until terminal (or the
-/// record is cancelled) -> download output -> fill items -> terminal events.
+/// Background driver: submit inline requests -> poll until terminal (or the
+/// record is cancelled) -> read inline results -> fill items -> terminal events.
 ///
-/// Each item becomes one JSONL line: `{"custom_id": "<index>",
-/// "method": "POST", "url": "/v1/chat/completions",
-/// "body": {"model": "<upstream>", "messages": [...]}}`.
-fn spawn_batch_driver(state: AppState, batch_id: String, spec: ProviderSpec) {
+/// Each item becomes one entry of the `requests` array:
+/// `{"custom_id": "<index>", "body": {"messages": [...]}}` — the model is
+/// declared once, at batch level, as an OpenRouter slug.
+pub(crate) fn spawn_batch_driver(state: AppState, batch_id: String, spec: ProviderSpec) {
     tokio::spawn(async move {
         let store: Arc<BatchStore> = state.batches.clone();
         if let Err(err) = drive_batch(&state, &batch_id, &spec).await {
@@ -241,35 +187,29 @@ async fn drive_batch(state: &AppState, batch_id: &str, spec: &ProviderSpec) -> R
         .get(batch_id)
         .await
         .ok_or_else(|| "batch record vanished".to_string())?;
-    // Strip the provider prefix AND the :batch suffix for the upstream id.
+    // Strip the :batch suffix for the upstream model slug sent at batch level.
+    // The full vendor/model path is preserved (e.g. "openai/gpt-6.1-sol-pro").
     let upstream = upstream_model(&record.model);
 
-    // 1. Upload the JSONL input file.
+    // 1. Submit every item inline — OpenRouter persists the JSONL itself.
     store
         .update(batch_id, |rec| rec.state = BatchState::Uploading)
         .await;
-    let mut lines = Vec::with_capacity(record.items.len());
-    for item in &record.items {
-        let line = serde_json::json!({
-            "custom_id": item.index.to_string(),
-            "method": "POST",
-            "url": "/v1/chat/completions",
-            "body": { "model": upstream, "messages": item.messages },
-        });
-        lines.push(serde_json::to_string(&line).map_err(|e| e.to_string())?);
-    }
-    let file_id = bebok_llm::upload_batch_file(spec, &lines.join("\n"))
-        .await
-        .map_err(|e| format!("file upload failed: {e}"))?;
+    let requests: Vec<bebok_llm::BatchRequest> = record
+        .items
+        .iter()
+        .map(|item| bebok_llm::BatchRequest {
+            custom_id: item.index.to_string(),
+            body: bebok_llm::BatchRequestBody {
+                messages: item.messages.clone(),
+            },
+        })
+        .collect();
 
     // 2. Submit the job.
-    let job = bebok_llm::submit_batch(
-        spec,
-        &file_id,
-        serde_json::json!({ "bebok_batch": batch_id }),
-    )
-    .await
-    .map_err(|e| format!("batch submit failed: {e}"))?;
+    let job = bebok_llm::submit_batch(spec, &upstream, requests)
+        .await
+        .map_err(|e| format!("batch submit failed: {e}"))?;
     let provider_job_id = job.id.clone();
     store
         .update(batch_id, |rec| {
@@ -279,7 +219,12 @@ async fn drive_batch(state: &AppState, batch_id: &str, spec: &ProviderSpec) -> R
         .await;
 
     // 3. Poll until the provider job is terminal or we are cancelled.
+    // OpenRouter may answer 404 ("not found") for a few polls right after
+    // the submit, before the job materializes — tolerate those briefly
+    // instead of failing the whole batch on the first poll.
+    const MAX_POLL_NOT_FOUND: u32 = 5;
     let total = record.items.len();
+    let mut not_found_streak: u32 = 0;
     loop {
         if store
             .get(batch_id)
@@ -289,10 +234,25 @@ async fn drive_batch(state: &AppState, batch_id: &str, spec: &ProviderSpec) -> R
         {
             return Err("cancelled by user".to_string());
         }
-        let job = bebok_llm::get_batch(spec, &provider_job_id)
-            .await
-            .map_err(|e| format!("batch poll failed: {e}"))?;
-        let done = (job.counts.completed + job.counts.failed) as usize;
+        let job = match bebok_llm::get_batch(spec, &provider_job_id).await {
+            Ok(job) => {
+                not_found_streak = 0;
+                job
+            }
+            Err(e)
+                if matches!(&e, LlmError::Http { status: 404, .. })
+                    && not_found_streak < MAX_POLL_NOT_FOUND =>
+            {
+                not_found_streak += 1;
+                store
+                    .update(batch_id, |rec| rec.state = BatchState::Polling)
+                    .await;
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+            Err(e) => return Err(format!("batch poll failed: {e}")),
+        };
+        let done = (job.request_counts.completed + job.request_counts.failed) as usize;
         state.store.bus().publish(Event::batch_progress(
             &record.directory,
             &record.session_id,
@@ -301,7 +261,7 @@ async fn drive_batch(state: &AppState, batch_id: &str, spec: &ProviderSpec) -> R
             total,
         ));
         if job.status.is_terminal() {
-            return finish_batch(state, batch_id, spec, &job).await;
+            return finish_batch(state, batch_id, &job).await;
         }
         store
             .update(batch_id, |rec| rec.state = BatchState::Polling)
@@ -310,72 +270,82 @@ async fn drive_batch(state: &AppState, batch_id: &str, spec: &ProviderSpec) -> R
     }
 }
 
-/// Fetch the output file, map each JSONL line back onto its item by
-/// `custom_id`, and publish the terminal event.
+/// Map a completed job's inline `results[]` back onto batch items by
+/// `custom_id` (the item index as a string).
+///
+/// Returns `(ok, failed)`. A result counts as `ok` when its response has
+/// `status_code == 200` and carries assistant content; anything else
+/// (provider `error`, non-200 status, missing content or a `custom_id`
+/// with no matching item) marks the item `Failed` with a diagnostic.
+pub fn apply_results(
+    items: &mut [BatchItem],
+    results: &[bebok_llm::BatchResult],
+) -> (usize, usize) {
+    use std::collections::HashMap;
+
+    let mut by_id: HashMap<&str, &bebok_llm::BatchResult> = HashMap::new();
+    for result in results {
+        by_id.insert(result.custom_id.as_str(), result);
+    }
+
+    let mut ok = 0usize;
+    let mut failed = 0usize;
+    for item in items.iter_mut() {
+        match by_id.get(item.index.to_string().as_str()) {
+            Some(result) => {
+                let status = result.response.as_ref().map(|r| r.status_code).unwrap_or(0);
+                if status == 200 {
+                    match result.content() {
+                        Some(content) => {
+                            item.status = BatchItemStatus::Done;
+                            item.result = Some(content);
+                            item.error = None;
+                            ok += 1;
+                        }
+                        None => {
+                            item.status = BatchItemStatus::Failed;
+                            item.error = Some("batch result has no assistant content".to_string());
+                            failed += 1;
+                        }
+                    }
+                } else if let Some(err) = result.error.as_ref() {
+                    item.status = BatchItemStatus::Failed;
+                    item.error = Some(err.to_string());
+                    failed += 1;
+                } else {
+                    item.status = BatchItemStatus::Failed;
+                    item.error = Some(format!("batch request failed with status {status}"));
+                    failed += 1;
+                }
+            }
+            None => {
+                item.status = BatchItemStatus::Failed;
+                item.error = Some("missing from batch output".to_string());
+                failed += 1;
+            }
+        }
+    }
+    (ok, failed)
+}
+
+/// Map a completed job's inline `results[]` back onto its items by
+/// `custom_id` and publish the terminal event.
+///
+/// Pure logic lives in [`apply_results`]; this wrapper only touches the
+/// store and the event bus.
 async fn finish_batch(
     state: &AppState,
     batch_id: &str,
-    spec: &ProviderSpec,
     job: &bebok_llm::BatchJob,
 ) -> Result<(), String> {
     let store = state.batches.clone();
     if job.status == bebok_llm::BatchStatus::Completed {
-        let file_id = job.output_file_id.clone().unwrap_or_default();
-        let text = bebok_llm::download_output(spec, &file_id)
-            .await
-            .map_err(|e| format!("output download failed: {e}"))?;
-        let mut ok = 0usize;
-        let mut failed = 0usize;
-        let mut results: std::collections::HashMap<u32, Result<String, String>> =
-            std::collections::HashMap::new();
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-            let index: u32 = value
-                .get("custom_id")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(u32::MAX);
-            if index == u32::MAX {
-                continue;
-            }
-            let entry = if value.get("error").is_some() {
-                failed += 1;
-                Err(value.to_string())
-            } else {
-                let content = value
-                    .pointer("/response/body/choices/0/message/content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                ok += 1;
-                Ok(content)
-            };
-            results.insert(index, entry);
-        }
+        let results = job.results.clone().unwrap_or_default();
+        let (ok, failed) = store
+            .update_and_map(batch_id, |rec| apply_results(&mut rec.items, &results))
+            .await;
         store
-            .update(batch_id, |rec| {
-                for item in &mut rec.items {
-                    match results.remove(&item.index) {
-                        Some(Ok(content)) => {
-                            item.status = BatchItemStatus::Done;
-                            item.result = Some(content);
-                        }
-                        Some(Err(err)) => {
-                            item.status = BatchItemStatus::Failed;
-                            item.error = Some(err);
-                        }
-                        None => {
-                            item.status = BatchItemStatus::Failed;
-                            item.error = Some("missing from batch output".to_string());
-                        }
-                    }
-                }
-                rec.state = BatchState::Completed;
-            })
+            .update(batch_id, |rec| rec.state = BatchState::Completed)
             .await;
         if let Some(rec) = store.get(batch_id).await {
             state.store.bus().publish(Event::batch_completed(
@@ -392,17 +362,37 @@ async fn finish_batch(
     }
 }
 
-/// `openrouter/deepseek/deepseek-chat:batch` -> `deepseek/deepseek-chat`.
+/// Strip the `:batch` / `:BATCH` suffix from a model identifier, preserving
+/// the full upstream model id (including any vendor prefix the provider needs).
+///
+/// Batch jobs always route through the OpenRouter provider spec, so the
+/// full model path must be preserved for OpenRouter to resolve the upstream:
+///
+/// - `openai/gpt-6.1-sol-pro:batch`       -> `openai/gpt-6.1-sol-pro`
+/// - `openrouter/deepseek/deepseek-chat:batch` -> `deepseek/deepseek-chat`
+/// - `openrouter/openai/gpt-6.1-sol-pro:batch` -> `openai/gpt-6.1-sol-pro`
+/// - `plain-model:batch`                    -> `plain-model`
 fn upstream_model(model: &str) -> String {
-    let without_prefix = match model.split_once('/') {
-        Some((_, rest)) => rest,
-        None => model,
-    };
-    without_prefix
+    let without_suffix = model
         .strip_suffix(":batch")
-        .or_else(|| without_prefix.strip_suffix(":BATCH"))
-        .unwrap_or(without_prefix)
+        .or_else(|| model.strip_suffix(":BATCH"))
+        .unwrap_or(model);
+    // A leading `openrouter/` names the Bebok provider, not the upstream
+    // vendor — OpenRouter itself expects `vendor/model`.
+    without_suffix
+        .strip_prefix("openrouter/")
+        .unwrap_or(without_suffix)
         .to_string()
+}
+
+/// Resolve the provider name for batch routing.
+///
+/// The batch client speaks the native OpenRouter batch protocol
+/// (`POST /batches` with inline `requests`), so batch jobs are always
+/// routed through the `openrouter` provider spec regardless of the model's
+/// Bebok provider prefix.
+pub(crate) fn batch_provider(_model: &str) -> String {
+    "openrouter".to_string()
 }
 
 #[cfg(test)]
@@ -410,12 +400,128 @@ mod tests {
     use super::*;
 
     #[test]
-    fn upstream_strips_prefix_and_suffix() {
+    fn upstream_strips_suffix_preserves_path() {
+        // Bare vendor/model with :batch
         assert_eq!(
             upstream_model("openrouter/deepseek/deepseek-chat:batch"),
             "deepseek/deepseek-chat"
         );
+        // Direct vendor model routed through openrouter
+        assert_eq!(
+            upstream_model("openai/gpt-6.1-sol-pro:batch"),
+            "openai/gpt-6.1-sol-pro"
+        );
+        // Nested openrouter prefix (e.g. openrouter/openai/...)
+        assert_eq!(
+            upstream_model("openrouter/openai/gpt-6.1-sol-pro:batch"),
+            "openai/gpt-6.1-sol-pro"
+        );
+        // No :batch suffix — pass through unchanged
         assert_eq!(upstream_model("openrouter/gpt-4o"), "gpt-4o");
+        // Plain model with :batch
         assert_eq!(upstream_model("plain-model:batch"), "plain-model");
+        // Case-insensitive suffix
+        assert_eq!(
+            upstream_model("openrouter/deepseek/deepseek-chat:BATCH"),
+            "deepseek/deepseek-chat"
+        );
+    }
+
+    #[test]
+    fn batch_provider_always_returns_openrouter() {
+        assert_eq!(batch_provider("openai/gpt-6.1-sol-pro:batch"), "openrouter");
+        assert_eq!(
+            batch_provider("openrouter/deepseek/deepseek-chat:batch"),
+            "openrouter"
+        );
+    }
+
+    fn sample_items() -> Vec<BatchItem> {
+        (0..3)
+            .map(|index| BatchItem {
+                index,
+                model: "openai/gpt-4o:batch".into(),
+                messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+                status: BatchItemStatus::Pending,
+                result: None,
+                error: None,
+            })
+            .collect()
+    }
+
+    fn ok_result(custom_id: &str, content: &str) -> bebok_llm::BatchResult {
+        bebok_llm::BatchResult {
+            id: Some(format!("batch_req_{custom_id}")),
+            custom_id: custom_id.into(),
+            response: Some(bebok_llm::BatchResponse {
+                status_code: 200,
+                request_id: Some("request_1".into()),
+                body: serde_json::json!({
+                    "choices": [{ "message": { "role": "assistant", "content": content } }]
+                }),
+            }),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn apply_results_maps_done_by_custom_id() {
+        let mut items = sample_items();
+        let results = vec![ok_result("0", "hello"), ok_result("2", "world")];
+
+        let (ok, failed) = apply_results(&mut items, &results);
+
+        assert_eq!((ok, failed), (2, 1));
+        assert_eq!(items[0].status, BatchItemStatus::Done);
+        assert_eq!(items[0].result.as_deref(), Some("hello"));
+        assert_eq!(items[2].status, BatchItemStatus::Done);
+        assert_eq!(items[2].result.as_deref(), Some("world"));
+        // Item 1 has no matching custom_id.
+        assert_eq!(items[1].status, BatchItemStatus::Failed);
+        assert_eq!(items[1].error.as_deref(), Some("missing from batch output"));
+    }
+
+    #[test]
+    fn apply_results_marks_errors_failed() {
+        let mut items = sample_items();
+        let results = vec![
+            bebok_llm::BatchResult {
+                custom_id: "0".into(),
+                response: None,
+                error: Some(serde_json::json!({"message": "boom"})),
+                ..bebok_llm::BatchResult::default()
+            },
+            bebok_llm::BatchResult {
+                custom_id: "1".into(),
+                response: Some(bebok_llm::BatchResponse {
+                    status_code: 429,
+                    request_id: None,
+                    body: serde_json::json!({}),
+                }),
+                error: None,
+                ..bebok_llm::BatchResult::default()
+            },
+            bebok_llm::BatchResult {
+                custom_id: "2".into(),
+                response: Some(bebok_llm::BatchResponse {
+                    status_code: 200,
+                    request_id: None,
+                    body: serde_json::json!({"choices": []}),
+                }),
+                error: None,
+                ..bebok_llm::BatchResult::default()
+            },
+        ];
+
+        let (ok, failed) = apply_results(&mut items, &results);
+
+        assert_eq!((ok, failed), (0, 3));
+        assert!(items.iter().all(|i| i.status == BatchItemStatus::Failed));
+        assert!(items[0].error.as_deref().unwrap().contains("boom"));
+        assert!(items[1].error.as_deref().unwrap().contains("status 429"));
+        assert_eq!(
+            items[2].error.as_deref(),
+            Some("batch result has no assistant content")
+        );
     }
 }

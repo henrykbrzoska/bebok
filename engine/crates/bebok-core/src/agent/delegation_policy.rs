@@ -10,7 +10,8 @@
 //!
 //! The text is deliberately operational rather than aspirational: it names the
 //! tools (`task` with `background: true`, `task_wait`, `task_status`,
-//! `task_cancel`, `fleet`), the triggers that must lead to decomposition, and
+//! `task_cancel`, `task_report`, `fleet`), the triggers that must lead to
+//! decomposition, and
 //! the supervision loop the main thread has to run. `off` yields no text at all
 //! - the tools stay available, the model just is not pushed to use them.
 //!
@@ -50,8 +51,14 @@ pub struct FleetMemberInfo {
 /// fan-out. [`is_active`] == [`is_usable`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FleetContext {
-    /// This agent actually has the `fleet` tool ([`FLEET_AGENT`] only).
+    /// This agent actually has the `fleet` tool ([`FLEET_AGENT`] only, and
+    /// only when the tool is registered — see `from_config_and_tools`).
     pub tool_available: bool,
+    /// This prompt is built for the orchestrator preset (the only preset
+    /// that may carry the `fleet` tool). Needed to tell "non-orchestrator
+    /// agent" (no note at all) apart from "orchestrator whose registry
+    /// lacks the tool" (note naming the registry gap).
+    pub is_orchestrator: bool,
     /// `fleet.enabled` in the resolved config.
     pub enabled: bool,
     /// Configured members, in config order.
@@ -64,9 +71,32 @@ pub struct FleetContext {
 impl FleetContext {
     /// Snapshot of the resolved config, seen from `agent_name`, for a prompt
     /// whose "Run as fleet" switch is `fleet_requested`.
+    ///
+    /// Honesty caveat: `tool_available` is derived from the agent name only —
+    /// it assumes the `fleet` tool is registered in the instance registry.
+    /// Prefer [`from_config_and_tools`] at the real assembly sites, which
+    /// also checks the registry, so the prompt never advertises a tool the
+    /// model cannot actually call.
     pub fn from_config(cfg: &ResolvedConfig, agent_name: &str, fleet_requested: bool) -> Self {
+        Self::from_config_and_tools(cfg, agent_name, fleet_requested, true)
+    }
+
+    /// Same as [`from_config`], but `registry_has_fleet` reports whether the
+    /// instance tool registry actually contains the `fleet` tool
+    /// (`instance.tools.get("fleet").is_some()`). When the tool is missing —
+    /// e.g. a store built without the shared back-reference, or an external
+    /// harness that pasted the prompt without injecting delegation tools —
+    /// the context reports unusable with the real reason instead of
+    /// advertising a roster the model can never fan out to.
+    pub fn from_config_and_tools(
+        cfg: &ResolvedConfig,
+        agent_name: &str,
+        fleet_requested: bool,
+        registry_has_fleet: bool,
+    ) -> Self {
         Self {
-            tool_available: agent_name == FLEET_AGENT,
+            tool_available: agent_name == FLEET_AGENT && registry_has_fleet,
+            is_orchestrator: agent_name == FLEET_AGENT,
             enabled: cfg.is_fleet_enabled(),
             members: cfg
                 .fleet_members()
@@ -101,12 +131,20 @@ impl FleetContext {
     /// prefers `fleet`, regardless of the legacy per-prompt flag. When
     /// unusable it names the reason and falls back to `task`.
     fn note(&self) -> String {
-        if !self.tool_available {
+        let registry_gap = self.is_orchestrator && self.enabled && !self.members.is_empty();
+        if !(self.tool_available || registry_gap) {
             return String::new();
         }
         if !self.is_usable() {
             let why = if !self.tool_available {
-                "this agent does not carry the `fleet` tool"
+                if self.enabled && !self.members.is_empty() {
+                    "the `fleet` tool is not registered in this session's tool list \
+                     (external harness or unshared store) — the roster below is what the \
+                     config declares, but a `fleet` call would fail; work the subtasks \
+                     yourself or via `task` calls instead"
+                } else {
+                    "this agent does not carry the `fleet` tool"
+                }
             } else if !self.enabled {
                 "`fleet.enabled` is false"
             } else {
@@ -161,11 +199,17 @@ impl FleetContext {
 
 /// Short delegation note for the orchestrator: the fleet roster, the spawn
 /// rule (members from the fleet list only), the concurrency cap, and the
-/// supervision tools. `None` for agents without the `fleet` tool (naming a
-/// tool that is not in their list only invites a hallucinated call).
+/// supervision tools. `None` for agents without the `fleet` tool — except
+/// the orchestrator-with-config-but-no-tool case (external harness /
+/// unshared store), where the note names the registry gap instead of
+/// advertising fan-out (naming a tool that is not in the list only invites
+/// a hallucinated call).
 pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> Option<String> {
     if !fleet.tool_available {
-        return None;
+        let registry_gap = fleet.is_orchestrator && fleet.enabled && !fleet.members.is_empty();
+        if !registry_gap {
+            return None;
+        }
     }
     let max = cfg.effective_max_concurrent();
     Some(format!(
@@ -177,8 +221,10 @@ pub fn delegation_policy_note(cfg: &DelegationConfig, fleet: &FleetContext) -> O
          preset or model directly.\n\
          - At most {max} sub-agents run at once; extra ones queue automatically.\n\
          - Supervise with `task_status` (what each child is doing), `task_wait` (collect \
-         results; never end your turn with children still running), and `task_cancel` \
-         (stop a child that loops or wanders, then re-delegate with a tighter brief).\n\
+         results; never end your turn with children still running), `task_cancel` \
+         (stop a child that loops or wanders, then re-delegate with a tighter brief) and \
+         `task_report` (read what a child actually did — work log, changed files, last output — \
+         especially after a cancel, since an aborted child reports no text).\n\
          {supervision}\
          {fleet_line}",
         supervision = supervision_note(),
@@ -196,8 +242,10 @@ fn supervision_note() -> String {
      a `code` child repeating the same edit is looping, an `ask` child touching files is \
      wandering.\n\
      - Call it to order: `task_cancel` the flagged child with reason `looping` or \
-     `wandering`, then immediately re-task the same part with a tighter brief (narrower \
-     file ownership, explicit stop condition).\n\
+     `wandering`, then `task_report` on that child to read its work log, changed files and \
+     last output, then immediately re-task the same part with a tighter brief (narrower \
+     file ownership, explicit stop condition) that builds on the partial work instead of \
+     repeating it.\n\
      - Escalate: if the re-tasked child is flagged again, do not spawn a third time — \
      finish that part yourself.\n"
         .to_string()
@@ -240,6 +288,7 @@ mod tests {
     fn fleet_requested(members: &[(&str, &str, &str)], requested: bool) -> FleetContext {
         FleetContext {
             tool_available: true,
+            is_orchestrator: true,
             enabled: true,
             members: members
                 .iter()
@@ -262,7 +311,14 @@ mod tests {
     #[test]
     fn note_names_fleet_only_spawn_and_supervision() {
         let note = note_with(&cfg(), &FleetContext::default());
-        for kw in ["fleet", "names", "task_wait", "task_status", "task_cancel"] {
+        for kw in [
+            "fleet",
+            "names",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
             assert!(note.contains(kw), "missing {kw}:\n{note}");
         }
         assert!(note.contains("At most 3 sub-agents"), "{note}");
@@ -310,6 +366,7 @@ mod tests {
             .collect();
         let ctx = FleetContext {
             tool_available: true,
+            is_orchestrator: true,
             enabled: true,
             members: many
                 .iter()
@@ -331,6 +388,7 @@ mod tests {
     fn fleet_is_not_named_for_agents_without_the_tool() {
         let ctx = FleetContext {
             tool_available: false,
+            is_orchestrator: false,
             enabled: true,
             members: vec![FleetMemberInfo {
                 name: "ask-a".into(),
@@ -384,6 +442,33 @@ mod tests {
         assert!(!ctx.is_usable());
         assert!(!ctx.is_active());
         assert!(note_with(&cfg(), &ctx).contains("NOT available"));
+    }
+
+    #[test]
+    fn missing_registry_tool_reports_the_real_reason() {
+        // Full config, but the `fleet` tool is not in the session's tool
+        // list (external harness / unshared store): the context must be
+        // unusable and name the registry — not the agent, config or roster.
+        let mut conf = ResolvedConfig::default();
+        conf.fleet.enabled = true;
+        conf.fleet.members.push(crate::config::FleetMember {
+            name: "ask-a".into(),
+            agent: "ask".into(),
+            model: "openai/gpt-4.1-nano".into(),
+        });
+        let ctx = FleetContext::from_config_and_tools(&conf, "orchestrator", false, false);
+        assert!(!ctx.tool_available);
+        assert!(!ctx.is_usable());
+        assert!(!ctx.is_active());
+        // NB: `note_with` forces `tool_available = true`, so it cannot render
+        // this path — call the note directly.
+        let note = delegation_policy_note(&cfg(), &ctx).expect("orchestrator note is always Some");
+        assert!(note.contains("NOT available"), "{note}");
+        assert!(note.contains("not registered"), "{note}");
+        // Same inputs with the tool present: usable, roster advertised.
+        let ok = FleetContext::from_config_and_tools(&conf, "orchestrator", false, true);
+        assert!(ok.is_usable());
+        assert!(note_with(&cfg(), &ok).contains("prefer `fleet` for independent"));
     }
 
     #[test]

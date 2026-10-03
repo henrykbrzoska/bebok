@@ -1,10 +1,16 @@
-//! OpenRouter Batch API client.
+//! OpenRouter Batch API client (native shape).
+//!
+//! OpenRouter's native Batch API takes the work inline: one
+//! `POST {base}/batches` carrying `endpoint`, `model`, `completion_window`
+//! and a `requests` array of `{custom_id, body}` — no JSONL upload, no
+//! result download. Results come back inline in the completed batch object
+//! (`results[]`), so the lifecycle is submit → poll → read results.
 //!
 //! This module is *not* a [`crate::Provider`] implementation — the `Provider`
 //! trait exposes a single `stream` method that does not fit the batch REST
-//! lifecycle (submit → poll → download). Instead it provides standalone async
-//! functions driving the batch job through its three phases, using the same
-//! authentication and base-URL resolution as the streaming provider.
+//! lifecycle. Instead it provides standalone async functions driving the
+//! batch job, using the same authentication and base-URL resolution as the
+//! streaming provider.
 
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
@@ -15,7 +21,7 @@ use crate::spec::resolve_api_key;
 
 /// The endpoint a batch job runs against.
 const BATCH_ENDPOINT: &str = "/v1/chat/completions";
-/// How long the provider keeps accepting a batch's work.
+/// The only completion window OpenRouter accepts.
 const COMPLETION_WINDOW: &str = "24h";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +103,13 @@ impl<'de> Deserialize<'de> for BatchStatus {
     }
 }
 
-/// Per-request counts tracked by the batch.
+impl Default for BatchStatus {
+    fn default() -> Self {
+        Self::Other(String::new())
+    }
+}
+
+/// Per-request counts tracked by the batch (`request_counts` on the wire).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchCounts {
     #[serde(default)]
@@ -106,6 +118,99 @@ pub struct BatchCounts {
     pub completed: u64,
     #[serde(default)]
     pub failed: u64,
+}
+
+/// One inline request of the `requests` array: a `custom_id` (Bebok sends
+/// the item index) plus the request body (chat messages only — the model is
+/// declared once, at batch level).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRequest {
+    pub custom_id: String,
+    pub body: BatchRequestBody,
+}
+
+/// The body of a single batched request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRequestBody {
+    pub messages: Vec<serde_json::Value>,
+}
+
+/// Body of `POST /batches`.
+///
+/// The field order is load-bearing: OpenRouter stream-parses the payload and
+/// returns `400` if `requests` is serialized before the scalar fields, so
+/// this must stay a struct with `requests` last.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubmitBatchBody {
+    pub endpoint: &'static str,
+    pub model: String,
+    pub completion_window: &'static str,
+    pub requests: Vec<BatchRequest>,
+}
+
+/// The successful HTTP response wrapper of one result item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchResponse {
+    #[serde(default)]
+    pub status_code: u16,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    /// The chat-completion body.
+    #[serde(default)]
+    pub body: serde_json::Value,
+}
+
+/// One entry of the completed batch's inline `results` array.
+///
+/// Exactly one of `response` / `error` is populated.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BatchResult {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub custom_id: String,
+    #[serde(default)]
+    pub response: Option<BatchResponse>,
+    #[serde(default)]
+    pub error: Option<serde_json::Value>,
+}
+
+impl BatchResult {
+    /// The assistant message content of a successful result, if present.
+    ///
+    /// Usually a plain string; when the provider returns content parts,
+    /// their `text` fields are concatenated.
+    pub fn content(&self) -> Option<String> {
+        let content = self
+            .response
+            .as_ref()?
+            .body
+            .pointer("/choices/0/message/content")?;
+        match content {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Array(parts) => {
+                let mut out = String::new();
+                for part in parts {
+                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                        out.push_str(text);
+                    }
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Token usage of a finished batch (`null` until it completes).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BatchUsage {
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    #[serde(default)]
+    pub completion_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
 }
 
 /// A batch job returned by `POST /batches` / `GET /batches/{id}`.
@@ -120,21 +225,20 @@ pub struct BatchJob {
     #[serde(default)]
     pub endpoint: String,
     #[serde(default)]
-    pub input_file_id: Option<String>,
+    pub model: String,
     #[serde(default)]
-    pub output_file_id: Option<String>,
+    pub completion_window: String,
+    /// The provider reports progress in `request_counts`.
+    #[serde(default, alias = "counts")]
+    pub request_counts: BatchCounts,
     #[serde(default)]
-    pub error_file_id: Option<String>,
+    pub usage: Option<BatchUsage>,
+    /// Inline results — `null` until the batch completes.
     #[serde(default)]
-    pub counts: BatchCounts,
+    pub results: Option<Vec<BatchResult>>,
+    /// Top-level failure reason for a `failed` batch.
     #[serde(default)]
-    pub metadata: serde_json::Value,
-}
-
-impl Default for BatchStatus {
-    fn default() -> Self {
-        Self::Other(String::new())
-    }
+    pub error: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -186,60 +290,28 @@ async fn send(
     Ok(resp)
 }
 
-/// Read a `{ "id": "..." }` style object and return the id.
-fn expect_id(value: &serde_json::Value, what: &str) -> Result<String, LlmError> {
-    value
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            LlmError::Parse(format!(
-                "{what} response is missing a string 'id' field: {value}"
-            ))
-        })
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Upload a JSONL payload as a batch input file and return its file id.
-///
-/// `POST {base}/files` with `{"purpose": "batch", "content": <jsonl>}`.
-pub async fn upload_batch_file(spec: &ProviderSpec, jsonl: &str) -> Result<String, LlmError> {
-    let headers = build_headers(spec)?;
-    let client = reqwest::Client::new();
-    let body = serde_json::json!({ "purpose": "batch", "content": jsonl });
-
-    let resp = send(
-        client
-            .post(format!("{}/files", spec.base_url()))
-            .json(&body),
-        &headers,
-    )
-    .await?;
-
-    let value: serde_json::Value = resp.json().await.map_err(LlmError::Request)?;
-    expect_id(&value, "file upload")
-}
-
-/// Create a batch job for an already-uploaded input file.
+/// Create a batch job from inline requests.
 ///
 /// `POST {base}/batches` with
-/// `{"input_file_id", "endpoint", "completion_window", "metadata"}`.
+/// `{"endpoint", "model", "completion_window", "requests"}` — in that exact
+/// key order, because OpenRouter rejects a body where `requests` comes first.
 pub async fn submit_batch(
     spec: &ProviderSpec,
-    input_file_id: &str,
-    metadata: serde_json::Value,
+    model: &str,
+    requests: Vec<BatchRequest>,
 ) -> Result<BatchJob, LlmError> {
     let headers = build_headers(spec)?;
     let client = reqwest::Client::new();
-    let body = serde_json::json!({
-        "input_file_id": input_file_id,
-        "endpoint": BATCH_ENDPOINT,
-        "completion_window": COMPLETION_WINDOW,
-        "metadata": metadata,
-    });
+    let body = SubmitBatchBody {
+        endpoint: BATCH_ENDPOINT,
+        model: model.to_string(),
+        completion_window: COMPLETION_WINDOW,
+        requests,
+    };
 
     let resp = send(
         client
@@ -268,22 +340,6 @@ pub async fn get_batch(spec: &ProviderSpec, batch_id: &str) -> Result<BatchJob, 
     Ok(job)
 }
 
-/// Download a file's content as text — `GET {base}/files/{file_id}/content`.
-///
-/// Used to fetch a completed batch's `output_file_id` (or `error_file_id`).
-pub async fn download_output(spec: &ProviderSpec, file_id: &str) -> Result<String, LlmError> {
-    let headers = build_headers(spec)?;
-    let client = reqwest::Client::new();
-
-    let resp = send(
-        client.get(format!("{}/files/{file_id}/content", spec.base_url())),
-        &headers,
-    )
-    .await?;
-
-    resp.text().await.map_err(LlmError::Request)
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -292,32 +348,141 @@ pub async fn download_output(spec: &ProviderSpec, file_id: &str) -> Result<Strin
 mod tests {
     use super::*;
 
+    fn sample_requests() -> Vec<BatchRequest> {
+        vec![
+            BatchRequest {
+                custom_id: "0".into(),
+                body: BatchRequestBody {
+                    messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+                },
+            },
+            BatchRequest {
+                custom_id: "1".into(),
+                body: BatchRequestBody {
+                    messages: vec![serde_json::json!({"role": "user", "content": "bye"})],
+                },
+            },
+        ]
+    }
+
     #[test]
-    fn deserialize_completed_batch_with_counts() {
+    fn submit_body_orders_scalars_before_requests() {
+        let body = SubmitBatchBody {
+            endpoint: BATCH_ENDPOINT,
+            model: "openai/gpt-4o".into(),
+            completion_window: COMPLETION_WINDOW,
+            requests: sample_requests(),
+        };
+        let text = serde_json::to_string(&body).unwrap();
+
+        let endpoint = text.find("\"endpoint\"").unwrap();
+        let model = text.find("\"model\"").unwrap();
+        let window = text.find("\"completion_window\"").unwrap();
+        let requests = text.find("\"requests\"").unwrap();
+        assert!(endpoint < model, "{text}");
+        assert!(model < window, "{text}");
+        assert!(window < requests, "{text}");
+
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["endpoint"], "/v1/chat/completions");
+        assert_eq!(value["model"], "openai/gpt-4o");
+        assert_eq!(value["completion_window"], "24h");
+        assert_eq!(value["requests"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn request_bodies_carry_messages_only() {
+        let text = serde_json::to_string(&sample_requests()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(value[0]["custom_id"], "0");
+        assert_eq!(value[0]["body"]["messages"][0]["content"], "hi");
+        // The model lives at batch level, never inside a request body.
+        assert!(value[0]["body"].get("model").is_none());
+        assert!(!text.contains("\"method\""));
+        assert!(!text.contains("\"url\""));
+    }
+
+    #[test]
+    fn deserialize_completed_batch_with_results() {
         let json = serde_json::json!({
-            "id": "batch_abc123",
-            "status": "completed",
+            "id": "batch_123",
+            "object": "batch",
             "endpoint": "/v1/chat/completions",
-            "input_file_id": "file_in_001",
-            "output_file_id": "file_out_001",
-            "error_file_id": null,
-            "counts": { "total": 10, "completed": 10, "failed": 0 },
-            "metadata": { "project": "test" }
+            "model": "openai/gpt-4o",
+            "completion_window": "24h",
+            "status": "completed",
+            "request_counts": { "total": 2, "completed": 1, "failed": 1 },
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 },
+            "results": [
+                {
+                    "id": "batch_req_1",
+                    "custom_id": "0",
+                    "response": {
+                        "status_code": 200,
+                        "request_id": "request_123",
+                        "body": {
+                            "choices": [{ "message": { "role": "assistant", "content": "hello" } }]
+                        }
+                    },
+                    "error": null
+                },
+                {
+                    "custom_id": "1",
+                    "response": null,
+                    "error": { "code": "server_error", "message": "boom" }
+                }
+            ],
+            "error": null
         });
 
         let job: BatchJob = serde_json::from_value(json).unwrap();
 
-        assert_eq!(job.id, "batch_abc123");
+        assert_eq!(job.id, "batch_123");
         assert_eq!(job.status, BatchStatus::Completed);
         assert!(job.status.is_terminal());
         assert_eq!(job.endpoint, "/v1/chat/completions");
-        assert_eq!(job.input_file_id.as_deref(), Some("file_in_001"));
-        assert_eq!(job.output_file_id.as_deref(), Some("file_out_001"));
-        assert!(job.error_file_id.is_none());
-        assert_eq!(job.counts.total, 10);
-        assert_eq!(job.counts.completed, 10);
-        assert_eq!(job.counts.failed, 0);
-        assert_eq!(job.metadata["project"], "test");
+        assert_eq!(job.model, "openai/gpt-4o");
+        assert_eq!(job.completion_window, "24h");
+        assert_eq!(job.request_counts.total, 2);
+        assert_eq!(job.request_counts.completed, 1);
+        assert_eq!(job.request_counts.failed, 1);
+        assert_eq!(job.usage.as_ref().unwrap().total_tokens, 15);
+
+        let results = job.results.unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].custom_id, "0");
+        assert_eq!(results[0].content().as_deref(), Some("hello"));
+        assert_eq!(results[0].response.as_ref().unwrap().status_code, 200);
+        assert_eq!(results[1].custom_id, "1");
+        assert_eq!(results[1].content(), None);
+        assert_eq!(results[1].error.as_ref().unwrap()["message"], "boom");
+    }
+
+    #[test]
+    fn in_progress_batch_has_null_results() {
+        let job: BatchJob = serde_json::from_value(serde_json::json!({
+            "id": "batch_123",
+            "status": "in_progress",
+            "request_counts": { "total": 4, "completed": 1, "failed": 0 },
+            "results": null,
+            "usage": null,
+            "error": null
+        }))
+        .unwrap();
+
+        assert_eq!(job.status, BatchStatus::InProgress);
+        assert!(!job.status.is_terminal());
+        assert_eq!(job.request_counts.total, 4);
+        assert!(job.results.is_none());
+        assert!(job.usage.is_none());
+    }
+
+    #[test]
+    fn legacy_counts_key_still_deserializes() {
+        let job: BatchJob =
+            serde_json::from_value(serde_json::json!({ "counts": { "total": 3 } })).unwrap();
+        assert_eq!(job.request_counts.total, 3);
     }
 
     #[test]
@@ -325,7 +490,7 @@ mod tests {
         let json = serde_json::json!({
             "id": "batch_new",
             "status": "awaiting_upload",
-            "counts": {}
+            "request_counts": {}
         });
 
         let job: BatchJob = serde_json::from_value(json).unwrap();
@@ -344,11 +509,12 @@ mod tests {
 
         assert_eq!(job.id, "");
         assert_eq!(job.endpoint, "");
-        assert!(job.input_file_id.is_none());
-        assert!(job.output_file_id.is_none());
-        assert!(job.error_file_id.is_none());
-        assert_eq!(job.counts, BatchCounts::default());
-        assert!(job.metadata.is_null());
+        assert_eq!(job.model, "");
+        assert_eq!(job.completion_window, "");
+        assert_eq!(job.request_counts, BatchCounts::default());
+        assert!(job.usage.is_none());
+        assert!(job.results.is_none());
+        assert!(job.error.is_none());
     }
 
     #[test]
@@ -388,12 +554,16 @@ mod tests {
     }
 
     #[test]
-    fn expect_id_reads_the_id_field() {
-        let value = serde_json::json!({ "id": "file_1", "bytes": 12 });
-        assert_eq!(expect_id(&value, "file upload").unwrap(), "file_1");
-
-        let missing = serde_json::json!({ "bytes": 12 });
-        assert!(expect_id(&missing, "file upload").is_err());
+    fn result_content_ignores_non_string_content() {
+        let result = BatchResult {
+            response: Some(BatchResponse {
+                status_code: 200,
+                request_id: None,
+                body: serde_json::json!({ "choices": [{ "message": { "content": 42 } }] }),
+            }),
+            ..BatchResult::default()
+        };
+        assert_eq!(result.content(), None);
     }
 
     #[test]
@@ -407,18 +577,10 @@ mod tests {
     fn headers_require_a_resolvable_key() {
         let spec = ProviderSpec {
             name: "openrouter".to_string(),
-            api_key: None,
+            api_key: Some("test-key".to_string()),
             ..ProviderSpec::default()
         };
-        // Either the env var is set (headers built) or the call fails cleanly.
-        match build_headers(&spec) {
-            Ok(headers) => {
-                assert!(headers.iter().any(|(name, _)| name == "authorization"));
-            }
-            Err(err) => assert!(
-                matches!(err, LlmError::Provider(_)),
-                "expected a clean provider error, got {err:?}"
-            ),
-        }
+        let headers = build_headers(&spec).expect("test key must resolve");
+        assert!(headers.iter().any(|(name, _)| name == "authorization"));
     }
 }

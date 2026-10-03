@@ -41,6 +41,12 @@ export function filterModelOptions(models: readonly string[], filter: string): s
   return models.filter((m) => m.toLowerCase().includes(needle));
 }
 
+/** True when the id targets the Batch API (`:batch` suffix, case-insensitive). */
+export function isBatchModel(id: string): boolean {
+  const slash = id.lastIndexOf('/');
+  const name = slash < 0 ? id : id.slice(slash + 1);
+  return name.toLowerCase().endsWith(':batch');
+}
 /** Group ids by provider prefix, preserving first-seen order. */
 export function groupModelOptions(models: readonly string[]): ModelGroup[] {
   const groups: ModelGroup[] = [];
@@ -137,6 +143,10 @@ export class ModelSelect {
 
   shortName(id: string): string {
     return splitModelOption(id).short;
+  }
+
+  isBatch(id: string): boolean {
+    return isBatchModel(id);
   }
 
   onSearchKeydown(event: KeyboardEvent): void {

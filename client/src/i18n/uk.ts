@@ -242,6 +242,7 @@ export const uk: Record<MessageKey, string> = {
   'settings.modelSearchPlaceholder': 'Фільтрувати моделі…',
   'modelSelect.search': 'Пошук моделей…',
   'modelSelect.noMatch': 'Немає відповідної моделі.',
+  'modelSelect.batchHint': 'Batch-модель — надсилання з чату ставить її в чергу як batch-завдання (див. панель Batch).',
   'settings.assignTo': 'призначити для',
   'settings.assign': 'Призначити',
   'settings.noProviderSelected': 'Оберіть провайдера ліворуч.',
@@ -352,6 +353,7 @@ export const uk: Record<MessageKey, string> = {
   'nav.working': 'agent working',
   'nav.closeSession': 'Закрити сесію',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'Поставлено в чергу як batch-завдання — стежте на панелі Batch.',
   'chat.forceSend': 'Force send',
   'chat.aborting': 'Зупинка…',
   'chat.forceSending': 'Надсилається…',
@@ -815,7 +817,7 @@ export const uk: Record<MessageKey, string> = {
 
 
 
-  'settings.delegationToolsNote': 'Субагентів запускають інструментом task (у фоні) і наглядають через task_status, task_wait і task_cancel.',
+  'settings.delegationToolsNote': 'Субагентів запускають інструментом task (у фоні) і наглядають через task_status, task_wait, task_cancel і task_report.',
   'settings.delegationSaved': 'Налаштування делегування збережено.',
   'drawer.collapsePanel': 'Згорнути панель',
   'drawer.expandPanel': 'Розгорнути панель',

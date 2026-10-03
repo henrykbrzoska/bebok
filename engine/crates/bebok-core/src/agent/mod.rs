@@ -83,7 +83,7 @@ pub use preset::Agent;
 pub use prompt_env::host_os_note;
 pub use request::{RequestBuilder, build_request, prune_for_budget};
 pub use status_rows::{format_duration, format_tokens};
-pub use supervision_tools::{TaskCancelTool, TaskStatusTool, TaskWaitTool};
+pub use supervision_tools::{TaskCancelTool, TaskReportTool, TaskStatusTool, TaskWaitTool};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};
 pub use verify_prompt::verification_section;

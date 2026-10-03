@@ -48,8 +48,10 @@
               [class.selected]="value() === id"
               [class.active]="flatRows().indexOf(id) === highlight()"
               (click)="pick(id)"
-              [title]="id"
-            >{{ shortName(id) }}</div>
+              [title]="isBatch(id) ? t('modelSelect.batchHint') : id"
+            >{{ shortName(id) }}@if (isBatch(id)) {
+              <span class="ms-batch" [title]="t('modelSelect.batchHint')">batch</span>
+            }</div>
           }
         }
         @if (filtered().length === 0) {

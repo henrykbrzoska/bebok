@@ -380,6 +380,19 @@ fn builtin_extra_fields(name: &str) -> Vec<ProviderExtraField> {
             ProviderExtraField::text("http_referer", "HTTP-Referer", "https://your.app"),
             ProviderExtraField::text("x_title", "X-Title", "Bebok"),
         ],
+        "opencode" => vec![
+            ProviderExtraField::text("user_agent", "User-Agent", "opencode/1.18.31"),
+            ProviderExtraField::text("x_opencode_client", "X-Opencode-Client", "cli"),
+            ProviderExtraField::text("http_referer", "HTTP-Referer", "https://opencode.ai/"),
+            ProviderExtraField::text("x_title", "X-Title", "opencode"),
+            ProviderExtraField::text("x_source", "X-Source", "opencode"),
+            ProviderExtraField::text(
+                "x_opencode_session_id",
+                "X-Opencode-Session-Id",
+                "ses_… (auto-generated per turn)",
+            ),
+            ProviderExtraField::text("x_opencode_project", "X-Opencode-Project", "bebok"),
+        ],
         _ => Vec::new(),
     }
 }

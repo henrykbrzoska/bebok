@@ -3,6 +3,7 @@
 mod deepseek;
 mod groq;
 mod ollama;
+mod opencode;
 mod openrouter;
 pub mod openrouter_batch;
 mod qwen;
@@ -20,6 +21,7 @@ pub fn adapter_config(spec: &ProviderSpec, api_key: Option<String>) -> AdapterCo
         "groq" => groq::config(spec, api_key),
         "qwen" => qwen::config(spec, api_key),
         "ollama" => ollama::config(spec, api_key),
+        "opencode" => opencode::config(spec, api_key),
         "openrouter" => openrouter::config(spec, api_key),
         _ => generic_config(spec, api_key),
     }

@@ -130,3 +130,13 @@
   font-size: var(--fs-12, 12px);
   color: var(--text-faint);
 }
+
+.ms-batch {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: var(--fs-11, 11px);
+  font-style: normal;
+  color: var(--warn-fg, #b7791f);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}

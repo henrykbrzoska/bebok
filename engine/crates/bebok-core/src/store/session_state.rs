@@ -318,6 +318,21 @@ impl SessionState {
             .await
     }
 
+    /// Append an assistant message carrying plain text (e.g. a `:batch`
+    /// fallback marker), persist it and return its index. The message is
+    /// tagged with the agent + model that produced it.
+    pub async fn append_assistant_text(&self, agent: &str, model: &str, text: &str) -> usize {
+        let idx = {
+            let mut messages = self.messages.write().await;
+            let mut msg = Message::assistant_with(agent, model);
+            msg.append_text(text);
+            messages.push(msg);
+            messages.len() - 1
+        };
+        self.persist_message_at(idx).await;
+        idx
+    }
+
     /// F9-7: append a status row to the latest assistant message, persist
     /// it and return the message index. Returns `None` when the transcript
     /// has no assistant message yet. Never creates a message of its own: an

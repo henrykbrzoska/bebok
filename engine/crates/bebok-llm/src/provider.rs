@@ -119,13 +119,35 @@ impl std::fmt::Display for ProviderErrorKind {
     }
 }
 
+/// True when the response body is an OpenCode Zen free-tier gate denial:
+/// `403` with a `FreeTierError` marker (`"free tier … within OpenCode"`).
+/// This is model-scoped client policy, not a credential fault — the same key
+/// keeps serving paid SKUs — so it must never be treated as an auth failure
+/// (no key rotation, no credential invalidation, no "auth error" label).
+pub fn is_opencode_free_tier_denial(status: u16, body: &str) -> bool {
+    if status != 403 {
+        return false;
+    }
+    let hint = body.to_ascii_lowercase();
+    hint.contains("freetiererror") || (hint.contains("free tier") && hint.contains("opencode"))
+}
+
 /// Map an HTTP status plus the response body onto a [`ProviderErrorKind`].
 ///
 /// The status is authoritative; the body is only consulted to tell a
 /// model-related 400/404 (`model_not_found`, `not_found_error` on a model id)
 /// apart from a generic bad request, and to catch providers that answer 200/400
 /// with a rate-limit envelope instead of a 429.
+///
+/// Exception: an OpenCode Zen free-tier gate denial (403 `FreeTierError`) is
+/// model-scoped client policy, not a credential fault, so it classifies as
+/// [`ProviderErrorKind::ModelError`] — never [`ProviderErrorKind::AuthError`].
+/// Retrying the same request cannot succeed (non-transient); the fix is a
+/// different model, not a different key.
 pub fn classify_http(status: u16, body: &str) -> ProviderErrorKind {
+    if is_opencode_free_tier_denial(status, body) {
+        return ProviderErrorKind::ModelError;
+    }
     let hint = error_hint(body);
     match status {
         401 | 403 => ProviderErrorKind::AuthError,
@@ -235,6 +257,11 @@ impl LlmError {
     /// Vendor-neutral classification of this error.
     pub fn kind(&self) -> ProviderErrorKind {
         match self {
+            // The free-tier gate denial is model-scoped policy, not auth:
+            // keep the `classify_http` scoping for the typed path too.
+            LlmError::Http { status, body, .. } if is_opencode_free_tier_denial(*status, body) => {
+                ProviderErrorKind::ModelError
+            }
             LlmError::Http { status, body, .. } => classify_http(*status, body),
             LlmError::Stream(_) => ProviderErrorKind::Network,
             LlmError::Parse(_) => ProviderErrorKind::Other,
@@ -658,6 +685,38 @@ mod tests {
             serde_json::json!({ "code": 1302, "msg": "rate limit reached", "success": false })
                 .to_string();
         assert_eq!(classify_http(400, &body), ProviderErrorKind::RateLimited);
+    }
+
+    /// OpenCode Zen free-tier gate denial (oh-my-pi bisection, can1357#12306):
+    /// a 403 `FreeTierError` is model-scoped client policy, not a credential
+    /// fault — it classifies as `ModelError` (non-transient), never
+    /// `AuthError`, so no key rotation / credential invalidation may fire.
+    #[test]
+    fn opencode_free_tier_denial_is_model_scoped_not_auth() {
+        let zen_denial = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "FreeTierError",
+                "message": "OpenCode's free tier can only be used from within OpenCode",
+            }
+        })
+        .to_string();
+        assert!(is_opencode_free_tier_denial(403, &zen_denial));
+        assert!(!is_opencode_free_tier_denial(429, &zen_denial));
+        assert!(!is_opencode_free_tier_denial(
+            403,
+            &anthropic_err("permission_error", "not allowed")
+        ));
+        assert_eq!(
+            classify_http(403, &zen_denial),
+            ProviderErrorKind::ModelError
+        );
+        assert!(!classify_http(403, &zen_denial).is_transient());
+        // A plain 403 without the gate marker stays an auth error.
+        assert_eq!(
+            classify_http(403, &anthropic_err("permission_error", "not allowed")),
+            ProviderErrorKind::AuthError
+        );
     }
 
     #[test]

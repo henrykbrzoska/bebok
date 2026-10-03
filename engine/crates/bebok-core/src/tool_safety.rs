@@ -111,6 +111,7 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("task_status", SafetyCategory::Safe),
     ("task_wait", SafetyCategory::Safe),
     ("task_cancel", SafetyCategory::Caution),
+    ("task_report", SafetyCategory::Safe),
     // F9-14: stops a background process started by `bash { background: true }`.
     ("bash_kill", SafetyCategory::Caution),
     // Code-index tools: read-only queries against the local tantivy index.

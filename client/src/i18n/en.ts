@@ -61,6 +61,7 @@ export const en = {
   'chat.runAsFleet': 'Run as fleet',
   'chat.fleetToggleHint': 'When checked, this prompt fans out to the fleet (requires fleet enabled in settings). Unchecked runs a single orchestrator turn.',
   'chat.queued': 'queued',
+  'chat.batch.queued': 'Queued as a batch job — track it in the Batch panel.',
   'chat.forceSend': 'Force send',
   'chat.aborting': 'Stopping…',
   'chat.forceSending': 'Sending now…',
@@ -198,6 +199,7 @@ export const en = {
   'settings.modelSearchPlaceholder': 'Filter models…',
   'modelSelect.search': 'Search models…',
   'modelSelect.noMatch': 'No matching model.',
+  'modelSelect.batchHint': 'Batch model — sending from chat queues it as a batch job (see the Batch panel).',
   'settings.assignTo': 'assign to',
   'settings.assign': 'Assign',
   'settings.noProviderSelected': 'Select a provider on the left.',
@@ -824,7 +826,7 @@ export const en = {
 
 
 
-  'settings.delegationToolsNote': 'Sub-agents are spawned with the task tool (background) and supervised with task_status, task_wait and task_cancel.',
+  'settings.delegationToolsNote': 'Sub-agents are spawned with the task tool (background) and supervised with task_status, task_wait, task_cancel and task_report.',
   'settings.delegationSaved': 'Delegation settings saved.',
   'drawer.collapsePanel': 'Collapse panel',
   'drawer.expandPanel': 'Expand panel',
