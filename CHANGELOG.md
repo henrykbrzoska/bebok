@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The Chrome extension's Options page no longer fails every action with "Receiving end does not exist": the background service worker now actually serves the messages the popup and Options send (`Test connection`, `Search local Bebok`, remote-piloting status, `Ask`), so testing the connection, asking about the page and the right-click "Ask Bebok about selection" entry work again. Port scanning also finds a token-protected engine (the `/version` probe now carries the token) instead of reporting "No engine found in scan range", and "Search local Bebok" no longer saves an Engine URL with a stray empty `&token=` appended.
+
+
 ## 1.9.2 — 2026-10-02
 
 ### Features

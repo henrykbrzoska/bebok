@@ -2,7 +2,7 @@
  * Bebok Chrome extension - background service worker.
  *
  * Owns every HTTP call to the local Bebok engine (only the worker is covered
- * by the extension's `host_permissions`). Two message types are served:
+ * by the extension's `host_permissions`). Message types served:
  *
  *   { type: 'bebok.ask', question, directory, engineUrl, screenshot? }
  *     -> { ok: true, answer, sessionID }
@@ -13,6 +13,11 @@
  *   { type: 'bebok.searchLocal', engineUrl, directory, pinnedToken? }
  *     -> { ok: true, engineUrl }   (working URL with ?token=, ready to save)
  *        { ok: false, needsToken, error }
+ *   { type: 'bebok.remoteStatus', engineUrl, directory }
+ *     -> { ok: true, status }      (GET /browser/remote/status body)
+ *        { ok: false, error }
+ *   { type: 'bebok.discoveryStatus', directory }
+ *     -> { ok: true, port, version } | { ok: false, error }
  *
  * `pinnedToken` is the user's copy of the engine's BEBOK_TOKEN env value
  * (variant 5: pinned token). When the Engine URL carries no `?token=` of its
@@ -35,11 +40,24 @@ const STORAGE_KEY_BEBOK_TOKEN = 'bebokToken';
 const STORAGE_KEY_FIXED_PORT = 'fixedPort';
 const STORAGE_KEY_USE_FIXED_PORT = 'useFixedPort';
 
-/** Engine base URL helpers. */
+/**
+ * Engine base URL helpers.
+ *
+ * `path` may carry its own query (`'/config?directory=x'`): the pathname part
+ * is appended to the base (keeping any `?token=` the base already has) and the
+ * query is merged into the URL's search params. Assigning the whole string to
+ * `url.pathname` would percent-encode the `?` into `%3F` and 404.
+ */
 function buildEngineUrl(base, path) {
   const trimmed = String(base || '').trim();
   const url = new URL(trimmed);
-  url.pathname = url.pathname.replace(/\/+$/, '') + path;
+  const [pathname, search] = String(path).split('?');
+  url.pathname = url.pathname.replace(/\/+$/, '') + pathname;
+  if (search) {
+    for (const [key, value] of new URLSearchParams(search)) {
+      url.searchParams.set(key, value);
+    }
+  }
   return url.toString();
 }
 
@@ -521,9 +539,9 @@ function stopPollingLoop() {
 async function registerExtension() {
   if (!_engineUrl || !_directory) return;
   try {
-    const url = buildEngineUrl(_engineUrl, '/browser/register', _directory);
-    const urlObj = new URL(url);
+    const urlObj = new URL(buildEngineUrl(_engineUrl, '/browser/register'));
     urlObj.searchParams.set('session_id', 'extension');
+    urlObj.searchParams.set('directory', _directory);
     await fetch(urlObj.toString(), { method: 'POST' });
   } catch (_) {
     // Best-effort; heartbeat will retry.
@@ -536,9 +554,9 @@ async function sendHeartbeat() {
     return;
   }
   try {
-    const url = buildEngineUrl(_engineUrl, '/browser/heartbeat', _directory);
-    const urlObj = new URL(url);
+    const urlObj = new URL(buildEngineUrl(_engineUrl, '/browser/heartbeat'));
     urlObj.searchParams.set('session_id', 'extension');
+    if (_directory) urlObj.searchParams.set('directory', _directory);
     const response = await fetch(urlObj.toString(), { method: 'POST' });
     if (response.status === 401) {
       _lastBeatAt = 0;
@@ -623,10 +641,11 @@ function stopHeartbeat() {
 
 // ── Engine discovery (Phase 1) ────────────────────────────────────────────
 
-async function probeVersion(port) {
+async function probeVersion(port, token) {
   try {
-    const url = `http://127.0.0.1:${port}/version`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
+    const url = new URL(`http://127.0.0.1:${port}/version`);
+    if (token) url.searchParams.set('token', token);
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(1000) });
     if (!res.ok) return null;
     return await res.json();
   } catch (_) {
@@ -634,9 +653,9 @@ async function probeVersion(port) {
   }
 }
 
-async function scanPorts(rangeStart, rangeEnd) {
+async function scanPorts(rangeStart, rangeEnd, token) {
   for (let p = rangeStart; p <= rangeEnd; p++) {
-    const info = await probeVersion(p);
+    const info = await probeVersion(p, token);
     if (info) {
       return { port: p, version: info.version || 'unknown' };
     }
@@ -663,7 +682,14 @@ async function handleSearchLocal(payload) {
         signal: AbortSignal.timeout(1000),
       });
       if (res.ok) {
-        return { ok: true, engineUrl: finalUrl + (finalUrl.includes('?') ? '&' : '?') + 'token=' + (tryToken || '') };
+        // Keep whatever `?token=` the URL already carried; only append the
+        // pinned token when there is one (an empty `&token=` would shadow
+        // the real token on the next request).
+        let out = finalUrl;
+        if (tryToken && !out.includes('token=')) {
+          out += (out.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(tryToken);
+        }
+        return { ok: true, engineUrl: out };
       }
       if (res.status === 401) {
         return { ok: false, needsToken: true, error: 'Engine found, token needed.' };
@@ -713,12 +739,20 @@ async function handleDiscoveryStatus(payload) {
   const { directory } = payload || {};
   if (!directory) return { ok: false, error: 'Working directory is not set' };
 
+  const stored = await readStorage();
+  const token =
+    new URLSearchParams(
+      String(stored.engineUrl || '').split('?')[1] || ''
+    ).get('token') ||
+    stored.pinnedToken ||
+    '';
+
   const range = await new Promise((resolve) => {
     chrome.storage.sync.get({ [STORAGE_KEY_PORT_SCAN_RANGE]: [8780, 8790] }, (vals) => {
       resolve(vals[STORAGE_KEY_PORT_SCAN_RANGE]);
     });
   });
-  const result = await scanPorts(range[0] || 8780, range[1] || 8790);
+  const result = await scanPorts(range[0] || 8780, range[1] || 8790, token);
 
   chrome.storage.sync.set({ [STORAGE_KEY_LAST_SCAN_TIME]: Date.now() });
 
@@ -742,7 +776,11 @@ async function handleSetEnginePort(payload) {
 let _engineUrl = '';
 let _directory = '';
 let _pinnedToken = '';
+let _lastGoodPort = 0;
 
+const HEARTBEAT_INTERVAL_MS = 5_000;
+const POLL_BACKOFF_BASE_MS = 1_000;
+const POLL_BACKOFF_MAX_MS = 30_000;
 let _netFailStreak = 0;
 const RECOVER_AFTER_FAILS = 3;
 const RECOVER_COOLDOWN_MS = 60_000;
@@ -789,25 +827,255 @@ function saveKey(key, value) {
   }
 }
 
-function buildEngineUrl(base, path) {
-  const trimmed = String(base || '').trim();
-  const url = new URL(trimmed);
-  url.pathname = url.pathname.replace(/\/+$/, '') + path;
-  return url.toString();
-}
+// ── Message dispatch (popup + options → worker) ──────────────────────────
 
-async function throwUnlessOk(res, msg) {
-  if (!res.ok) {
-    throw new Error(`${msg}: ${res.status} ${res.statusText}`);
+/** Normalise an exception to a message the Options page can match on. */
+function errorMessage(err) {
+  if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    return 'Failed to fetch (timeout)';
   }
+  return String((err && err.message) || err || 'unknown error');
 }
 
-async function readJsonSafe(res) {
+/** Keep the base URL's own `?token=`, else fall back to the pinned token. */
+function withToken(base, pinnedToken) {
   try {
-    return await res.json();
+    const url = new URL(base);
+    if (!url.searchParams.get('token') && pinnedToken) {
+      url.searchParams.set('token', pinnedToken);
+    }
+    return url.toString();
   } catch (_) {
-    return null;
+    return base;
   }
+}
+
+/** `fetch` an engine endpoint and parse JSON (throws on non-2xx). */
+async function engineFetch(base, path, init, pinnedToken) {
+  const url = withToken(buildEngineUrl(base, path), pinnedToken || '');
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(20_000),
+    ...(init || {}),
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`.trim());
+    err.status = res.status;
+    throw err;
+  }
+  return res.json().catch(() => null);
+}
+
+/** `bebok.testConnection` -> `{ ok, model }`. */
+async function handleTestConnection(payload) {
+  const { engineUrl, directory, pinnedToken } = payload || {};
+  const base = String(engineUrl || '').trim() || 'http://127.0.0.1:8787';
+  try {
+    const body = await engineFetch(
+      base,
+      '/config?directory=' + encodeURIComponent(directory || ''),
+      {},
+      pinnedToken || ''
+    );
+    const model = (body && body.config && body.config.model) || '';
+    return { ok: true, model };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** `bebok.remoteStatus` -> `{ ok, status }` (live /browser/remote/status). */
+async function handleRemoteStatus(payload) {
+  const { engineUrl, pinnedToken } = payload || {};
+  const stored = await readStorage();
+  const base =
+    String(engineUrl || '').trim() ||
+    String(stored.engineUrl || '').trim() ||
+    'http://127.0.0.1:8787';
+  const token = pinnedToken || stored.pinnedToken || '';
+  try {
+    const status = await engineFetch(
+      base,
+      '/browser/remote/status?session_id=extension',
+      {},
+      token
+    );
+    return { ok: true, status };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * `bebok.ask` -> `{ ok, answer, sessionID }`.
+ *
+ * Ask path per README: `POST /session` -> `POST /session/{id}/prompt`
+ * (+ optional `captureVisibleTab` PNG in `images[]`) -> poll
+ * `GET /session/{id}` until `running === false` -> last assistant `text`
+ * parts from `GET /session/{id}/message`.
+ */
+async function handleAsk(payload) {
+  const { question, directory, engineUrl, screenshot } = payload || {};
+  const stored = await readStorage();
+  const base =
+    String(engineUrl || '').trim() ||
+    String(stored.engineUrl || '').trim() ||
+    'http://127.0.0.1:8787';
+  const dir = String(directory || '').trim() || String(stored.directory || '').trim();
+  const token = stored.pinnedToken || '';
+  if (!question || !String(question).trim()) {
+    return { ok: false, error: 'Empty question.' };
+  }
+  if (!dir) {
+    return { ok: false, error: 'Working directory is not set (Options).' };
+  }
+
+  try {
+    const created = await engineFetch(
+      base,
+      '/session',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: dir }),
+      },
+      token
+    );
+    const sessionID = created && created.sessionID;
+    if (!sessionID) {
+      return { ok: false, error: 'Engine did not return a sessionID.' };
+    }
+
+    const body = { message: String(question) };
+    if (screenshot) {
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+        const data = String(dataUrl || '').split(',')[1];
+        if (data) body.images = [{ media_type: 'image/png', data }];
+      } catch (_) {
+        // Screenshot is optional — the prompt still goes out.
+      }
+    }
+
+    await engineFetch(
+      base,
+      `/session/${sessionID}/prompt`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      token
+    );
+
+    const deadline = Date.now() + 180_000;
+    let running = true;
+    while (running && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const meta = await engineFetch(base, `/session/${sessionID}`, {}, token);
+      running = Boolean(meta && meta.running);
+    }
+    if (running) {
+      return {
+        ok: false,
+        sessionID,
+        error:
+          'Timed out after 180 s — a permission ask may be waiting in the Bebok GUI.',
+      };
+    }
+
+    const transcript = await engineFetch(
+      base,
+      `/session/${sessionID}/message`,
+      {},
+      token
+    );
+    const messages = (transcript && transcript.messages) || [];
+    let answer = '';
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (!message || message.role !== 'assistant') continue;
+      const text = (message.parts || [])
+        .filter((part) => part && part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+      if (text.trim()) {
+        answer = text;
+        break;
+      }
+    }
+    return { ok: true, answer, sessionID };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+const messageHandlers = {
+  'bebok.ask': handleAsk,
+  'bebok.testConnection': handleTestConnection,
+  'bebok.searchLocal': handleSearchLocal,
+  'bebok.remoteStatus': handleRemoteStatus,
+  'bebok.discoveryStatus': handleDiscoveryStatus,
+  'bebok.setEnginePort': handleSetEnginePort,
+};
+
+if (chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    const handler = message && messageHandlers[message.type];
+    if (!handler) return undefined;
+    Promise.resolve()
+      .then(() => handler(message))
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: errorMessage(err) }));
+    return true; // keep the channel open for the async response
+  });
+}
+
+// ── Context menu: right-click selection → popup prefill ──────────────────
+
+function installContextMenu() {
+  if (!chrome.contextMenus) return;
+  try {
+    chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({
+        id: 'bebok-ask-selection',
+        title: 'Ask Bebok about selection',
+        contexts: ['selection'],
+      });
+    });
+  } catch (_) {
+    // Menu creation is best-effort.
+  }
+}
+
+if (chrome.runtime && chrome.runtime.onInstalled) {
+  chrome.runtime.onInstalled.addListener(installContextMenu);
+}
+if (chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(installContextMenu);
+}
+
+if (chrome.contextMenus && chrome.contextMenus.onClicked) {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId !== 'bebok-ask-selection') return;
+    const pending = {
+      text: info.selectionText || '',
+      url: (tab && tab.url) || '',
+      title: (tab && tab.title) || '',
+    };
+    if (chrome.storage && chrome.storage.session) {
+      chrome.storage.session.set({ pendingSelection: pending }, () => {
+        void chrome.runtime.lastError;
+      });
+    }
+    try {
+      if (chrome.action && chrome.action.openPopup) {
+        const opened = chrome.action.openPopup();
+        if (opened && typeof opened.catch === 'function') opened.catch(() => {});
+      }
+    } catch (_) {
+      // Popup may refuse to open without a gesture — the prefill is stored.
+    }
+  });
 }
 
 // ── Lifecycle: respond to storage changes ────────────────────────────────
