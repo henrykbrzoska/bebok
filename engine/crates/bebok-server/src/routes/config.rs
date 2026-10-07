@@ -203,6 +203,27 @@ pub async fn put_config(
             .map_err(|e| ApiError::bad_request(format!("invalid config: {e}")).into_response())?;
         restore_secrets(&mut delta, &previous);
     }
+    // `skills` is a toggle map: merge the incoming keys into the existing
+    // section instead of replacing it, so flipping one skill off does not
+    // silently re-enable every skill that was previously turned off (the
+    // panel sends single-key deltas like `{"skills": {"code-index": false}}`).
+    if !replace {
+        if let Some(incoming) = delta.get("skills").and_then(|s| s.as_object()) {
+            let previous_skills = std::fs::read_to_string(&layer_path)
+                .ok()
+                .and_then(|raw| config::jsonc::parse(&raw).ok())
+                .and_then(|prev| prev.get("skills").cloned())
+                .and_then(|s| s.as_object().cloned())
+                .unwrap_or_default();
+            let mut merged = previous_skills;
+            for (k, v) in incoming {
+                merged.insert(k.clone(), v.clone());
+            }
+            if let Some(obj) = delta.as_object_mut() {
+                obj.insert("skills".to_string(), serde_json::Value::Object(merged));
+            }
+        }
+    }
     if replace {
         let write = if scope_global {
             config::write_full_global(&delta)
