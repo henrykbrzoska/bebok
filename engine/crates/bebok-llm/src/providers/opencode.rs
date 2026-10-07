@@ -185,7 +185,8 @@ const RESPONSES_MODELS: &[&str] = &[
 /// identity handling in `openai_body`, so a same-named model on another
 /// provider is never redirected.
 pub(crate) fn uses_responses(req_model: &str) -> bool {
-    req_model.starts_with("opencode/") && RESPONSES_MODELS.contains(&crate::spec::model_name(req_model))
+    req_model.starts_with("opencode/")
+        && RESPONSES_MODELS.contains(&crate::spec::model_name(req_model))
 }
 
 /// Swap the provider's chat URL (`…/chat/completions`, what
@@ -347,7 +348,9 @@ mod tests {
             assert!(!super::uses_responses(model), "{model} must stay on chat");
         }
         // Same model id on a different provider: never redirected.
-        assert!(!super::uses_responses("openrouter/muse-spark-1.3-contributor-free"));
+        assert!(!super::uses_responses(
+            "openrouter/muse-spark-1.3-contributor-free"
+        ));
     }
 
     #[test]

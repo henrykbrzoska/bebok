@@ -74,10 +74,7 @@ pub fn responses_body(req: &ChatRequest, model: &str) -> Value {
         "max_output_tokens": req.max_tokens,
     });
     if tool_choice_none && let Value::Object(map) = &mut body {
-        map.insert(
-            "tool_choice".to_string(),
-            Value::String("none".to_string()),
-        );
+        map.insert("tool_choice".to_string(), Value::String("none".to_string()));
     }
     if let Some(effort) = req.thinking.openai_effort()
         && let Value::Object(map) = &mut body
@@ -243,7 +240,10 @@ pub fn responses_stream(resp: reqwest::Response) -> impl Stream<Item = StreamRes
 /// Parse a complete (already buffered) Responses SSE body into typed events,
 /// running the same state machine as [`responses_stream`]. `chunk_size` splits
 /// the body into byte chunks so tests can prove chunk-boundary insensitivity.
-pub fn parse_responses_sse(body: &str, chunk_size: Option<usize>) -> Vec<StreamResult<StreamEvent>> {
+pub fn parse_responses_sse(
+    body: &str,
+    chunk_size: Option<usize>,
+) -> Vec<StreamResult<StreamEvent>> {
     let mut parser = ResponsesParser::new();
     let bytes = body.as_bytes();
     let step = chunk_size.unwrap_or(bytes.len()).max(1);
@@ -337,7 +337,8 @@ impl ResponsesParser {
             if slot.call_id.is_empty() && slot.name.is_empty() {
                 continue;
             }
-            self.ready.push_back(Ok(StreamEvent::ToolCall(tool_call(slot))));
+            self.ready
+                .push_back(Ok(StreamEvent::ToolCall(tool_call(slot))));
         }
     }
 
@@ -395,7 +396,8 @@ impl ResponsesParser {
                 if let Some(delta) = v.get("delta").and_then(|d| d.as_str())
                     && !delta.is_empty()
                 {
-                    self.ready.push_back(Ok(StreamEvent::Text(delta.to_string())));
+                    self.ready
+                        .push_back(Ok(StreamEvent::Text(delta.to_string())));
                 }
             }
             "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
@@ -435,8 +437,9 @@ impl ResponsesParser {
                     let key = pending_key(item);
                     let slot = self.pending.entry(key.clone()).or_default();
                     fill_call(slot, item);
-                    if let Some(args) =
-                        item.and_then(|i| i.get("arguments")).and_then(|a| a.as_str())
+                    if let Some(args) = item
+                        .and_then(|i| i.get("arguments"))
+                        .and_then(|a| a.as_str())
                         && !args.is_empty()
                     {
                         slot.arguments = args.to_string();
@@ -450,8 +453,10 @@ impl ResponsesParser {
             }
             "response.completed" | "response.incomplete" => {
                 if let Some(usage) = v.pointer("/response/usage") {
-                    self.usage_in =
-                        usage.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+                    self.usage_in = usage
+                        .get("input_tokens")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(0);
                     self.usage_out = usage
                         .get("output_tokens")
                         .and_then(|x| x.as_u64())
@@ -587,7 +592,10 @@ mod tests {
 
     #[test]
     fn body_keeps_real_tools_unpinned() {
-        let body = responses_body(&tool_request("opencode/longcat-2.5-preview-free"), "longcat");
+        let body = responses_body(
+            &tool_request("opencode/longcat-2.5-preview-free"),
+            "longcat",
+        );
         let names: Vec<&str> = body["tools"]
             .as_array()
             .unwrap()
