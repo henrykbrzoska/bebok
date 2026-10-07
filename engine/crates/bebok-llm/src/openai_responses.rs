@@ -664,7 +664,8 @@ mod tests {
         ];
         let input = to_responses_input(&request.messages, &request.system);
         assert_eq!(input.len(), 4);
-        assert_eq!(input[1]["type"], "assistant");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"], "calling");
         assert_eq!(input[2]["type"], "function_call");
         assert_eq!(input[2]["call_id"], "call_1");
         assert_eq!(input[2]["name"], "bash");
