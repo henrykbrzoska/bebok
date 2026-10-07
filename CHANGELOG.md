@@ -6,6 +6,7 @@
 
 - The Chrome extension's Options page no longer fails every action with "Receiving end does not exist": the background service worker now actually serves the messages the popup and Options send (`Test connection`, `Search local Bebok`, remote-piloting status, `Ask`), so testing the connection, asking about the page and the right-click "Ask Bebok about selection" entry work again. Port scanning also finds a token-protected engine (the `/version` probe now carries the token) instead of reporting "No engine found in scan range", and "Search local Bebok" no longer saves an Engine URL with a stray empty `&token=` appended.
 
+- OpenCode Zen models that refuse Chat Completions (`muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free`, `longcat-2.5-preview-free`) now answer from Bebok instead of failing with `400 Model does not support this protocol`: those three free models are sent through the Responses endpoint (`/responses`), exactly like the official OpenCode CLI, while every other model keeps the Chat Completions path unchanged.
 
 ## 1.9.2 — 2026-10-02
 

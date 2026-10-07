@@ -159,6 +159,44 @@ fn push_default(
     }
 }
 
+/// Zen models that refuse Chat Completions with `400 ModelProtocolUnsupported
+/// ("Model does not support this protocol")` and only answer the OpenAI
+/// *Responses* protocol (`POST {base}/responses`) — the endpoint the official
+/// CLI uses for them.
+///
+/// Hardcoded from a live probe of the whole configured roster on
+/// `POST /zen/v1/chat/completions` (one request per model with the
+/// first-party identity headers): every other configured model answered
+/// `200`/`4xx upstream` on Chat Completions, only these three free models
+/// rejected the protocol itself. The Responses request lives in
+/// [`crate::openai_responses`]; everything else keeps the default
+/// Chat Completions path unchanged.
+const RESPONSES_MODELS: &[&str] = &[
+    "longcat-2.5-preview-free",
+    "muse-spark-1.2-contributor-free",
+    "muse-spark-1.3-contributor-free",
+];
+
+/// True when the request model (provider-prefixed, e.g.
+/// `opencode/muse-spark-1.3-contributor-free`) must go through the Responses
+/// endpoint instead of `/chat/completions`.
+///
+/// Gated on the `opencode/` request prefix exactly like the free-tier
+/// identity handling in `openai_body`, so a same-named model on another
+/// provider is never redirected.
+pub(crate) fn uses_responses(req_model: &str) -> bool {
+    req_model.starts_with("opencode/") && RESPONSES_MODELS.contains(&crate::spec::model_name(req_model))
+}
+
+/// Swap the provider's chat URL (`…/chat/completions`, what
+/// [`ProviderSpec::chat_url`] yields) for the Responses endpoint.
+pub(crate) fn responses_url(endpoint: &str) -> String {
+    match endpoint.strip_suffix("/chat/completions") {
+        Some(base) => format!("{base}/responses"),
+        None => endpoint.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +316,50 @@ mod tests {
                 .iter()
                 .collect::<Vec<_>>(),
             "override must replace the default, not duplicate it"
+        );
+    }
+
+    #[test]
+    fn responses_models_are_hardcoded_to_the_responses_endpoint() {
+        for model in [
+            "muse-spark-1.2-contributor-free",
+            "muse-spark-1.3-contributor-free",
+            "longcat-2.5-preview-free",
+        ] {
+            assert!(
+                super::uses_responses(&format!("opencode/{model}")),
+                "{model} must use /responses"
+            );
+            assert!(
+                !super::uses_responses(model),
+                "bare (non-opencode/) model must not be redirected"
+            );
+        }
+        // Everything else keeps the Chat Completions path — including models
+        // that merely share the free-tier suffix or are paid variants.
+        for model in [
+            "opencode/ling-3.1-flash-free",
+            "opencode/mimo-v2.6-flash-free",
+            "opencode/big-pickle",
+            "opencode/jev-1.13",
+            "opencode/gpt-5.5",
+        ] {
+            assert!(!super::uses_responses(model), "{model} must stay on chat");
+        }
+        // Same model id on a different provider: never redirected.
+        assert!(!super::uses_responses("openrouter/muse-spark-1.3-contributor-free"));
+    }
+
+    #[test]
+    fn responses_url_swaps_the_chat_suffix() {
+        assert_eq!(
+            super::responses_url("https://opencode.ai/zen/v1/chat/completions"),
+            "https://opencode.ai/zen/v1/responses"
+        );
+        // Unknown shapes pass through unchanged instead of corrupting the URL.
+        assert_eq!(
+            super::responses_url("https://example.test/v1/messages"),
+            "https://example.test/v1/messages"
         );
     }
 }

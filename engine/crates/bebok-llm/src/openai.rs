@@ -244,10 +244,10 @@ impl OpenAiProvider {
         self
     }
 
-    fn request(&self, body: &Value) -> reqwest::RequestBuilder {
+    fn request(&self, url: &str, body: &Value) -> reqwest::RequestBuilder {
         let mut request = self
             .client
-            .post(&self.endpoint)
+            .post(url)
             .header("content-type", "application/json");
         if let Some(key) = self.api_key.as_ref().filter(|k| !k.trim().is_empty()) {
             request = request.header("authorization", format!("Bearer {key}"));
@@ -331,19 +331,35 @@ impl Provider for OpenAiProvider {
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
         let model = model_name(&req.model).to_string();
-        let mut body = openai_body(&req, &model);
-        if apply_known_tools_without_reasoning(&mut body, &self.endpoint, &model) {
-            tracing::debug!(model = %model, "Chat Completions: sending reasoning_effort=none with tools (model rejected reasoning with tools earlier)");
-        }
-        let mut resp = self.request(&body).send().await?;
+        // Three OpenCode Zen models refuse Chat Completions outright
+        // (`400 ModelProtocolUnsupported`): send those through the Responses
+        // protocol instead, endpoint and body alike. Everything else keeps
+        // the Chat Completions path byte for byte.
+        let responses = crate::providers::uses_responses(&req.model);
+        let (url, mut body) = if responses {
+            (
+                crate::providers::responses_url(&self.endpoint),
+                crate::openai_responses::responses_body(&req, &model),
+            )
+        } else {
+            let mut body = openai_body(&req, &model);
+            if apply_known_tools_without_reasoning(&mut body, &self.endpoint, &model) {
+                tracing::debug!(model = %model, "Chat Completions: sending reasoning_effort=none with tools (model rejected reasoning with tools earlier)");
+            }
+            (self.endpoint.clone(), body)
+        };
+        let mut resp = self.request(&url, &body).send().await?;
         if resp.status() == reqwest::StatusCode::BAD_REQUEST {
             let retry_after = retry_after_from_headers(resp.headers());
             let text = resp.text().await.unwrap_or_default();
-            if needs_tools_without_reasoning_retry(400, &text, &body) {
+            // The reasoning-with-tools rejection is a Chat Completions
+            // diagnostic; the Responses body has no `reasoning_effort` key
+            // to downgrade, so its 400 is reported as-is.
+            if !responses && needs_tools_without_reasoning_retry(400, &text, &body) {
                 tracing::warn!(model = %model, "Chat Completions rejected reasoning with tools; retrying with reasoning_effort=none (remembered for this model)");
                 remember_tools_without_reasoning(&self.endpoint, &model);
                 body["reasoning_effort"] = Value::String("none".to_string());
-                resp = self.request(&body).send().await?;
+                resp = self.request(&url, &body).send().await?;
             } else {
                 return Err(LlmError::Http {
                     status: 400,
@@ -363,7 +379,11 @@ impl Provider for OpenAiProvider {
             });
         }
 
-        Ok(Box::pin(openai_stream(resp)))
+        if responses {
+            Ok(Box::pin(crate::openai_responses::responses_stream(resp)))
+        } else {
+            Ok(Box::pin(openai_stream(resp)))
+        }
     }
 }
 

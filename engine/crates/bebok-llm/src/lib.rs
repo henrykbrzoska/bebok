@@ -8,6 +8,7 @@ mod cache_policy;
 mod cost;
 mod model_catalog;
 mod openai;
+mod openai_responses;
 mod protocols;
 mod provider;
 mod providers;
@@ -21,6 +22,7 @@ pub use model_catalog::{ModelCapabilities, ModelCatalog, ModelPricing};
 pub use openai::{
     OpenAiProvider, openai_body, openai_stream, parse_openai_sse, to_openai_messages,
 };
+pub use openai_responses::{parse_responses_sse, responses_body, responses_stream};
 pub use protocols::{AnthropicMessagesAdapter, OpenAiChatAdapter};
 pub use provider::{
     AdapterConfig, ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider,

@@ -9,6 +9,8 @@ pub mod openrouter_batch;
 mod qwen;
 mod xai;
 
+pub(crate) use opencode::{responses_url, uses_responses};
+
 use serde_json::Value;
 
 use crate::ProviderSpec;
