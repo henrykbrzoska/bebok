@@ -8,6 +8,8 @@
 
 - OpenCode Zen models that refuse Chat Completions (`muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free`, `longcat-2.5-preview-free`) now answer from Bebok instead of failing with `400 Model does not support this protocol`: those three free models are sent through the Responses endpoint (`/responses`), exactly like the official OpenCode CLI, while every other model keeps the Chat Completions path unchanged.
 
+- Unchecking a skill in the session panel (or Settings → Skills) no longer re-enables a previously unchecked one: skill toggles are now merged into the `skills` config section instead of replacing it, so each switch sticks to its own skill.
+
 ## 1.9.2 — 2026-10-02
 
 ### Features
