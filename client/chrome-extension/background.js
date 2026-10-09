@@ -396,6 +396,48 @@ const handlers = {
     }
   },
 
+  // Activate another tab so every subsequent command (requireActiveTab)
+  // targets it. Accepts `tab_id` / `tabId` / `id` as a number or numeric
+  // string — ids come from the `tabs` action.
+  switchTab: async (params) => {
+    const raw = params.tab_id ?? params.tabId ?? params.id;
+    const tabId = Number(raw);
+    if (!Number.isInteger(tabId)) {
+      throw new Error('switchTab: missing or invalid tab_id (get ids from tabs)');
+    }
+
+    let tab;
+    try {
+      // {active:true} switches to the tab; focus its window as well so the
+      // user sees the switch when the tab lives in another window.
+      tab = await chrome.tabs.update(tabId, { active: true });
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (/no tab with id|invalid tab id/i.test(msg)) {
+        throw new Error('switchTab: no tab with id ' + tabId + ' — list tabs first');
+      }
+      throw err;
+    }
+
+    if (tab && tab.windowId != null) {
+      try {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      } catch (_) {
+        // Focusing the window is best-effort; the tab is active either way.
+      }
+    }
+
+    // Re-read metadata: url/title are only populated after the update.
+    const fresh = tab && tab.id != null ? await chrome.tabs.get(tab.id) : tab;
+    return {
+      id: fresh.id,
+      title: fresh.title || '',
+      url: fresh.url || '',
+      active: fresh.active || false,
+      windowId: fresh.windowId,
+    };
+  },
+
   // ── Element discovery ───────────────────────────────────────────────
 
   find: async (params) => {

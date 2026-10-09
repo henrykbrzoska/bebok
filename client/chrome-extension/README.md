@@ -47,8 +47,9 @@ you are reading, and optionally lets the agent drive your browser remotely
 Remote piloting lets the agent drive your real browser tabs. When enabled the
 extension registers with the engine and listens for commands (navigate,
 screenshot, evaluate, click, type, getText, getPageContext, find, wait,
-history, console, tabs). All commands except `tabs` run on your active tab;
-`tabs` lists tabs without switching them.
+history, console, tabs, switchTab). All commands except `tabs` run on your
+active tab; `tabs` lists tabs without switching them, `switchTab` activates
+the tab you pick (and focuses its window) so the following commands target it.
 
 ### Enable
 
@@ -125,6 +126,7 @@ listening TCP socket, so the engine cannot push commands.
 | `history` | `{action: back\|forward\|reload}` | `{url, title}` |
 | `console` | `{}` | `{entries: []}` (phase 5) |
 | `tabs` | `{}` (or `chrome.tabs.query` filter, e.g. `{active: true, currentWindow: true}`) | `[{id, title, url, active, windowId}]` — all tabs, no tab switching |
+| `switchTab` | `{tab_id}` (also accepts `tabId` / `id`, number or numeric string) | `{id, title, url, active, windowId}` — activates that tab and focuses its window, so every later command runs on it |
 
 ### Options page status messages
 
