@@ -232,7 +232,17 @@ pub struct AstSearchConfig {
 }
 
 fn default_ast_languages() -> Vec<String> {
-    vec!["rs".into(), "ts".into(), "tsx".into()]
+    vec![
+        "rs".into(),
+        "ts".into(),
+        "tsx".into(),
+        "js".into(),
+        "jsx".into(),
+        "mjs".into(),
+        "cjs".into(),
+        "php".into(),
+        "py".into(),
+    ]
 }
 
 impl Default for AstSearchConfig {
@@ -734,7 +744,10 @@ mod tests {
         let cfg = AstSearchConfig::default();
         assert!(!cfg.enabled);
         assert_eq!(cfg.max_files, DEFAULT_AST_SEARCH_MAX_FILES);
-        assert_eq!(cfg.languages, vec!["rs", "ts", "tsx"]);
+        assert_eq!(
+            cfg.languages,
+            vec!["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"]
+        );
     }
 
     #[test]

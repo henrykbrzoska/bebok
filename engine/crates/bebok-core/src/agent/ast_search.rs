@@ -1,7 +1,8 @@
 //! Embedded AST-aware structural code search using tree-sitter.
 //!
 //! This module is built directly into `bebok-core` — no external CLI binary
-//! required. It supports Rust (.rs) and TypeScript (.ts/.tsx) files.
+//! required. It supports Rust (.rs), TypeScript (.ts/.tsx), JavaScript
+//! (.js/.jsx/.mjs/.cjs), PHP (.php) and Python (.py) files.
 
 use regex::Regex;
 use serde_json::Value;
@@ -54,9 +55,14 @@ impl Filters {
             return vec![ext.clone()];
         }
         let base: &[&str] = match kind {
-            "const" | "static" | "mod" | "use" | "trait" => &["rs"],
-            "impl" | "struct" | "fn" | "enum" | "type_alias" | "test" => &["rs", "ts", "tsx"],
-            _ => &["rs", "ts", "tsx"],
+            "static" => &["rs"],
+            "const" => &["rs", "php"],
+            "mod" | "use" => &["rs", "php"],
+            "trait" => &["rs", "php"],
+            "impl" | "struct" | "fn" | "enum" | "type_alias" | "test" => {
+                &["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"]
+            }
+            _ => &["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"],
         };
         if languages.is_empty() {
             return base.iter().map(|s| s.to_string()).collect();
@@ -531,6 +537,319 @@ fn extract_ts_snippet(content: &str, start_row: usize, max_lines: usize) -> Stri
 }
 
 // ---------------------------------------------------------------------------
+// JavaScript language handler (.js/.jsx/.mjs/.cjs)
+// ---------------------------------------------------------------------------
+
+pub struct JsLang {
+    language: Language,
+}
+
+impl JsLang {
+    pub fn new() -> anyhow::Result<Self> {
+        let language = Language::from(tree_sitter_javascript::LANGUAGE);
+        Ok(Self { language })
+    }
+
+    pub fn supports_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "impl" | "struct" | "fn" | "enum" | "type_alias" | "test"
+        )
+    }
+
+    pub fn query(&self, content: &str, kind: &str, filters: &Filters) -> Vec<MatchResult> {
+        query_generic(
+            &self.language,
+            content,
+            js_query_for_kind(kind),
+            kind,
+            filters,
+            extract_js_name,
+        )
+    }
+}
+
+fn js_query_for_kind(kind: &str) -> &str {
+    match kind {
+        "impl" | "struct" => {
+            "[
+            (class_declaration) @item
+        ]"
+        }
+        "fn" => {
+            "[
+            (function_declaration) @item
+            (function_expression) @item
+            (arrow_function) @item
+            (generator_function_declaration) @item
+            (method_definition) @item
+        ]"
+        }
+        "test" => "(call_expression) @item",
+        _ => "(function_declaration) @item",
+    }
+}
+
+fn extract_js_name(node: tree_sitter::Node, source: &[u8]) -> String {
+    if let Some(child) = node.child_by_field_name("name") {
+        return child.utf8_text(source).unwrap_or("").to_string();
+    }
+    if node.kind() == "call_expression"
+        && let Some(fn_node) = node.child_by_field_name("function")
+    {
+        return fn_node.utf8_text(source).unwrap_or("").to_string();
+    }
+    // `const world = () => 42` / `const f = function() {}`: the arrow /
+    // function node itself is anonymous — the name lives on the parent
+    // `variable_declarator` (or `assignment_expression` left side).
+    if matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    ) && let Some(parent) = node.parent()
+    {
+        if parent.kind() == "variable_declarator"
+            && let Some(name_node) = parent.child_by_field_name("name")
+        {
+            return name_node.utf8_text(source).unwrap_or("").to_string();
+        }
+        if parent.kind() == "assignment_expression"
+            && let Some(left) = parent.child_by_field_name("left")
+        {
+            return left.utf8_text(source).unwrap_or("").to_string();
+        }
+    }
+    "<?>".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// PHP language handler (.php)
+// ---------------------------------------------------------------------------
+
+pub struct PhpLang {
+    language: Language,
+}
+
+impl PhpLang {
+    pub fn new() -> anyhow::Result<Self> {
+        let language = Language::from(tree_sitter_php::LANGUAGE_PHP);
+        Ok(Self { language })
+    }
+
+    pub fn supports_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "impl"
+                | "struct"
+                | "fn"
+                | "enum"
+                | "trait"
+                | "type_alias"
+                | "const"
+                | "mod"
+                | "use"
+                | "test"
+        )
+    }
+
+    pub fn query(&self, content: &str, kind: &str, filters: &Filters) -> Vec<MatchResult> {
+        query_generic(
+            &self.language,
+            content,
+            php_query_for_kind(kind),
+            kind,
+            filters,
+            extract_php_name,
+        )
+    }
+}
+
+fn php_query_for_kind(kind: &str) -> &str {
+    match kind {
+        "impl" | "struct" => {
+            "[
+            (class_declaration) @item
+            (interface_declaration) @item
+            (trait_declaration) @item
+        ]"
+        }
+        "fn" => {
+            "[
+            (function_definition) @item
+            (method_declaration) @item
+            (arrow_function) @item
+        ]"
+        }
+        "enum" => "(enum_declaration) @item",
+        "trait" => "(trait_declaration) @item",
+        "const" => "(const_declaration) @item",
+        "mod" => "(namespace_definition) @item",
+        "use" => {
+            "[
+            (namespace_use_declaration) @item
+            (use_declaration) @item
+        ]"
+        }
+        "test" => "(function_call_expression) @item",
+        _ => "(function_definition) @item",
+    }
+}
+
+fn extract_php_name(node: tree_sitter::Node, source: &[u8]) -> String {
+    if let Some(child) = node.child_by_field_name("name") {
+        return child.utf8_text(source).unwrap_or("").to_string();
+    }
+    if node.kind() == "function_call_expression" {
+        let text = node.utf8_text(source).unwrap_or("");
+        if let Some(end) = text.find('(') {
+            return text[..end].trim().to_string();
+        }
+        return text.trim().to_string();
+    }
+    if node.kind() == "namespace_use_declaration" || node.kind() == "use_declaration" {
+        return "use ...".to_string();
+    }
+    "<?>".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Python language handler (.py)
+// ---------------------------------------------------------------------------
+
+pub struct PyLang {
+    language: Language,
+}
+
+impl PyLang {
+    pub fn new() -> anyhow::Result<Self> {
+        let language = Language::from(tree_sitter_python::LANGUAGE);
+        Ok(Self { language })
+    }
+
+    pub fn supports_kind(&self, kind: &str) -> bool {
+        matches!(kind, "impl" | "struct" | "fn" | "test")
+    }
+
+    pub fn query(&self, content: &str, kind: &str, filters: &Filters) -> Vec<MatchResult> {
+        query_generic(
+            &self.language,
+            content,
+            py_query_for_kind(kind),
+            kind,
+            filters,
+            extract_py_name,
+        )
+    }
+}
+
+fn py_query_for_kind(kind: &str) -> &str {
+    match kind {
+        "impl" | "struct" => {
+            "[
+            (class_definition) @item
+        ]"
+        }
+        "fn" => {
+            "[
+            (function_definition) @item
+        ]"
+        }
+        "test" => "(call) @item",
+        _ => "(function_definition) @item",
+    }
+}
+
+fn extract_py_name(node: tree_sitter::Node, source: &[u8]) -> String {
+    if let Some(child) = node.child_by_field_name("name") {
+        return child.utf8_text(source).unwrap_or("").to_string();
+    }
+    if node.kind() == "call"
+        && let Some(fn_node) = node.child_by_field_name("function")
+    {
+        return fn_node.utf8_text(source).unwrap_or("").to_string();
+    }
+    if node.kind() == "decorated_definition" {
+        // `def`/`class` wrapped in decorators: dig into the definition child.
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "function_definition" || child.kind() == "class_definition" {
+                return extract_py_name(child, source);
+            }
+        }
+    }
+    "<?>".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Shared generic query driver (JS / PHP / Python)
+// ---------------------------------------------------------------------------
+
+/// Run a tree-sitter query with a language-specific name extractor and the
+/// shared name/test filters. Keeps the three C-like handlers small.
+fn query_generic(
+    language: &Language,
+    content: &str,
+    query_str: &str,
+    kind: &str,
+    filters: &Filters,
+    extract_name: fn(tree_sitter::Node, &[u8]) -> String,
+) -> Vec<MatchResult> {
+    let mut parser = Parser::new();
+    if parser.set_language(language).is_err() {
+        return Vec::new();
+    }
+    let tree = match parser.parse(content, None) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+    let query = match Query::new(language, query_str) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cursor = QueryCursor::new();
+    let mut results = Vec::new();
+    let source_bytes = content.as_bytes();
+    let mut matches = cursor.matches(&query, tree.root_node(), source_bytes);
+
+    while let Some(m) = matches.next() {
+        if m.captures.is_empty() {
+            continue;
+        }
+        let node = m.captures[0].node;
+        let line = node.start_position().row + 1;
+        let column = node.start_position().column + 1;
+        let name = extract_name(node, source_bytes);
+        let snippet = extract_snippet(content, node.start_position().row, 3);
+
+        if !filters.matches_name(&name) {
+            continue;
+        }
+        if kind == "test" && !is_test_name(&name) {
+            continue;
+        }
+        results.push(MatchResult {
+            line,
+            column,
+            kind: kind.to_string(),
+            name,
+            snippet,
+        });
+    }
+    results
+}
+
+/// Shared `test`-kind name heuristic for JS/PHP/Python: PHPUnit (`test*`),
+/// pytest (`test_*`), JS (`test*`, `it(`, `describe(`).
+fn is_test_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.starts_with("test")
+        || lower.starts_with("it(")
+        || lower.starts_with("describe(")
+        || lower.starts_with("it ")
+        || lower.starts_with("describe ")
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -630,6 +949,51 @@ pub fn search(
             };
         }
     };
+    let js_lang = match JsLang::new() {
+        Ok(l) => l,
+        Err(e) => {
+            return AstResponse {
+                ok: false,
+                results: None,
+                error: Some(format!("failed to init JS parser: {e}")),
+                parsed_files: 0,
+                scanned_files: 0,
+                root: root.to_string_lossy().to_string(),
+                truncated: false,
+                duration_ms: 0,
+            };
+        }
+    };
+    let php_lang = match PhpLang::new() {
+        Ok(l) => l,
+        Err(e) => {
+            return AstResponse {
+                ok: false,
+                results: None,
+                error: Some(format!("failed to init PHP parser: {e}")),
+                parsed_files: 0,
+                scanned_files: 0,
+                root: root.to_string_lossy().to_string(),
+                truncated: false,
+                duration_ms: 0,
+            };
+        }
+    };
+    let py_lang = match PyLang::new() {
+        Ok(l) => l,
+        Err(e) => {
+            return AstResponse {
+                ok: false,
+                results: None,
+                error: Some(format!("failed to init Python parser: {e}")),
+                parsed_files: 0,
+                scanned_files: 0,
+                root: root.to_string_lossy().to_string(),
+                truncated: false,
+                duration_ms: 0,
+            };
+        }
+    };
 
     let mut results = Vec::new();
     let mut parsed_files = 0usize;
@@ -648,6 +1012,9 @@ pub fn search(
         let matched = match ext {
             "rs" => rust_lang.query(&content_or_warn(path), kind, filters),
             "ts" | "tsx" => ts_lang.query(&content_or_warn(path), kind, is_tsx, filters),
+            "js" | "jsx" | "mjs" | "cjs" => js_lang.query(&content_or_warn(path), kind, filters),
+            "php" => php_lang.query(&content_or_warn(path), kind, filters),
+            "py" => py_lang.query(&content_or_warn(path), kind, filters),
             _ => continue,
         };
 
@@ -768,9 +1135,13 @@ mod tests {
     #[test]
     fn filters_exts_for_kind_rust_only() {
         let f = Filters::default();
-        assert_eq!(f.exts_for_kind("trait", &[]), vec!["rs"]);
-        assert_eq!(f.exts_for_kind("const", &[]), vec!["rs"]);
-        assert_eq!(f.exts_for_kind("fn", &[]), vec!["rs", "ts", "tsx"]);
+        assert_eq!(f.exts_for_kind("static", &[]), vec!["rs"]);
+        assert_eq!(f.exts_for_kind("trait", &[]), vec!["rs", "php"]);
+        assert_eq!(f.exts_for_kind("const", &[]), vec!["rs", "php"]);
+        assert_eq!(
+            f.exts_for_kind("fn", &[]),
+            vec!["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"]
+        );
     }
 
     #[test]
@@ -1030,12 +1401,12 @@ fn c() {}
     fn search_skips_non_matching_extensions() {
         let root = std::env::temp_dir().join(format!("bebok-ast-ext-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("test.py"), "def foo(): pass\n").unwrap();
+        std::fs::write(root.join("test.txt"), "fn foo() {}\n").unwrap();
 
         let filters = Filters::default();
         let resp = search(&root, "fn", &filters, 10, 500, &[]);
         assert!(resp.ok);
-        // Python files are skipped by default (no Python parser).
+        // .txt files never match any kind's extension set.
         assert_eq!(resp.results.as_ref().map(|r| r.len()).unwrap_or(0), 0);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -1146,9 +1517,74 @@ fn c() {}
     fn exts_for_kind_intersects_languages() {
         let f = Filters::default();
         let langs = vec!["ts".to_string()];
-        // "trait" is Rust-only, so intersecting with ["ts"] yields nothing.
+        // "trait" is Rust+PHP, so intersecting with ["ts"] yields nothing.
         assert!(f.exts_for_kind("trait", &langs).is_empty());
-        // "fn" supports both; intersection keeps only ts.
+        // "fn" supports all languages; intersection keeps only ts.
         assert_eq!(f.exts_for_kind("fn", &langs), vec!["ts"]);
+    }
+
+    #[test]
+    fn js_query_returns_results_for_fn() {
+        let lang = JsLang::new().unwrap();
+        let code = "function hello() {}\nconst world = () => 42;\nclass Foo {}\n";
+        let filters = Filters::default();
+        let results = lang.query(code, "fn", &filters);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "hello");
+        assert_eq!(results[1].name, "world");
+        let classes = lang.query(code, "struct", &filters);
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].name, "Foo");
+    }
+
+    #[test]
+    fn php_query_returns_results_for_fn_and_class() {
+        let lang = PhpLang::new().unwrap();
+        let code = "<?php\nfunction hello() {}\nclass Foo {\n public function bar() {}\n}\n";
+        let filters = Filters::default();
+        let fns = lang.query(code, "fn", &filters);
+        let names: Vec<&str> = fns.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"hello"), "got: {names:?}");
+        assert!(names.contains(&"bar"), "got: {names:?}");
+        let classes = lang.query(code, "struct", &filters);
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].name, "Foo");
+    }
+
+    #[test]
+    fn py_query_returns_results_for_fn_and_class() {
+        let lang = PyLang::new().unwrap();
+        let code = "def hello():\n    pass\n\nclass Foo:\n    def bar(self):\n        pass\n";
+        let filters = Filters::default();
+        let fns = lang.query(code, "fn", &filters);
+        let names: Vec<&str> = fns.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"hello"), "got: {names:?}");
+        assert!(names.contains(&"bar"), "got: {names:?}");
+        let classes = lang.query(code, "struct", &filters);
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].name, "Foo");
+    }
+
+    #[test]
+    fn search_finds_php_js_py_end_to_end() {
+        let root = std::env::temp_dir().join(format!("bebok-ast-multi-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.php"), "<?php\nfunction php_hello() {}\n").unwrap();
+        std::fs::write(root.join("b.js"), "function js_hello() {}\n").unwrap();
+        std::fs::write(root.join("c.py"), "def py_hello():\n    pass\n").unwrap();
+
+        let filters = Filters::default();
+        let resp = search(&root, "fn", &filters, 10, 500, &[]);
+        assert!(resp.ok);
+        let mut names: Vec<String> = resp
+            .results
+            .unwrap()
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["js_hello", "php_hello", "py_hello"]);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

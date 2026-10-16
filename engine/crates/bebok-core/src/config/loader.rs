@@ -826,7 +826,10 @@ mod tests {
         let cfg = ResolvedConfig::default();
         assert!(!cfg.ast_search.enabled);
         assert_eq!(cfg.ast_search.max_files, DEFAULT_AST_SEARCH_MAX_FILES);
-        assert_eq!(cfg.ast_search.languages, vec!["rs", "ts", "tsx"]);
+        assert_eq!(
+            cfg.ast_search.languages,
+            vec!["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"]
+        );
     }
 
     #[test]
@@ -865,7 +868,10 @@ mod tests {
             "non-bool enabled keeps the default"
         );
         assert_eq!(cfg.ast_search.max_files, DEFAULT_AST_SEARCH_MAX_FILES);
-        assert_eq!(cfg.ast_search.languages, vec!["rs", "ts", "tsx"]);
+        assert_eq!(
+            cfg.ast_search.languages,
+            vec!["rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "php", "py"]
+        );
         // A non-object section is a no-op.
         apply(&mut cfg, &serde_json::json!({ "ast_search": "on" }));
         assert!(!cfg.ast_search.enabled);
