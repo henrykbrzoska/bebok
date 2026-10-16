@@ -331,10 +331,10 @@ impl Provider for OpenAiProvider {
         req: ChatRequest,
     ) -> StreamResult<BoxStream<'static, StreamResult<StreamEvent>>> {
         let model = model_name(&req.model).to_string();
-        // Three OpenCode Zen models refuse Chat Completions outright
-        // (`400 ModelProtocolUnsupported`): send those through the Responses
-        // protocol instead, endpoint and body alike. Everything else keeps
-        // the Chat Completions path byte for byte.
+        // OpenCode Zen goes through the Responses protocol, endpoint and
+        // body alike (the official CLI sends everything to
+        // `POST {base}/responses`). Everything else keeps the Chat
+        // Completions path byte for byte.
         let responses = crate::providers::uses_responses(&req.model);
         let (url, mut body) = if responses {
             (

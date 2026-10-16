@@ -1,13 +1,14 @@
-//! OpenCode Zen gateway (`https://opencode.ai/zen/v1`).
+//! OpenCode Zen gateway (`https://opencode.ai/inference/v1`).
 //!
-//! Zen speaks the OpenAI Chat Completions protocol, but its free tier is
-//! gated on client identity: requests without first-party headers are
-//! rejected with `403 FreeTierError: ... can only be used from within
-//! OpenCode`. The header shape below was captured from the live official
-//! CLI 1.18.34 (`OPENCODE_DEBUG_REQUEST=1 opencode run`, 200 OK on
-//! `mimo-v2.6-flash-free`), so every default mirrors the real CLI byte for
-//! byte and is overridable through the provider's `extra` map
-//! (Settings UI):
+//! Zen speaks the OpenAI Responses protocol on `POST {base}/responses` —
+//! the official CLI sends every request there (chat and title generation
+//! alike). The free tier is gated on client identity: requests without
+//! first-party headers are rejected with `403 FreeTierError: ... can only
+//! be used from within OpenCode`. The header shape below was captured from
+//! the live official CLI 1.18.34 (`OPENCODE_DEBUG_REQUEST=1 opencode run`,
+//! `POST https://opencode.ai/inference/v1/responses`), so every default
+//! mirrors the real CLI byte for byte and is overridable through the
+//! provider's `extra` map (Settings UI):
 //! - full `User-Agent` incl. ai-sdk/runtime suffix, not the bare token
 //! - `x-opencode-session` + `x-opencode-session-id` carrying the SAME id,
 //!   stable for the whole session (the CLI reuses one `ses_…` id)
@@ -34,11 +35,12 @@ use serde_json::Value;
 use crate::ProviderSpec;
 use crate::provider::AdapterConfig;
 
-/// Full `User-Agent` captured from the live CLI 1.18.34 on the Chat
-/// Completions endpoint. The gateway keys its first-party detection off
-/// the leading token `opencode/<version>`, but the whole string is sent
-/// verbatim because that is what the real client emits.
-const USER_AGENT: &str = "opencode/1.18.34 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2";
+/// Full `User-Agent` captured from the live CLI 1.18.34 on the Responses
+/// endpoint (`OPENCODE_DEBUG_REQUEST=1 opencode run`, `POST
+/// `https://opencode.ai/inference/v1/responses`). The gateway keys its
+/// first-party detection off the leading token `opencode/<version>`, but the
+/// whole string is sent verbatim because that is what the real client emits.
+const USER_AGENT: &str = "opencode/1.18.34 ai-sdk/provider-utils/4.0.40 runtime/bun/1.4.2";
 
 /// Default client flavour reported via `x-opencode-client` (the real CLI
 /// sends its app name here: `cli` / `desktop` / `web`).
@@ -159,34 +161,20 @@ fn push_default(
     }
 }
 
-/// Zen models that refuse Chat Completions with `400 ModelProtocolUnsupported
-/// ("Model does not support this protocol")` and only answer the OpenAI
-/// *Responses* protocol (`POST {base}/responses`) — the endpoint the official
-/// CLI uses for them.
-///
-/// Hardcoded from a live probe of the whole configured roster on
-/// `POST /zen/v1/chat/completions` (one request per model with the
-/// first-party identity headers): every other configured model answered
-/// `200`/`4xx upstream` on Chat Completions, only these three free models
-/// rejected the protocol itself. The Responses request lives in
-/// [`crate::openai_responses`]; everything else keeps the default
-/// Chat Completions path unchanged.
-const RESPONSES_MODELS: &[&str] = &[
-    "longcat-2.5-preview-free",
-    "muse-spark-1.2-contributor-free",
-    "muse-spark-1.3-contributor-free",
-];
-
 /// True when the request model (provider-prefixed, e.g.
 /// `opencode/muse-spark-1.3-contributor-free`) must go through the Responses
 /// endpoint instead of `/chat/completions`.
+///
+/// The official CLI sends EVERYTHING through `POST {base}/responses` — chat
+/// and title generation alike (see the `OPENCODE_DEBUG_REQUEST=1` capture:
+/// even the `gpt-5.4-nano` title request goes to `/responses`). So every
+/// `opencode/` model uses Responses.
 ///
 /// Gated on the `opencode/` request prefix exactly like the free-tier
 /// identity handling in `openai_body`, so a same-named model on another
 /// provider is never redirected.
 pub(crate) fn uses_responses(req_model: &str) -> bool {
     req_model.starts_with("opencode/")
-        && RESPONSES_MODELS.contains(&crate::spec::model_name(req_model))
 }
 
 /// Swap the provider's chat URL (`…/chat/completions`, what
@@ -216,7 +204,7 @@ mod tests {
         for (name, value) in [
             (
                 "User-Agent",
-                "opencode/1.18.34 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2",
+                "opencode/1.18.34 ai-sdk/provider-utils/4.0.40 runtime/bun/1.4.2",
             ),
             ("x-opencode-client", "cli"),
             ("x-opencode-project", "global"),
@@ -321,43 +309,35 @@ mod tests {
     }
 
     #[test]
-    fn responses_models_are_hardcoded_to_the_responses_endpoint() {
+    fn every_opencode_model_uses_the_responses_endpoint() {
+        // The official CLI sends everything through POST {base}/responses
+        // (chat and title generation alike), so every `opencode/` model is
+        // routed there — free and paid alike.
         for model in [
-            "muse-spark-1.2-contributor-free",
-            "muse-spark-1.3-contributor-free",
-            "longcat-2.5-preview-free",
-        ] {
-            assert!(
-                super::uses_responses(&format!("opencode/{model}")),
-                "{model} must use /responses"
-            );
-            assert!(
-                !super::uses_responses(model),
-                "bare (non-opencode/) model must not be redirected"
-            );
-        }
-        // Everything else keeps the Chat Completions path — including models
-        // that merely share the free-tier suffix or are paid variants.
-        for model in [
-            "opencode/ling-3.1-flash-free",
+            "opencode/muse-spark-1.2-contributor-free",
+            "opencode/muse-spark-1.3-contributor-free",
+            "opencode/longcat-2.5-preview-free",
             "opencode/mimo-v2.6-flash-free",
             "opencode/big-pickle",
-            "opencode/jev-1.13",
             "opencode/gpt-5.5",
         ] {
-            assert!(!super::uses_responses(model), "{model} must stay on chat");
+            assert!(super::uses_responses(model), "{model} must use /responses");
         }
-        // Same model id on a different provider: never redirected.
-        assert!(!super::uses_responses(
-            "openrouter/muse-spark-1.3-contributor-free"
-        ));
+        // Bare ids (no provider prefix) and other providers stay put.
+        for model in [
+            "muse-spark-1.3-contributor-free",
+            "openrouter/muse-spark-1.3-contributor-free",
+            "openai/gpt-5.5",
+        ] {
+            assert!(!super::uses_responses(model), "{model} must not redirect");
+        }
     }
 
     #[test]
     fn responses_url_swaps_the_chat_suffix() {
         assert_eq!(
-            super::responses_url("https://opencode.ai/zen/v1/chat/completions"),
-            "https://opencode.ai/zen/v1/responses"
+            super::responses_url("https://opencode.ai/inference/v1/chat/completions"),
+            "https://opencode.ai/inference/v1/responses"
         );
         // Unknown shapes pass through unchanged instead of corrupting the URL.
         assert_eq!(
