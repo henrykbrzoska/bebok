@@ -150,7 +150,7 @@ fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
             "xai" => "https://api.x.ai/v1",
             "deepseek" => "https://api.deepseek.com/v1",
             "openrouter" => "https://openrouter.ai/api/v1",
-            "opencode" => "https://opencode.ai/zen/v1",
+            "opencode" => "https://opencode.ai/inference/v1",
             "ollama" => "http://localhost:11434/v1",
             "google" => "https://generativelanguage.googleapis.com/v1beta/openai",
             "mistralai" => "https://api.mistral.ai/v1",
@@ -250,14 +250,14 @@ pub fn builtin_provider_specs() -> Vec<ProviderSpec> {
             extra: Map::new(),
         },
         // OpenCode Zen: a curated gateway in front of many vendors. It speaks
-        // the OpenAI Chat Completions protocol under /zen/v1 (some model
-        // families are also served over Anthropic Messages and Google-native
-        // paths), so the generic OpenAI adapter is used and the model id alone
-        // picks the upstream vendor.
+        // the OpenAI Responses protocol under /inference/v1 (the official
+        // CLI sends every request — chat and title generation alike — to
+        // POST {base}/responses), so the generic OpenAI adapter is used
+        // and the model id alone picks the upstream vendor.
         ProviderSpec {
             name: "opencode".into(),
             kind: ProviderKind::Openai,
-            endpoint: Some("https://opencode.ai/zen/v1".into()),
+            endpoint: Some("https://opencode.ai/inference/v1".into()),
             api_key: None,
             models: Vec::new(),
             extra: Map::new(),
@@ -456,13 +456,23 @@ pub fn provider_catalog() -> Vec<ProviderUiSpec> {
 /// name; unknown names are appended (custom/self-hosted providers). Built-in
 /// model lists are empty (only the connection test fills them), so this rule
 /// stays neutral until a config entry sets models explicitly.
+///
+/// Migration: the OpenCode Zen base moved from `/zen/v1` to `/inference/v1`
+/// (the official CLI sends everything to `POST {base}/responses` on the new
+/// base). A saved project/global config still carrying the old endpoint
+/// would otherwise keep hitting the retired base after an upgrade, so an
+/// explicit old-base endpoint on the `opencode` built-in is ignored and the
+/// current built-in default wins. An explicit *custom* endpoint (anything
+/// else) still overrides, as before.
 pub fn resolve_provider_specs(config_specs: &[ProviderSpec]) -> Vec<ProviderSpec> {
     let mut out = builtin_provider_specs();
     for spec in config_specs {
         match out.iter_mut().find(|b| b.name == spec.name) {
             Some(builtin) => {
                 builtin.kind = spec.kind;
-                if spec.endpoint.is_some() {
+                if let Some(endpoint) = spec.endpoint.as_deref()
+                    && !is_retired_opencode_endpoint(&builtin.name, endpoint)
+                {
                     builtin.endpoint = spec.endpoint.clone();
                 }
                 if spec.api_key.is_some() {
@@ -481,6 +491,15 @@ pub fn resolve_provider_specs(config_specs: &[ProviderSpec]) -> Vec<ProviderSpec
         }
     }
     out
+}
+
+/// True when the endpoint is the retired OpenCode Zen base: the official
+/// CLI moved from `/zen/v1` to `/inference/v1` (everything goes to
+/// `POST {base}/responses` on the new base). A config saved before the move
+/// still carries the old URL, and the old base now answers free-tier
+/// requests with `403 FreeTierError`.
+fn is_retired_opencode_endpoint(name: &str, endpoint: &str) -> bool {
+    name == "opencode" && endpoint.trim_end_matches('/') == "https://opencode.ai/zen/v1"
 }
 
 /// Look up one provider spec by name (falling back to built-ins).
