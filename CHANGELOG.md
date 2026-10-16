@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The Bebok Companion extension can now switch to another of your open tabs: the new `switchTab` command (`POST /browser/remote/switchTab` with the tab id from `tabs`) activates that tab and focuses its window, so every following command — click, type, screenshot — runs on the tab you picked instead of only on whatever was active.
+
 ## 1.9.3 — 2026-10-07
 
 ### Fixes

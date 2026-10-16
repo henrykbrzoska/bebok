@@ -37,6 +37,7 @@ registers under in `registerExtension()`). `directory` is the project root.
 | Action | Params | Result |
 |--------|--------|--------|
 | `tabs` | `{}` (or `chrome.tabs.query` filter, e.g. `{"active":true,"currentWindow":true}`) | `[{id, title, url, active, windowId}]` — all tabs, no switching |
+| `switchTab` | `{"tab_id"}` (also `tabId` / `id`) | `{id, title, url, active, windowId}` — activates that tab (focuses its window), later commands run on it |
 | `navigate` | `{"url"}` | `{url, title}` (active tab) |
 | `getPageContext` | `{"max_chars?"}` | `{url, title, text, selection, metaDescription}` |
 | `getText` | `{"selector?","max_chars?"}` | `{text, url, title, truncated}` |
@@ -98,6 +99,9 @@ POST /browser/remote/tabs?session_id=extension&directory=/home/rajner/bebok
 - Prefer 1–2 distinctive commands over chains: `tabs` first (what is open?),
   then act on the active tab. Never `navigate` the user's active tab without
   asking — it hijacks the window they are looking at.
+- To work in another of the user's tabs use `switchTab` (with the `id` from
+  `tabs`) instead of `navigate` — it just brings that tab to the front, the
+  page itself is untouched; tell the user you did it.
 - `tabs` with `{}` lists every window; filter with `chrome.tabs.query`
   shapes (`active`, `currentWindow`, `url` pattern like
   `"https://github.com/*"`).
