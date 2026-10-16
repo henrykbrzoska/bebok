@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- AST search (`code_ast`) now also covers PHP (`.php`), JavaScript (`.js/.jsx/.mjs/.cjs`) and Python (`.py`) files — not just Rust and TypeScript. Functions, classes, methods, interfaces, traits and enums in those languages are found structurally (by AST node, not regex), with the same `name_regex` / `path_regex` filters.
+- The Bebok Companion extension can now switch to another of your open tabs: the new `switchTab` command (`POST /browser/remote/switchTab` with the tab id from `tabs`) activates that tab and focuses its window, so every following command — click, type, screenshot — runs on the tab you picked instead of only on whatever was active.
+- OpenCode Zen now goes through the Responses protocol for every request (`POST https://opencode.ai/inference/v1/responses`, like the official CLI) instead of Chat Completions on the retired `/zen/v1` endpoint — free-tier models answer again, and stale `https://opencode.ai/zen/v1` configs are auto-migrated to the new base URL.
+
+### Fixes
+
+- The Debug log's expanded LLM-call JSON no longer paints over the log rows below: the calls panel scrolls internally instead of overflowing.
+
 ## 1.9.3 — 2026-10-07
 
 ### Fixes
