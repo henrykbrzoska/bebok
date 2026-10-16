@@ -101,11 +101,13 @@
 /* --- Last LLM calls (existing feature, restyled) ------------------------ */
 
 .calls {
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 400px;
+  min-height: 0;
   max-height: 45%;
+  overflow-y: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);

@@ -1,10 +1,8 @@
 //! OpenAI Responses protocol client (SSE streaming).
 //!
-//! A few OpenCode Zen models refuse Chat Completions outright
-//! (`400 ModelProtocolUnsupported … Model does not support this protocol`)
-//! and only answer the *Responses* protocol on `POST {base}/responses` —
-//! exactly what the official CLI sends (see
-//! `providers::opencode::uses_responses` for the hardcoded model list).
+//! OpenCode Zen answers the *Responses* protocol on `POST {base}/responses` —
+//! exactly what the official CLI sends for every request (see
+//! `providers::opencode::uses_responses`).
 //!
 //! This module builds that request body and parses its event stream into the
 //! same [`StreamEvent`] vocabulary the agent loop consumes, so those models
@@ -72,18 +70,25 @@ pub fn responses_body(req: &ChatRequest, model: &str) -> Value {
         "stream": true,
         "store": false,
         "max_output_tokens": req.max_tokens,
+        // First-party fingerprint the official CLI (ai-sdk) always sends:
+        // encrypted reasoning content for multi-turn reasoning continuity.
+        // The gateway uses its presence as a first-party signal — requests
+        // without it get `403 FreeTierError` even with correct headers.
+        "include": ["reasoning.encrypted_content"],
     });
     if tool_choice_none && let Value::Object(map) = &mut body {
         map.insert("tool_choice".to_string(), Value::String("none".to_string()));
     }
-    if let Some(effort) = req.thinking.openai_effort()
-        && let Value::Object(map) = &mut body
-    {
-        // Responses carries reasoning under `reasoning.effort` (the chat
-        // `reasoning_effort` key is not part of this protocol).
+    // The CLI always sends `reasoning`, even when it wants no reasoning:
+    // `{"effort":"none","summary":"auto"}` (see the title request in the
+    // `OPENCODE_DEBUG_REQUEST=1` capture). Omitting the block reads as a
+    // non-CLI client to the gateway, so `Thinking::Off` maps to
+    // `effort:none` instead of omitting the field.
+    if let Value::Object(map) = &mut body {
+        let effort = req.thinking.openai_effort().unwrap_or("none");
         map.insert(
             "reasoning".to_string(),
-            serde_json::json!({ "effort": effort }),
+            serde_json::json!({ "effort": effort, "summary": "auto" }),
         );
     }
     // Sampling: only `temperature`/`top_p` exist in the Responses schema —
@@ -572,6 +577,16 @@ mod tests {
         assert_eq!(body["input"][0]["content"], "sys");
         assert_eq!(body["input"][1]["role"], "user");
         assert_eq!(body["input"][1]["content"], "hi");
+        // First-party fingerprint the CLI always sends (title request in the
+        // `OPENCODE_DEBUG_REQUEST=1` capture): encrypted reasoning content
+        // plus an explicit `reasoning` block even when no reasoning is
+        // wanted (`effort:none`).
+        assert_eq!(
+            body["include"],
+            serde_json::json!(["reasoning.encrypted_content"])
+        );
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert_eq!(body["reasoning"]["summary"], "auto");
     }
 
     #[test]
