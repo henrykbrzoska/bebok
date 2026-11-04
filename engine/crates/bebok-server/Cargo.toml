@@ -12,6 +12,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 axum.workspace = true
 base64.workspace = true
+bebok-cli-agents = { path = "../bebok-cli-agents" }
 bebok-core = { path = "../bebok-core" }
 bebok-llm = { path = "../bebok-llm" }
 bebok-tools = { path = "../bebok-tools" }

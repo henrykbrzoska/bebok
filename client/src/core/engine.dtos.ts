@@ -341,6 +341,34 @@ export interface PermissionResolved {
   scope?: string;
 }
 
+/** Properties of an `ssh.prompt` event: the engine needs a password to open a persistent SSH session. */
+export interface SshPrompt {
+  /** Single-use id answered with `POST /ssh/prompt/{requestID}`. */
+  requestID: string;
+  /** Bebok session that is trying to connect. */
+  sessionID: string;
+  directory: string;
+  /** `user@host:port` shown to the user. */
+  host: string;
+  /** Short reason, currently always `password`. */
+  prompt: string;
+}
+
+/** One open persistent SSH session (`GET /ssh`). */
+export interface SshSessionInfo {
+  id: string;
+  sessionID: string;
+  directory: string;
+  host: string;
+  label: string;
+  cwd: string;
+  startedAt: number;
+  lastUsed: number;
+  commands: number;
+  /** `running` or `dead`. */
+  status: string;
+}
+
 /** Active sub-task spawned by the orchestrator (emitted via `task.started`). */
 export interface ActiveTask {
   taskID: string;
@@ -636,6 +664,10 @@ export interface ResolvedConfig {
     max_files?: number;
     languages?: string[];
   };
+  /** Remote-server access through the `ssh` tool (on by default). */
+  ssh?: {
+    enabled?: boolean;
+  };
 }
 
 /** `verify` config section (WP-AUTOVERIFY / F8-1). */
@@ -733,17 +765,63 @@ export interface UiConfig {
   custom_css_files?: string[];
 }
 
+/**
+ * Wire protocol of a provider. `cli` is not an HTTP protocol at all: it drives
+ * an external agentic CLI (Claude Code) as a subprocess, is always keyless and
+ * has no endpoint/base URL.
+ */
+export type ProviderKind = 'openai' | 'anthropic' | 'cli';
+
 /** One provider (name, endpoint, API key, known models). */
 export interface ProviderSpec {
   name: string;
-  kind: 'openai' | 'anthropic';
+  kind: ProviderKind;
   endpoint?: string | null;
   api_key?: string | null;
   models: string[];
   /** True when an API key is resolvable (explicit or env var). */
   has_key?: boolean;
-  /** Provider-specific extra fields declared by the catalog (WP-LLM F3-2). */
-  extra?: Record<string, string>;
+  /**
+   * Provider-specific extra fields declared by the catalog (WP-LLM F3-2).
+   * Values are raw JSON on the wire: CLI providers store booleans
+   * (`allow_write`) and numbers (`timeout_secs`) here, not just strings.
+   */
+  extra?: Record<string, unknown>;
+}
+
+/** Capability flags of a CLI backend (`GET /cli/backends`, camelCase wire names). */
+export interface CliCapabilities {
+  streaming: boolean;
+  resume: boolean;
+  system_prompt: boolean;
+  tool_events: boolean;
+  usage: boolean;
+  images: boolean;
+  mcp: boolean;
+}
+
+/** One agentic CLI the engine can drive as a provider (`GET /cli/backends`). */
+export interface CliBackend {
+  id: string;
+  label: string;
+  /** The binary was found on this machine; `binary` may still be null otherwise. */
+  available: boolean;
+  binary: string | null;
+  version: string | null;
+  capabilities: CliCapabilities;
+  /** Model ids offered by default when adding this backend as a provider. */
+  defaultModels: string[];
+  /** Environment variable that overrides the discovered binary path. */
+  envOverride: string;
+}
+
+/** `POST /cli/backends/{id}/probe` result; `code` is null when killed. */
+export interface CliProbeResult {
+  id: string;
+  ok: boolean;
+  code: number | null;
+  stdout: string;
+  stderr: string;
 }
 
 /** Executable paths for language runtimes (resolved with defaults). */

@@ -126,6 +126,27 @@ describe('CodeFeaturesCard', () => {
     expect(component.astSearchEnabled()).toBeTrue();
   });
 
+  it('the ssh toggle is on by default and persists { ssh: { enabled } }', async () => {
+    await setup();
+    expect(component.sshEnabled()).toBeTrue();
+
+    spyOn(engine, 'putConfig').and.callFake((_dir: string, delta: unknown) =>
+      Promise.resolve(configResponse(delta as Record<string, unknown>)),
+    );
+
+    await component.toggleSsh(false);
+
+    expect(engine.putConfig).toHaveBeenCalledWith('/tmp/project', {
+      ssh: { enabled: false },
+    });
+    expect(component.sshEnabled()).toBeFalse();
+  });
+
+  it('the ssh toggle reflects a disabled config section', async () => {
+    await setup({ ssh: { enabled: false } });
+    expect(component.sshEnabled()).toBeFalse();
+  });
+
   it('a failed save reports the error and keeps the switch unchanged', async () => {
     await setup();
     spyOn(engine, 'putConfig').and.returnValue(Promise.reject(new Error('engine down')));

@@ -9,6 +9,7 @@ members = [
     "crates/bebok-skills",
     "crates/bebok-pty",
     "crates/bebok-ast-cli",
+    "crates/bebok-cli-agents",
 ]
 default-members = ["crates/bebok-server"]
 

@@ -43,7 +43,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use crate::config::ResolvedConfig;
-use crate::provider::build_provider;
+use crate::provider::{ProviderCtx, build_provider_for};
 use crate::store::InstanceStore;
 
 /// Maximum sub-agent nesting depth (a sub-agent delegating further counts as
@@ -332,7 +332,7 @@ impl Tool for TaskTool {
         // server's prompt assembly, minus the parent-only context notes).
         assemble_prompt(&instance, &mut agent, &cfg);
 
-        let provider = match build_provider(&cfg, &model) {
+        let provider = match build_provider_for(&cfg, &model, &ProviderCtx::root(&instance.root)) {
             Ok(p) => p,
             Err(e) => {
                 return ToolOutput::new(

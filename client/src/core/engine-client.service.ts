@@ -17,6 +17,8 @@ import {
   ChangeDiffResponse,
   ChangeEntry,
   ChangesResponse,
+  CliBackend,
+  CliProbeResult,
   CompactResponse,
   ConfigResponse,
   CreatePtyResponse,
@@ -72,6 +74,7 @@ import {
   CodeMapResponse,
   CodeGraphResponse,
   ScheduleTask,
+  SshSessionInfo,
 } from './engine.dtos';
 import { ConnectionProfile, EngineConnection, TransportStrategy } from './transport.strategy';
 
@@ -495,6 +498,36 @@ export class EngineClient {
     ).then((response) => response.asks);
   }
 
+  // ---------------------------------------------------------------------------
+  // Persistent SSH sessions (`ssh` tool)
+  // ---------------------------------------------------------------------------
+
+  /** Open persistent SSH sessions of the engine. */
+  async listSshSessions(): Promise<SshSessionInfo[]> {
+    const response = await this.request<{ sessions: SshSessionInfo[] }>('GET', '/ssh');
+    return response.sessions ?? [];
+  }
+
+  /**
+   * Deliver (or cancel) the password prompt of a pending `ssh` connect. The
+   * password goes straight to the `ssh` process and is never persisted.
+   */
+  async answerSshPrompt(
+    requestID: string,
+    body: { answer?: string; cancel?: boolean },
+  ): Promise<void> {
+    await this.request<unknown>(
+      'POST',
+      `/ssh/prompt/${encodeURIComponent(requestID)}`,
+      body.cancel ? { cancel: true } : { answer: body.answer ?? '' },
+    );
+  }
+
+  /** Close an open SSH session. */
+  async closeSshSession(id: string): Promise<void> {
+    await this.request<unknown>('POST', `/ssh/${encodeURIComponent(id)}/close`);
+  }
+
   /** Absolute URL of the global SSE stream (used by `EventsStore`). */
   eventUrl(): string {
     const conn = this.requireConnection();
@@ -757,6 +790,36 @@ export class EngineClient {
     return this.request<ModelsResponse>(
       'GET',
       `/models?directory=${encodeURIComponent(directory)}&provider=${encodeURIComponent(provider)}`,
+    );
+  }
+
+  /**
+   * `GET /cli/backends` -> the agentic CLIs (Claude Code, …) installed on this
+   * machine, each with availability, version and default models.
+   *
+   * The engine wraps the list in `{ "backends": [...] }` (like
+   * `/providers/catalog`) so it can grow another key later; a bare array is
+   * tolerated too so a shape change cannot blank the settings card.
+   */
+  async cliBackends(): Promise<CliBackend[]> {
+    const body = await this.request<{ backends?: CliBackend[] } | CliBackend[]>(
+      'GET',
+      '/cli/backends',
+    );
+    if (Array.isArray(body)) {
+      return body;
+    }
+    return Array.isArray(body?.backends) ? body.backends : [];
+  }
+
+  /**
+   * `POST /cli/backends/{id}/probe` -> exit code + stdout/stderr of one bounded
+   * `--version` run. "Not installed" is a 200 with `ok: false`, not an error.
+   */
+  probeCliBackend(id: string): Promise<CliProbeResult> {
+    return this.request<CliProbeResult>(
+      'POST',
+      `/cli/backends/${encodeURIComponent(id)}/probe`,
     );
   }
 

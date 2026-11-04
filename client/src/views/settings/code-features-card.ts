@@ -3,8 +3,9 @@
  *
  * On/off toggles for the three code-analysis features the engine reads from
  * config: `code_map` (directory map injected into the system prompt),
- * `code_graph` (module dependency graph behind the code_graph_* tools) and
- * `ast_search` (structural search behind the code_ast tool). Each toggle is
+ * `code_graph` (module dependency graph behind the code_graph_* tools),
+ * `ast_search` (structural search behind the code_ast tool) and `ssh`
+ * (persistent remote shells behind the ssh tool). Each toggle is
  * a `PUT /config` delta `{ <section>: { enabled } }` — the engine merges
  * per-key, reloads the instance and registers/unregisters the tools, so the
  * change takes effect on the next turn.
@@ -49,6 +50,10 @@ export class CodeFeaturesCard {
   // --- ast search -----------------------------------------------------------
   readonly astSearchEnabled = signal(false);
 
+  // --- ssh tool -------------------------------------------------------------
+  /** Remote-server access (`ssh`); on by default, so mirror the config value. */
+  readonly sshEnabled = signal(true);
+
   /** True while any config save is in flight (disables the toggles). */
   readonly saving = signal(false);
 
@@ -63,6 +68,7 @@ export class CodeFeaturesCard {
       this.codeMapEnabled.set(!!cfg.code_map?.enabled);
       this.codeGraphEnabled.set(!!cfg.code_graph?.enabled);
       this.astSearchEnabled.set(!!cfg.ast_search?.enabled);
+      this.sshEnabled.set(cfg.ssh?.enabled !== false);
     });
   }
 
@@ -84,6 +90,10 @@ export class CodeFeaturesCard {
 
   async toggleAstSearch(enabled: boolean): Promise<void> {
     await this.saveEnabled('ast_search', enabled);
+  }
+
+  async toggleSsh(enabled: boolean): Promise<void> {
+    await this.saveEnabled('ssh', enabled);
   }
 
   // --- regenerate -------------------------------------------------------------
@@ -126,7 +136,7 @@ export class CodeFeaturesCard {
 
   /** Persist one `{ <section>: { enabled } }` delta and adopt the response. */
   private async saveEnabled(
-    section: 'code_map' | 'code_graph' | 'ast_search',
+    section: 'code_map' | 'code_graph' | 'ast_search' | 'ssh',
     enabled: boolean,
   ): Promise<void> {
     const dir = this.store.directory();

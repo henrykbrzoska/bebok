@@ -182,6 +182,13 @@ async fn try_llm_generate(
     types: &[String],
     min_per_type: usize,
 ) -> Result<FleetGenResult> {
+    // Deliberately HTTP-only: fleet generation runs on `build_provider` (no
+    // project root), so a `kind: "cli"` model fails here with an explicit
+    // "CLI provider but no project root" error instead of quietly spawning an
+    // agentic CLI. Asking a CLI to emit a strict JSON fleet plan would burn a
+    // paid, tool-enabled turn per attempt and answer in prose half the time —
+    // and this path is on the fallback branch already, where a clear error is
+    // better than a slow surprise.
     let provider = crate::provider::build_provider(cfg, generation_model)?;
 
     let system = "You are a fleet planner for an AI agent system. You MUST respond \

@@ -11,7 +11,8 @@ use bebok_llm::{ProviderSpec, Thinking};
 
 use super::jsonc;
 use super::model::{
-    AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, UiConfig,
+    AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, SshConfig,
+    UiConfig,
 };
 
 /// Load and resolve configuration for a project directory.
@@ -151,6 +152,10 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     if let Some(as_cfg) = v.get("ast_search") {
         apply_ast_search(&mut cfg.ast_search, as_cfg);
     }
+    // SSH tool: project overrides global per-field.
+    if let Some(ssh) = v.get("ssh") {
+        apply_ssh(&mut cfg.ssh, ssh);
+    }
     // Sampling overrides merge per key (project wins per key): global
     // fields (`{ "temperature": 0.5 }`) and per-agent sections
     // (`{ "code": { "temperature": 0.2 } }`) alike.
@@ -234,6 +239,18 @@ pub fn apply_ast_search(cfg: &mut AstSearchConfig, v: &Value) {
         if !filtered.is_empty() {
             cfg.languages = filtered;
         }
+    }
+}
+
+/// Apply one layer's `ssh` section on top of the current value.
+/// `enabled` accepts bool only; a bare bool (`"ssh": false`) works too.
+pub fn apply_ssh(cfg: &mut SshConfig, v: &Value) {
+    let enabled = match v {
+        Value::Bool(b) => Some(*b),
+        _ => v.get("enabled").and_then(|x| x.as_bool()),
+    };
+    if let Some(enabled) = enabled {
+        cfg.enabled = enabled;
     }
 }
 
@@ -817,6 +834,43 @@ mod tests {
             &serde_json::json!({ "code_map": { "max_depth": 99 } }),
         );
         assert_eq!(cfg.code_map.max_depth, 6);
+    }
+
+    // -- ssh -----------------------------------------------------------------
+    #[test]
+    fn ssh_defaults_to_enabled() {
+        let cfg = ResolvedConfig::default();
+        assert!(cfg.ssh.enabled, "ssh tool must be on by default");
+    }
+
+    #[test]
+    fn ssh_toggle_accepts_object_and_bare_bool() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ssh": { "enabled": false } }),
+        );
+        assert!(!cfg.ssh.enabled);
+
+        let mut cfg = ResolvedConfig::default();
+        apply(&mut cfg, &serde_json::json!({ "ssh": false }));
+        assert!(!cfg.ssh.enabled);
+
+        // Malformed values keep the current setting.
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ssh": { "enabled": "nope" } }),
+        );
+        assert!(cfg.ssh.enabled);
+
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "ssh": { "enabled": false } }),
+        );
+        apply(&mut cfg, &serde_json::json!({ "ssh": { "enabled": true } }));
+        assert!(cfg.ssh.enabled, "a later layer must win");
     }
 
     // -- ast_search ---------------------------------------------------------

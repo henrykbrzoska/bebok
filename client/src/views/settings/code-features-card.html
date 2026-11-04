@@ -92,4 +92,25 @@
       >{{ astSearchEnabled() ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
     </span>
   </div>
+
+  <div class="feature-row" data-testid="ssh-row">
+    <span
+      class="dot"
+      [class.ok]="sshEnabled()"
+      [class.idle]="!sshEnabled()"
+      aria-hidden="true"
+    ></span>
+    <span class="feature-info">
+      <span class="feature-name">{{ t('settings.sshToolTitle') }}</span>
+      <span class="feature-hint small faint">{{ t('settings.sshToolHint') }}</span>
+    </span>
+    <span class="feature-actions">
+      <button
+        type="button"
+        data-testid="ssh-toggle"
+        [disabled]="saving()"
+        (click)="toggleSsh(!sshEnabled())"
+      >{{ sshEnabled() ? t('settings.pluginDisable') : t('settings.pluginEnable') }}</button>
+    </span>
+  </div>
 </div>

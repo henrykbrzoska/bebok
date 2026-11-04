@@ -63,4 +63,35 @@ describe('selectableModels', () => {
     expect(providerUsable(provider({ name: 'mycorp', has_key: false }))).toBeFalse();
     expect(providerUsable(provider({ name: 'mycorp', has_key: true }))).toBeTrue();
   });
+
+  it('treats a CLI provider without a key as usable', () => {
+    const cli = provider({
+      name: 'claude-cli',
+      kind: 'cli',
+      endpoint: null,
+      models: ['opus', 'sonnet'],
+      has_key: false,
+    });
+    expect(providerUsable(cli)).toBeTrue();
+  });
+
+  it('offers the models of a CLI provider as provider/model ids', () => {
+    const models = selectableModels([
+      provider({
+        name: 'claude-cli',
+        kind: 'cli',
+        endpoint: null,
+        models: ['opus', 'sonnet', 'haiku'],
+        has_key: false,
+      }),
+    ]);
+    expect(models).toEqual(['claude-cli/opus', 'claude-cli/sonnet', 'claude-cli/haiku']);
+  });
+
+  it('still hides an unknown keyless provider that is not a CLI', () => {
+    expect(providerUsable(provider({ name: 'mycorp', kind: 'openai', has_key: false }))).toBeFalse();
+    expect(
+      selectableModels([provider({ name: 'mycorp', kind: 'openai', models: ['x'], has_key: false })]),
+    ).toEqual([]);
+  });
 });

@@ -58,3 +58,93 @@
 .assign-row select {
   max-width: 220px;
 }
+
+/* --- CLI agents card ---------------------------------------------------- */
+
+/* The card sits below the provider split, so it needs its own top gap. */
+.cli-card {
+  margin-top: var(--space-14);
+}
+
+.cli-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.cli-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--bg);
+}
+
+.cli-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cli-actions {
+  display: flex;
+  gap: var(--space-8);
+  flex: none;
+}
+
+/* Probe output spans the full row below the label and buttons. */
+.cli-probe,
+.cli-env {
+  flex-basis: 100%;
+}
+
+.cli-probe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cli-output {
+  margin: 0;
+  padding: var(--space-8);
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  font-size: var(--fs-11-5);
+  color: var(--code-text-strong);
+}
+
+.cli-output.err {
+  border-color: var(--danger);
+}
+
+.ok-text {
+  color: var(--success);
+}
+
+.err-text {
+  color: var(--danger);
+}
+
+.cli-env {
+  margin: 0;
+}
+
+/* Checkbox row in the CLI provider editor (allow_write). */
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-8);
+}

@@ -14,6 +14,7 @@ pub mod batch;
 pub mod browser;
 pub mod browser_remote;
 pub mod changes;
+pub mod cli;
 pub mod code_graph;
 pub mod code_map;
 pub mod common;
@@ -33,6 +34,7 @@ pub mod providers;
 pub mod pty;
 pub mod schedules;
 pub mod session;
+pub mod ssh;
 pub mod stats;
 pub mod tools;
 
@@ -69,6 +71,10 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/session/{id}/processes", get(processes::list_processes))
         .route("/processes/{id}/log", get(processes::process_log))
         .route("/processes/{id}/kill", post(processes::kill_process))
+        // Persistent SSH sessions (`ssh` tool): status + password prompt.
+        .route("/ssh", get(ssh::list_ssh))
+        .route("/ssh/prompt/{requestID}", post(ssh::answer_prompt))
+        .route("/ssh/{id}/close", post(ssh::close_ssh))
         .route("/session/{id}/truncate", post(session::truncate_session))
         // OpenRouter Batch API (async bulk jobs; never take the turn lock).
         .route("/session/{id}/batch", post(batch::submit_batch))
@@ -102,6 +108,11 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
         .route("/providers/catalog", get(providers::provider_catalog))
+        // CLI agents (Claude Code and friends) as providers: the Settings card
+        // reads install state from the engine (only it can spawn a probe) and
+        // the "Test" button bypasses the listing cache.
+        .route("/cli/backends", get(cli::list_cli_backends))
+        .route("/cli/backends/{id}/probe", post(cli::probe_cli_backend))
         .route("/fs/browse", get(fs_browse::fs_browse))
         .route("/fs/tree", get(fs::fs_tree))
         .route("/fs/file", get(fs::fs_file).put(fs::fs_file_write))

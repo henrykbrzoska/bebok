@@ -18,7 +18,9 @@ single route table), `engine/crates/bebok-core/src/agent/mod.rs`,
 `engine/crates/bebok-core/src/store/mod.rs`, `client/src/app/app.routes.ts`.
 There is no `SPEC.md`; the code is the specification.
 For how the orchestrator decomposes, spawns and supervises sub-agents see
-[`docs/orchestrator.md`](./docs/orchestrator.md).
+[`docs/orchestrator.md`](./docs/orchestrator.md). For how an external agentic CLI
+is driven as a provider (Claude Code, and the `CliBackend` contract for adding
+others) see [`docs/cli-agents.md`](./docs/cli-agents.md).
 
 ## 2. Build, run, test
 
@@ -62,6 +64,7 @@ Manual steps still work: `cd engine && cargo run` (engine on `:8787`),
 Tests and lints (CI runs exactly these on `ubuntu-22.04` + `windows-latest`):
 
 ```bash
+npm run check:windows                        # compile + lint the engine for Windows (zig-backed; run before pushing engine changes)
 cd engine && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
 cd engine && cargo test --workspace          # ~553 tests; browser round-trip auto-skips without Chrome
 cd client && npm run build                   # type-check + bundle (what CI runs)
@@ -93,8 +96,14 @@ engine/                      Rust workspace (virtual; edition 2024; rust ≥ 1.8
                              bash_kill, processes (registry), browser/ (driver, discovery, settings,
                              frames, console, tools, verify_tools), pathguard, explorer, runtimes, docker, fetch
   crates/bebok-llm/          provider (Provider trait, error kinds, retry-after), spec (11 built-ins),
-                             protocols/ (openai_chat, anthropic_messages), providers/ (xai, deepseek, groq,
+                             protocols/ (openai_chat, anthropic_messages), kind ProviderKind::{Openai,Anthropic,Cli},
+                             providers/ (xai, deepseek, groq,
                              qwen, openrouter, ollama), model_catalog (vendored models.dev), cost, cache_policy
+  crates/bebok-cli-agents/   agentic CLIs as providers: trait CliBackend + process runner
+                             (line streaming, hard timeout, tree kill, Windows .cmd shim),
+                             CliProvider: bebok_llm::Provider, discovery, transcript,
+                             backends/ (claude). CLI tool use is presentation only, never
+                             a StreamEvent::ToolCall - see docs/cli-agents.md
   crates/bebok-mcp/          rmcp bridge (stdio + streamable HTTP) → tools mcp__<server>__<tool>
   crates/bebok-skills/       AGENTS.md + skill/<name>/SKILL.md discovery, frontmatter, toggles
   crates/bebok-pty/          PTY manager (portable-pty, scrollback ring, single-use tickets, Job Object)
@@ -143,6 +152,14 @@ config file from a parsed value alone. Sections: `model`, `models`, `providers`,
 `api_key`, `max_tokens`, `thinking`, `context_budget`, `tool_output_cap`, `yolo`,
 `permission`, `mcp`, `skills`, `terminal`, `runtimes`, `browser`, `verify`,
 `tool_safety`, `delegation`, `fleet`, `ui`, plus the `projects` registry (global only).
+
+**CLI providers**: `kind: "cli"` (config `providers[].extra.backend`) builds a
+`bebok-cli-agents::CliProvider` instead of an HTTP adapter — it spawns the CLI in
+`instance.root`. `bebok_llm::build_provider` refuses a `Cli` spec (`adapter_for`
+returns `Err`), and `bebok_core::provider::build_provider_for(.., &ProviderCtx)` is
+the entry point every real turn uses. `bebok_core::provider::build_provider`
+(no ctx) stays HTTP-only, so `fleet_gen` cannot accidentally drive a CLI. Routes:
+`GET /cli/backends`, `POST /cli/backends/{id}/probe` (`routes/cli.rs`).
 
 **Providers** (`bebok-llm`): `provider_from_model` = text before the first `/`
 → `ProviderSpec {name, kind: openai|anthropic, endpoint, api_key, models, extra}`.
@@ -297,6 +314,23 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   native tools. Set `BEBOK_SHELL` to change the shell for both `bash` and the terminal.
 - Cancelling a delegated child aborts the whole parent turn; the orchestrator may
   answer without delegating unless the prompt demands a `task` call.
+- **Windows is not your machine.** `#[cfg(windows)]` code is not compiled on
+  Linux, so an import or const used only there is `dead_code` on Linux and an
+  `-D warnings` failure on Windows — the most common way a green local clippy
+  run turns into a red `windows-latest` job. `npm run check:windows` runs the
+  real compiler for `x86_64-pc-windows-gnu` via zig, so it answers exactly
+  instead of guessing from `#[cfg]` attributes; run it before pushing engine
+  changes. Structurally, give each platform its own `#[cfg(...)] mod` with its
+  own imports and consts — see `bebok-cli-agents/src/runner.rs`'s `platform`
+  modules. An item referenced from only one branch then cannot exist by
+  accident.
+- A CLI provider's tool use never reaches Bebok's permission engine or
+  `change_tracking.rs`: the only guard is the CLI's own flags, and CLI edits do
+  not appear in the Changes panel. `extra.allow_write` defaults to false for that
+  reason — never flip it silently, and never emit `bypassPermissions`.
+- On Windows npm installs Claude Code as `claude.cmd`; the runner wraps
+  `.cmd`/`.bat` as `cmd /C`. Claude's `--disallowedTools` is variadic, so the
+  prompt must follow a `--` separator or it is parsed as another tool name.
 - Linked git worktrees break `git` inside Docker (absolute Windows `gitdir`).
 - The `release` job's GitHub API upload can fail transiently; assets can be
   re-uploaded from the workflow artifacts with `gh run download` + `gh release upload`.

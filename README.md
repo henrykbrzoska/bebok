@@ -1,4 +1,4 @@
-# Bebok 1.9.2
+# Bebok 1.9.4
 
 Bebok is a local-first AI coding agent. A headless Rust engine (axum + tokio,
 HTTP + SSE + WebSocket) owns sessions, tools, permissions, sub-agents and
@@ -76,6 +76,27 @@ yet and nothing is released.
   window with a live frame stream), `drawer`. Screenshots reach the model as images.
 - `bash` supports `background: true` with readiness waits (`ready_port` /
   `ready_text` / `ready_timeout`) and `bash_kill`.
+
+### CLI agents
+- Any agentic CLI can be a provider: pick a `kind: "cli"` entry
+  (`claude-cli/sonnet`) and the turn — or a delegated sub-agent — is driven by
+  that CLI instead of an HTTP API. Claude Code ships as the first backend.
+- Settings > Providers detects installed CLI agents (binary path, version,
+  one-click "Add as provider"), shows their capabilities and has a "Test"
+  button that runs the CLI and prints its output.
+- Reads only by default: without `allow_write` the CLI gets
+  `--permission-mode plan` *and* an explicit `--disallowedTools Edit Write Bash`.
+  `bypassPermissions` is never emitted, even with writes enabled.
+- Streaming is preserved (text, reasoning and the CLI's own tool activity reach
+  the transcript live), the turn is aborted by killing the whole process tree
+  (also on Windows, where npm wraps the CLI as `claude.cmd`), and token/cost
+  usage is reported per turn.
+- Caveat, shown next to the setting: a CLI's tools do **not** go through
+  Bebok's permission rules, and files it edits do not appear in the Changes
+  panel (they are missing from change tracking, not from disk).
+- Adding another CLI (codex, gemini, aider, opencode) is one file in
+  `bebok-cli-agents/src/backends/` — see
+  [docs/cli-agents.md](docs/cli-agents.md).
 
 ### Projects & git
 - Project registry with groups and a grouped, collapsible switcher.
@@ -157,21 +178,42 @@ The API key comes from the provider entry in config, else `<NAME>_API_KEY`
 | `openrouter` | openai | `https://openrouter.ai/api/v1` |
 | `opencode` | openai | `https://opencode.ai/zen/v1` (`OPENCODE_API_KEY`; `muse-spark`/`gpt`/`grok` families route to `/responses`) |
 | `ollama` | openai | `http://localhost:11434/v1` (no key) |
+| *your CLI* | cli | none — runs the binary in the project root (see below) |
 
 Any other OpenAI-compatible or Anthropic-compatible server can be added as a
 custom provider (name, kind, endpoint, key) in Settings > Providers.
 
-## Downloads (1.9.2)
+A CLI provider needs no endpoint and no key — the CLI authenticates itself:
 
-Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.9.2>
+```jsonc
+{
+  "providers": [
+    {
+      "name": "claude-cli",
+      "kind": "cli",
+      "models": ["opus", "sonnet", "haiku"],
+      "extra": { "backend": "claude", "mode": "agent", "allow_write": false }
+    }
+  ],
+  "model": "claude-cli/sonnet"
+}
+```
+
+`extra.backend` picks the backend (`claude`), `allow_write` (default `false`)
+is the only switch that lets the CLI modify files, and `timeout_secs` (default
+`900`) bounds a turn. See [docs/cli-agents.md](docs/cli-agents.md).
+
+## Downloads (1.9.4)
+
+Release page: <https://github.com/henrykbrzoska/bebok/releases/tag/1.9.4>
 (all assets built by the release workflow; checksums in `SHA256SUMS.txt`).
 
 | OS | Desktop app | Headless engine |
 |---|---|---|
-| Windows x64 | `bebok_1.9.2_x64-setup.exe` (NSIS), `bebok_1.9.2_x64_en-US.msi`, `bebok-1.9.2-windows-x64-portable.zip` | `bebok-server-1.9.2-windows-x64.exe` |
-| Linux x64 | `bebok_1.9.2_amd64.deb`, `bebok_1.9.2_amd64.AppImage`, `bebok-1.9.2-linux-x64-portable.tar.gz` | `bebok-server-1.9.2-linux-x64` |
-| macOS Apple silicon | `bebok_1.9.2_aarch64.dmg`, `bebok_1.9.2_aarch64.app.tar.gz` | `bebok-server-1.9.2-macos-arm64` |
-| macOS Intel | `bebok_1.9.2_x64.dmg`, `bebok_1.9.2_x64.app.tar.gz` | `bebok-server-1.9.2-macos-x64` |
+| Windows x64 | `bebok_1.9.4_x64-setup.exe` (NSIS), `bebok_1.9.4_x64_en-US.msi`, `bebok-1.9.4-windows-x64-portable.zip` | `bebok-server-1.9.4-windows-x64.exe` |
+| Linux x64 | `bebok_1.9.4_amd64.deb`, `bebok_1.9.4_amd64.AppImage`, `bebok-1.9.4-linux-x64-portable.tar.gz` | `bebok-server-1.9.4-linux-x64` |
+| macOS Apple silicon | `bebok_1.9.4_aarch64.dmg`, `bebok_1.9.4_aarch64.app.tar.gz` | `bebok-server-1.9.4-macos-arm64` |
+| macOS Intel | `bebok_1.9.4_x64.dmg`, `bebok_1.9.4_x64.app.tar.gz` | `bebok-server-1.9.4-macos-x64` |
 
 The builds are **unsigned**. macOS: Gatekeeper blocks the first launch -
 right-click > Open, or `xattr -dr com.apple.quarantine /Applications/bebok.app`.

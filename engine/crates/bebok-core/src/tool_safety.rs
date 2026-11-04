@@ -143,6 +143,8 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("ln", SafetyCategory::Dangerous),
     ("gzip", SafetyCategory::Dangerous),
     ("bash", SafetyCategory::Dangerous),
+    // Persistent remote sessions: a remote shell is a full escape hatch.
+    ("ssh", SafetyCategory::Dangerous),
 ];
 
 /// The built-in default for a tool name (exact match in

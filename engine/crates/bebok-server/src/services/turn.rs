@@ -20,7 +20,7 @@ use bebok_core::agent::TurnRunner;
 use bebok_core::error::CoreError;
 use bebok_core::store::SessionState;
 
-use super::provider_factory::build_provider;
+use super::provider_factory::{ProviderCtx, build_provider_for};
 use crate::error::ApiError;
 use crate::routes::session::PromptBody;
 use crate::state::AppState;
@@ -236,7 +236,9 @@ pub async fn prompt_turn(
         ));
     }
 
-    let provider = build_provider(&cfg, &model).map_err(ApiError::from)?;
+    // CLI providers run inside the project, so they need its root as their cwd.
+    let provider = build_provider_for(&cfg, &model, &ProviderCtx::root(&instance.root))
+        .map_err(ApiError::from)?;
 
     // Whether this turn carried image attachments (drives the error hint below).
     let images_attached = !image_parts.is_empty();
