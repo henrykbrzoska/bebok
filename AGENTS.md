@@ -64,7 +64,7 @@ Manual steps still work: `cd engine && cargo run` (engine on `:8787`),
 Tests and lints (CI runs exactly these on `ubuntu-22.04` + `windows-latest`):
 
 ```bash
-npm run lint:cfg                             # cfg hygiene: platform-only dead items (runs on Linux, guards Windows)
+npm run check:windows                        # compile + lint the engine for Windows (zig-backed; run before pushing engine changes)
 cd engine && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
 cd engine && cargo test --workspace          # ~553 tests; browser round-trip auto-skips without Chrome
 cd client && npm run build                   # type-check + bundle (what CI runs)
@@ -315,13 +315,15 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
 - Cancelling a delegated child aborts the whole parent turn; the orchestrator may
   answer without delegating unless the prompt demands a `task` call.
 - **Windows is not your machine.** `#[cfg(windows)]` code is not compiled on
-  Linux, so an item used only there is `dead_code` on Linux and a build failure
-  on Windows under `-D warnings` — and that is the most common way a green local
-  clippy run turns into a red `windows-latest` job. `npm run lint:cfg`
-  (`scripts/check-cfg-hygiene.mjs`, wired into CI) catches both that and a
-  Windows-only `fn` called from ungated code. The structural fix is one
-  `#[cfg(...)] mod` per platform with its own imports and consts — see
-  `bebok-cli-agents/src/runner.rs`'s `platform` modules.
+  Linux, so an import or const used only there is `dead_code` on Linux and an
+  `-D warnings` failure on Windows — the most common way a green local clippy
+  run turns into a red `windows-latest` job. `npm run check:windows` runs the
+  real compiler for `x86_64-pc-windows-gnu` via zig, so it answers exactly
+  instead of guessing from `#[cfg]` attributes; run it before pushing engine
+  changes. Structurally, give each platform its own `#[cfg(...)] mod` with its
+  own imports and consts — see `bebok-cli-agents/src/runner.rs`'s `platform`
+  modules. An item referenced from only one branch then cannot exist by
+  accident.
 - A CLI provider's tool use never reaches Bebok's permission engine or
   `change_tracking.rs`: the only guard is the CLI's own flags, and CLI edits do
   not appear in the Changes panel. `extra.allow_write` defaults to false for that

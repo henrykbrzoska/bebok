@@ -319,7 +319,6 @@ pub fn build_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{CliCapabilities, CliStreamState};
 
     /// `Result::unwrap_err` needs `T: Debug`, and `Arc<dyn Provider>` is not.
     fn expect_err(result: Result<Arc<dyn Provider>, String>) -> String {
@@ -440,6 +439,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn streams_text_tool_activity_and_one_final_done() {
+        use crate::backend::{CliCapabilities, CliStreamState};
+
         /// A backend that prints canned JSONL from a shell one-liner.
         struct FakeBackend;
 

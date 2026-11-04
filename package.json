@@ -14,7 +14,8 @@
     "client": "node scripts/bebok.mjs client",
     "engine:sweep": "node scripts/bebok.mjs sweep",
     "engine:clean": "node scripts/bebok.mjs clean",
-    "lint:cfg": "node scripts/check-cfg-hygiene.mjs",
+    "check:windows": "node scripts/check-windows.mjs",
+    "lint:cfg": "node scripts/check-windows.mjs --check",
     "release": "node scripts/release.mjs",
     "release:status": "node scripts/release.mjs status",
     "release:check": "node scripts/release.mjs check"
