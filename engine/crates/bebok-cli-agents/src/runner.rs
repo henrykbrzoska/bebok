@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::stream::{BoxStream, StreamExt};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -36,8 +36,6 @@ use tokio::sync::{Mutex, mpsc, watch};
 use crate::backend::{CliBackend, CliError, CliEvent, CliRequest, CliStreamState};
 use crate::spec::CliSpec;
 
-/// How long a SIGTERM'd process tree may linger before it gets SIGKILL.
-const TERM_GRACE: Duration = Duration::from_secs(3);
 /// How many stderr lines are kept for the error message.
 const STDERR_TAIL_LINES: usize = 200;
 /// Events buffered between the reader task and the consumer. Bounded on
@@ -47,11 +45,6 @@ const EVENT_CHANNEL: usize = 64;
 const LOG_ARG_CHARS: usize = 120;
 /// How long the reader waits for the process to be reaped after stdout EOF.
 const REAP_GRACE: Duration = Duration::from_secs(5);
-
-#[cfg(windows)]
-const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// A running CLI: the parsed event stream plus the exit handle.
 ///
@@ -367,19 +360,7 @@ fn prepare_command(program: &str, args: Vec<String>) -> (String, Vec<String>) {
 /// Spawn in its own process group (Unix) or with creation flags (Windows) so
 /// the whole tree can be signalled as one unit.
 fn apply_process_flags(cmd: &mut Command) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.as_std_mut()
-            .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    {
-        use std::os::unix::process::CommandExt;
-        // The child becomes the leader of a new group; `kill(-pid)` then
-        // reaches every descendant, including the `node` grandchild.
-        cmd.as_std_mut().process_group(0);
-    }
+    platform::spawn_flags(cmd);
 }
 
 /// Wait until the exit supervisor publishes `done` (or drops the sender).
@@ -397,8 +378,37 @@ async fn wait_done(rx: &mut watch::Receiver<bool>) {
 
 /// Kill the process tree rooted at `pid` (async, for the timeout watchdog).
 async fn kill_tree(pid: u32) {
-    #[cfg(windows)]
-    {
+    platform::kill_tree(pid).await;
+}
+
+/// Kill the process tree rooted at `pid` without a tokio runtime (drop path).
+fn kill_tree_blocking(pid: u32) {
+    platform::kill_tree_blocking(pid);
+}
+
+/// Platform-specific process control.
+///
+/// The two platforms share no item here on purpose. A `use` or `const` declared
+/// once and referenced only from inside a `#[cfg(...)]` branch is dead code for
+/// the other target, and `-D warnings` turns that into a build failure on the
+/// platform nobody built. Keeping each branch a self-contained module makes
+/// that failure mode structurally impossible; `scripts/check-cfg-hygiene.mjs`
+/// enforces the rule for the rest of the tree.
+#[cfg(windows)]
+mod platform {
+    use std::process::Stdio;
+
+    /// Own process group for the wrapper, and no console window flashing up.
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    fn creation_flags() -> u32 {
+        CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    }
+
+    /// `taskkill /T` is the only reliable tree kill: `claude.cmd` is a `cmd.exe`
+    /// shim around a `node` grandchild, and terminating the shim orphans it.
+    pub(super) async fn kill_tree(pid: u32) {
         use std::os::windows::process::CommandExt;
         let mut cmd = tokio::process::Command::new("taskkill");
         cmd.args(["/T", "/F", "/PID", &pid.to_string()])
@@ -408,24 +418,8 @@ async fn kill_tree(pid: u32) {
         cmd.as_std_mut().creation_flags(CREATE_NO_WINDOW);
         let _ = cmd.status().await;
     }
-    #[cfg(not(windows))]
-    {
-        signal_group(pid, libc::SIGTERM);
-        let deadline = Instant::now() + TERM_GRACE;
-        while Instant::now() < deadline {
-            if !pid_alive(pid) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        signal_group(pid, libc::SIGKILL);
-    }
-}
 
-/// Kill the process tree rooted at `pid` without a tokio runtime (drop path).
-fn kill_tree_blocking(pid: u32) {
-    #[cfg(windows)]
-    {
+    pub(super) fn kill_tree_blocking(pid: u32) {
         use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/T", "/F", "/PID", &pid.to_string()])
@@ -435,43 +429,80 @@ fn kill_tree_blocking(pid: u32) {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
-    #[cfg(not(windows))]
-    {
+
+    pub(super) fn spawn_flags(cmd: &mut tokio::process::Command) {
+        use std::os::windows::process::CommandExt;
+        cmd.as_std_mut().creation_flags(creation_flags());
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+compile_error!(
+    "bebok-cli-agents needs a process-control impl for this platform: add one next to the windows/unix `platform` modules in runner.rs"
+);
+
+#[cfg(unix)]
+mod platform {
+    use std::time::{Duration, Instant};
+
+    /// How long a SIGTERM'd process tree may linger before it gets SIGKILL.
+    const TERM_GRACE: Duration = Duration::from_secs(3);
+    /// How often the liveness of a dying tree is re-checked.
+    const POLL: Duration = Duration::from_millis(50);
+
+    /// Signal the whole process group led by `pid` (the child was spawned with
+    /// `process_group(0)`, so its pgid is its pid). A direct syscall rather than
+    /// the `kill` binary: procps parses `kill -TERM -1234` as a signal number and
+    /// silently signals nothing. Never signals pgid 0 or 1.
+    fn signal_group(pid: u32, signal: libc::c_int) {
+        if pid <= 1 {
+            return;
+        }
+        // SAFETY: plain kill(2) on a pgid we spawned; the kernel validates it.
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), signal);
+        }
+    }
+
+    fn pid_alive(pid: u32) -> bool {
+        if pid <= 1 {
+            return false;
+        }
+        // Signal 0 delivers nothing and succeeds while the process exists.
+        // SAFETY: kill(2) with signal 0 has no side effects.
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    pub(super) async fn kill_tree(pid: u32) {
         signal_group(pid, libc::SIGTERM);
         let deadline = Instant::now() + TERM_GRACE;
         while Instant::now() < deadline {
             if !pid_alive(pid) {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            tokio::time::sleep(POLL).await;
         }
         signal_group(pid, libc::SIGKILL);
     }
-}
 
-/// Signal the whole process group led by `pid` (the child was spawned with
-/// `process_group(0)`, so its pgid is its pid). A direct syscall rather than
-/// the `kill` binary: procps parses `kill -TERM -1234` as a signal number and
-/// silently signals nothing. Never signals pgid 0 or 1.
-#[cfg(not(windows))]
-fn signal_group(pid: u32, signal: libc::c_int) {
-    if pid <= 1 {
-        return;
+    pub(super) fn kill_tree_blocking(pid: u32) {
+        signal_group(pid, libc::SIGTERM);
+        let deadline = Instant::now() + TERM_GRACE;
+        while Instant::now() < deadline {
+            if !pid_alive(pid) {
+                return;
+            }
+            std::thread::sleep(POLL);
+        }
+        signal_group(pid, libc::SIGKILL);
     }
-    // SAFETY: plain kill(2) on a pgid we spawned; the kernel validates it.
-    unsafe {
-        libc::kill(-(pid as libc::pid_t), signal);
-    }
-}
 
-#[cfg(not(windows))]
-fn pid_alive(pid: u32) -> bool {
-    if pid <= 1 {
-        return false;
+    pub(super) fn spawn_flags(cmd: &mut tokio::process::Command) {
+        use std::os::unix::process::CommandExt;
+        // The child becomes the leader of a new group; `kill(-pid)` then
+        // reaches every descendant, including the `node` grandchild.
+        cmd.as_std_mut().process_group(0);
     }
-    // Signal 0 delivers nothing and succeeds while the process exists.
-    // SAFETY: kill(2) with signal 0 has no side effects.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
 /// Shorten a string for the debug log without splitting a UTF-8 character.
