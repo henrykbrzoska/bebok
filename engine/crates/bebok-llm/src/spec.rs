@@ -32,6 +32,13 @@ pub enum ProviderKind {
     Openai,
     /// Anthropic Messages API (Anthropic, Z.ai's Anthropic endpoint).
     Anthropic,
+    /// An external agentic CLI driven as a transport (Claude Code, …).
+    ///
+    /// This variant carries no transport logic on purpose: `bebok-llm` speaks
+    /// HTTP protocols only. The provider for a `Cli` spec is built by the
+    /// `bebok-cli-agents` crate, and `bebok_llm::build_provider` refuses it
+    /// rather than silently inventing an endpoint.
+    Cli,
 }
 
 /// One named provider. `api_key` is intentionally plain (empty = not given /
@@ -75,6 +82,10 @@ impl ProviderSpec {
         match self.kind {
             ProviderKind::Openai => format!("{base}/chat/completions"),
             ProviderKind::Anthropic => format!("{base}/messages"),
+            // A CLI has no chat endpoint. Returning the bare base keeps this
+            // total and harmless: `build_provider` never reaches a request for
+            // a `Cli` spec, and the GUI hides the URL field (auth: none).
+            ProviderKind::Cli => base.to_string(),
         }
     }
 
@@ -159,6 +170,8 @@ fn default_endpoint(name: &str, kind: ProviderKind) -> &'static str {
             "openai" => "https://api.openai.com/v1",
             _ => "https://api.openai.com/v1",
         },
+        // No HTTP endpoint: everything happens in a child process.
+        ProviderKind::Cli => "",
     }
 }
 
@@ -426,6 +439,10 @@ fn provider_auth(name: &str, kind: ProviderKind) -> ProviderAuth {
         _ => match kind {
             ProviderKind::Anthropic => ProviderAuth::XApiKey,
             ProviderKind::Openai => ProviderAuth::Bearer,
+            // A CLI authenticates itself (`claude` login / its own env var).
+            // `none` also makes `is_configured()` true without an API key, and
+            // hides the key + base-URL fields in the settings UI.
+            ProviderKind::Cli => ProviderAuth::None,
         },
     }
 }
@@ -521,6 +538,11 @@ pub fn resolve_api_key(spec: &ProviderSpec) -> Option<String> {
 /// Ollama's `/v1/models`) endpoint. This is the engine-side implementation of
 /// the GUI's "check available models" button.
 pub async fn list_models(spec: &ProviderSpec) -> Result<Vec<String>, LlmError> {
+    // A CLI has no `/models` endpoint: its model ids are whatever the provider
+    // entry declares (or the backend's defaults, merged by the caller).
+    if spec.kind == ProviderKind::Cli {
+        return Ok(spec.models.clone());
+    }
     let client = reqwest::Client::new();
     let url = format!("{}/models", spec.models_url());
     let mut req = client.get(&url);

@@ -1,0 +1,19 @@
+[package]
+name = "bebok-cli-agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Drive agentic CLIs (Claude Code, and future ones) as Bebok providers"
+
+[dependencies]
+async-trait.workspace = true
+bebok-llm = { path = "../bebok-llm" }
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

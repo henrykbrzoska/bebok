@@ -50,7 +50,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use super::task_tool::MAX_TASK_DEPTH;
-use crate::provider::build_provider;
+use crate::provider::{ProviderCtx, build_provider_for};
 use crate::store::InstanceStore;
 
 /// The `fleet` tool. One instance is registered per directory `Instance`.
@@ -646,7 +646,7 @@ async fn run_member(
 
     assemble_prompt(instance, &mut agent, cfg);
 
-    let provider = match build_provider(cfg, &model) {
+    let provider = match build_provider_for(cfg, &model, &ProviderCtx::root(&instance.root)) {
         Ok(p) => p,
         Err(e) => {
             return MemberResult {

@@ -23,6 +23,7 @@ tree-sitter-python.workspace = true
 anyhow.workspace = true
 
 bebok-llm = { path = "../bebok-llm" }
+bebok-cli-agents = { path = "../bebok-cli-agents" }
 bebok-mcp = { path = "../bebok-mcp" }
 bebok-skills = { path = "../bebok-skills" }
 bebok-tools = { path = "../bebok-tools" }

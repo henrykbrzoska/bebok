@@ -26,10 +26,20 @@ static OPENAI_CHAT_ADAPTER: crate::OpenAiChatAdapter = crate::OpenAiChatAdapter;
 static ANTHROPIC_MESSAGES_ADAPTER: crate::AnthropicMessagesAdapter =
     crate::AnthropicMessagesAdapter;
 
-pub fn adapter_for(kind: crate::ProviderKind) -> &'static dyn ProviderAdapter {
+/// The HTTP protocol adapter for a provider kind.
+///
+/// `Cli` has no adapter: those providers are process transports built by the
+/// `bebok-cli-agents` crate. Returning `Err` (rather than panicking) keeps a
+/// mis-configured `kind: "cli"` entry from crashing the engine — the caller
+/// turns it into a normal provider-config error.
+pub fn adapter_for(kind: crate::ProviderKind) -> Result<&'static dyn ProviderAdapter, String> {
     match kind {
-        crate::ProviderKind::Openai => &OPENAI_CHAT_ADAPTER,
-        crate::ProviderKind::Anthropic => &ANTHROPIC_MESSAGES_ADAPTER,
+        crate::ProviderKind::Openai => Ok(&OPENAI_CHAT_ADAPTER),
+        crate::ProviderKind::Anthropic => Ok(&ANTHROPIC_MESSAGES_ADAPTER),
+        crate::ProviderKind::Cli => Err(
+            "CLI providers are built by bebok-cli-agents, not by an HTTP protocol adapter"
+                .to_string(),
+        ),
     }
 }
 
@@ -39,7 +49,7 @@ pub fn build_provider(
 ) -> Result<Arc<dyn Provider>, String> {
     let api_key = crate::resolve_api_key(spec).or(fallback_api_key);
     let config = crate::adapter_config(spec, api_key);
-    let adapter = adapter_for(spec.kind);
+    let adapter = adapter_for(spec.kind)?;
     adapter.build(config)
 }
 
