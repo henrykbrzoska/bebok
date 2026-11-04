@@ -255,6 +255,11 @@ fn first_version_line(stdout: &str) -> Option<String> {
         .map(|line| truncate(line, VERSION_CAP))
 }
 
+/// `CREATE_NO_WINDOW`. A CLI probe runs on every settings refresh, and the
+/// desktop shell is a GUI process, so a console window flashing up would show.
+#[cfg(windows)]
+const NO_WINDOW: u32 = 0x0800_0000;
+
 /// Run `binary probe_args` with a hard timeout.
 ///
 /// `kill_on_drop(true)` plus `tokio::time::timeout` is what makes the 2 s / 10 s
@@ -277,9 +282,10 @@ async fn run_probe(
     // cached refresh would be jarring.
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt as _;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        // No `CommandExt` import: `tokio::process::Command` has an inherent
+        // `creation_flags` on Windows. Importing the std trait here would be an
+        // unused import, which `-D warnings` only reports on a Windows build.
+        cmd.creation_flags(NO_WINDOW);
     }
 
     let child = cmd

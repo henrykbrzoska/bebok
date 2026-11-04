@@ -199,6 +199,33 @@ function missingElsewhere(lines, regions) {
   return out;
 }
 
+/**
+ * `use ... as _;` inside a `cfg`-gated block.
+ *
+ * An anonymous trait import is invisible to name-based reasoning: nothing
+ * "references" it, so it can only be checked by compiling that platform. When
+ * it is unnecessary (the type often has an inherent method — e.g.
+ * `tokio::process::Command::creation_flags`), the import is dead code on that
+ * platform and `-D warnings` fails the build there alone.
+ *
+ * Any such import must therefore be justified by a comment, and the ones that
+ * are left are rare enough that flagging them costs nothing.
+ */
+function anonymousImportsInCfg(lines, regions) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*use\s+[^;]+\bas\s+_;\s*$/.test(lines[i])) continue;
+    const r = regionOf(regions, i);
+    if (!r) continue; // ungated: clippy sees it on every platform
+    // Only platform gates matter; `#[cfg(test)]` compiles everywhere.
+    if (r.polarity !== 'windows' && r.polarity !== 'unix' && r.polarity !== 'not(windows)') {
+      continue;
+    }
+    out.push({ line: i + 1, text: lines[i].trim(), polarity: r.polarity });
+  }
+  return out;
+}
+
 const violations = [];
 
 for (const file of rustFiles(target)) {
@@ -250,6 +277,16 @@ for (const file of rustFiles(target)) {
         text: line.trim().slice(0, 100),
       });
     }
+  }
+
+  for (const anon of anonymousImportsInCfg(lines, regions)) {
+    violations.push({
+      file,
+      line: anon.line,
+      name: 'anonymous trait import',
+      only: `${anon.polarity} only, ` + 'cannot be checked by name',
+      text: anon.text,
+    });
   }
 
   for (const missing of missingElsewhere(lines, regions)) {
