@@ -34,6 +34,7 @@ import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ModelSelect } from '../../ui/model-select/model-select';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
+import { SshPromptPopup } from '../../ui/ssh-prompt/ssh-prompt';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ToastHost } from '../../ui/toast/toast-host';
 import { ToastStore } from '../../ui/toast/toast.store';
@@ -200,6 +201,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     ModelSelect,
     PermissionPopup,
+    SshPromptPopup,
     MessageRowComponent,
     ToolRunRowComponent,
     TaskProgressLine,

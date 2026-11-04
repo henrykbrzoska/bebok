@@ -16,7 +16,10 @@
 //! `batch.submitted` (`properties`: `{ batchID, count }`),
 //! `batch.completed` (`properties`: `{ batchID, ok, failed }`),
 //! `batch.failed` (`properties`: `{ batchID, error }`), and
-//! `batch.progress` (`properties`: `{ batchID, done, total }`).
+//! `batch.progress` (`properties`: `{ batchID, done, total }`), and
+//! `ssh.prompt` (a persistent SSH session needs a password:
+//! `properties`: `{ requestID, sessionID, directory, host, prompt }`, where
+//! `prompt` is `password` (SSH login) or `sudo`).
 
 use tokio::sync::broadcast;
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -31,6 +31,10 @@ pub struct ToolRegistry {
     /// shadow a built-in of the same name).
     dynamic: RwLock<HashMap<String, Arc<dyn Tool>>>,
     mcp: RwLock<HashMap<String, Arc<dyn Tool>>>,
+    /// Built-ins switched off by config (`ssh.enabled: false`). They stay in
+    /// `builtin` so re-enabling needs no reconstruction, but every lookup and
+    /// `list()` skips them, so they never reach a provider request.
+    disabled: RwLock<HashSet<String>>,
 }
 
 impl Default for ToolRegistry {
@@ -45,16 +49,45 @@ impl ToolRegistry {
             builtin,
             dynamic: RwLock::new(HashMap::new()),
             mcp: RwLock::new(HashMap::new()),
+            disabled: RwLock::new(HashSet::new()),
         }
+    }
+
+    /// Enable or disable a built-in tool by name (a no-op for names that are
+    /// not built in). A disabled built-in is invisible to [`get`](Self::get),
+    /// [`list`](Self::list) and [`names`](Self::names), so its schema is never
+    /// sent to the model. A dynamic tool of the same name still wins, which
+    /// keeps `register_tool` as the documented override path.
+    pub fn set_builtin_enabled(&self, name: &str, enabled: bool) {
+        if !self.builtin.iter().any(|t| t.name() == name) {
+            return;
+        }
+        let mut disabled = self.disabled.write().unwrap();
+        if enabled {
+            disabled.remove(name);
+        } else {
+            disabled.insert(name.to_string());
+        }
+    }
+
+    /// Whether a built-in of that name is currently switched off.
+    pub fn builtin_disabled(&self, name: &str) -> bool {
+        self.disabled.read().unwrap().contains(name)
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         if let Some(t) = self.dynamic.read().unwrap().get(name) {
             return Some(t.clone());
         }
-        if let Some(t) = self.builtin.iter().find(|t| t.name() == name) {
+        let disabled = self.disabled.read().unwrap();
+        if let Some(t) = self
+            .builtin
+            .iter()
+            .find(|t| t.name() == name && !disabled.contains(t.name()))
+        {
             return Some(t.clone());
         }
+        drop(disabled);
         self.mcp.read().unwrap().get(name).cloned()
     }
 
@@ -66,13 +99,15 @@ impl ToolRegistry {
     /// e.g. DeepSeek rejects it with 400 "Tool names must be unique".
     pub fn list(&self) -> Vec<Arc<dyn Tool>> {
         let dynamic = self.dynamic.read().unwrap();
+        let disabled = self.disabled.read().unwrap();
         let mut out: Vec<Arc<dyn Tool>> = dynamic.values().cloned().collect();
         out.extend(
             self.builtin
                 .iter()
-                .filter(|t| !dynamic.contains_key(t.name()))
+                .filter(|t| !dynamic.contains_key(t.name()) && !disabled.contains(t.name()))
                 .cloned(),
         );
+        drop(disabled);
         drop(dynamic);
         out.extend(self.mcp.read().unwrap().values().cloned());
         out
@@ -114,7 +149,11 @@ impl ToolRegistry {
         if self.dynamic.read().unwrap().contains_key(name) {
             return Some(ToolSource::Dynamic);
         }
-        if self.builtin.iter().any(|t| t.name() == name) {
+        if self
+            .builtin
+            .iter()
+            .any(|t| t.name() == name && !self.disabled.read().unwrap().contains(name))
+        {
             return Some(ToolSource::Builtin);
         }
         if self.mcp.read().unwrap().contains_key(name) {
@@ -196,5 +235,46 @@ mod tests {
             "names: {names:?}"
         );
         assert_eq!(reg.source_of("grep"), Some(ToolSource::Dynamic));
+    }
+
+    /// `set_builtin_enabled("ssh", false)` must hide the built-in from every
+    /// lookup path (`get`, `list`, `names`, `source_of`) so its schema is
+    /// never sent to the model, and re-enabling must bring it back without
+    /// rebuilding the registry.
+    #[test]
+    fn disabling_a_builtin_hides_it_everywhere() {
+        let reg = ToolRegistry::new(vec![Arc::new(StubTool("ssh")), Arc::new(StubTool("bash"))]);
+        assert!(reg.names().contains(&"ssh".to_string()));
+
+        reg.set_builtin_enabled("ssh", false);
+        assert!(reg.builtin_disabled("ssh"));
+        assert!(reg.get("ssh").is_none(), "get() still returns the tool");
+        assert!(
+            !reg.names().contains(&"ssh".to_string()),
+            "names() leaks it"
+        );
+        assert!(
+            reg.list().iter().all(|t| t.name() != "ssh"),
+            "list() leaks it"
+        );
+        assert_eq!(reg.source_of("ssh"), None);
+        // The other tools are untouched.
+        assert!(reg.names().contains(&"bash".to_string()));
+
+        reg.set_builtin_enabled("ssh", true);
+        assert!(!reg.builtin_disabled("ssh"));
+        assert!(
+            reg.get("ssh").is_some(),
+            "re-enable did not restore the tool"
+        );
+        assert!(reg.names().contains(&"ssh".to_string()));
+    }
+
+    /// Unknown names are ignored instead of polluting the disabled set.
+    #[test]
+    fn enabling_an_unknown_builtin_is_a_no_op() {
+        let reg = ToolRegistry::new(vec![Arc::new(StubTool("bash"))]);
+        reg.set_builtin_enabled("not-a-tool", false);
+        assert!(!reg.builtin_disabled("not-a-tool"));
     }
 }

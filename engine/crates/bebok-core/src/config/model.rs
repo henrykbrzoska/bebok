@@ -214,6 +214,27 @@ impl BuildTestMode {
     }
 }
 
+/// Remote-server access config (`ssh`).
+///
+/// When `enabled`, the `ssh` tool is registered and the agent can open a
+/// persistent shell on a remote host (`connect` / `run` / `close` / `list`).
+/// Disabling it removes the tool (and its schema) from every request, which
+/// saves the prompt tokens when a project never touches a remote server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SshConfig {
+    /// Master toggle: when false, the `ssh` tool is not registered.
+    pub enabled: bool,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        // On by default: the tool is part of the released surface, and a
+        // project that does not need it turns it off explicitly.
+        Self { enabled: true }
+    }
+}
+
 /// AST-aware structural search config (`ast_search`).
 ///
 /// When `enabled`, the agent can use the `code_ast` tool to query the AST shape
@@ -379,6 +400,9 @@ pub struct ResolvedConfig {
     /// AST-aware structural search (off by default; opt-in per project).
     #[serde(default)]
     pub ast_search: AstSearchConfig,
+    /// Remote-server access through the `ssh` tool (on by default).
+    #[serde(default)]
+    pub ssh: SshConfig,
 }
 
 impl Default for ResolvedConfig {
@@ -410,6 +434,7 @@ impl Default for ResolvedConfig {
             code_map: CodeMapConfig::default(),
             code_graph: CodeGraphConfig::default(),
             ast_search: AstSearchConfig::default(),
+            ssh: SshConfig::default(),
         }
     }
 }
@@ -611,6 +636,11 @@ impl ResolvedConfigBuilder {
 
     pub fn ast_search(mut self, ast_search: AstSearchConfig) -> Self {
         self.inner.ast_search = ast_search;
+        self
+    }
+
+    pub fn ssh(mut self, ssh: SshConfig) -> Self {
+        self.inner.ssh = ssh;
         self
     }
 

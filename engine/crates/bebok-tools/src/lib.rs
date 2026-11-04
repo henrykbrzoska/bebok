@@ -39,6 +39,7 @@ pub mod runtimes;
 pub mod sed;
 pub mod sha256sum;
 pub mod sort;
+pub mod ssh;
 pub mod stat;
 pub mod tail;
 pub mod tool;
@@ -55,6 +56,7 @@ pub use pathguard::resolve_in_root;
 pub use processes::{ProcessEvent, ProcessExited, ProcessInfo, ProcessOutput, ProcessRegistry};
 pub use registry::{ToolRegistry, ToolSource};
 pub use runtimes::Runtimes;
+pub use ssh::{ConnectOpts, SshInfo, SshPrompt, SshRegistry, SshSession, SshTool};
 pub use tool::{Tool, ToolCtx, ToolImage, ToolOutput};
 
 use std::sync::Arc;
@@ -116,6 +118,8 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
         // Escape hatch.
         Arc::new(bash::Bash),
         Arc::new(bash_kill::BashKill),
+        // Persistent remote sessions.
+        Arc::new(ssh::SshTool),
     ];
     tools.extend(browser::tools());
     tools

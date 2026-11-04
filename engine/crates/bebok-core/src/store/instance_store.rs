@@ -77,6 +77,7 @@ impl InstanceStore {
         tracing::info!("recovered {} session(s) from disk", meta.len());
         let bus = EventBus::default();
         install_browser_frame_sink(bus.clone());
+        install_ssh_prompt_sink(bus.clone());
         Self {
             data_dir,
             bus,
@@ -531,6 +532,11 @@ impl InstanceStore {
                     .tools
                     .register_tool(Arc::new(crate::agent::CodeAstSearch));
             }
+            // Remote-server access (on by default; off hides the built-in so
+            // neither the tool nor its schema reaches a request).
+            instance
+                .tools
+                .set_builtin_enabled("ssh", instance.config_snapshot().ssh.enabled);
         }
 
         // Async side effects: connect enabled MCP servers and register their
@@ -572,6 +578,11 @@ impl InstanceStore {
         } else {
             instance.tools.unregister_tool("code_ast");
         }
+
+        // SSH tool: on by default, hidden from requests when disabled.
+        instance
+            .tools
+            .set_builtin_enabled("ssh", config.ssh.enabled);
 
         // Code graph tools: register/unregister based on config toggle.
         if config.code_graph.enabled {
@@ -937,6 +948,22 @@ fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
 /// event on the bus (`properties` = the frame: url, title, media_type, data,
 /// width, height, seq, headed). The client's viewer window renders them; the
 /// chat view ignores the type.
+/// Persistent SSH sessions (`ssh` tool): a password prompt raised while a
+/// tool call is blocked becomes an `ssh.prompt` event; the client answers it
+/// with `POST /ssh/prompt/{requestID}` and the secret goes straight to the
+/// `ssh` process, never into the transcript.
+fn install_ssh_prompt_sink(bus: EventBus) {
+    bebok_tools::SshRegistry::global().set_prompt_sink(Arc::new(
+        move |prompt: bebok_tools::SshPrompt| {
+            let properties = serde_json::to_value(&prompt).unwrap_or(serde_json::Value::Null);
+            bus.publish(
+                crate::event::Event::new("ssh.prompt", &prompt.directory, &prompt.session_id)
+                    .with_properties(properties),
+            );
+        },
+    ));
+}
+
 fn install_browser_frame_sink(bus: EventBus) {
     bebok_tools::browser::set_frame_sink(Arc::new(move |frame: bebok_tools::browser::Frame| {
         let (directory, session_id) = (frame.directory.clone(), frame.session_id.clone());
@@ -950,6 +977,8 @@ fn install_browser_frame_sink(bus: EventBus) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::InstanceStore;
     use crate::permission::{PermissionAnswer, ResolveOutcome};
 
@@ -1292,6 +1321,67 @@ mod tests {
             bebok_tools::resolve_in_root(&instance.root, "sub/file.txt").is_ok(),
             "relative path inside global sandbox must be accepted"
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `ssh` tool gating follows `ssh.enabled`: on by default, dropped from
+    /// the registry (and therefore from every request) when a project or the
+    /// global config disables it.
+    #[tokio::test]
+    async fn ssh_tool_follows_the_config_toggle() {
+        let base = std::env::temp_dir().join(format!("bebok-ssh-gate-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(project.join(".bebok")).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let has_ssh = |inst: &Arc<crate::store::instance::Instance>| {
+            inst.tools.names().iter().any(|n| n == "ssh")
+        };
+
+        // Default config: ssh tool present.
+        let instance = store
+            .get_or_create_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            has_ssh(&instance),
+            "ssh tool missing from the default config"
+        );
+
+        // Disable in the project config and reload.
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "ssh": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let reloaded = store
+            .reload_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        assert!(!has_ssh(&reloaded), "ssh tool registered while disabled");
+
+        // A bare bool disables it too, and re-enabling brings it back.
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "ssh": false }"#,
+        )
+        .unwrap();
+        let bare = store
+            .reload_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        assert!(!has_ssh(&bare), "`ssh: false` did not disable the tool");
+
+        std::fs::write(
+            project.join(".bebok").join("config.json"),
+            r#"{ "ssh": { "enabled": true } }"#,
+        )
+        .unwrap();
+        let back = store
+            .reload_instance(project.to_str().unwrap())
+            .await
+            .unwrap();
+        assert!(has_ssh(&back), "ssh tool missing after re-enable");
 
         let _ = std::fs::remove_dir_all(&base);
     }
