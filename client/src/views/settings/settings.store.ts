@@ -303,13 +303,23 @@ export class SettingsStore {
 
   /** Set one `extra` field of a provider (catalog-declared dynamic field). */
   updateProviderExtra(name: string, key: string, value: string): void {
+    this.updateProviderExtraValue(name, key, value.trim().length === 0 ? undefined : value);
+  }
+
+  /**
+   * Set one `extra` field to a raw JSON value. CLI providers need it: the
+   * engine reads `allow_write` as a bool, `timeout_secs` as a number and
+   * `args` as an array, so a string-only setter would write unusable config.
+   * `undefined`/`null` removes the key (the engine then uses its default).
+   */
+  updateProviderExtraValue(name: string, key: string, value: unknown): void {
     this.providers.update((list) =>
       list.map((p) => {
         if (p.name !== name) {
           return { ...p };
         }
         const extra = { ...(p.extra ?? {}) };
-        if (value.trim().length === 0) {
+        if (value === undefined || value === null) {
           delete extra[key];
         } else {
           extra[key] = value;

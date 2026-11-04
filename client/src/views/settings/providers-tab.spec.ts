@@ -5,13 +5,16 @@
  *       persist an unconfirmed draft of the form.
  * F3-5: the `kind` select must be disabled for built-in providers and only
  *       editable for genuinely custom ones.
+ * CLI:  a `kind: "cli"` provider is keyless and endpoint-less, so neither the
+ *       API-key nor the base-URL input may render; the "CLI agents" card lists
+ *       one row per backend the engine reports.
  */
 
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { ConfigResponse } from '../../core/engine.dtos';
+import { CliBackend, ConfigResponse } from '../../core/engine.dtos';
 import { ProviderCatalog } from './provider-catalog';
 import { ProvidersTab } from './providers-tab';
 import { SettingsStore } from './settings.store';
@@ -44,6 +47,28 @@ function configResponse(): ConfigResponse {
   };
 }
 
+function cliBackend(overrides: Partial<CliBackend>): CliBackend {
+  return {
+    id: 'claude',
+    label: 'Claude Code',
+    available: true,
+    binary: '/usr/local/bin/claude',
+    version: '2.0.1',
+    capabilities: {
+      streaming: true,
+      resume: true,
+      system_prompt: true,
+      tool_events: true,
+      usage: true,
+      images: false,
+      mcp: true,
+    },
+    defaultModels: ['opus', 'sonnet', 'haiku'],
+    envOverride: 'BEBOK_CLAUDE_BIN',
+    ...overrides,
+  };
+}
+
 describe('ProvidersTab', () => {
   let fixture: ComponentFixture<ProvidersTab>;
   let component: ProvidersTab;
@@ -61,6 +86,12 @@ describe('ProvidersTab', () => {
     spyOn(engine, 'putConfig').and.returnValue(Promise.resolve(configResponse()));
     spyOn(engine, 'listModels').and.returnValue(
       Promise.resolve({ provider: 'openai', models: ['gpt-4o', 'gpt-4o-mini'] }),
+    );
+    spyOn(engine, 'cliBackends').and.returnValue(
+      Promise.resolve([
+        cliBackend({}),
+        cliBackend({ id: 'other', label: 'Other CLI', available: false, binary: null, version: null }),
+      ]),
     );
 
     // The catalog is fetched over HTTP; the static built-in list is enough here.
@@ -128,5 +159,56 @@ describe('ProvidersTab', () => {
     ) as HTMLInputElement;
     expect(input).not.toBeNull();
     expect(input.value).toBe('');
+  });
+
+  it('renders no API-key or endpoint input for a kind: "cli" provider', async () => {
+    component.select('claude-cli');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('input[data-testid="provider-api-key"]')).toBeNull();
+    expect(host.querySelector('input[data-testid="provider-endpoint"]')).toBeNull();
+    // The CLI-specific extra fields take their place.
+    expect(host.querySelector('input[data-testid="cli-extra-command"]')).not.toBeNull();
+    expect(host.querySelector('input[data-testid="cli-extra-allow-write"]')).not.toBeNull();
+    // Writing through the CLI is opt-in, so the warning is always visible.
+    expect(host.textContent).toContain(component.t('settings.cliAllowWriteWarning'));
+  });
+
+  it('renders one row per CLI backend', async () => {
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelectorAll('.cli-row').length).toBe(2);
+    expect(host.querySelector('[data-testid="cli-backend-test-claude"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="cli-backend-add-claude"]')).not.toBeNull();
+    // An unavailable backend says so instead of printing a missing binary.
+    expect(host.textContent).toContain(component.t('settings.cliNotInstalled'));
+  });
+
+  it('"Add as provider" writes a keyless cli entry through the config PUT', async () => {
+    await fixture.whenStable();
+    // Start from a config without the CLI provider so the entry is created here.
+    component.store.removeProvider('claude-cli');
+    await component.addCliProvider(component.backends()[0]);
+
+    const added = component.store.providers().find((p) => p.name === 'claude-cli');
+    expect(added).withContext('the backend becomes a provider').toBeDefined();
+    expect(added!.kind).toBe('cli');
+    expect(added!.models).toEqual(['opus', 'sonnet', 'haiku']);
+    expect(added!.extra).toEqual({
+      backend: 'claude',
+      mode: 'agent',
+      allow_write: false,
+      timeout_secs: 900,
+    });
+    expect(engine.putConfig).toHaveBeenCalled();
+
+    // The new provider is keyless by construction, so no key field appears.
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('input[data-testid="provider-api-key"]')).toBeNull();
   });
 });

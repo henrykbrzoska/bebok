@@ -14,6 +14,7 @@ import { FormsModule } from '@angular/forms';
 
 import { I18nService } from '../../i18n/i18n.service';
 import { EngineClient } from '../../core/engine-client.service';
+import { CliBackend, CliProbeResult, ProviderKind } from '../../core/engine.dtos';
 import { ProviderCatalog, ProviderDraft, ProviderExtraField } from './provider-catalog';
 import { SettingsStore } from './settings.store';
 
@@ -34,13 +35,31 @@ export class ProvidersTab {
   /** The "+ Add provider" form is collapsed until the button is pressed. */
   readonly adding = signal(false);
   readonly draftName = signal('');
-  readonly draftKind = signal<'openai' | 'anthropic'>('openai');
+  readonly draftKind = signal<ProviderKind>('openai');
 
   /** Agent type the discovered model is about to be assigned to. */
   readonly assignType = signal('code');
   readonly assignModel = signal('');
   /** Filter for the discovered models list. */
   readonly modelSearch = signal('');
+
+  // --- CLI agents card -----------------------------------------------------
+
+  /** Agentic CLIs the engine reports (`GET /cli/backends`). */
+  readonly backends = signal<CliBackend[]>([]);
+  readonly loadingBackends = signal(false);
+  readonly cliError = signal<string | null>(null);
+  /** Backend id whose probe is in flight. */
+  readonly probing = signal<string | null>(null);
+  /** Last probe result per backend id (`POST /cli/backends/{id}/probe`). */
+  readonly probeResults = signal<Record<string, CliProbeResult>>({});
+
+  constructor() {
+    // The card is the entry point for CLI providers, so it loads with the tab
+    // instead of waiting for the user to press something. Failures are shown
+    // inline: an old engine simply has no `/cli/backends`.
+    void this.loadCliBackends();
+  }
 
   readonly selected = computed<ProviderDraft | null>(
     () => this.store.providers().find((p) => p.name === this.store.selectedProvider()) ?? null,
@@ -97,15 +116,27 @@ export class ProvidersTab {
     this.store.providerModelsError.set(null);
   }
 
-  /** True when the provider is usable: keyless, or a key is resolvable. */
+  /**
+   * True for a provider the engine runs as an external CLI. It has no API key
+   * and no base URL at all, so both credential checks and both form fields are
+   * meaningless for it.
+   */
+  isCli(provider: ProviderDraft): boolean {
+    return provider.kind === 'cli';
+  }
+
+  /** True when the provider is usable: CLI, keyless, or a key is resolvable. */
   isConfigured(provider: ProviderDraft): boolean {
-    if (!this.catalog.needsApiKey(provider.name)) {
+    if (this.isCli(provider) || !this.catalog.needsApiKey(provider.name)) {
       return true;
     }
     return !!provider.has_key || (this.store.keyDrafts()[provider.name] ?? '').trim().length > 0;
   }
 
   statusLabel(provider: ProviderDraft): string {
+    if (this.isCli(provider)) {
+      return this.t('settings.providerCli');
+    }
     if (!this.catalog.needsApiKey(provider.name)) {
       return this.t('settings.providerKeyless');
     }
@@ -136,7 +167,7 @@ export class ProvidersTab {
   }
 
   /** Kinds offered by the select (always including the configured one). */
-  allowedKinds(provider: ProviderDraft): Array<'openai' | 'anthropic'> {
+  allowedKinds(provider: ProviderDraft): ProviderKind[] {
     const kinds = this.catalog.allowedKinds(provider.name);
     return kinds.includes(provider.kind) ? kinds : [...kinds, provider.kind];
   }
@@ -184,6 +215,125 @@ export class ProvidersTab {
       models: [],
     });
     this.adding.set(false);
+  }
+
+  // --- CLI agents ----------------------------------------------------------
+
+  /** Load the agentic CLIs installed on this machine (once per visit). */
+  async loadCliBackends(): Promise<void> {
+    if (this.loadingBackends()) {
+      return;
+    }
+    this.loadingBackends.set(true);
+    this.cliError.set(null);
+    try {
+      this.backends.set(await this.engine.cliBackends());
+    } catch (err) {
+      this.cliError.set(
+        this.t('settings.cliBackendsError', { msg: this.store.describe(err) }),
+      );
+    } finally {
+      this.loadingBackends.set(false);
+    }
+  }
+
+  /**
+   * Probe one backend (`--version`). "Not installed" answers 200 with
+   * `ok: false`, so the result - not an exception - carries the explanation
+   * and is rendered inline under the row.
+   */
+  async probeBackend(backend: CliBackend): Promise<void> {
+    if (this.probing() !== null) {
+      return;
+    }
+    this.probing.set(backend.id);
+    this.cliError.set(null);
+    try {
+      const result = await this.engine.probeCliBackend(backend.id);
+      this.probeResults.update((r) => ({ ...r, [backend.id]: result }));
+    } catch (err) {
+      this.cliError.set(this.store.describe(err));
+    } finally {
+      this.probing.set(null);
+    }
+  }
+
+  probeResult(id: string): CliProbeResult | null {
+    return this.probeResults()[id] ?? null;
+  }
+
+  /** Name a CLI provider gets: `<backend>-cli`, e.g. `claude-cli`. */
+  cliProviderName(backend: CliBackend): string {
+    return `${backend.id}-cli`;
+  }
+
+  /**
+   * Add the backend as a provider and persist it. It goes through the same
+   * `addProvider` + `PUT /config` path as the hand-written providers, so the
+   * user can still edit it in the form afterwards.
+   */
+  async addCliProvider(backend: CliBackend): Promise<void> {
+    const name = this.cliProviderName(backend);
+    if (!this.store.providers().some((p) => p.name === name)) {
+      this.store.addProvider({
+        name,
+        kind: 'cli',
+        endpoint: null,
+        api_key: null,
+        models: [...backend.defaultModels],
+        extra: {
+          backend: backend.id,
+          mode: 'agent',
+          // Never pre-enable writing: a CLI's edits bypass Bebok's permission
+          // engine and change tracking (documented limitation, opt-in only).
+          allow_write: false,
+          timeout_secs: 900,
+        },
+      });
+    }
+    this.store.selectedProvider.set(name);
+    await this.store.saveProviders();
+  }
+
+  // --- CLI provider `extra` fields -----------------------------------------
+
+  /** `extra.args` edited as one space-separated line. */
+  cliArgs(provider: ProviderDraft): string {
+    const args = provider.extra?.['args'];
+    return Array.isArray(args) ? args.filter((a) => typeof a === 'string').join(' ') : '';
+  }
+
+  setCliArgs(provider: ProviderDraft, value: string): void {
+    const args = value.split(/\s+/).filter((a) => a.length > 0);
+    this.store.updateProviderExtraValue(provider.name, 'args', args.length > 0 ? args : undefined);
+  }
+
+  cliMode(provider: ProviderDraft): string {
+    const mode = provider.extra?.['mode'];
+    return typeof mode === 'string' && mode.length > 0 ? mode : 'agent';
+  }
+
+  cliAllowWrite(provider: ProviderDraft): boolean {
+    return provider.extra?.['allow_write'] === true;
+  }
+
+  setCliAllowWrite(provider: ProviderDraft, value: boolean): void {
+    this.store.updateProviderExtraValue(provider.name, 'allow_write', value);
+  }
+
+  cliTimeout(provider: ProviderDraft): number {
+    const raw = provider.extra?.['timeout_secs'];
+    const parsed = typeof raw === 'number' ? raw : Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 900;
+  }
+
+  setCliTimeout(provider: ProviderDraft, value: string | number): void {
+    const parsed = Math.round(Number(value));
+    this.store.updateProviderExtraValue(
+      provider.name,
+      'timeout_secs',
+      Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+    );
   }
 
   /**

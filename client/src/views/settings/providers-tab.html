@@ -76,23 +76,27 @@
           }
         </label>
 
-        <label class="field">
-          <span class="micro-label">{{ t('settings.endpoint') }}</span>
-          <input
-            type="text"
-            class="mono"
-            [ngModel]="provider.endpoint ?? ''"
-            (ngModelChange)="store.updateProvider(provider.name, { endpoint: $event })"
-            [attr.placeholder]="endpointPlaceholder(provider)"
-            spellcheck="false"
-          />
-        </label>
+        @if (!isCli(provider)) {
+          <label class="field">
+            <span class="micro-label">{{ t('settings.endpoint') }}</span>
+            <input
+              type="text"
+              class="mono"
+              data-testid="provider-endpoint"
+              [ngModel]="provider.endpoint ?? ''"
+              (ngModelChange)="store.updateProvider(provider.name, { endpoint: $event })"
+              [attr.placeholder]="endpointPlaceholder(provider)"
+              spellcheck="false"
+            />
+          </label>
+        }
 
-        @if (catalog.needsApiKey(provider.name)) {
+        @if (!isCli(provider) && catalog.needsApiKey(provider.name)) {
           <label class="field">
             <span class="micro-label">{{ t('settings.providerKey') }}</span>
             <input
               type="password"
+              data-testid="provider-api-key"
               [ngModel]="keyDraft(provider.name)"
               (ngModelChange)="store.setKeyDraft(provider.name, $event)"
               [attr.placeholder]="provider.has_key ? t('settings.providerKeyKeep') : t('settings.providerKeyPlaceholder')"
@@ -115,6 +119,70 @@
               spellcheck="false"
             />
           </label>
+        }
+
+        <!-- CLI providers have no endpoint or key: the engine spawns the CLI
+             binary instead, so only the CLI-specific `extra` keys apply. -->
+        @if (isCli(provider)) {
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliExtraCommand') }}</span>
+            <input
+              type="text"
+              class="mono"
+              data-testid="cli-extra-command"
+              [ngModel]="extraValue(provider, 'command')"
+              (ngModelChange)="store.updateProviderExtra(provider.name, 'command', $event)"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliExtraArgs') }}</span>
+            <input
+              type="text"
+              class="mono"
+              data-testid="cli-extra-args"
+              [ngModel]="cliArgs(provider)"
+              (ngModelChange)="setCliArgs(provider, $event)"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliExtraMode') }}</span>
+            <select
+              class="mono"
+              data-testid="cli-extra-mode"
+              [ngModel]="cliMode(provider)"
+              (ngModelChange)="store.updateProviderExtra(provider.name, 'mode', $event)"
+            >
+              <option value="agent">agent</option>
+              <option value="text">text</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliExtraTimeout') }}</span>
+            <input
+              type="number"
+              min="1"
+              class="mono"
+              data-testid="cli-extra-timeout"
+              [ngModel]="cliTimeout(provider)"
+              (ngModelChange)="setCliTimeout(provider, $event)"
+            />
+          </label>
+
+          <label class="field checkbox-field">
+            <input
+              type="checkbox"
+              data-testid="cli-extra-allow-write"
+              [ngModel]="cliAllowWrite(provider)"
+              (ngModelChange)="setCliAllowWrite(provider, $event)"
+            />
+            <span class="micro-label">{{ t('settings.cliExtraAllowWrite') }}</span>
+          </label>
+          <div class="note">{{ t('settings.cliAllowWriteWarning') }}</div>
         }
 
         <div class="actions spread">
@@ -183,4 +251,90 @@
       <div class="card empty">{{ t('settings.noProviderSelected') }}</div>
     }
   </div>
+</div>
+
+<!-- CLI agents: external agentic CLIs (Claude Code) the engine can drive as
+     keyless providers. Kept below the provider editor because it is the
+     on-ramp: "Add as provider" creates the entry the form then edits. -->
+<div class="card cli-card">
+  <h3>{{ t('settings.cliAgentsTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.cliAgentsHint') }}</p>
+
+  @if (cliError()) {
+    <div class="inline-error">{{ cliError() }}</div>
+  }
+
+  @if (backends().length === 0) {
+    <p class="small faint">{{ t('settings.cliAgentsEmpty') }}</p>
+  } @else {
+    <ul class="cli-list">
+      @for (backend of backends(); track backend.id) {
+        <li class="cli-row">
+          <span
+            class="dot"
+            [class.ok]="backend.available"
+            [class.idle]="!backend.available"
+            aria-hidden="true"
+          ></span>
+          <div class="cli-main">
+            <span class="row-name">{{ backend.label }}</span>
+            <span class="small faint mono">
+              @if (backend.available) {
+                {{ backend.binary }}
+              } @else {
+                {{ t('settings.cliNotInstalled') }}
+              }
+              @if (backend.version) {
+                · {{ backend.version }}
+              }
+            </span>
+          </div>
+          <div class="cli-actions">
+            <button
+              type="button"
+              [attr.data-testid]="'cli-backend-test-' + backend.id"
+              [disabled]="probing() !== null"
+              (click)="probeBackend(backend)"
+            >
+              @if (probing() === backend.id) {
+                <span class="spinner" aria-hidden="true"></span>{{ t('settings.cliTesting') }}
+              } @else {
+                {{ t('settings.cliTest') }}
+              }
+            </button>
+            <button
+              type="button"
+              class="primary"
+              [attr.data-testid]="'cli-backend-add-' + backend.id"
+              [disabled]="store.saving()"
+              (click)="addCliProvider(backend)"
+            >
+              {{ t('settings.cliAddAsProvider') }}
+            </button>
+          </div>
+
+          @if (probeResult(backend.id); as probe) {
+            <div class="cli-probe" [attr.data-testid]="'cli-probe-result-' + backend.id">
+              <div class="small" [class.ok-text]="probe.ok" [class.err-text]="!probe.ok">
+                {{ probe.ok ? t('settings.cliTestOk') : t('settings.cliTestFailed') }}
+                @if (probe.code !== null) {
+                  <span class="mono faint">({{ probe.code }})</span>
+                }
+              </div>
+              @if (probe.stdout) {
+                <pre class="mono cli-output">{{ probe.stdout }}</pre>
+              }
+              @if (probe.stderr) {
+                <pre class="mono cli-output err">{{ probe.stderr }}</pre>
+              }
+            </div>
+          }
+
+          <p class="small faint cli-env">
+            {{ t('settings.cliEnvOverride', { env: backend.envOverride }) }}
+          </p>
+        </li>
+      }
+    </ul>
+  }
 </div>

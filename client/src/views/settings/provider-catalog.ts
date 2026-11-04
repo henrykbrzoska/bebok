@@ -18,7 +18,7 @@ import { Injectable, inject, signal } from '@angular/core';
 
 import { authFetch } from '../../core/auth.interceptor';
 import { EngineClient } from '../../core/engine-client.service';
-import { ProviderSpec } from '../../core/engine.dtos';
+import { ProviderKind, ProviderSpec } from '../../core/engine.dtos';
 
 /** Input type of a catalog-declared extra field. */
 export type ProviderFieldType = 'text' | 'password' | 'url' | 'number' | 'bool';
@@ -36,7 +36,7 @@ export interface ProviderExtraField {
 export interface ProviderUiSpec {
   id: string;
   label: string;
-  kind: 'openai' | 'anthropic';
+  kind: ProviderKind;
   auth: 'bearer' | 'x-api-key' | 'none';
   envVar: string;
   baseUrlDefault: string;
@@ -44,11 +44,11 @@ export interface ProviderUiSpec {
 }
 
 /**
- * A provider row as edited in the GUI: the engine's `ProviderSpec` plus the
- * `extra` map added by WP-LLM (F3-2). `core/engine.dtos.ts` has no `extra`
- * field yet - that one-line addition belongs to whoever owns `core/`.
+ * A provider row as edited in the GUI: the engine's `ProviderSpec`, whose
+ * `extra` map (WP-LLM F3-2) carries the provider-specific fields - catalog
+ * fields for HTTP providers, `backend`/`mode`/`allow_write`/… for CLI ones.
  */
-export type ProviderDraft = ProviderSpec & { extra?: Record<string, string> };
+export type ProviderDraft = ProviderSpec;
 
 /**
  * Built-in provider ids, used as the offline fallback for F3-5 when the
@@ -110,7 +110,7 @@ export class ProviderCatalog {
   }
 
   /** Allowed `kind` values for a provider: one fixed value for built-ins. */
-  allowedKinds(id: string): Array<'openai' | 'anthropic'> {
+  allowedKinds(id: string): ProviderKind[] {
     const entry = this.find(id);
     if (entry) {
       return [entry.kind];
@@ -120,6 +120,8 @@ export class ProviderCatalog {
       // the config says by offering both, the select is disabled anyway.
       return ['openai', 'anthropic'];
     }
+    // Custom providers stay HTTP-only here: a CLI provider is created through
+    // the "CLI agents" card, which knows the backend id and its options.
     return ['openai', 'anthropic'];
   }
 
