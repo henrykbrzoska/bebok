@@ -64,6 +64,7 @@ Manual steps still work: `cd engine && cargo run` (engine on `:8787`),
 Tests and lints (CI runs exactly these on `ubuntu-22.04` + `windows-latest`):
 
 ```bash
+npm run lint:cfg                             # cfg hygiene: platform-only dead items (runs on Linux, guards Windows)
 cd engine && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
 cd engine && cargo test --workspace          # ~553 tests; browser round-trip auto-skips without Chrome
 cd client && npm run build                   # type-check + bundle (what CI runs)
@@ -313,6 +314,14 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   native tools. Set `BEBOK_SHELL` to change the shell for both `bash` and the terminal.
 - Cancelling a delegated child aborts the whole parent turn; the orchestrator may
   answer without delegating unless the prompt demands a `task` call.
+- **Windows is not your machine.** `#[cfg(windows)]` code is not compiled on
+  Linux, so an item used only there is `dead_code` on Linux and a build failure
+  on Windows under `-D warnings` — and that is the most common way a green local
+  clippy run turns into a red `windows-latest` job. `npm run lint:cfg`
+  (`scripts/check-cfg-hygiene.mjs`, wired into CI) catches both that and a
+  Windows-only `fn` called from ungated code. The structural fix is one
+  `#[cfg(...)] mod` per platform with its own imports and consts — see
+  `bebok-cli-agents/src/runner.rs`'s `platform` modules.
 - A CLI provider's tool use never reaches Bebok's permission engine or
   `change_tracking.rs`: the only guard is the CLI's own flags, and CLI edits do
   not appear in the Changes panel. `extra.allow_write` defaults to false for that
