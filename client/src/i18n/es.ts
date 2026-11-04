@@ -920,6 +920,8 @@ export const es: Record<MessageKey, string> = {
   'settings.codeGraphModules': '{n} módulos, {m} aristas',
   'settings.astSearchTitle': 'Búsqueda AST',
   'settings.astSearchHint': 'Búsqueda estructural con la herramienta code_ast (bloques impl, derives, firmas de funciones). Requiere el plugin bebok-ast en el proyecto.',
+  'settings.sshToolTitle': 'Herramienta SSH',
+  'settings.sshToolHint': 'Servidores remotos con una shell persistente: conecta una vez y las llamadas siguientes conservan el directorio de trabajo y las variables exportadas. Desactívala para quitarla del esquema del modelo.',
   'settings.astSearchParsed': '{n} archivos analizados',
   'settings.codeFeaturesError': 'Error al guardar: {msg}',
   'find.placeholder': 'Buscar en el archivo',
@@ -977,4 +979,34 @@ export const es: Record<MessageKey, string> = {
   'schedules.statsCardLink': 'Abrir Estadísticas',
 
 
+
+  // Persistent SSH sessions (password dialog)
+  'ssh.title': 'Se requiere contraseña SSH',
+  'ssh.hint': 'Introduce la contraseña de {host}. Se envía una sola vez al proceso ssh y nunca se guarda ni aparece en la transcripción.',
+  'ssh.password': 'Contraseña',
+  'ssh.connect': 'Conectar',
+  'ssh.connecting': 'Conectando…',
+  'ssh.cancel': 'Cancelar',
+  'ssh.failed': 'No se pudo enviar la contraseña: {error}',
+  'ssh.sudoTitle': 'Se necesitan permisos de root',
+  'ssh.sudoHint': '{host} necesita la contraseña de sudo para este comando. Se envía una vez al host remoto y se reutiliza en los siguientes comandos sudo de esta sesión; una contraseña rechazada se olvida.',
+  // CLI agents (agentic CLIs driven as providers).
+  'settings.cliAgentsTitle': 'Agentes CLI',
+  'settings.cliAgentsHint': 'CLIs agénticos instalados en esta máquina, usados como proveedores. Una CLI ejecuta sus propias herramientas, así que sus cambios quedan fuera de las reglas de permisos y del seguimiento de cambios de Bebok.',
+  'settings.cliAgentsEmpty': 'El motor no informa de ningún backend CLI.',
+  'settings.cliBackendsError': 'No se pudieron cargar los backends CLI: {msg}',
+  'settings.cliNotInstalled': 'no encontrado',
+  'settings.cliTest': 'Probar',
+  'settings.cliTesting': 'Probando…',
+  'settings.cliTestOk': 'OK',
+  'settings.cliTestFailed': 'Falló',
+  'settings.cliAddAsProvider': 'Añadir como proveedor',
+  'settings.cliEnvOverride': 'Sobrescribe el binario con {env}.',
+  'settings.providerCli': 'Agente CLI',
+  'settings.cliExtraCommand': 'Comando alternativo',
+  'settings.cliExtraArgs': 'Argumentos adicionales (separados por espacios)',
+  'settings.cliExtraMode': 'Modo',
+  'settings.cliExtraAllowWrite': 'Permitir que la CLI escriba archivos',
+  'settings.cliExtraTimeout': 'Tiempo límite (segundos)',
+  'settings.cliAllowWriteWarning': 'La CLI edita archivos con sus propias herramientas: las reglas de permisos y el seguimiento de cambios de Bebok no se aplican y esos cambios nunca aparecen en el panel Changes. Actívalo solo si lo aceptas.',
 };

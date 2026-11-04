@@ -4,6 +4,8 @@
 
 ### Features
 
+- Run a session (or a delegated sub-agent) through **Claude Code CLI** instead of an API key: add a provider with `"kind": "cli"` and pick a `claude-cli/sonnet`-style model — Settings → Providers now detects installed CLI agents, shows their version and offers one click to add them. The CLI edits files only if you explicitly enable `allow_write` (off by default, and Bebok warns that its own permission rules and the Changes panel do not cover CLI edits). Adding another CLI (codex, gemini, aider, opencode) is one file in `bebok-cli-agents/src/backends/` — see `docs/cli-agents.md`.
+- New `ssh` tool: a remote server is now one persistent SSH session instead of a fresh `ssh host "cmd"` per command. `connect` logs in once (key/agent auth when available, otherwise a password dialog in the chat — the password is handed straight to the `ssh` process and never stored or shown in the transcript), `run` executes commands in that same remote shell so the working directory, exports and shell state persist between calls, and `close`/`list` manage the open sessions. Commands that need root (`sudo ...`, or `sudo: true`) are asked for the sudo password in the chat — once per session, reused afterwards, forgotten the moment the host rejects it — while hosts with NOPASSWD sudo are detected at connect and never prompt. `connect` also takes `options` — any extra `ssh` flags exactly as on the command line (a bare `Key=Value` becomes `-o Key=Value`), so you can force a method such as `PreferredAuthentications=password` on hosts where an agent full of keys trips `Too many authentication failures`. Open sessions are also visible at `GET /ssh`.
 - AST search (`code_ast`) now also covers PHP (`.php`), JavaScript (`.js/.jsx/.mjs/.cjs`) and Python (`.py`) files — not just Rust and TypeScript. Functions, classes, methods, interfaces, traits and enums in those languages are found structurally (by AST node, not regex), with the same `name_regex` / `path_regex` filters.
 - The Bebok Companion extension can now switch to another of your open tabs: the new `switchTab` command (`POST /browser/remote/switchTab` with the tab id from `tabs`) activates that tab and focuses its window, so every following command — click, type, screenshot — runs on the tab you picked instead of only on whatever was active.
 - OpenCode Zen now goes through the Responses protocol for every request (`POST https://opencode.ai/inference/v1/responses`, like the official CLI) instead of Chat Completions on the retired `/zen/v1` endpoint — free-tier models answer again, and stale `https://opencode.ai/zen/v1` configs are auto-migrated to the new base URL.
@@ -11,6 +13,11 @@
 ### Fixes
 
 - The Debug log's expanded LLM-call JSON no longer paints over the log rows below: the calls panel scrolls internally instead of overflowing.
+- The SSH password dialog now actually appears: the engine emitted `requestId` while the client read `requestID`, so every password prompt was silently dropped and a login waited the full five minutes. The dialog is also a viewport overlay (it was rendered inline at the end of the transcript, below the fold on a long chat), and forcing a password no longer breaks the connection — the `-o PreferredAuthentications=...` flags are passed to `ssh` instead of being sent as the remote command (`bash: - : invalid option`).
+
+### Other
+
+- The `ssh` tool can now be switched off (Settings → Code intelligence, or `"ssh": { "enabled": false }`) so its schema and description are not sent with every request in projects that never touch a remote server. On by default; a project or global layer can flip it and the change applies to the next turn.
 
 ## 1.9.3 — 2026-10-07
 
