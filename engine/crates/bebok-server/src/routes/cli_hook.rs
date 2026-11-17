@@ -32,7 +32,6 @@
 //! the engine is unreachable.
 
 use std::net::SocketAddr;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::Json;
@@ -64,16 +63,11 @@ pub const PRE_TIMEOUT_ENV: &str = "BEBOK_CLI_HOOK_TIMEOUT_SECS";
 
 /// The engine's own listening URL, e.g. `http://127.0.0.1:8787`. Set once by
 /// `server::serve` after binding (the desktop sidecar binds a random port).
-static ENGINE_BASE_URL: OnceLock<String> = OnceLock::new();
-
-/// Remember the bound address so CLI turns can hand their hooks a URL.
+///
+/// The registry itself lives in `bebok_core::cli_turn_token`, so the delegation
+/// path (`fleet` / `task`, which is core-side) can issue hook credentials too.
 pub fn set_engine_base_url(url: impl Into<String>) {
-    let _ = ENGINE_BASE_URL.set(url.into());
-}
-
-/// The engine's base URL, when it is known (not in unit tests / MCP mode).
-pub fn engine_base_url() -> Option<&'static str> {
-    ENGINE_BASE_URL.get().map(String::as_str)
+    bebok_core::cli_turn_token::set_engine_base_url(url);
 }
 
 /// Issue the per-turn hook environment for a CLI session.
@@ -83,21 +77,12 @@ pub fn engine_base_url() -> Option<&'static str> {
 /// child must see. `None` when the engine does not know its own address — then
 /// no hooks are wired at all, which is safer than a URL pointing nowhere.
 pub fn issue_hook_env(session: &str) -> Option<(String, Vec<(String, String)>)> {
-    let base = engine_base_url()?;
-    let (token, _scope) = TurnTokenStore::global().issue(session);
-    let env = vec![
-        (
-            "BEBOK_HOOK_URL".to_string(),
-            format!("{base}/cli-hook/{session}"),
-        ),
-        ("BEBOK_HOOK_TOKEN".to_string(), token.clone()),
-    ];
-    Some((token, env))
+    bebok_core::cli_turn_token::issue_hook_env(session)
 }
 
 /// Revoke a turn token issued by [`issue_hook_env`].
 pub fn revoke_hook_token(token: &str) {
-    TurnTokenStore::global().revoke(token);
+    bebok_core::cli_turn_token::revoke_hook_token(token);
 }
 
 /// One hook event.

@@ -19,6 +19,7 @@ import {
   ChangesResponse,
   CliBackend,
   CliProbeResult,
+  CliProfilePreview,
   CompactResponse,
   ConfigResponse,
   CreatePtyResponse,
@@ -994,6 +995,26 @@ export class EngineClient {
       'POST',
       `/cli/backends/${encodeURIComponent(id)}/probe`,
     );
+  }
+
+  /**
+   * `GET /cli/profile/{provider}?directory=` -> read-only preview of the managed
+   * profile (files, argv, env, probed flags). Nothing is written by the engine.
+   * An engine without this route answers 404: that resolves to `null` so the
+   * settings card just hides the preview instead of showing an error.
+   */
+  async cliProfile(providerName: string, directory: string): Promise<CliProfilePreview | null> {
+    try {
+      return await this.request<CliProfilePreview>(
+        'GET',
+        `/cli/profile/${encodeURIComponent(providerName)}?directory=${encodeURIComponent(directory)}`,
+      );
+    } catch (err) {
+      if (err instanceof Error && /-> 404\b/.test(err.message)) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   // ---------------------------------------------------------------------------

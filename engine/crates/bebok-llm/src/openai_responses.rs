@@ -708,6 +708,7 @@ mod tests {
                 StreamEvent::Text(_) => "text",
                 StreamEvent::Thinking(_) => "thinking",
                 StreamEvent::ToolCall(_) => "tool",
+                StreamEvent::ExternalTool { .. } => "external",
                 StreamEvent::Done(_) => "done",
             })
             .collect()

@@ -146,6 +146,95 @@ pub fn build_provider_for(
     .map_err(CoreError::ProviderConfig)
 }
 
+pub type ChildProviderFactory =
+    dyn Fn(&str) -> Result<(Arc<dyn Provider>, Option<String>), String> + Send + Sync;
+
+/// How a delegated child (`task` / `fleet`) gets its provider.
+///
+/// An HTTP provider is built once, eagerly. A CLI provider cannot be: its
+/// managed profile runs `bebok-server cli-hook <event>` before and after every
+/// tool call, and that hook child needs `BEBOK_HOOK_URL` / `BEBOK_HOOK_TOKEN` in
+/// its environment (see [`crate::cli_turn_token`]). Those are scoped to one
+/// session, so the provider has to be built *after* the child session exists —
+/// otherwise the profile's hooks are wired but carry no credential, `cli-hook`
+/// fails closed, and the CLI reports every tool as "could not run".
+pub enum ChildProvider {
+    /// Already built (HTTP providers, and tests).
+    Ready(Arc<dyn Provider>),
+    /// Built per child session; the closure also returns the hook token to
+    /// revoke when the child's turn ends (`None` for a provider without hooks).
+    PerSession(Box<ChildProviderFactory>),
+}
+
+impl ChildProvider {
+    /// Wrap an already built provider (no per-session hook credentials).
+    pub fn ready(provider: Arc<dyn Provider>) -> Self {
+        Self::Ready(provider)
+    }
+
+    /// The provider for `child_session`, plus the hook token its CLI hooks were
+    /// issued (revoke it when the child's turn ends).
+    pub fn resolve(
+        &self,
+        child_session: &str,
+    ) -> Result<(Arc<dyn Provider>, Option<String>), String> {
+        match self {
+            Self::Ready(provider) => Ok((provider.clone(), None)),
+            Self::PerSession(build) => build(child_session),
+        }
+    }
+}
+
+/// Build the provider for a delegated child running in `root`.
+///
+/// HTTP providers come back ready. A CLI provider is deferred to
+/// [`ChildProvider::resolve`] so that the hook environment handed to the CLI
+/// child is scoped to the child's own session — a child is a separate session,
+/// and a token of the parent would be refused by the hook route.
+pub fn child_provider(
+    config: &ResolvedConfig,
+    model: &str,
+    root: &Path,
+) -> Result<ChildProvider, CoreError> {
+    let name = provider_from_model(model);
+    let spec = config
+        .provider_spec(&name)
+        .ok_or_else(|| CoreError::ProviderConfig(format!("unknown provider '{name}'")))?;
+    if spec.kind != ProviderKind::Cli {
+        return Ok(ChildProvider::Ready(build_provider_for(
+            config,
+            model,
+            &ProviderCtx::root(root),
+        )?));
+    }
+
+    let config = config.clone();
+    let model = model.to_string();
+    let root = root.to_path_buf();
+    Ok(ChildProvider::PerSession(Box::new(move |child_session| {
+        let (token, env) = match crate::cli_turn_token::issue_hook_env(child_session) {
+            Some((token, env)) => (Some(token), env),
+            None => {
+                // No engine URL (MCP mode / unit tests): the profile's hooks
+                // cannot call back, so they would deny every tool call. Say so
+                // instead of letting the CLI look broken.
+                tracing::warn!(
+                    provider = %name,
+                    "no engine URL for CLI hook callbacks; this CLI child has no permission gate"
+                );
+                (None, Vec::new())
+            }
+        };
+        build_provider_for(
+            &config,
+            &model,
+            &ProviderCtx::root(&root).with_hook_env(env),
+        )
+        .map(|provider| (provider, token))
+        .map_err(|e| e.to_string())
+    })))
+}
+
 /// Digest of a system prompt, as recorded in [`CliSessionMeta::system_hash`].
 pub fn system_hash(system: &str) -> String {
     Sha256::digest(system.as_bytes())
@@ -337,5 +426,58 @@ mod tests {
         )]);
         assert_eq!(ctx.hook_env.len(), 1);
         assert_eq!(ctx.hook_env[0].0, "BEBOK_HOOK_URL");
+    }
+
+    fn spec(name: &str, kind: ProviderKind, backend: Option<&str>) -> bebok_llm::ProviderSpec {
+        let mut extra = serde_json::Map::new();
+        if let Some(backend) = backend {
+            extra.insert("backend".into(), serde_json::Value::String(backend.into()));
+        }
+        bebok_llm::ProviderSpec {
+            name: name.to_string(),
+            kind,
+            endpoint: Some(format!("https://{name}.example.com/v1")),
+            api_key: None,
+            models: vec!["opus".into()],
+            extra,
+        }
+    }
+
+    #[test]
+    fn an_http_child_provider_is_built_eagerly_and_needs_no_hook_token() {
+        let cfg = ResolvedConfig::builder()
+            .providers(vec![spec("openai", ProviderKind::Openai, None)])
+            .build();
+        let ready = child_provider(&cfg, "openai/opus", Path::new("/tmp/proj")).unwrap();
+        assert!(matches!(ready, ChildProvider::Ready(_)));
+        let (_, token) = ready.resolve("child-1").unwrap();
+        assert!(token.is_none(), "HTTP providers have no hooks");
+    }
+
+    /// A delegated CLI child must be handed hook credentials scoped to *its*
+    /// session: with the parent's token (or none at all) the managed profile's
+    /// hooks answer `deny` fail-closed and the CLI reports every tool as
+    /// "could not run".
+    #[test]
+    fn a_cli_child_provider_is_deferred_until_the_child_session_exists() {
+        crate::cli_turn_token::set_engine_base_url("http://127.0.0.1:8787");
+        let cfg = ResolvedConfig::builder()
+            .providers(vec![spec("claude-cli", ProviderKind::Cli, Some("claude"))])
+            .build();
+        let deferred = child_provider(&cfg, "claude-cli/opus", Path::new("/tmp/proj")).unwrap();
+        assert!(matches!(deferred, ChildProvider::PerSession(_)));
+
+        let (_, token) = deferred.resolve("child-42").unwrap();
+        let token = token.expect("a CLI child gets hook credentials");
+        let scope = crate::cli_turn_token::TurnTokenStore::global()
+            .validate(&token)
+            .expect("the token is live");
+        assert_eq!(scope.session, "child-42");
+        crate::cli_turn_token::revoke_hook_token(&token);
+        assert!(
+            crate::cli_turn_token::TurnTokenStore::global()
+                .validate(&token)
+                .is_none()
+        );
     }
 }

@@ -513,12 +513,25 @@ pub struct Usage {
     pub context_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalSource {
+    Cli,
+}
+
 /// A typed event emitted by a provider stream.
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Text(String),
     Thinking(String),
     ToolCall(ToolCall),
+    ExternalTool {
+        id: String,
+        name: String,
+        input: Value,
+        output: String,
+        is_error: bool,
+        source: ExternalSource,
+    },
     Done(Usage),
 }
 

@@ -20,6 +20,11 @@
 //! `ssh.prompt` (a persistent SSH session needs a password:
 //! `properties`: `{ requestID, sessionID, directory, host, prompt }`, where
 //! `prompt` is `password` (SSH login) or `sudo`).
+//!
+//! `cli.turn.stopped` (`properties`: `{ changedFiles }`) is published by
+//! `POST /cli-hook/{session}/stop` when a managed-profile CLI turn (Claude Code)
+//! ends. `changedFiles` is the number of paths the change tracker holds for the
+//! session at that moment (`Tracker::tracked_count`), not a per-turn diff.
 
 use tokio::sync::broadcast;
 

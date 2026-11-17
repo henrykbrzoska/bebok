@@ -125,6 +125,9 @@ import { safetyLegend } from './safety-legend';
 
       @if (detailsOpen()) {
         <div class="tool-details">
+          @if (isExternal()) {
+            <span class="external-badge" data-testid="tool-external-badge">{{ t('chat.tool.externalBy') }}</span>
+          }
           <div class="section-label">{{ t('tool.arguments') }}</div>
           <pre class="panel"><code>{{ inputText() }}</code></pre>
 
@@ -544,6 +547,7 @@ export class ToolPartComponent {
     this.state().state === 'error' ? (this.state() as ToolStateError) : null,
   );
 
+  readonly isExternal = computed(() => !!(this.toolPart() as ToolPart).external);
   readonly outputText = computed(() => this.completed()?.output ?? '');
   readonly errorText = computed(() => this.failed()?.error ?? '');
   /** F9-11: `errorText`, escaped and with any bare http(s) URL linkified -

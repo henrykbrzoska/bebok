@@ -370,9 +370,29 @@ impl CliBackend for ClaudeBackend {
             "stream_event" => Ok(stream_event(&value, st)),
 
             "user" => {
-                // Tool results come back as a synthetic user message. Only the
-                // `tool_result` blocks matter; the rest is a prompt echo that
-                // must not be rendered a second time.
+                if let Some(arr) = value.pointer("/message/content").and_then(Value::as_array) {
+                    for block in arr {
+                        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                            continue;
+                        }
+                        if let Some(tid) = block.get("tool_use_id").and_then(Value::as_str)
+                            && let Some((name, input)) = st.pending_tools.remove(tid)
+                        {
+                            let output = tool_result_block_text(block);
+                            let is_error = block
+                                .get("is_error")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
+                            return Ok(Some(CliEvent::ExternalTool {
+                                id: tid.to_string(),
+                                name,
+                                input,
+                                output,
+                                is_error,
+                            }));
+                        }
+                    }
+                }
                 let detail = tool_result_text(value.pointer("/message/content"));
                 if detail.is_empty() {
                     return Ok(None);
@@ -470,6 +490,21 @@ fn assistant_event(value: &Value, st: &mut CliStreamState) -> Option<CliEvent> {
         return Some(CliEvent::Thinking(thinking.to_string()));
     }
 
+    // Record tool_use for fallback pairing with tool_result
+    for block in content
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+    {
+        if let Some(id) = block.get("id").and_then(Value::as_str) {
+            let name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool")
+                .to_string();
+            let input = block.get("input").cloned().unwrap_or(Value::Null);
+            st.pending_tools.insert(id.to_string(), (name, input));
+        }
+    }
     blocks
         .iter()
         .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
@@ -507,6 +542,20 @@ fn tool_detail(name: &str, input: Option<&Value>) -> String {
 
     // Unknown tool or missing argument: fall back to the compact input object.
     truncate(&input.to_string())
+}
+
+fn tool_result_block_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(t)) => truncate(t),
+        Some(Value::Array(inner)) => {
+            let parts: Vec<&str> = inner
+                .iter()
+                .filter_map(|i| i.get("text").and_then(Value::as_str))
+                .collect();
+            truncate(&parts.join("\n"))
+        }
+        _ => String::new(),
+    }
 }
 
 /// Text of the `tool_result` blocks, joined when the content is an array.

@@ -123,13 +123,11 @@ impl<'a> RequestBuilder<'a> {
                     });
                 }
                 Role::Assistant => {
-                    let content = msg.text_content();
+                    let mut content = msg.text_content();
                     let mut tool_calls = Vec::new();
                     let mut tool_results = Vec::new();
-                    // Image parts on an assistant message are tool-produced
-                    // (WP-BROWSER screenshots): they travel with the tool
-                    // results in the synthetic user turn that follows.
                     let mut result_images: Vec<ContentPart> = Vec::new();
+                    let mut external_lines: Vec<String> = Vec::new();
                     for part in &msg.parts {
                         if let crate::session::Part::Image {
                             media_type, data, ..
@@ -141,9 +139,25 @@ impl<'a> RequestBuilder<'a> {
                             });
                         }
                         if let crate::session::Part::Tool {
-                            id, name, state, ..
+                            id,
+                            name,
+                            state,
+                            external,
+                            ..
                         } = part
                         {
+                            if external == &Some(true) {
+                                let input_str = state.input().to_string();
+                                let output_str = match state {
+                                    ToolState::Completed { output, .. } => output.clone(),
+                                    ToolState::Error { error, .. } => error.clone(),
+                                    _ => String::new(),
+                                };
+                                external_lines.push(format!(
+                                    "[Claude Code ran {name}: {input_str} → {output_str}]"
+                                ));
+                                continue;
+                            }
                             tool_calls.push(bebok_llm::ToolCall {
                                 id: id.clone(),
                                 name: name.clone(),
@@ -165,13 +179,6 @@ impl<'a> RequestBuilder<'a> {
                                     });
                                 }
                                 _ => {
-                                    // Pending / Running — the tool never
-                                    // finished (turn was interrupted). Emit a
-                                    // synthetic error result so every
-                                    // tool_call_id has a matching response;
-                                    // without this OpenAI-compatible providers
-                                    // return 400 "Missing tool response for
-                                    // tool_call_id(s)".
                                     tool_results.push(ToolResult {
                                         tool_use_id: id.clone(),
                                         content: "[tool did not complete: turn was interrupted before execution finished]"
@@ -181,6 +188,12 @@ impl<'a> RequestBuilder<'a> {
                                 }
                             }
                         }
+                    }
+                    if !external_lines.is_empty() {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(&external_lines.join("\n"));
                     }
                     chat.push(ChatMessage {
                         role: ChatRole::Assistant,

@@ -71,6 +71,10 @@ pub enum Part {
         /// derive it from the tool name via `GET /tools/safety` then.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         safety: Option<crate::tool_safety::SafetyCategory>,
+        /// True when this tool row was produced by an external CLI (e.g. Claude Code)
+        /// via `StreamEvent::ExternalTool`. Never executed by Bebok's tool loop.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        external: Option<bool>,
     },
     Usage {
         input_tokens: u64,
@@ -256,6 +260,39 @@ impl Message {
             permission: None,
             mutating: None,
             safety: None,
+            external: None,
+        });
+    }
+
+    pub fn add_external_tool(
+        &mut self,
+        id: String,
+        name: String,
+        input: Value,
+        output: String,
+        is_error: bool,
+    ) {
+        let state = if is_error {
+            ToolState::Error {
+                input: input.clone(),
+                error: output,
+            }
+        } else {
+            ToolState::Completed {
+                input: input.clone(),
+                output,
+                title: name.clone(),
+                structured: None,
+            }
+        };
+        self.parts.push(Part::Tool {
+            id,
+            name,
+            state,
+            permission: None,
+            mutating: None,
+            safety: None,
+            external: Some(true),
         });
     }
 

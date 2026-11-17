@@ -43,7 +43,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use crate::config::ResolvedConfig;
-use crate::provider::{ProviderCtx, build_provider_for};
+use crate::provider::child_provider;
 use crate::store::InstanceStore;
 
 /// Maximum sub-agent nesting depth (a sub-agent delegating further counts as
@@ -291,11 +291,13 @@ impl Tool for TaskTool {
             }
         };
 
-        // The sub-agent model follows the fleet fallback chain: an explicit
-        // per-call `model` wins, else `models.<agent>` when set, else the
-        // parent's effective model. `model: "heavy"` lifts a heavy part onto
-        // the parent's own model. A live child with the same prompt+agent refuses
-        // the duplicate (collect it with `task_wait` instead).
+        // The sub-agent model must come from the fleet roster when fleet is
+        // enabled (otherwise any configured model). A per-call `model`
+        // outside the fleet roster is rejected with a clear error so the
+        // orchestrator learns the allowed roster. `model: "heavy"` lifts a
+        // heavy part onto the parent's own model (mapped to fleet fallback
+        // inside `resolve_subagent_model`). A live child with the same
+        // prompt+agent refuses the duplicate (collect it with `task_wait`).
         let parent_model = crate::store::parent_model_for_delegation(
             &parent.meta_snapshot().await,
             &instance,
@@ -306,6 +308,39 @@ impl Tool for TaskTool {
                 format!(
                     "task: a {} child task already covers this (name `{}` taskID `{}` status `{}`); collect it with `task_wait` instead of spawning a duplicate",
                     dup.agent, dup.name, dup.task_id, dup.status,
+                ),
+                "task",
+            );
+        }
+        // Fleet gate: reject a `task` model outside the roster before
+        // resolving, so the error is actionable (lists the roster).
+        if let Some(req) = args
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            && !req.eq_ignore_ascii_case(crate::agent::model_policy::HEAVY)
+            && cfg.is_fleet_enabled()
+            && !cfg.fleet_members().is_empty()
+            && cfg.is_model_available(req)
+            && !cfg.is_model_in_fleet(req)
+        {
+            let roster = cfg
+                .fleet_members()
+                .iter()
+                .map(|m| m.model.clone())
+                .filter(|s| !s.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return ToolOutput::new(
+                format!(
+                    "task: model '{req}' is not in the fleet roster [{}]; use one of the fleet models or omit `model` (fleet fallback). Fleet members: {}",
+                    roster,
+                    cfg.fleet_members()
+                        .iter()
+                        .map(|m| format!("{}({}/{})", m.name, m.agent, m.model))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
                 "task",
             );
@@ -332,7 +367,9 @@ impl Tool for TaskTool {
         // server's prompt assembly, minus the parent-only context notes).
         assemble_prompt(&instance, &mut agent, &cfg);
 
-        let provider = match build_provider_for(&cfg, &model, &ProviderCtx::root(&instance.root)) {
+        // A CLI provider is built later, once the child session exists, so its
+        // hook environment carries a token scoped to that session.
+        let provider = match child_provider(&cfg, &model, &instance.root) {
             Ok(p) => p,
             Err(e) => {
                 return ToolOutput::new(

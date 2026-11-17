@@ -26,8 +26,37 @@ pub fn resolve_subagent_model(
     requested: Option<&str>,
 ) -> String {
     let is_available = |m: &str| cfg.is_model_available(m);
+    let fleet_enabled = cfg.is_fleet_enabled() && !cfg.fleet_members().is_empty();
+    let in_fleet = |m: &str| !fleet_enabled || cfg.is_model_in_fleet(m);
+    let fleet_list = || {
+        cfg.fleet_members()
+            .iter()
+            .map(|m| m.model.clone())
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let fallback = || {
-        // Prefer parent when available, otherwise the global default.
+        if fleet_enabled {
+            // Sub-agents must come from the fleet roster.
+            if let Some(first) = cfg
+                .fleet_members()
+                .iter()
+                .find(|m| !m.model.trim().is_empty())
+            {
+                let fm = first.model.trim().to_string();
+                if is_available(&fm) {
+                    return fm;
+                }
+            }
+            // No usable fleet model — fall back to global but warn.
+            tracing::warn!(
+                "resolve_subagent_model: fleet enabled but no usable fleet model; falling back to '{}'",
+                cfg.model
+            );
+            return cfg.model.clone();
+        }
+        // Fleet disabled: prefer parent when available, otherwise global.
         if is_available(parent_model) {
             parent_model.trim().to_string()
         } else if !parent_model.trim().is_empty() {
@@ -47,10 +76,14 @@ pub fn resolve_subagent_model(
         if r.eq_ignore_ascii_case(HEAVY) {
             return fallback();
         }
-        // Only models present in config are honoured.
         if !is_available(r) {
             tracing::warn!(
                 "resolve_subagent_model: ignoring model '{r}' for sub-agent '{child_agent}': not in providers[].models; using config/parent instead"
+            );
+        } else if !in_fleet(r) {
+            tracing::warn!(
+                "resolve_subagent_model: ignoring model '{r}' for sub-agent '{child_agent}': not in fleet roster [{}]; using fleet/config instead",
+                fleet_list()
             );
         } else {
             let configured = model_for_child(child_agent);
@@ -60,6 +93,14 @@ pub fn resolve_subagent_model(
                     tracing::warn!(
                         "resolve_subagent_model: models.{child_agent}='{}' not in providers[].models; using requested '{r}' instead",
                         configured_trim
+                    );
+                    return r.to_string();
+                }
+                if !in_fleet(configured_trim) {
+                    tracing::warn!(
+                        "resolve_subagent_model: models.{child_agent}='{}' not in fleet roster [{}]; using requested '{r}' instead",
+                        configured_trim,
+                        fleet_list()
                     );
                     return r.to_string();
                 }
@@ -81,8 +122,16 @@ pub fn resolve_subagent_model(
     }
     if !is_available(configured_trim) {
         tracing::warn!(
-            "resolve_subagent_model: models.{child_agent}='{}' not in providers[].models; falling back to parent/global",
+            "resolve_subagent_model: models.{child_agent}='{}' not in providers[].models; falling back",
             configured_trim
+        );
+        return fallback();
+    }
+    if !in_fleet(configured_trim) {
+        tracing::warn!(
+            "resolve_subagent_model: models.{child_agent}='{}' not in fleet roster [{}]; falling back",
+            configured_trim,
+            fleet_list()
         );
         return fallback();
     }
@@ -273,6 +322,74 @@ mod tests {
                 None
             ),
             "openai/o3"
+        );
+    }
+
+    #[test]
+    fn fleet_roster_gates_subagent_model() {
+        // Fleet enabled with one member: only that model is allowed.
+        let mut cfg = test_cfg(
+            providers_with(&[("openai", &["o3", "o4"]), ("x", &["parent"])]),
+            serde_json::json!({}),
+            "x/parent",
+        );
+        cfg.fleet.enabled = true;
+        cfg.fleet.members = vec![crate::config::FleetMember {
+            name: "code-a".into(),
+            agent: "code".into(),
+            model: "openai/o3".into(),
+        }];
+        // Requested model not in fleet -> fallback to fleet model.
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg,
+                "x/parent",
+                "code",
+                |_| String::new(),
+                Some("openai/o4")
+            ),
+            "openai/o3"
+        );
+        // Requested model in fleet -> allowed.
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg,
+                "x/parent",
+                "code",
+                |_| String::new(),
+                Some("openai/o3")
+            ),
+            "openai/o3"
+        );
+        // No requested model -> fallback is fleet member, not parent.
+        assert_eq!(
+            resolve_subagent_model(&cfg, "x/parent", "code", |_| String::new(), None),
+            "openai/o3"
+        );
+        // models.<agent> outside fleet -> ignored, falls back to fleet.
+        assert_eq!(
+            resolve_subagent_model(&cfg, "x/parent", "code", |_| "openai/o4".into(), None),
+            "openai/o3"
+        );
+    }
+
+    #[test]
+    fn fleet_disabled_allows_any_available_model() {
+        let cfg = test_cfg(
+            providers_with(&[("openai", &["o3", "o4"]), ("x", &["parent"])]),
+            serde_json::json!({}),
+            "x/parent",
+        );
+        // Fleet disabled (default) -> any available model passes.
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg,
+                "x/parent",
+                "code",
+                |_| String::new(),
+                Some("openai/o4")
+            ),
+            "openai/o4"
         );
     }
 }

@@ -665,7 +665,10 @@ pub struct ChildSpec {
     /// Preset name as the model asked for it (`code`, `ask`, ...).
     pub agent_name: String,
     pub model: String,
-    pub provider: Arc<dyn bebok_llm::Provider>,
+    /// Where the child's provider comes from. A CLI provider is built once the
+    /// child session exists, so its hooks get a token scoped to that session
+    /// (see [`crate::provider::ChildProvider`]).
+    pub provider: crate::provider::ChildProvider,
     /// Unique child name (already allocated on the parent).
     pub name: String,
     pub prompt: String,
@@ -825,6 +828,7 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
 #[allow(clippy::too_many_arguments)]
 async fn run_child_turn_with_watchdog(
     spec: &ChildSpec,
+    provider: &Arc<dyn bebok_llm::Provider>,
     child: &Arc<SessionState>,
     info: &ChildTask,
     bus: &EventBus,
@@ -891,7 +895,7 @@ async fn run_child_turn_with_watchdog(
             child.clone(),
             spec.agent.clone(),
             spec.instance.tools.clone(),
-            spec.provider.clone(),
+            provider.clone(),
             spec.instance.permission.clone(),
             bus.clone(),
             attempt_abort.clone(),
@@ -994,11 +998,44 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
         }
     }
 
+    // Build the provider now that the child session exists: a CLI child's
+    // managed profile calls back into the engine for every tool call, and the
+    // hook token is scoped to the session it was issued for.
+    let (provider, hook_token) = match spec.provider.resolve(&child_session_id) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            if holds_slot {
+                spec.parent.child_slots().release();
+            }
+            child.clear_abort().await;
+            child.end_turn();
+            child.set_task_status("error", Some(&e)).await;
+            return ChildOutcome {
+                task_id: task_id.clone(),
+                name: name.clone(),
+                child_session_id: child_session_id.clone(),
+                status: "error".to_string(),
+                error: Some(e.clone()),
+                text: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+                started_at,
+                ended_at: crate::util::now_ms(),
+            };
+        }
+    };
+
     let result = if abort.is_cancelled() {
         Ok(())
     } else {
-        run_child_turn_with_watchdog(&spec, &child, &info, &bus, &abort, &task_id, 0).await
+        run_child_turn_with_watchdog(&spec, &provider, &child, &info, &bus, &abort, &task_id, 0)
+            .await
     };
+
+    // The child's turn is over: its hook token must not outlive it.
+    if let Some(token) = hook_token.as_deref() {
+        crate::cli_turn_token::revoke_hook_token(token);
+    }
 
     if holds_slot {
         spec.parent.child_slots().release();

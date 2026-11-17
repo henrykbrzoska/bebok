@@ -200,7 +200,15 @@ hardcoded `agent/sampling_defaults.rs`), `context_budget`, `tool_output_cap`, `y
 returns `Err`), and `bebok_core::provider::build_provider_for(.., &ProviderCtx)` is
 the entry point every real turn uses. `bebok_core::provider::build_provider`
 (no ctx) stays HTTP-only, so `fleet_gen` cannot accidentally drive a CLI. Routes:
-`GET /cli/backends`, `POST /cli/backends/{id}/probe` (`routes/cli.rs`).
+`GET /cli/backends`, `POST /cli/backends/{id}/probe`, `GET /cli/profile/{provider}`
+(`routes/cli.rs`). **Hooks are the permission path** for managed profiles
+(`profile` `bebok`/`isolated`): Claude Code runs `bebok-server cli-hook pre|post|stop`,
+which posts to `POST /cli-hook/{session}/{event}` (`routes/cli_hook.rs`) with
+`BEBOK_HOOK_URL`/`BEBOK_HOOK_TOKEN`; `pre` is fail-closed (any failure answers `deny`).
+The token is a per-turn credential from `bebok_core::cli_turn_token`, scoped to one
+session, revoked at turn end and never written to disk. The generated profile lives
+under `<data dir>/bebok/cli-profiles/<project-key>/<backend>/` (`profile.rs`, with
+`profile.lock.json`).
 
 **Providers** (`bebok-llm`): `provider_from_model` = text before the first `/`
 → `ProviderSpec {name, kind: openai|anthropic, endpoint, api_key, models, extra}`.
@@ -437,10 +445,13 @@ then live bytes; JSON control frames `resize` / `input`. PTY env is scrubbed of
   own imports and consts — see `bebok-cli-agents/src/runner.rs`'s `platform`
   modules. An item referenced from only one branch then cannot exist by
   accident.
-- A CLI provider's tool use never reaches Bebok's permission engine or
-  `change_tracking.rs`: the only guard is the CLI's own flags, and CLI edits do
-  not appear in the Changes panel. `extra.allow_write` defaults to false for that
-  reason — never flip it silently, and never emit `bypassPermissions`.
+- A CLI hook without its turn token is denied fail-closed: `BEBOK_HOOK_TOKEN` exists
+  only in the child environment of a CLI turn, so a hand-run `bebok-server cli-hook pre`
+  always answers `deny`. Debug hooks through the engine, not by piping JSON by hand.
+- A `profile: "user"` CLI provider writes no Bebok hooks, so its tool calls skip the
+  permission engine and `change_tracking.rs`: only the CLI's own flags guard them.
+  Even in managed modes, `Bash` writes are not tracked. `extra.allow_write` defaults
+  to false for that reason — never flip it silently, and never emit `bypassPermissions`.
 - On Windows npm installs Claude Code as `claude.cmd`; the runner wraps
   `.cmd`/`.bat` as `cmd /C`. Claude's `--disallowedTools` is variadic, so the
   prompt must follow a `--` separator or it is parsed as another tool name.

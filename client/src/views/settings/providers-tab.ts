@@ -14,7 +14,7 @@ import { FormsModule } from '@angular/forms';
 
 import { I18nService } from '../../i18n/i18n.service';
 import { EngineClient } from '../../core/engine-client.service';
-import { CliBackend, CliProbeResult, ProviderKind } from '../../core/engine.dtos';
+import { CliBackend, CliProbeResult, CliProfilePreview, ProviderKind } from '../../core/engine.dtos';
 import { ProviderCatalog, ProviderDraft, ProviderExtraField } from './provider-catalog';
 import { SettingsStore } from './settings.store';
 
@@ -260,6 +260,87 @@ export class ProvidersTab {
 
   probeResult(id: string): CliProbeResult | null {
     return this.probeResults()[id] ?? null;
+  }
+
+  /** Profile modes offered for `extra.profile` (values match `ProfileMode` in the engine). */
+  readonly cliProfileModes: { value: string; labelKey: 'settings.cliProfileBebok' | 'settings.cliProfileUser' | 'settings.cliProfileIsolated' }[] = [
+    { value: 'bebok', labelKey: 'settings.cliProfileBebok' },
+    { value: 'user', labelKey: 'settings.cliProfileUser' },
+    { value: 'isolated', labelKey: 'settings.cliProfileIsolated' },
+  ];
+
+  /** Managed-profile previews per provider name (`GET /cli/profile/{provider}`). */
+  readonly profiles = signal<Record<string, CliProfilePreview>>({});
+  /** Provider whose preview request is in flight. */
+  readonly profileLoading = signal<string | null>(null);
+  readonly profileError = signal<string | null>(null);
+  /** Set when the engine has no profile route (older engine): the section is hidden. */
+  readonly profileUnsupported = signal(false);
+  /** True after the profile directory path was copied (inline feedback). */
+  readonly profileCopied = signal(false);
+
+  profilePreview(name: string): CliProfilePreview | null {
+    return this.profiles()[name] ?? null;
+  }
+
+  /** `extra.profile`, defaulting to the engine's default (`bebok`). */
+  cliProfile(provider: ProviderDraft): string {
+    const mode = provider.extra?.['profile'];
+    return typeof mode === 'string' && mode.length > 0 ? mode : 'bebok';
+  }
+
+  /**
+   * Change `extra.profile`. The cached preview is dropped: it describes the
+   * SAVED config, so it is stale until the user saves and reloads it.
+   */
+  setCliProfile(provider: ProviderDraft, value: string): void {
+    this.store.updateProviderExtraValue(provider.name, 'profile', value);
+    this.profiles.update((all) => {
+      const next = { ...all };
+      delete next[provider.name];
+      return next;
+    });
+  }
+
+  /** Load the read-only preview of the managed profile the engine would write. */
+  async loadProfile(provider: ProviderDraft): Promise<void> {
+    const dir = this.store.directory();
+    if (!dir || this.profileLoading() !== null) {
+      return;
+    }
+    this.profileLoading.set(provider.name);
+    this.profileError.set(null);
+    this.profileCopied.set(false);
+    try {
+      const preview = await this.engine.cliProfile(provider.name, dir);
+      if (preview === null) {
+        this.profileUnsupported.set(true);
+        return;
+      }
+      this.profiles.update((all) => ({ ...all, [provider.name]: preview }));
+    } catch (err) {
+      this.profileError.set(this.store.describe(err));
+    } finally {
+      this.profileLoading.set(null);
+    }
+  }
+
+  /**
+   * Copy the profile directory path. The client has no way to open a folder
+   * on the engine's machine, so the path goes to the clipboard instead.
+   */
+  async copyProfileDir(preview: CliProfilePreview): Promise<void> {
+    try {
+      await navigator.clipboard?.writeText(preview.dir);
+      this.profileCopied.set(true);
+    } catch {
+      this.profileError.set(this.t('settings.cliProfileCopyFailed'));
+    }
+  }
+
+  /** Flags the probe found for a backend, as one comma-separated line. */
+  probeFlagsLine(result: CliProbeResult): string {
+    return result.features?.flags.join(', ') ?? '';
   }
 
   /** Name a CLI provider gets: `<backend>-cli`, e.g. `claude-cli`. */

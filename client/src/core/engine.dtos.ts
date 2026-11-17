@@ -94,6 +94,7 @@ export interface ToolPart {
    *  parts persisted before this field existed - derive it from the tool
    *  name via `GET /tools/safety` then (`ToolSafetyStore.categoryOf`). */
   safety?: SafetyCategory;
+  external?: boolean;
 }
 
 export interface UsagePart {
@@ -815,6 +816,14 @@ export interface CliBackend {
   envOverride: string;
 }
 
+/** What the installed binary advertises (`features` of a probe result). */
+export interface CliProbeFeatures {
+  /** First line of `--version`; null when the binary did not answer. */
+  version: string | null;
+  /** Advertised long flags (`--foo`), sorted. Empty when `--help` did not answer. */
+  flags: string[];
+}
+
 /** `POST /cli/backends/{id}/probe` result; `code` is null when killed. */
 export interface CliProbeResult {
   id: string;
@@ -822,6 +831,29 @@ export interface CliProbeResult {
   code: number | null;
   stdout: string;
   stderr: string;
+  /** Null when no binary was found. The engine has no login-status probe. */
+  features: CliProbeFeatures | null;
+}
+
+/** One file of a managed CLI profile (`GET /cli/profile/{provider}`). */
+export interface CliProfileFile {
+  /** Path relative to the profile directory. */
+  name: string;
+  contents: string;
+}
+
+/**
+ * Read-only preview of the managed profile a CLI provider would use
+ * (`GET /cli/profile/{provider}?directory=`). Serialised snake_case by the
+ * engine (plain serde struct); `env` is a list of `[key, value]` pairs.
+ */
+export interface CliProfilePreview {
+  dir: string;
+  files: CliProfileFile[];
+  args: string[];
+  env: [string, string][];
+  flags: string[];
+  version: string | null;
 }
 
 /** Executable paths for language runtimes (resolved with defaults). */

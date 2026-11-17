@@ -530,6 +530,32 @@ impl ResolvedConfig {
         &self.fleet.members
     }
 
+    /// True when `model` is listed among `fleet.members[].model` (case-insensitive,
+    /// `~` prefix and `:batch` suffix ignored, same normalisation as
+    /// `is_model_available`). Empty fleet → false.
+    pub fn is_model_in_fleet(&self, model: &str) -> bool {
+        let norm = Self::normalize_model_id(model);
+        if norm.is_empty() {
+            return false;
+        }
+        self.fleet.members.iter().any(|m| {
+            let n = Self::normalize_model_id(&m.model);
+            !n.is_empty() && n.eq_ignore_ascii_case(&norm)
+        })
+    }
+
+    /// Normalised `provider/model` id for fleet/provider comparisons.
+    fn normalize_model_id(model: &str) -> String {
+        let s = model.trim();
+        let s = s.strip_prefix('~').unwrap_or(s);
+        let s = if s.len() >= 6 && s[s.len() - 6..].eq_ignore_ascii_case(":batch") {
+            &s[..s.len() - 6]
+        } else {
+            s
+        };
+        s.trim().to_string()
+    }
+
     /// The effective `verify.frontend` policy (WP-AUTOVERIFY / F8-1).
     pub fn frontend_verify(&self) -> super::verify::FrontendVerify {
         super::verify::FrontendVerify::from_config(&self.verify)

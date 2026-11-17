@@ -243,6 +243,13 @@ pub enum CliEvent {
         name: String,
         detail: String,
     },
+    ExternalTool {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+        output: String,
+        is_error: bool,
+    },
     Usage(bebok_llm::Usage),
     /// Conversation id to reuse on the next turn.
     SessionKey(String),
@@ -274,6 +281,8 @@ pub struct CliStreamState {
     /// Prompt size of the latest API call (input plus cache buckets), from the
     /// latest `assistant` message's usage.
     pub context_tokens: Option<u64>,
+    /// Pending tool_use blocks keyed by tool_use_id, for fallback pairing with tool_result.
+    pub pending_tools: std::collections::HashMap<String, (String, serde_json::Value)>,
 }
 
 /// Errors a backend or the runner can produce.

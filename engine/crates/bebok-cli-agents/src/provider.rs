@@ -171,12 +171,23 @@ fn present(ev: CliEvent) -> Option<StreamEvent> {
     match ev {
         CliEvent::Text(t) => Some(StreamEvent::Text(t)),
         CliEvent::Thinking(t) => Some(StreamEvent::Thinking(t)),
-        // Presentation only. A `StreamEvent::ToolCall` here would be executed
-        // by `bebok-core`'s agent loop against a registry that never defined
-        // the CLI's tools — see this module's docs and `crate::backend`.
         CliEvent::ToolActivity { name, detail } => {
             Some(StreamEvent::Thinking(format!("⚙ {name}: {detail}")))
         }
+        CliEvent::ExternalTool {
+            id,
+            name,
+            input,
+            output,
+            is_error,
+        } => Some(StreamEvent::ExternalTool {
+            id,
+            name,
+            input,
+            output,
+            is_error,
+            source: bebok_llm::ExternalSource::Cli,
+        }),
         CliEvent::Usage(_) | CliEvent::SessionKey(_) => None,
     }
 }
