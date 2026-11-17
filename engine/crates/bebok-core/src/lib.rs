@@ -4,6 +4,7 @@
 pub mod agent;
 pub mod batch;
 pub mod change_tracking;
+pub mod cli_turn_token;
 pub mod code_graph;
 pub mod config;
 pub mod context;
@@ -42,6 +43,9 @@ pub use tool_safety::{SafetyCategory, SafetyOverrides, ToolSafetyEntry};
 
 /// Batch processing types for asynchronous bulk LLM jobs.
 pub use batch::{BatchRecord, BatchState, BatchStore};
+
+/// Turn-scoped tokens for CLI hook callbacks (`bebok-server cli-hook`).
+pub use cli_turn_token::{TURN_TOKEN_TTL, TurnScope, TurnTokenStore};
 
 /// Plugin host + observer API (event-observer with typed lifecycle hooks).
 pub use plugin::{

@@ -516,6 +516,34 @@ pub struct Session {
     /// F6-12: error text that accompanied `task_status` (if any).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_error: Option<String>,
+    /// The Claude-Code-style CLI conversation this session continues, when
+    /// its last turn ran through a CLI provider. Cleared by anything that
+    /// rewrites history or switches model/provider (see `store::lifecycle`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session: Option<CliSessionMeta>,
+}
+
+/// Where a CLI-side conversation stands, as of the end of the last turn.
+///
+/// The CLI holds messages `[0..msg_index]`; the next turn sends only the
+/// messages from `msg_index` on, and only while the provider, model, system
+/// prompt and profile are the same as they were when the conversation was
+/// recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CliSessionMeta {
+    /// The CLI's conversation id (`--resume <key>`).
+    pub key: String,
+    /// Bebok provider name (`claude-cli`).
+    pub provider: String,
+    /// Full Bebok model string the turn ran with (`claude-cli/sonnet`).
+    pub model: String,
+    /// Digest of the system prompt the turn ran with.
+    pub system_hash: String,
+    /// Count of session messages the CLI already has.
+    pub msg_index: usize,
+    /// Digest of the managed profile the turn ran with (`""` when none).
+    #[serde(default)]
+    pub profile_hash: String,
 }
 
 impl Session {
@@ -538,6 +566,7 @@ impl Session {
             share: None,
             task_status: None,
             task_error: None,
+            cli_session: None,
         }
     }
 
@@ -727,5 +756,42 @@ mod tool_permission_tests {
         assert!(permission.is_none());
         assert!(mutating.is_none());
         assert!(safety.is_none());
+    }
+}
+
+#[cfg(test)]
+mod cli_session_tests {
+    use super::*;
+
+    #[test]
+    fn sessions_saved_before_cli_resume_still_load() {
+        let mut value = serde_json::to_value(Session::new("/p", "code")).unwrap();
+        value.as_object_mut().unwrap().remove("cli_session");
+        let session: Session = serde_json::from_value(value).expect("legacy session loads");
+        assert!(session.cli_session.is_none());
+    }
+
+    #[test]
+    fn cli_record_round_trips_and_profile_hash_defaults_to_empty() {
+        let mut session = Session::new("/p", "code");
+        session.cli_session = Some(CliSessionMeta {
+            key: "k".into(),
+            provider: "claude-cli".into(),
+            model: "claude-cli/sonnet".into(),
+            system_hash: "s".into(),
+            msg_index: 3,
+            profile_hash: "p".into(),
+        });
+        let value = serde_json::to_value(&session).unwrap();
+        let back: Session = serde_json::from_value(value).unwrap();
+        assert_eq!(back.cli_session, session.cli_session);
+
+        let mut value = serde_json::to_value(&session).unwrap();
+        value["cli_session"]
+            .as_object_mut()
+            .unwrap()
+            .remove("profile_hash");
+        let older: Session = serde_json::from_value(value).unwrap();
+        assert_eq!(older.cli_session.unwrap().profile_hash, "");
     }
 }

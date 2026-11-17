@@ -38,6 +38,17 @@ fn default_log_filter() -> &'static str {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `bebok-server cli-hook <pre|post|stop>`: a CLI provider's hook calling
+    // back into the engine. Runs before anything else (no token generation, no
+    // listener, no logging setup): stdout carries only the hook decision.
+    if args.first().is_some_and(|a| a == "cli-hook") {
+        let event = args.get(1).map(String::as_str).unwrap_or_default();
+        let code = cli::run_hook(event).await;
+        bebok_tools::processes::ProcessRegistry::global().kill_all_blocking();
+        std::process::exit(code);
+    }
+
     // `bebok-server mcp ...`: stdio MCP server instead of the HTTP engine.
     let mcp_mode = args.first().is_some_and(|a| a == "mcp");
 

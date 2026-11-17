@@ -11,13 +11,19 @@
 //! `--append-system-prompt`, `--resume`, `--permission-mode`,
 //! `--disallowedTools`; `--max-turns` is accepted but hidden from `--help`).
 
+use std::path::Path;
+
 use serde_json::{Value, json};
 
 use crate::backend::{
     CliBackend, CliCapabilities, CliError, CliEvent, CliProbe, CliRequest, CliStreamState,
     PromptBlock, TurnScratch,
 };
-use crate::spec::CliSpec;
+use crate::profile::{
+    ProfileFile, ProfileInput, ProfileWriter, RenderedProfile, deep_merge, read_project_layer,
+    system_text, to_json_file, validate_settings,
+};
+use crate::spec::{CliSpec, ProfileMode, SystemPromptMode};
 
 /// How much of a tool input / result we keep for the one-line UI row: long
 /// enough to recognise the call, short enough not to flood the transcript.
@@ -95,6 +101,16 @@ impl CliBackend for ClaudeBackend {
         "BEBOK_CLAUDE_BIN"
     }
 
+    fn profile_writer(&self) -> Option<&dyn ProfileWriter> {
+        Some(self)
+    }
+
+    /// `--resume` is only used when the installed binary's own `--help`
+    /// advertises it (see `build_command`).
+    fn resume_flag_available(&self, probe: &CliProbe) -> bool {
+        probe.has("--resume")
+    }
+
     /// Build `claude <flags>`, with the prompt on stdin or, as a fallback, on
     /// the command line.
     ///
@@ -136,7 +152,7 @@ impl CliBackend for ClaudeBackend {
             args.push("--input-format".to_string());
             args.push("stream-json".to_string());
         }
-        if probe.mentions("--include-partial-messages") {
+        if probe.has("--include-partial-messages") {
             // Token deltas as they are generated. `parse_line` drops the full
             // message that follows a block it already showed from deltas.
             args.push("--include-partial-messages".to_string());
@@ -149,8 +165,14 @@ impl CliBackend for ClaudeBackend {
 
         // Bytes of system prompt that have to travel on the command line.
         let mut argv_bytes = 0usize;
+        // A managed profile hands the system prompt over as a file of its own
+        // (see `render`); in that case this function emits nothing for it.
+        let project_append = read_project_layer(&req.cwd, self.id(), "system.append.md")?;
+        let system = system_text(req.system.as_deref(), project_append.as_deref());
+        let profile_owns_system = system_file_flag(spec, probe)?.is_some();
         if self.capabilities().system_prompt
-            && let Some(system) = non_empty(req.system.as_deref())
+            && !profile_owns_system
+            && let Some(system) = system.as_deref()
         {
             if supports_system_prompt_file(probe) {
                 // The file lives as long as the process stream (see `runner`).
@@ -169,7 +191,9 @@ impl CliBackend for ClaudeBackend {
             args.push(turns.to_string());
         }
 
-        if let Some(key) = non_empty(req.resume_key.as_deref()) {
+        if let Some(key) = non_empty(req.resume_key.as_deref())
+            && self.resume_flag_available(probe)
+        {
             args.push("--resume".to_string());
             args.push(key.to_string());
         }
@@ -601,15 +625,233 @@ fn prompt_block_json(block: &PromptBlock) -> Value {
 }
 
 /// The binary accepts the prompt as stream-json on stdin. Both halves must be
-/// advertised: the flag, and the value that selects it.
+/// advertised: the flag, and a `stream-json` choice in its help. The choice is
+/// matched case-insensitively, because help formatting (quotes, casing) varies
+/// between releases and a miss here silently falls back to argv.
 fn supports_stream_input(probe: &CliProbe) -> bool {
-    probe.mentions("--input-format") && probe.mentions("\"stream-json\"")
+    probe.has("--input-format") && probe.mentions_ci("stream-json")
 }
 
 /// The binary takes the system prompt from a file. Accepts both the literal
 /// flag and the `[-file]` notation the help text uses for the pair.
 fn supports_system_prompt_file(probe: &CliProbe) -> bool {
     probe.mentions("--append-system-prompt-file") || probe.mentions("--append-system-prompt[-file]")
+}
+
+/// The binary takes a replacement system prompt from a file.
+fn supports_replace_file(probe: &CliProbe) -> bool {
+    probe.has("--system-prompt-file") || probe.mentions("--system-prompt[-file]")
+}
+
+/// The flag that hands the system prompt to the CLI by file, when a managed
+/// profile owns it. `None` means the profile does not own it: `build_command`
+/// keeps its historical path (a scratch file, or argv on old binaries).
+///
+/// `user` mode never owns it. `replace` mode without file support is an error,
+/// not a quiet downgrade to append: the user asked for a replaced prompt.
+fn system_file_flag(spec: &CliSpec, probe: &CliProbe) -> Result<Option<&'static str>, CliError> {
+    if spec.profile == ProfileMode::User {
+        return Ok(None);
+    }
+    match spec.system_prompt_mode {
+        SystemPromptMode::Append => Ok(supports_system_prompt_file(probe)
+            .then_some("--append-system-prompt-file")),
+        SystemPromptMode::Replace if supports_replace_file(probe) => Ok(Some("--system-prompt-file")),
+        SystemPromptMode::Replace => Err(CliError::Config(
+            "extra.system_prompt_mode = \"replace\" needs a claude that accepts --system-prompt-file; \
+             this one does not (use \"append\")"
+                .into(),
+        )),
+    }
+}
+
+/// The Bebok side of `settings.json`'s `hooks` block: every tool call is gated
+/// by `bebok-server cli-hook <event>` before it runs and reported after it.
+///
+/// The hook child finds the engine through `BEBOK_HOOK_URL` /
+/// `BEBOK_HOOK_TOKEN`, which the runner puts in the CLI's environment for each
+/// turn (see `bebok_core::cli_turn_token`); nothing engine-side is baked into
+/// the profile, so the cached settings file stays valid across restarts.
+///
+/// `timeout` is the CLI's own hook timeout. `pre` answers itself 5 s earlier
+/// (`routes::cli_hook::PRE_ANSWER_TIMEOUT`), so the CLI receives a real `deny`
+/// with a reason instead of "hook timed out".
+///
+/// [verify] shape checked against the Claude Code hooks documentation
+/// (`hooks.<Event>[].hooks[].{type,command,timeout}`); a `Stop` hook takes no
+/// matcher.
+fn hook_settings() -> Value {
+    // The hook must run *this* binary: a bundled sidecar and `cargo run` both
+    // land on the engine executable, and a rename keeps working because the
+    // path is resolved at profile-write time.
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "bebok-server".to_string());
+    // Quoted: the path may contain spaces (`C:\Program Files\…`) and the CLI
+    // runs the command through a shell. A `.exe` suffix is harmless on Unix and
+    // required on Windows.
+    let command = |event: &str| format!("\"{exe}\" cli-hook {event}");
+    let entry = |event: &str, timeout: u32| {
+        json!([{
+            "matcher": "*",
+            "hooks": [{ "type": "command", "command": command(event), "timeout": timeout }],
+        }])
+    };
+    json!({
+        "PreToolUse": entry("pre", 600),
+        "PostToolUse": entry("post", 60),
+        "Stop": [{
+            "hooks": [{ "type": "command", "command": command("stop"), "timeout": 60 }],
+        }],
+    })
+}
+
+/// `settings.json` values Bebok puts under its own control for a managed
+/// profile. `write` selects the permission posture; the rest is fixed.
+fn managed_base(write: bool) -> Value {
+    let (default_mode, allow, deny) = if write {
+        ("acceptEdits", json!(WRITE_TOOLS), json!([]))
+    } else {
+        ("plan", json!([]), json!(MUTATING_TOOLS))
+    };
+    json!({
+        "permissions": { "defaultMode": default_mode, "allow": allow, "deny": deny },
+        // AGENTS.md §6: no attribution trailers in anything Bebok makes.
+        "includeCoAuthoredBy": false,
+        // Deterministic, quiet runs: no self-update, no nonessential traffic.
+        "env": {
+            "DISABLE_AUTOUPDATER": "1",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            "DISABLE_TELEMETRY": "1",
+        },
+        // Bebok's own hook entries: every CLI tool call is gated by Bebok
+        // before it runs. The validator refuses overrides that drop them.
+        "hooks": hook_settings(),
+    })
+}
+
+/// Parse a project `settings.json` layer; it must be a JSON object.
+fn parse_settings_layer(text: &str, path: &Path) -> Result<Value, CliError> {
+    let value: Value = serde_json::from_str(text)
+        .map_err(|e| CliError::Config(format!("{}: not valid JSON ({e})", path.display())))?;
+    if value.is_object() {
+        Ok(value)
+    } else {
+        Err(CliError::Config(format!(
+            "{}: must contain a JSON object",
+            path.display()
+        )))
+    }
+}
+
+fn abs_path(dir: &Path, name: &str) -> String {
+    dir.join(name).display().to_string()
+}
+
+/// Renders the Claude Code profile. Order of layers, lowest first: Bebok's
+/// managed base, `extra.profile_overrides`, the project's own
+/// `.bebok/cli/claude/settings.json`. Validation runs on the result.
+impl ProfileWriter for ClaudeBackend {
+    fn render(&self, input: &ProfileInput<'_>) -> Result<RenderedProfile, CliError> {
+        let ProfileInput {
+            spec,
+            req,
+            probe,
+            dir,
+        } = *input;
+        let project = req.cwd.as_path();
+        let mut out = RenderedProfile {
+            version: probe.features().version.clone(),
+            ..RenderedProfile::default()
+        };
+
+        let base = match spec.profile {
+            ProfileMode::User => json!({}),
+            ProfileMode::Bebok | ProfileMode::Isolated => managed_base(req.write),
+        };
+        let mut settings = base.clone();
+        if let Some(overrides) = &spec.profile_overrides {
+            deep_merge(&mut settings, overrides);
+        }
+        if let Some(text) = read_project_layer(project, self.id(), "settings.json")? {
+            let path = crate::profile::project_layer_path(project, self.id(), "settings.json");
+            deep_merge(&mut settings, &parse_settings_layer(&text, &path)?);
+        }
+        validate_settings(&base, &settings)?;
+
+        let managed = spec.profile != ProfileMode::User;
+        if !managed && settings == json!({}) {
+            // `user` mode with nothing to add: today's behaviour, no files.
+            return Ok(out);
+        }
+        if !probe.has("--settings") {
+            let why = if probe.features().help.is_empty() {
+                "its --help did not answer, so the feature probe is empty"
+            } else {
+                "its --help does not list it"
+            };
+            return Err(CliError::Config(format!(
+                "the CLI profile needs claude's --settings, and {why}; \
+                 update claude or set extra.profile to \"user\""
+            )));
+        }
+
+        out.files.push(ProfileFile {
+            name: "settings.json".into(),
+            contents: to_json_file(&settings)?,
+        });
+        out.args.push("--settings".into());
+        out.args.push(abs_path(dir, "settings.json"));
+        out.flags.push("--settings".into());
+
+        if !managed {
+            return Ok(out);
+        }
+
+        // Bebok mode: only the user's *user* settings, never the repository's
+        // own `.claude/` (it would duplicate AGENTS.md). Isolated mode reads
+        // nothing but its own config dir, so the flag is not needed there.
+        if spec.profile == ProfileMode::Bebok && probe.has("--setting-sources") {
+            out.args.push("--setting-sources".into());
+            out.args.push("user".into());
+            out.flags.push("--setting-sources".into());
+        }
+
+        if probe.has("--mcp-config") {
+            out.files.push(ProfileFile {
+                name: "mcp.json".into(),
+                contents: to_json_file(&json!({ "mcpServers": {} }))?,
+            });
+            out.args.push("--mcp-config".into());
+            out.args.push(abs_path(dir, "mcp.json"));
+            out.flags.push("--mcp-config".into());
+            if probe.has("--strict-mcp-config") {
+                out.args.push("--strict-mcp-config".into());
+                out.flags.push("--strict-mcp-config".into());
+            }
+        }
+
+        if let Some(flag) = system_file_flag(spec, probe)?
+            && let Some(text) = system_text(
+                req.system.as_deref(),
+                read_project_layer(project, self.id(), "system.append.md")?.as_deref(),
+            )
+        {
+            out.files.push(ProfileFile {
+                name: "system.md".into(),
+                contents: format!("{text}\n"),
+            });
+            out.args.push(flag.into());
+            out.args.push(abs_path(dir, "system.md"));
+            out.flags.push(flag.into());
+        }
+
+        if spec.profile == ProfileMode::Isolated {
+            out.env
+                .push(("CLAUDE_CONFIG_DIR".into(), dir.display().to_string()));
+        }
+        Ok(out)
+    }
 }
 
 /// Tool names Claude Code refused to run in a `result` line.
@@ -675,7 +917,7 @@ fn truncate(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::CliMode;
+    use crate::backend::{CliMode, ProfileDir};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -708,6 +950,9 @@ mod tests {
             allow_write: false,
             timeout_secs: 900,
             max_turns: None,
+            profile: Default::default(),
+            profile_overrides: None,
+            system_prompt_mode: Default::default(),
         }
     }
 
@@ -722,6 +967,7 @@ mod tests {
             write: false,
             max_turns: None,
             timeout: Duration::from_secs(120),
+            extra_env: Vec::new(),
         }
     }
 
@@ -832,6 +1078,14 @@ mod tests {
     }
 
     #[test]
+    fn resume_is_dropped_when_the_binary_does_not_advertise_it() {
+        let mut req = request();
+        req.resume_key = Some("abc-123".to_string());
+        let args = args_with(&spec_with(&[]), &req, &probe_with(&[]));
+        assert!(!args.iter().any(|a| a == "--resume"), "{args:?}");
+    }
+
+    #[test]
     fn model_system_turns_resume_and_extra_args_come_before_prompt() {
         let mut req = request();
         req.model = Some("sonnet".to_string());
@@ -839,8 +1093,10 @@ mod tests {
         req.max_turns = Some(7);
         req.resume_key = Some("abc-123".to_string());
         let spec = spec_with(&["--add-dir", "/tmp/other"]);
+        // `--resume` is only emitted when the binary advertises it.
+        let probe = probe_with(&["--resume"]);
 
-        let args = args_of(&spec, &req);
+        let args = args_with(&spec, &req, &probe);
 
         assert_eq!(args[position(&args, "--model") + 1], "sonnet");
         assert_eq!(
@@ -1202,9 +1458,13 @@ mod tests {
         let probe = probe_with(&["system-file"]);
         let mut req = request();
         req.system = Some("be terse".to_string());
+        // The managed profile owns the prompt by default; the scratch-file path
+        // belongs to the `user` mode.
+        let mut spec = spec_with(&[]);
+        spec.profile = ProfileMode::User;
         let mut scratch = TurnScratch::default();
         let (_, args) = ClaudeBackend
-            .build_command(&spec_with(&[]), &req, &probe, &mut scratch)
+            .build_command(&spec, &req, &probe, &mut scratch)
             .expect("builds");
 
         assert!(!args.iter().any(|a| a == "--append-system-prompt"));
@@ -1398,5 +1658,398 @@ mod tests {
             Some("anthropic/claude-opus-4-6")
         );
         assert_eq!(backend.catalog_model("gpt-x", None), None);
+    }
+
+    // --- 07A: managed profile ---
+
+    /// Flags a claude 2.1.325-style binary advertises for the managed profile.
+    const PROFILE_FLAGS: [&str; 5] = [
+        "--settings",
+        "--setting-sources",
+        "--mcp-config",
+        "--strict-mcp-config",
+        "system-file",
+    ];
+
+    /// Render against a fixed, non-existent project (so no project layer is
+    /// read) and a made-up profile directory.
+    fn render_with(
+        spec: &CliSpec,
+        req: &CliRequest,
+        probe: &CliProbe,
+    ) -> Result<RenderedProfile, CliError> {
+        let dir = PathBuf::from("/profiles/claude");
+        ClaudeBackend.render(&ProfileInput {
+            spec,
+            req,
+            probe,
+            dir: &dir,
+        })
+    }
+
+    fn file_of<'a>(out: &'a RenderedProfile, name: &str) -> &'a str {
+        out.files
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| f.contents.as_str())
+            .unwrap_or_else(|| panic!("{name} was not rendered"))
+    }
+
+    /// A fresh project directory under the temp dir; removed by the caller.
+    fn temp_project(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("bebok-claude-profile-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_project_file(project: &Path, name: &str, contents: &str) {
+        let path = crate::profile::project_layer_path(project, "claude", name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn read_only_profile_golden_settings_and_argv() {
+        let probe = probe_with(&PROFILE_FLAGS);
+        let out = render_with(&spec_with(&[]), &request(), &probe).expect("renders");
+
+        let expected = json!({
+            "env": {
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                "DISABLE_AUTOUPDATER": "1",
+                "DISABLE_TELEMETRY": "1",
+            },
+            // Bebok's hook entries are exercised on their own below; the
+            // command embeds this test binary's path, so it is not golden.
+            "hooks": hook_settings(),
+            "includeCoAuthoredBy": false,
+            "permissions": {
+                "allow": [],
+                "defaultMode": "plan",
+                "deny": ["Edit", "Write", "Bash"],
+            },
+        });
+        // Compared as values: key order is not part of the contract.
+        let settings: Value = serde_json::from_str(file_of(&out, "settings.json")).unwrap();
+        assert_eq!(settings, expected);
+        assert!(file_of(&out, "settings.json").ends_with('\n'));
+        assert_eq!(file_of(&out, "mcp.json"), "{\n  \"mcpServers\": {}\n}\n");
+        assert!(
+            out.files.iter().all(|f| f.name != "system.md"),
+            "no system text, no file"
+        );
+
+        let dir = "/profiles/claude";
+        assert_eq!(
+            out.args,
+            vec![
+                "--settings".to_string(),
+                format!("{dir}/settings.json"),
+                "--setting-sources".into(),
+                "user".into(),
+                "--mcp-config".into(),
+                format!("{dir}/mcp.json"),
+                "--strict-mcp-config".into(),
+            ]
+        );
+        assert!(
+            out.env.is_empty(),
+            "only isolated mode sets CLAUDE_CONFIG_DIR"
+        );
+        assert_eq!(
+            out.version, None,
+            "probe built from help alone has no version"
+        );
+    }
+
+    #[test]
+    fn write_mode_maps_yolo_to_accept_edits_and_never_bypasses() {
+        let probe = probe_with(&PROFILE_FLAGS);
+        let mut req = request();
+        req.write = true;
+        let out = render_with(&spec_with(&[]), &req, &probe).expect("renders");
+        let settings: Value = serde_json::from_str(file_of(&out, "settings.json")).unwrap();
+        assert_eq!(settings["permissions"]["defaultMode"], "acceptEdits");
+        assert!(
+            settings["permissions"]["allow"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t == "Bash")
+        );
+        assert!(!file_of(&out, "settings.json").contains("bypassPermissions"));
+    }
+
+    #[test]
+    fn managed_profile_without_settings_flag_is_a_config_error() {
+        // Empty probe: the help did not answer.
+        let err = render_with(&spec_with(&[]), &request(), &CliProbe::default()).unwrap_err();
+        assert!(
+            matches!(&err, CliError::Config(m) if m.contains("--settings")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn optional_profile_flags_are_gated_by_the_probe() {
+        let probe = probe_with(&["--settings"]);
+        let out = render_with(&spec_with(&[]), &request(), &probe).expect("renders");
+        assert_eq!(
+            out.args,
+            vec![
+                "--settings".to_string(),
+                "/profiles/claude/settings.json".to_string()
+            ]
+        );
+        assert!(out.files.iter().all(|f| f.name != "mcp.json"));
+        assert_eq!(out.flags, vec!["--settings".to_string()]);
+    }
+
+    #[test]
+    fn user_mode_renders_nothing_without_overrides() {
+        let mut spec = spec_with(&[]);
+        spec.profile = ProfileMode::User;
+        let out = render_with(&spec, &request(), &CliProbe::default()).expect("renders");
+        assert!(out.files.is_empty() && out.args.is_empty() && out.env.is_empty());
+    }
+
+    #[test]
+    fn user_mode_with_overrides_writes_only_the_settings_layer() {
+        let mut spec = spec_with(&[]);
+        spec.profile = ProfileMode::User;
+        spec.profile_overrides = Some(json!({ "env": { "FOO": "1" } }));
+        let out = render_with(&spec, &request(), &probe_with(&["--settings"])).expect("renders");
+        assert_eq!(out.files.len(), 1);
+        assert_eq!(out.files[0].name, "settings.json");
+        assert_eq!(
+            file_of(&out, "settings.json"),
+            to_json_file(&json!({ "env": { "FOO": "1" } })).unwrap()
+        );
+    }
+
+    #[test]
+    fn profile_overrides_cannot_switch_on_bypass_permissions() {
+        let mut spec = spec_with(&[]);
+        spec.profile_overrides =
+            Some(json!({ "permissions": { "defaultMode": "bypassPermissions" } }));
+        let err = render_with(&spec, &request(), &probe_with(&PROFILE_FLAGS)).unwrap_err();
+        assert!(matches!(err, CliError::Config(_)), "{err:?}");
+    }
+
+    #[test]
+    fn layers_apply_in_order_and_the_project_file_wins() {
+        let project = temp_project("layers");
+        write_project_file(
+            &project,
+            "settings.json",
+            "{\"env\":{\"DISABLE_TELEMETRY\":\"1\"}}",
+        );
+        let mut spec = spec_with(&[]);
+        spec.profile_overrides = Some(json!({ "env": { "DISABLE_TELEMETRY": "0", "KEEP": "x" } }));
+        let mut req = request();
+        req.cwd = project.clone();
+
+        let out = render_with(&spec, &req, &probe_with(&["--settings"])).expect("renders");
+        let settings: Value = serde_json::from_str(file_of(&out, "settings.json")).unwrap();
+        assert_eq!(
+            settings["env"]["DISABLE_TELEMETRY"], "1",
+            "project layer wins"
+        );
+        assert_eq!(settings["env"]["KEEP"], "x", "override survives the merge");
+        assert_eq!(
+            settings["env"]["DISABLE_AUTOUPDATER"], "1",
+            "Bebok base survives"
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn project_layer_that_is_not_an_object_is_refused() {
+        let project = temp_project("not-object");
+        write_project_file(&project, "settings.json", "[1,2]");
+        let mut req = request();
+        req.cwd = project.clone();
+        let err = render_with(&spec_with(&[]), &req, &probe_with(&PROFILE_FLAGS)).unwrap_err();
+        assert!(
+            matches!(&err, CliError::Config(m) if m.contains("JSON object")),
+            "{err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn project_system_append_follows_the_turn_prompt() {
+        let project = temp_project("append");
+        write_project_file(&project, "system.append.md", "project rule");
+        let mut req = request();
+        req.cwd = project.clone();
+        req.system = Some("turn prompt".into());
+
+        let out = render_with(&spec_with(&[]), &req, &probe_with(&PROFILE_FLAGS)).expect("renders");
+        assert_eq!(file_of(&out, "system.md"), "turn prompt\n\nproject rule\n");
+        assert!(
+            out.args
+                .contains(&"--append-system-prompt-file".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn managed_build_command_leaves_the_system_prompt_to_the_profile() {
+        let mut req = request();
+        req.system = Some("be terse".into());
+        let probe = probe_with(&["system-file"]);
+
+        let managed = args_with(&spec_with(&[]), &req, &probe);
+        assert!(
+            !managed
+                .iter()
+                .any(|a| a == "--append-system-prompt" || a == "--append-system-prompt-file")
+        );
+
+        let mut user = spec_with(&[]);
+        user.profile = ProfileMode::User;
+        let legacy = args_with(&user, &req, &probe);
+        assert!(legacy.iter().any(|a| a == "--append-system-prompt-file"));
+    }
+
+    #[test]
+    fn replace_mode_needs_the_replace_flag_and_uses_it_when_present() {
+        let mut spec = spec_with(&[]);
+        spec.system_prompt_mode = SystemPromptMode::Replace;
+        let mut req = request();
+        req.system = Some("only this".into());
+
+        let err = render_with(&spec, &req, &probe_with(&["--settings"])).unwrap_err();
+        assert!(
+            matches!(&err, CliError::Config(m) if m.contains("--system-prompt-file")),
+            "{err:?}"
+        );
+
+        let out = render_with(
+            &spec,
+            &req,
+            &probe_with(&["--settings", "--system-prompt-file"]),
+        )
+        .expect("renders");
+        assert!(out.args.contains(&"--system-prompt-file".to_string()));
+        assert!(
+            !out.args
+                .contains(&"--append-system-prompt-file".to_string())
+        );
+    }
+
+    #[test]
+    fn isolated_mode_points_the_config_dir_at_the_profile() {
+        let mut spec = spec_with(&[]);
+        spec.profile = ProfileMode::Isolated;
+        let out = render_with(&spec, &request(), &probe_with(&PROFILE_FLAGS)).expect("renders");
+        assert_eq!(
+            out.env,
+            vec![(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                "/profiles/claude".to_string()
+            )]
+        );
+        assert!(
+            !out.args.contains(&"--setting-sources".to_string()),
+            "isolated reads only its own dir"
+        );
+    }
+
+    #[test]
+    fn stream_input_is_detected_from_the_flag_and_any_case_of_the_value() {
+        let probe = CliProbe::new("  --input-format <format>  Input format: Stream-Json\n".into());
+        let args = args_of(&spec_with(&[]), &request());
+        assert!(
+            !args.iter().any(|a| a == "--input-format"),
+            "baseline has no probe"
+        );
+        let with = args_with(&spec_with(&[]), &request(), &probe);
+        let at = position(&with, "--input-format");
+        assert_eq!(with[at + 1], "stream-json");
+    }
+
+    #[test]
+    fn managed_hooks_gate_every_tool_call() {
+        let base = managed_base(false);
+        let hooks = &base["hooks"];
+        for event in ["PreToolUse", "PostToolUse"] {
+            let entry = &hooks[event][0];
+            assert_eq!(entry["matcher"], "*");
+            assert_eq!(entry["hooks"][0]["type"], "command");
+            assert!(
+                entry["hooks"][0]["timeout"].is_number(),
+                "{event} needs an explicit timeout"
+            );
+        }
+        // The pre hook must outlive Bebok's own answer deadline.
+        assert!(
+            hooks["PreToolUse"][0]["hooks"][0]["timeout"]
+                .as_u64()
+                .unwrap()
+                > 60
+        );
+        // Stop takes no matcher (it is not a tool event).
+        assert!(hooks["Stop"][0].get("matcher").is_none());
+
+        let commands: Vec<String> = ["PreToolUse", "PostToolUse", "Stop"]
+            .iter()
+            .map(|e| {
+                hooks[*e][0]["hooks"][0]["command"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert!(commands[0].contains("cli-hook pre"), "{}", commands[0]);
+        assert!(commands[1].contains("cli-hook post"), "{}", commands[1]);
+        assert!(commands[2].contains("cli-hook stop"), "{}", commands[2]);
+        for command in &commands {
+            // Quoted executable: the path may contain spaces.
+            assert!(command.starts_with('"'), "{command}");
+            assert!(command.contains("\" cli-hook "), "{command}");
+        }
+    }
+
+    #[test]
+    fn prepare_writes_the_profile_once_and_reuses_it() {
+        let tmp = temp_project("prepare");
+        let profile = ProfileDir {
+            dir: Some(tmp.join("profile")),
+        };
+        let probe = probe_with(&PROFILE_FLAGS);
+        let spec = spec_with(&[]);
+        let req = request();
+
+        let first = ClaudeBackend
+            .prepare(&spec, &req, &probe, &profile)
+            .expect("prepares");
+        let settings_path = tmp.join("profile").join("settings.json");
+        assert!(
+            first
+                .args_extra
+                .contains(&settings_path.display().to_string())
+        );
+        let mtime = std::fs::metadata(&settings_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let second = ClaudeBackend
+            .prepare(&spec, &req, &probe, &profile)
+            .expect("prepares");
+        assert_eq!(first.args_extra, second.args_extra);
+        assert_eq!(
+            std::fs::metadata(&settings_path)
+                .unwrap()
+                .modified()
+                .unwrap(),
+            mtime
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

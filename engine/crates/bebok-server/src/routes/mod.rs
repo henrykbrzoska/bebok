@@ -15,6 +15,7 @@ pub mod browser;
 pub mod browser_remote;
 pub mod changes;
 pub mod cli;
+pub mod cli_hook;
 pub mod code_graph;
 pub mod code_map;
 pub mod common;
@@ -113,6 +114,12 @@ pub fn build_api_router() -> Router<AppState> {
         // the "Test" button bypasses the listing cache.
         .route("/cli/backends", get(cli::list_cli_backends))
         .route("/cli/backends/{id}/probe", post(cli::probe_cli_backend))
+        // Read-only preview of the managed profile a CLI provider would write.
+        .route("/cli/profile/{provider}", get(cli::get_cli_profile))
+        // CLI hook bridge (`bebok-server cli-hook <event>`): authenticated by
+        // the per-turn token in `Authorization`, not the engine capability
+        // token (see `auth::is_exempt` and `bebok_core::cli_turn_token`).
+        .route("/cli-hook/{session}/{event}", post(cli_hook::hook))
         .route("/fs/browse", get(fs_browse::fs_browse))
         .route("/fs/tree", get(fs::fs_tree))
         .route(

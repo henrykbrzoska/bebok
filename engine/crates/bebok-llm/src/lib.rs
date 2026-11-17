@@ -27,7 +27,7 @@ pub use protocols::{AnthropicMessagesAdapter, OpenAiChatAdapter};
 pub use provider::{
     AdapterConfig, ChatMessage, ChatRequest, ChatRole, ContentPart, LlmError, Provider,
     ProviderAdapter, ProviderErrorKind, Sampling, StreamEvent, StreamResult, Thinking, ToolCall,
-    ToolDef, ToolResult, Usage, adapter_for, build_provider, classify_http,
+    ToolDef, ToolResult, Transport, Usage, adapter_for, build_provider, classify_http,
     is_opencode_free_tier_denial, retry_after_from_headers,
 };
 pub use providers::adapter_config;

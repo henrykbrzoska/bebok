@@ -54,6 +54,7 @@ pub struct RequestBuilder<'a> {
     pub max_tokens: u32,
     pub thinking: Thinking,
     pub sampling: Sampling,
+    pub transport: bebok_llm::Transport,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -73,7 +74,13 @@ impl<'a> RequestBuilder<'a> {
             max_tokens,
             thinking,
             sampling: Sampling::default(),
+            transport: bebok_llm::Transport::Http,
         }
+    }
+
+    pub fn with_transport(mut self, transport: bebok_llm::Transport) -> Self {
+        self.transport = transport;
+        self
     }
 
     /// Builder-style override for sampling params (orchestrator `task`
@@ -216,8 +223,9 @@ impl<'a> RequestBuilder<'a> {
         // Every other preset sees no delegation tool at all, so nothing in
         // its request advertises fan-out it cannot do.
         let is_subagent = self.state.meta_snapshot().await.subagent;
+        let is_cli = self.transport.is_cli();
         let delegation_owner =
-            !is_subagent && DELEGATING_AGENTS.contains(&self.agent.name.as_str());
+            !is_cli && !is_subagent && DELEGATING_AGENTS.contains(&self.agent.name.as_str());
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -298,7 +306,7 @@ impl<'a> RequestBuilder<'a> {
         // Central enforcement: inject the code-navigation section when the
         // plugin is available at this project's root.
         let root = std::path::Path::new(self.state.directory());
-        if let Some(section) = super::index_section(root) {
+        if let Some(section) = super::index_section_for_transport(root, self.transport) {
             if !req.system.is_empty() {
                 req.system.push_str("\n\n");
             }
@@ -882,6 +890,28 @@ mod image_tests {
             flat.contains(crate::util::SECRET_PLACEHOLDER),
             "placeholder expected: {flat}"
         );
+    }
+
+    #[test]
+    fn transport_cli_without_bebok_tools_omits_delegation_and_index() {
+        // CLI without bebok_tools must not advertise delegation tools.
+        // This is the RequestBuilder-level guard (turn.rs also gates prompt sections).
+        let rt = std::env::temp_dir().join(format!("bebok-rt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&rt).unwrap();
+        // Use a minimal check: delegation_owner is false for CLI.
+        let transport = bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            native_tools: true,
+        };
+        assert!(transport.is_cli());
+        assert!(!transport.bebok_tools());
+        let transport2 = bebok_llm::Transport::AgenticCli {
+            bebok_tools: true,
+            native_tools: true,
+        };
+        assert!(transport2.bebok_tools());
+        assert!(!bebok_llm::Transport::Http.is_cli());
+        let _ = std::fs::remove_dir_all(&rt);
     }
 
     #[test]

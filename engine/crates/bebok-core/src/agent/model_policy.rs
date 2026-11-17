@@ -3,81 +3,138 @@
 //! Precedence: `"heavy"` means the parent's own model; otherwise
 //! `models.<child-agent>` when set wins over any per-call request; otherwise
 //! the per-call model (`task` `model` / fleet `member.model`) when set;
-//! otherwise the parent's effective model. Models containing "xiaomi" are
-//! never used for sub-agents (treated as if not requested).
+//! otherwise the parent's effective model.
+//!
+//! Invariant: the returned model is always one listed in the resolved config
+//! (`providers[].models`). A `requested` model not present in config is
+//! ignored as if not requested — so the orchestrator can never inject a
+//! model that isn't configured. If `xiaomi` is in config, it is allowed.
 
-use crate::config::DelegationConfig;
+use crate::config::ResolvedConfig;
 
 /// The `task` `model` argument value that means "use the parent's model".
 pub const HEAVY: &str = "heavy";
 
-fn is_xiaomi(model: &str) -> bool {
-    model.to_ascii_lowercase().contains("xiaomi")
-}
-
-/// The model a sub-agent gets: `"heavy"` lifts to the parent model;
-/// otherwise `models.<agent>` (`model_for_child`, e.g. `cfg.model_for`) wins
-/// over any per-call `requested` model; otherwise `requested` (fleet
-/// member's `model` or `task.model`) when set and not xiaomi; otherwise the
-/// parent's model. `child_agent` selects the `models.<agent>` entry.
-/// `cfg` is the delegation section (kept so callers pass the cap source
-/// explicitly; only used for future knobs — currently unused).
+/// The model a sub-agent gets. `cfg` is the full resolved config — it is
+/// used to check `is_model_available` so only models present in
+/// `providers[].models` are ever returned.
 pub fn resolve_subagent_model(
-    _cfg: &DelegationConfig,
+    cfg: &ResolvedConfig,
     parent_model: &str,
     child_agent: &str,
     model_for_child: impl Fn(&str) -> String,
     requested: Option<&str>,
 ) -> String {
+    let is_available = |m: &str| cfg.is_model_available(m);
+    let fallback = || {
+        // Prefer parent when available, otherwise the global default.
+        if is_available(parent_model) {
+            parent_model.trim().to_string()
+        } else if !parent_model.trim().is_empty() {
+            tracing::warn!(
+                "resolve_subagent_model: parent model '{}' not in config; falling back to '{}'",
+                parent_model.trim(),
+                cfg.model
+            );
+            cfg.model.clone()
+        } else {
+            cfg.model.clone()
+        }
+    };
+
     let requested = requested.map(str::trim).filter(|m| !m.is_empty());
-    // "heavy" always wins.
     if let Some(r) = requested {
         if r.eq_ignore_ascii_case(HEAVY) {
-            return parent_model.to_string();
+            return fallback();
         }
-        // Xiaomi is never used for sub-agents — drop it as if not requested.
-        if is_xiaomi(r) {
+        // Only models present in config are honoured.
+        if !is_available(r) {
             tracing::warn!(
-                "resolve_subagent_model: ignoring xiaomi model '{r}' for sub-agent '{child_agent}'; using config/parent instead"
+                "resolve_subagent_model: ignoring model '{r}' for sub-agent '{child_agent}': not in providers[].models; using config/parent instead"
             );
         } else {
-            // Config wins over per-call request when set.
             let configured = model_for_child(child_agent);
-            if !configured.trim().is_empty() {
-                if configured.trim() != r.trim() {
+            let configured_trim = configured.trim();
+            if !configured_trim.is_empty() {
+                if !is_available(configured_trim) {
+                    tracing::warn!(
+                        "resolve_subagent_model: models.{child_agent}='{}' not in providers[].models; using requested '{r}' instead",
+                        configured_trim
+                    );
+                    return r.to_string();
+                }
+                if configured_trim != r.trim() {
                     tracing::warn!(
                         "resolve_subagent_model: per-call model '{r}' overridden by models.{child_agent}='{}'",
-                        configured.trim()
+                        configured_trim
                     );
                 }
-                return configured.trim().to_string();
+                return configured_trim.to_string();
             }
-            // No config — honour the per-call request.
             return r.to_string();
         }
     }
     let configured = model_for_child(child_agent);
-    if configured.trim().is_empty() {
-        parent_model.to_string()
-    } else {
-        configured.trim().to_string()
+    let configured_trim = configured.trim();
+    if configured_trim.is_empty() {
+        return fallback();
     }
+    if !is_available(configured_trim) {
+        tracing::warn!(
+            "resolve_subagent_model: models.{child_agent}='{}' not in providers[].models; falling back to parent/global",
+            configured_trim
+        );
+        return fallback();
+    }
+    configured_trim.to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ResolvedConfig;
+    use bebok_llm::ProviderSpec;
 
-    fn inherit(agent: &str) -> String {
-        match agent {
-            "ask" => "x/cp".to_string(),
-            _ => "x/parent".to_string(),
+    fn test_cfg(
+        providers: Vec<ProviderSpec>,
+        models: serde_json::Value,
+        global_model: &str,
+    ) -> ResolvedConfig {
+        ResolvedConfig {
+            model: global_model.to_string(),
+            models,
+            providers,
+            ..Default::default()
         }
+    }
+
+    fn providers_with(models_by_provider: &[(&str, &[&str])]) -> Vec<ProviderSpec> {
+        models_by_provider
+            .iter()
+            .map(|(name, models)| ProviderSpec {
+                name: name.to_string(),
+                kind: bebok_llm::ProviderKind::Openai,
+                models: models.iter().map(|m| m.to_string()).collect(),
+                ..Default::default()
+            })
+            .collect()
     }
 
     #[test]
     fn resolve_honours_fallback_chain_and_heavy() {
-        let cfg = DelegationConfig::default();
+        let cfg = test_cfg(
+            providers_with(&[
+                ("x", &["cp", "parent"]),
+                ("openai", &["o3"]),
+                ("anthropic", &["claude-opus-5"]),
+            ]),
+            serde_json::json!({"ask": "x/cp"}),
+            "x/parent",
+        );
+        let inherit = |agent: &str| match agent {
+            "ask" => "x/cp".to_string(),
+            _ => String::new(),
+        };
         // `models.<child>` wins over the parent model.
         assert_eq!(
             resolve_subagent_model(&cfg, "x/parent", "ask", inherit, None),
@@ -85,7 +142,7 @@ mod tests {
         );
         // Empty `models.<child>` falls back to the parent model.
         assert_eq!(
-            resolve_subagent_model(&cfg, "x/parent", "code", inherit, None),
+            resolve_subagent_model(&cfg, "x/parent", "code", |_| String::new(), None),
             "x/parent"
         );
         // `heavy` -> the parent's model.
@@ -94,12 +151,12 @@ mod tests {
                 &cfg,
                 "anthropic/claude-opus-5",
                 "code",
-                inherit,
+                |_| String::new(),
                 Some("heavy")
             ),
             "anthropic/claude-opus-5"
         );
-        // Explicit per-call request wins only when models.<agent> is empty.
+        // Explicit per-call request wins only when models.<agent> is empty and available.
         assert_eq!(
             resolve_subagent_model(
                 &cfg,
@@ -110,12 +167,27 @@ mod tests {
             ),
             "openai/o3"
         );
-        // When models.<agent> is set, it wins over the per-call request.
+        // When models.<agent> is set and available, it wins over the per-call request.
         assert_eq!(
             resolve_subagent_model(&cfg, "x/parent", "ask", inherit, Some("openai/o3")),
             "x/cp"
         );
-        // Xiaomi is never used for sub-agents — falls back to config/parent.
+        // Empty/blank requests are ignored.
+        assert_eq!(
+            resolve_subagent_model(&cfg, "x/parent", "ask", inherit, Some("  ")),
+            "x/cp"
+        );
+    }
+
+    #[test]
+    fn unavailable_model_is_ignored() {
+        // Only openai/o3 is available; xiaomi not in config.
+        let cfg = test_cfg(
+            providers_with(&[("openai", &["o3"]), ("x", &["parent"])]),
+            serde_json::json!({}),
+            "x/parent",
+        );
+        // Requested model not in config -> fallback to parent.
         assert_eq!(
             resolve_subagent_model(
                 &cfg,
@@ -127,13 +199,80 @@ mod tests {
             "x/parent"
         );
         assert_eq!(
-            resolve_subagent_model(&cfg, "x/parent", "ask", inherit, Some("xiaomi/mimo")),
-            "x/cp"
+            resolve_subagent_model(
+                &cfg,
+                "x/parent",
+                "code",
+                |_| String::new(),
+                Some("xiaomi/mimo")
+            ),
+            "x/parent"
         );
-        // Empty/blank requests are ignored.
+        // Unknown provider -> fallback.
         assert_eq!(
-            resolve_subagent_model(&cfg, "x/parent", "ask", inherit, Some("  ")),
-            "x/cp"
+            resolve_subagent_model(
+                &cfg,
+                "x/parent",
+                "code",
+                |_| String::new(),
+                Some("unknown/model-x")
+            ),
+            "x/parent"
+        );
+    }
+
+    #[test]
+    fn available_xiaomi_is_allowed() {
+        let cfg = test_cfg(
+            providers_with(&[("xiaomi", &["mimo-v2.6-flash"]), ("openai", &["o3"])]),
+            serde_json::json!({}),
+            "openai/o3",
+        );
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg,
+                "openai/o3",
+                "code",
+                |_| String::new(),
+                Some("xiaomi/mimo-v2.6-flash")
+            ),
+            "xiaomi/mimo-v2.6-flash"
+        );
+        // via openrouter prefix when openrouter lists it
+        let cfg2 = test_cfg(
+            providers_with(&[("openrouter", &["xiaomi/mimo-v2.6-flash"])]),
+            serde_json::json!({}),
+            "openai/o3",
+        );
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg2,
+                "openai/o3",
+                "code",
+                |_| String::new(),
+                Some("openrouter/xiaomi/mimo-v2.6-flash")
+            ),
+            "openrouter/xiaomi/mimo-v2.6-flash"
+        );
+    }
+
+    #[test]
+    fn parent_not_available_falls_back_to_global() {
+        let cfg = test_cfg(
+            providers_with(&[("openai", &["o3"])]),
+            serde_json::json!({}),
+            "openai/o3",
+        );
+        // parent xiaomi not in config -> global model
+        assert_eq!(
+            resolve_subagent_model(
+                &cfg,
+                "xiaomi/mimo-v2.6-flash",
+                "code",
+                |_| String::new(),
+                None
+            ),
+            "openai/o3"
         );
     }
 }

@@ -18,24 +18,88 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bebok_llm::{ChatRequest, LlmError, Provider, StreamEvent, StreamResult, Usage};
 use futures::stream::{BoxStream, StreamExt};
 
 use crate::backend::{CliBackend, CliError, CliEvent, CliRequest};
+use crate::runner;
 use crate::spec::CliSpec;
+
+/// Text the CLI prints when asked to resume a conversation it no longer has.
+const RESUME_LOST_MARKER: &str = "No conversation found";
+
+/// Continue a CLI-side conversation from an earlier turn instead of re-sending
+/// the whole transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliResume {
+    /// The CLI's own conversation id (`--resume <key>`).
+    pub key: String,
+    /// Index into the chat messages of the first one the CLI has not seen.
+    /// Only the messages from here on are sent.
+    pub from_msg: usize,
+    /// Profile digest the conversation was started with. A different profile
+    /// means different settings and hooks, so the turn starts over.
+    pub profile_hash: String,
+}
+
+/// What a finished turn tells its caller, so the conversation can be resumed
+/// next time. `key: None` means nothing is resumable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CliSessionReport {
+    pub key: Option<String>,
+    pub profile_hash: Option<String>,
+}
+
+/// Where a provider leaves its [`CliSessionReport`] when a turn ends.
+pub type CliSessionSink = Arc<Mutex<Option<CliSessionReport>>>;
 
 /// A provider that drives an agentic CLI.
 pub struct CliProvider {
     backend: Arc<dyn CliBackend>,
     spec: CliSpec,
     cwd: PathBuf,
+    /// Environment every turn of this provider adds to the child process: the
+    /// hook endpoint + its turn-scoped token, and (in `isolated` profile mode)
+    /// the config dir override. Assembled by the engine for one turn.
+    extra_env: Vec<(String, String)>,
+    /// Conversation to continue, when the caller has one for this session.
+    resume: Option<CliResume>,
+    /// Receives the conversation key and profile digest when the turn ends.
+    sink: Option<CliSessionSink>,
 }
 
 impl CliProvider {
     pub fn new(backend: Arc<dyn CliBackend>, spec: CliSpec, cwd: PathBuf) -> Self {
-        Self { backend, spec, cwd }
+        Self {
+            backend,
+            spec,
+            cwd,
+            extra_env: Vec::new(),
+            resume: None,
+            sink: None,
+        }
+    }
+
+    /// Continue an earlier conversation when the CLI still has it (see
+    /// [`CliResume`]). Falls back to the full transcript when it cannot.
+    pub fn with_resume(mut self, resume: Option<CliResume>) -> Self {
+        self.resume = resume;
+        self
+    }
+
+    /// Report the conversation key and profile digest to `sink` at turn end.
+    pub fn with_session_sink(mut self, sink: Option<CliSessionSink>) -> Self {
+        self.sink = sink;
+        self
+    }
+
+    /// Add environment variables every turn of this provider passes to the CLI
+    /// (see `bebok_core::cli_turn_token` for the hook token that motivates it).
+    pub fn with_extra_env(mut self, env: Vec<(String, String)>) -> Self {
+        self.extra_env = env;
+        self
     }
 
     /// The backend this provider drives (used by `/cli/backends` reporting and
@@ -117,6 +181,13 @@ fn present(ev: CliEvent) -> Option<StreamEvent> {
     }
 }
 
+/// Everything needed to start the same turn again with the full transcript.
+struct RetryPlan {
+    backend: Arc<dyn CliBackend>,
+    spec: CliSpec,
+    full: CliRequest,
+}
+
 /// Streaming state for one turn.
 struct RunState {
     inner: BoxStream<'static, Result<CliEvent, CliError>>,
@@ -130,26 +201,82 @@ struct RunState {
     queue: VecDeque<StreamResult<StreamEvent>>,
     /// True once the inner stream ended and the child was reaped.
     finalised: bool,
+    /// The current attempt continues a conversation (`--resume`).
+    resumed: bool,
+    /// Set when the current attempt produced something the consumer saw.
+    emitted: bool,
+    /// Present while a resumed attempt can still fall back to the full
+    /// transcript. Taken (so at most one retry happens) when it is used.
+    retry: Option<RetryPlan>,
+    /// The resumed conversation was lost before any output: start over.
+    want_retry: bool,
+    /// Conversation key announced by the current attempt.
+    session_key: Option<String>,
+    /// Profile digest of the current attempt.
+    profile_hash: Option<String>,
+    sink: Option<CliSessionSink>,
 }
 
 impl RunState {
+    /// Start the same turn again with the full transcript, after the CLI lost
+    /// the conversation it was asked to resume.
+    async fn restart_full(&mut self) -> Result<(), CliError> {
+        let plan = self
+            .retry
+            .take()
+            .ok_or_else(|| CliError::Stream("no full transcript to fall back to".into()))?;
+        tracing::info!("CLI lost the resumed conversation; retrying with the full transcript");
+        let run = runner::spawn_cli(plan.backend, plan.spec, plan.full).await?;
+        self.inner = run.events;
+        self.exit = Some(run.exit);
+        self.profile_hash = run.profile_hash;
+        self.session_key = None;
+        self.resumed = false;
+        self.finalised = false;
+        Ok(())
+    }
+
     /// Await the child, then decide what the tail of the stream looks like.
-    async fn finalise(&mut self, stream_error: Option<LlmError>) {
+    async fn finalise(&mut self, stream_error: Option<CliError>) {
         let exit_result = match self.exit.take() {
             Some(handle) => handle.await,
             // Already reaped (or never created): nothing to add.
             None => Ok(Ok(None)),
         };
 
-        let mut error: Option<LlmError> = stream_error;
-        if error.is_none() {
+        let mut cli_error: Option<CliError> = stream_error;
+        let mut error: Option<LlmError> = None;
+        if cli_error.is_none() {
             match exit_result {
                 Ok(Ok(_)) => {}
-                Ok(Err(e)) => error = Some(LlmError::from(e)),
+                Ok(Err(e)) => cli_error = Some(e),
                 Err(join) => {
                     error = Some(LlmError::Provider(format!("CLI supervisor failed: {join}")));
                 }
             }
+        }
+        if let Some(e) = cli_error {
+            let e = classify_resume_lost(e);
+            if matches!(e, CliError::ResumeLost(_))
+                && self.resumed
+                && !self.emitted
+                && self.retry.is_some()
+            {
+                // The stream is over for this attempt; `next` restarts it.
+                self.want_retry = true;
+                self.finalised = true;
+                return;
+            }
+            error = Some(LlmError::from(e));
+        }
+
+        if let Some(sink) = &self.sink
+            && let Ok(mut slot) = sink.lock()
+        {
+            *slot = Some(CliSessionReport {
+                key: self.session_key.clone(),
+                profile_hash: self.profile_hash.clone(),
+            });
         }
 
         // `Done` first: a billed turn must be accounted for even when the CLI
@@ -174,6 +301,13 @@ impl RunState {
 impl Provider for CliProvider {
     fn name(&self) -> &str {
         self.backend.id()
+    }
+
+    fn transport(&self) -> bebok_llm::Transport {
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            native_tools: true,
+        }
     }
 
     /// Stream one turn through the CLI.
@@ -201,28 +335,51 @@ impl Provider for CliProvider {
             Some(model_id.to_string())
         };
 
-        let cli_req = CliRequest {
-            prompt: crate::transcript::render_prompt(&req),
-            blocks: crate::transcript::render_blocks(&req),
-            system,
-            model,
+        // `allow_write` is the single opt-in for letting the CLI mutate the
+        // tree; it bypasses Bebok's permission engine and change tracking,
+        // so it stays false unless the user asked for it in config.
+        let turn = |from: usize, resume_key: Option<String>| CliRequest {
+            prompt: crate::transcript::render_prompt(&slice_from(&req, from)),
+            blocks: crate::transcript::render_blocks(&slice_from(&req, from)),
+            system: system.clone(),
+            model: model.clone(),
             cwd: self.cwd.clone(),
-            // v1 is stateless: the transcript carries the whole conversation.
-            // TODO: persist the CLI's SessionKey under
-            // `<project>/.bebok/cli/<session>.json` and resume from it, so the
-            // transcript is not re-sent every turn.
-            resume_key: None,
-            // `allow_write` is the single opt-in for letting the CLI mutate the
-            // tree; it bypasses Bebok's permission engine and change tracking,
-            // so it stays false unless the user asked for it in config.
+            resume_key,
             write: self.spec.allow_write,
             max_turns: self.spec.max_turns,
             timeout: self.spec.timeout(),
+            extra_env: self.extra_env.clone(),
+        };
+        let full = turn(0, None);
+
+        // Continue the CLI's conversation only when the binary can, the
+        // profile is unchanged and the tail is non-empty. Otherwise the whole
+        // transcript goes out again.
+        let (first, resumed) = match &self.resume {
+            Some(hint) if hint.from_msg < req.messages.len() => {
+                let tail = turn(hint.from_msg, Some(hint.key.clone()));
+                let pre = runner::preflight(self.backend.as_ref(), &self.spec, &tail)
+                    .await
+                    .map_err(LlmError::from)?;
+                let same_profile = pre.profile_hash.unwrap_or_default() == hint.profile_hash;
+                if pre.resume_supported && same_profile {
+                    (tail, true)
+                } else {
+                    (full.clone(), false)
+                }
+            }
+            _ => (full.clone(), false),
         };
 
-        let run = crate::runner::spawn_cli(self.backend.clone(), self.spec.clone(), cli_req)
+        let run = runner::spawn_cli(self.backend.clone(), self.spec.clone(), first)
             .await
             .map_err(LlmError::from)?;
+
+        let retry = resumed.then(|| RetryPlan {
+            backend: self.backend.clone(),
+            spec: self.spec.clone(),
+            full,
+        });
 
         let state = RunState {
             inner: run.events,
@@ -231,6 +388,13 @@ impl Provider for CliProvider {
             saw_usage: false,
             queue: VecDeque::new(),
             finalised: false,
+            resumed,
+            emitted: false,
+            retry,
+            want_retry: false,
+            session_key: None,
+            profile_hash: run.profile_hash,
+            sink: self.sink.clone(),
         };
 
         let stream = futures::stream::unfold(Some(state), |slot: Option<RunState>| async move {
@@ -241,16 +405,22 @@ impl Provider for CliProvider {
                     return Some((item, Some(st)));
                 }
                 if st.finalised {
+                    if st.want_retry {
+                        st.want_retry = false;
+                        if let Err(e) = st.restart_full().await {
+                            st.queue.push_back(Err(LlmError::from(e)));
+                            st.finalised = true;
+                        }
+                        continue;
+                    }
                     // Queue drained and nothing left to say: end the stream.
                     return None;
                 }
 
                 match st.inner.next().await {
                     Some(Ok(ev)) => {
-                        if let Some(key) = session_key_of(&ev) {
-                            // Remembered for the eventual `--resume` work; not
-                            // shown to the user.
-                            tracing::debug!(session = %key, "cli session key");
+                        if let CliEvent::SessionKey(key) = &ev {
+                            st.session_key = Some(key.clone());
                         }
                         if let CliEvent::Usage(u) = ev {
                             merge_usage(&mut st.usage, u);
@@ -258,13 +428,14 @@ impl Provider for CliProvider {
                             continue;
                         }
                         if let Some(event) = present(ev) {
+                            st.emitted = true;
                             return Some((Ok(event), Some(st)));
                         }
                         // Bookkeeping event: keep reading.
                         continue;
                     }
                     Some(Err(e)) => {
-                        st.finalise(Some(LlmError::from(e))).await;
+                        st.finalise(Some(e)).await;
                         continue;
                     }
                     None => {
@@ -279,12 +450,25 @@ impl Provider for CliProvider {
     }
 }
 
-/// The session key carried by an event, if any (borrowing helper so `present`
-/// can stay consuming).
-fn session_key_of(ev: &CliEvent) -> Option<&str> {
-    match ev {
-        CliEvent::SessionKey(k) => Some(k.as_str()),
+/// The chat request without its first `from` messages, for a resumed turn.
+fn slice_from(req: &ChatRequest, from: usize) -> ChatRequest {
+    ChatRequest {
+        messages: req.messages[from.min(req.messages.len())..].to_vec(),
+        ..req.clone()
+    }
+}
+
+/// Turn "the CLI does not know this conversation" into [`CliError::ResumeLost`],
+/// so the caller can tell it apart from any other failure.
+fn classify_resume_lost(err: CliError) -> CliError {
+    let text = match &err {
+        CliError::Exit { stderr, .. } => Some(stderr.clone()),
+        CliError::RunFailed(message) => Some(message.clone()),
         _ => None,
+    };
+    match text {
+        Some(text) if text.contains(RESUME_LOST_MARKER) => CliError::ResumeLost(text),
+        _ => err,
     }
 }
 
@@ -295,6 +479,28 @@ fn session_key_of(ev: &CliEvent) -> Option<&str> {
 pub fn build_provider(
     spec: &bebok_llm::ProviderSpec,
     project_root: Option<PathBuf>,
+) -> Result<Arc<dyn Provider>, String> {
+    build_provider_with_env(spec, project_root, Vec::new())
+}
+
+/// [`build_provider`] plus the extra environment the child must see this turn
+/// (the hook endpoint and its turn-scoped token).
+pub fn build_provider_with_env(
+    spec: &bebok_llm::ProviderSpec,
+    project_root: Option<PathBuf>,
+    extra_env: Vec<(String, String)>,
+) -> Result<Arc<dyn Provider>, String> {
+    build_provider_for_turn(spec, project_root, extra_env, None, None)
+}
+
+/// [`build_provider_with_env`] plus the conversation to continue (if any) and
+/// the sink that receives the conversation key when the turn ends.
+pub fn build_provider_for_turn(
+    spec: &bebok_llm::ProviderSpec,
+    project_root: Option<PathBuf>,
+    extra_env: Vec<(String, String)>,
+    resume: Option<CliResume>,
+    sink: Option<CliSessionSink>,
 ) -> Result<Arc<dyn Provider>, String> {
     let cli_spec = CliSpec::from_extra(&spec.extra).map_err(|e| e.to_string())?;
 
@@ -318,7 +524,12 @@ pub fn build_provider(
         )
     })?;
 
-    Ok(Arc::new(CliProvider::new(backend, cli_spec, root)))
+    Ok(Arc::new(
+        CliProvider::new(backend, cli_spec, root)
+            .with_extra_env(extra_env)
+            .with_resume(resume)
+            .with_session_sink(sink),
+    ))
 }
 
 #[cfg(test)]
@@ -531,6 +742,9 @@ mod tests {
                 allow_write: false,
                 timeout_secs: 30,
                 max_turns: None,
+                profile: Default::default(),
+                profile_overrides: None,
+                system_prompt_mode: Default::default(),
             },
             PathBuf::from("/tmp"),
         );
@@ -569,6 +783,310 @@ mod tests {
         assert!(
             matches!(events.last(), Some(Ok(StreamEvent::Done(_)))),
             "Done must be last: {events:?}"
+        );
+    }
+}
+
+/// Resume behaviour against a recording fake CLI (no real `claude` needed).
+#[cfg(all(test, unix))]
+mod resume_tests {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::backend::{CliCapabilities, CliProbe, CliStreamState, TurnScratch};
+    use bebok_llm::ChatMessage;
+
+    /// When the fake pretends to have lost the conversation.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Lose {
+        Never,
+        /// Only turns that try to resume fail.
+        OnResume,
+        /// Every turn fails, resumed or not.
+        Always,
+    }
+
+    /// Each turn's `(resume key, prompt)`, in order.
+    type Calls = Arc<Mutex<Vec<(Option<String>, String)>>>;
+
+    struct RecordingBackend {
+        calls: Calls,
+        lose: Lose,
+    }
+
+    impl CliBackend for RecordingBackend {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn label(&self) -> &'static str {
+            "Fake CLI"
+        }
+        fn capabilities(&self) -> CliCapabilities {
+            CliCapabilities {
+                resume: true,
+                ..CliCapabilities::default()
+            }
+        }
+        fn default_models(&self) -> Vec<String> {
+            vec!["sonnet".into()]
+        }
+        fn binary_names(&self) -> &'static [&'static str] {
+            &["sh"]
+        }
+        fn env_override(&self) -> &'static str {
+            "BEBOK_FAKE_CLI_BIN"
+        }
+        fn resume_flag_available(&self, _probe: &CliProbe) -> bool {
+            true
+        }
+        fn build_command(
+            &self,
+            _spec: &CliSpec,
+            req: &CliRequest,
+            _probe: &CliProbe,
+            _scratch: &mut TurnScratch,
+        ) -> Result<(String, Vec<String>), CliError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((req.resume_key.clone(), req.prompt.clone()));
+            let lost = match self.lose {
+                Lose::Never => false,
+                Lose::OnResume => req.resume_key.is_some(),
+                Lose::Always => true,
+            };
+            let script = if lost {
+                "echo 'No conversation found with session ID: s-old' >&2; exit 1".to_string()
+            } else {
+                // A resumed conversation keeps its id; a fresh one gets a new id.
+                let key = req.resume_key.clone().unwrap_or_else(|| "s-new".into());
+                let jsonl = format!(
+                    concat!(
+                        r#"{{"type":"system","subtype":"init","session_id":"{k}"}}"#,
+                        "\n",
+                        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"reply"}}]}}}}"#,
+                        "\n",
+                        r#"{{"type":"result","subtype":"success","session_id":"{k}","usage":{{"input_tokens":1,"output_tokens":1}}}}"#,
+                        "\n",
+                    ),
+                    k = key
+                );
+                format!("printf '%s' \"{}\"", jsonl.replace('"', "\\\""))
+            };
+            Ok(("sh".to_string(), vec!["-c".to_string(), script]))
+        }
+        fn parse_line(
+            &self,
+            line: &str,
+            st: &mut CliStreamState,
+        ) -> Result<Option<CliEvent>, CliError> {
+            crate::backends::backend_for("claude")
+                .expect("claude backend")
+                .parse_line(line, st)
+        }
+    }
+
+    fn spec() -> CliSpec {
+        CliSpec {
+            backend: "fake".into(),
+            command: None,
+            args: Vec::new(),
+            mode: crate::backend::CliMode::Agent,
+            allow_write: false,
+            timeout_secs: 30,
+            max_turns: None,
+            profile: Default::default(),
+            profile_overrides: None,
+            system_prompt_mode: Default::default(),
+        }
+    }
+
+    fn assistant(text: &str) -> ChatMessage {
+        ChatMessage {
+            role: bebok_llm::ChatRole::Assistant,
+            content: text.into(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            content_parts: Vec::new(),
+        }
+    }
+
+    fn request(messages: Vec<ChatMessage>) -> ChatRequest {
+        ChatRequest {
+            model: "fake/sonnet".into(),
+            system: String::new(),
+            messages,
+            tools: Vec::new(),
+            max_tokens: 128,
+            thinking: bebok_llm::Thinking::Off,
+            sampling: bebok_llm::Sampling::default(),
+        }
+    }
+
+    async fn run(
+        provider: &CliProvider,
+        messages: Vec<ChatMessage>,
+    ) -> Vec<StreamResult<StreamEvent>> {
+        provider
+            .stream(request(messages))
+            .await
+            .expect("streams")
+            .collect()
+            .await
+    }
+
+    fn assert_one_final_done(events: &[StreamResult<StreamEvent>]) {
+        let dones = events
+            .iter()
+            .filter(|e| matches!(e, Ok(StreamEvent::Done(_))))
+            .count();
+        assert_eq!(dones, 1, "exactly one Done: {events:?}");
+        assert!(
+            matches!(events.last(), Some(Ok(StreamEvent::Done(_)))),
+            "Done must be last"
+        );
+    }
+
+    fn provider(calls: &Calls, lose: Lose, sink: &CliSessionSink) -> CliProvider {
+        CliProvider::new(
+            Arc::new(RecordingBackend {
+                calls: calls.clone(),
+                lose,
+            }),
+            spec(),
+            PathBuf::from("/tmp"),
+        )
+        .with_session_sink(Some(sink.clone()))
+    }
+
+    fn resume(from_msg: usize, profile_hash: &str) -> Option<CliResume> {
+        Some(CliResume {
+            key: "s-new".into(),
+            from_msg,
+            profile_hash: profile_hash.into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn second_turn_sends_only_the_new_messages() {
+        let calls = Calls::default();
+        let sink = CliSessionSink::default();
+
+        let first = provider(&calls, Lose::Never, &sink);
+        let events = run(&first, vec![ChatMessage::user("one")]).await;
+        assert_one_final_done(&events);
+        let report = sink.lock().unwrap().take().expect("turn reported");
+        assert_eq!(report.key.as_deref(), Some("s-new"));
+
+        // The CLI has seen both the user message and the assistant reply.
+        let second = provider(&calls, Lose::Never, &sink).with_resume(resume(2, ""));
+        let events = run(
+            &second,
+            vec![
+                ChatMessage::user("one"),
+                assistant("reply"),
+                ChatMessage::user("two"),
+            ],
+        )
+        .await;
+        assert_one_final_done(&events);
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 2, "one call per turn: {recorded:?}");
+        assert_eq!(recorded[1].0.as_deref(), Some("s-new"), "resumes the key");
+        assert!(
+            recorded[1].1.contains("two"),
+            "new message sent: {recorded:?}"
+        );
+        assert!(
+            !recorded[1].1.contains("one") && !recorded[1].1.contains("reply"),
+            "earlier messages not re-sent: {recorded:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_changed_profile_starts_over_with_the_full_transcript() {
+        let calls = Calls::default();
+        let sink = CliSessionSink::default();
+        // The recorded profile digest differs from this turn's (none: the fake
+        // has no profile writer), so the conversation must not be resumed.
+        let stale = provider(&calls, Lose::Never, &sink).with_resume(resume(2, "old-profile"));
+        let events = run(
+            &stale,
+            vec![
+                ChatMessage::user("one"),
+                assistant("reply"),
+                ChatMessage::user("two"),
+            ],
+        )
+        .await;
+        assert_one_final_done(&events);
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].0, None, "no --resume after a profile change");
+        assert!(recorded[0].1.contains("one") && recorded[0].1.contains("two"));
+    }
+
+    #[tokio::test]
+    async fn a_lost_conversation_is_retried_once_with_the_full_transcript() {
+        let calls = Calls::default();
+        let sink = CliSessionSink::default();
+        let first = provider(&calls, Lose::OnResume, &sink);
+        run(&first, vec![ChatMessage::user("one")]).await;
+
+        let second = provider(&calls, Lose::OnResume, &sink).with_resume(resume(2, ""));
+        let events = run(
+            &second,
+            vec![
+                ChatMessage::user("one"),
+                assistant("reply"),
+                ChatMessage::user("two"),
+            ],
+        )
+        .await;
+        assert_one_final_done(&events);
+        assert!(
+            events.iter().all(|e| e.is_ok()),
+            "the retry hides the lost conversation: {events:?}"
+        );
+
+        let recorded = calls.lock().unwrap().clone();
+        // fresh turn, the resumed attempt, then exactly one full-transcript retry.
+        assert_eq!(recorded.len(), 3, "{recorded:?}");
+        assert_eq!(recorded[1].0.as_deref(), Some("s-new"));
+        assert_eq!(recorded[2].0, None, "retry drops the key");
+        assert!(recorded[2].1.contains("one") && recorded[2].1.contains("two"));
+        let report = sink.lock().unwrap().take().expect("turn reported");
+        assert_eq!(report.key.as_deref(), Some("s-new"));
+    }
+
+    #[tokio::test]
+    async fn a_second_lost_conversation_is_reported_not_retried_again() {
+        let calls = Calls::default();
+        let sink = CliSessionSink::default();
+        let second = provider(&calls, Lose::Always, &sink).with_resume(resume(2, ""));
+        let events = run(
+            &second,
+            vec![
+                ChatMessage::user("one"),
+                assistant("reply"),
+                ChatMessage::user("two"),
+            ],
+        )
+        .await;
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(
+            recorded.len(),
+            2,
+            "resumed attempt + one retry: {recorded:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Err(LlmError::Provider(m)) if m.contains("no longer has"))),
+            "error surfaces: {events:?}"
         );
     }
 }

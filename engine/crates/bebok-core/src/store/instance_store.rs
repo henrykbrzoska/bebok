@@ -607,6 +607,11 @@ impl InstanceStore {
         let mcp_tools = instance.mcp.sync(&specs, &runtimes).await;
         instance.tools.set_mcp_tools(mcp_tools);
 
+        // A CLI profile embeds config-derived settings (permissions, prompt,
+        // MCP list), so a config change must invalidate its cached hash and
+        // force a regeneration on the next CLI turn.
+        bebok_cli_agents::invalidate_profile_cache();
+
         self.bus.publish(crate::event::Event::new(
             "config.changed",
             &instance.directory,

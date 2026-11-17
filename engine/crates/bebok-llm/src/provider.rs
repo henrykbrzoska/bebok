@@ -522,10 +522,36 @@ pub enum StreamEvent {
     Done(Usage),
 }
 
+/// How the prompt reaches the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transport {
+    Http,
+    AgenticCli {
+        bebok_tools: bool,
+        native_tools: bool,
+    },
+}
+
+impl Transport {
+    pub fn is_cli(&self) -> bool {
+        matches!(self, Transport::AgenticCli { .. })
+    }
+    pub fn bebok_tools(&self) -> bool {
+        match self {
+            Transport::AgenticCli { bebok_tools, .. } => *bebok_tools,
+            Transport::Http => true,
+        }
+    }
+}
+
 /// The streaming interface the agent loop consumes.
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
+
+    fn transport(&self) -> Transport {
+        Transport::Http
+    }
 
     async fn stream(
         &self,

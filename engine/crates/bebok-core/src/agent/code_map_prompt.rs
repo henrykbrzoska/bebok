@@ -32,6 +32,23 @@ pub use super::code_map_gen::SECTION_HEADING;
 /// The section for the resolved config and project root, or `None` when the
 /// feature is off, the root is not a directory, or generation failed.
 pub fn code_map_section(root: &Path, cfg: &ResolvedConfig) -> Option<String> {
+    code_map_section_for_transport(root, cfg, bebok_llm::Transport::Http)
+}
+
+pub fn code_map_section_for_transport(
+    root: &Path,
+    cfg: &ResolvedConfig,
+    transport: bebok_llm::Transport,
+) -> Option<String> {
+    if matches!(
+        transport,
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            ..
+        }
+    ) {
+        return None;
+    }
     // 1. Toggle: disabled -> None, no work at all (no I/O, no cache write).
     if !cfg.code_map.enabled {
         return None;

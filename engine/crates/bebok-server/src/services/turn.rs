@@ -17,8 +17,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use bebok_core::agent::TurnRunner;
+use bebok_core::config::provider_from_model;
 use bebok_core::error::CoreError;
 use bebok_core::store::SessionState;
+use bebok_llm::ProviderKind;
 
 use super::provider_factory::{ProviderCtx, build_provider_for};
 use crate::error::ApiError;
@@ -167,11 +169,6 @@ pub async fn prompt_turn(
             .unwrap_or_else(|| cfg.model_for(&agent.name))
     });
 
-    // Extension point (Tasks 2/5/6): prompt assembly is isolated here so
-    // config/plugin editable prompts (and future sidebar/topbar or custom-CSS
-    // context) can override the system text without touching the handler.
-    assemble_prompt(&instance, &mut agent, &cfg);
-
     // Pre-flight vision capability check: a model known to reject image input
     // fails fast with a 400 *before* the user message is appended, so the
     // transcript never ends up with an orphaned, unanswerable attachment.
@@ -237,8 +234,46 @@ pub async fn prompt_turn(
     }
 
     // CLI providers run inside the project, so they need its root as their cwd.
-    let provider = build_provider_for(&cfg, &model, &ProviderCtx::root(&instance.root))
-        .map_err(ApiError::from)?;
+    //
+    // A CLI provider's tool use happens in a child process, outside Bebok's
+    // permission engine. The managed profile runs `bebok-server cli-hook <event>`
+    // before/after every tool call, so the child needs this turn's hook
+    // endpoint plus a token scoped to this session — issued here, revoked in the
+    // turn's teardown.
+    let hook = match cfg
+        .provider_spec(&provider_from_model(&model))
+        .map(|spec| spec.kind)
+    {
+        Some(ProviderKind::Cli) => crate::routes::cli_hook::issue_hook_env(&id.to_string()),
+        _ => None,
+    };
+    let hook_token = hook.as_ref().map(|(token, _)| token.clone());
+    let provider_ctx = match hook {
+        Some((_, env)) => ProviderCtx::root(&instance.root).with_hook_env(env),
+        None => ProviderCtx::root(&instance.root),
+    };
+    // Where a CLI reports its conversation key when the turn ends (see the
+    // CLI session bookkeeping after `TurnRunner::run` below).
+    let cli_sink: bebok_cli_agents::CliSessionSink =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let is_cli = matches!(
+        cfg.provider_spec(&provider_from_model(&model))
+            .map(|spec| spec.kind),
+        Some(ProviderKind::Cli)
+    );
+    let provider_ctx = if is_cli {
+        provider_ctx.with_session_sink(cli_sink.clone())
+    } else {
+        provider_ctx
+    };
+    let mut provider = build_provider_for(&cfg, &model, &provider_ctx).map_err(ApiError::from)?;
+
+    // Extension point (Tasks 2/5/6): prompt assembly is isolated here so
+    // config/plugin editable prompts (and future sidebar/topbar or custom-CSS
+    // context) can override the system text without touching the handler. It
+    // needs the built provider: a CLI transport changes which prompt sections
+    // make sense (phase 03/07).
+    assemble_prompt(&instance, &mut agent, &cfg, provider.transport());
 
     // Whether this turn carried image attachments (drives the error hint below).
     let images_attached = !image_parts.is_empty();
@@ -250,6 +285,26 @@ pub async fn prompt_turn(
         .map_err(ApiError::from)?;
     if session.set_title_if_empty(&body.message).await {
         session.touch().await;
+    }
+
+    // A CLI provider continues its own conversation when the record still
+    // matches this turn (same provider, model, system prompt and profile, and
+    // the transcript before the record is plain). The record is read after the
+    // user message is appended, so the tail it selects includes this message.
+    let system_hash = bebok_core::provider::system_hash(&agent.prompt);
+    if is_cli {
+        let messages = session.messages_snapshot().await;
+        let hint = bebok_core::provider::cli_resume_hint(
+            session.cli_session().await.as_ref(),
+            &provider_from_model(&model),
+            &model,
+            &system_hash,
+            &messages,
+        );
+        if hint.is_some() {
+            let resumed_ctx = provider_ctx.clone().with_resume(hint);
+            provider = build_provider_for(&cfg, &model, &resumed_ctx).map_err(ApiError::from)?;
+        }
     }
 
     let bus = state.store.bus();
@@ -275,6 +330,8 @@ pub async fn prompt_turn(
 
         // Safety net: if run_turn panics the turn slot is still released.
         let mut release = ReleaseOnDrop::new(task_state.clone());
+        let provider_name = provider_from_model(&model);
+        let turn_model = model.clone();
         let result = TurnRunner::new(
             task_state.clone(),
             agent,
@@ -288,11 +345,42 @@ pub async fn prompt_turn(
         .run()
         .await;
 
+        // Remember the CLI conversation only for a turn that ended cleanly: an
+        // error or abort may have left the CLI ahead of the transcript, and the
+        // next turn then starts over with the full transcript.
+        if is_cli {
+            let report = cli_sink.lock().ok().and_then(|mut slot| slot.take());
+            let record = match (&result, abort.is_cancelled(), report) {
+                (
+                    Ok(()),
+                    false,
+                    Some(bebok_cli_agents::CliSessionReport {
+                        key: Some(key),
+                        profile_hash,
+                    }),
+                ) => Some(bebok_core::session::CliSessionMeta {
+                    key,
+                    provider: provider_name.clone(),
+                    model: turn_model.clone(),
+                    system_hash: system_hash.clone(),
+                    msg_index: task_state.messages_snapshot().await.len(),
+                    profile_hash: profile_hash.unwrap_or_default(),
+                }),
+                _ => None,
+            };
+            task_state.set_cli_session(record).await;
+        }
+
         // Happy path: disarm the panic guard, then do the normal teardown
         // (clear_abort is async so it can't live in Drop).
         release.disarm();
         task_state.clear_abort().await;
         task_state.end_turn();
+        // The CLI is gone (the provider stream owns the child and kills it on
+        // drop), so its hook token has no further use.
+        if let Some(token) = &hook_token {
+            crate::routes::cli_hook::revoke_hook_token(token);
+        }
         // Always publish an explicit idle transition. Clients treat bare
         // `session.updated` events as unrelated metadata changes and may still
         // see `running=true` if teardown is the only completion signal.
@@ -357,13 +445,25 @@ fn assemble_prompt(
     instance: &bebok_core::Instance,
     agent: &mut bebok_core::agent::Agent,
     cfg: &bebok_core::config::ResolvedConfig,
+    transport: bebok_llm::Transport,
 ) {
-    // Assemble AGENTS.md + enabled skills into the system prompt.
-    let mut discovered = bebok_core::skills::discover(&instance.root);
-    bebok_core::skills::apply_toggles(&mut discovered, Some(&cfg.skills));
-    let instructions = bebok_core::skills::assemble_prompt(&discovered);
-    if !instructions.is_empty() {
-        agent.prompt = format!("{}\n\n{instructions}", agent.prompt);
+    let is_cli_without_bebok = matches!(
+        transport,
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            ..
+        }
+    );
+    let is_cli = transport.is_cli();
+
+    // AGENTS.md / skills — via profile for CLI without bebok_tools (faza 07).
+    if !is_cli_without_bebok {
+        let mut discovered = bebok_core::skills::discover(&instance.root);
+        bebok_core::skills::apply_toggles(&mut discovered, Some(&cfg.skills));
+        let instructions = bebok_core::skills::assemble_prompt(&discovered);
+        if !instructions.is_empty() {
+            agent.prompt = format!("{}\n\n{instructions}", agent.prompt);
+        }
     }
 
     // Surface mid-chat environment changes (MCP/skill/yolo toggles) to the model.
@@ -376,13 +476,20 @@ fn assemble_prompt(
         agent.prompt = format!("{}\n\n{block}", agent.prompt);
     }
 
-    // Tell the model which host OS / shell dialect the `bash` tool uses so it
-    // emits syntax that actually runs (matters most on Windows).
-    agent.prompt = format!("{}\n\n{}", agent.prompt, bebok_core::agent::host_os_note());
+    // Host OS / bash — omitted for CLI without bebok_tools.
+    if !is_cli_without_bebok {
+        agent.prompt = format!(
+            "{}\n\n{}",
+            agent.prompt,
+            bebok_core::agent::host_os_note_for_transport(transport)
+        );
+    }
 
-    // WP-AUTOVERIFY (F8-1): "Verification capabilities" section (browser,
-    // dev servers, `verify.frontend` policy); built in its own module.
-    if let Some(section) = bebok_core::agent::verification_section(cfg, agent) {
+    // WP-AUTOVERIFY — omitted for CLI without bebok_tools.
+    if !is_cli_without_bebok
+        && let Some(section) =
+            bebok_core::agent::verification_section_for_transport(cfg, agent, transport)
+    {
         tracing::debug!(
             agent = %agent.name,
             mode = cfg.frontend_verify().as_str(),
@@ -391,8 +498,7 @@ fn assemble_prompt(
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
-    // `verify.buildTest` policy: tells the agent whether to run builds/tests
-    // autonomously (`auto`), ask first (`ask`), or stay silent (`off`).
+    // `verify.buildTest` policy — ALWAYS (policy, not tool).
     if let Some(section) = bebok_core::agent::build_test_section(cfg) {
         tracing::debug!(
             mode = cfg.build_test_mode().as_str(),
@@ -401,20 +507,28 @@ fn assemble_prompt(
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
-    // Pre-computed code map (`code_map.enabled`, opt-in): "what is where"
-    // orientation without a list_dir/tree/glob walk at conversation start.
-    if let Some(section) = bebok_core::agent::code_map_section(&instance.root, cfg) {
+    // Pre-computed code map — omitted for CLI without bebok_tools.
+    if !is_cli_without_bebok
+        && let Some(section) =
+            bebok_core::agent::code_map_section_for_transport(&instance.root, cfg, transport)
+    {
         tracing::debug!("code map section added to the system prompt");
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
-    // Module dependency graph (`code_graph.enabled`, opt-in): summary +
-    // query hints for the code_graph_* tools.
-    if let Some(section) = bebok_core::agent::code_graph_section(&instance.root, cfg) {
+    // Module dependency graph — omitted for CLI without bebok_tools.
+    if !is_cli_without_bebok
+        && let Some(section) =
+            bebok_core::agent::code_graph_section_for_transport(&instance.root, cfg, transport)
+    {
         tracing::debug!("code graph section added to the system prompt");
         agent.prompt = format!("{}\n\n{section}", agent.prompt);
     }
 
+    // Fleet-only delegation: never for CLI (no fleet/task on CLI).
+    if is_cli {
+        return;
+    }
     // Fleet-only delegation: the orchestrator note (fleet roster, spawn rule,
     // cap, supervision tools), main-thread sessions only; the text lives in
     // `bebok_core::agent::delegation_policy`, and the `Fleet:` paragraph is
@@ -561,7 +675,12 @@ mod tests {
 
         // Run as fleet: roster + prefer-fleet spawn route.
         let mut orchestrator = bebok_core::agent::Agent::orchestrator();
-        assemble_prompt(&instance, &mut orchestrator, &cfg);
+        assemble_prompt(
+            &instance,
+            &mut orchestrator,
+            &cfg,
+            bebok_llm::Transport::Http,
+        );
         let prompt = orchestrator.prompt.clone();
         assert!(prompt.contains("## Delegation (fleet only,"), "{prompt}");
         assert!(prompt.contains("Fleet: enabled here with"), "{prompt}");
@@ -578,7 +697,7 @@ mod tests {
         // Same project, legacy flag off: the roster + prefer-fleet route are
         // still shown (fleet-first: usability alone decides).
         let mut solo = bebok_core::agent::Agent::orchestrator();
-        assemble_prompt(&instance, &mut solo, &cfg);
+        assemble_prompt(&instance, &mut solo, &cfg, bebok_llm::Transport::Http);
         assert!(
             solo.prompt.contains("Fleet: enabled here with"),
             "{}",
@@ -592,7 +711,7 @@ mod tests {
 
         // `code` is a main-thread agent as well, but it has no `fleet` tool.
         let mut code = bebok_core::agent::Agent::code();
-        assemble_prompt(&instance, &mut code, &cfg);
+        assemble_prompt(&instance, &mut code, &cfg, bebok_llm::Transport::Http);
         assert!(!code.prompt.contains("fleet"), "{}", code.prompt);
 
         let _ = std::fs::remove_dir_all(&base);
@@ -624,7 +743,12 @@ mod tests {
         let cfg = instance.config_snapshot();
 
         let mut orchestrator = bebok_core::agent::Agent::orchestrator();
-        assemble_prompt(&instance, &mut orchestrator, &cfg);
+        assemble_prompt(
+            &instance,
+            &mut orchestrator,
+            &cfg,
+            bebok_llm::Transport::Http,
+        );
         let prompt = orchestrator.prompt.clone();
 
         let host = prompt.find("Host OS: ").expect("Host OS note");

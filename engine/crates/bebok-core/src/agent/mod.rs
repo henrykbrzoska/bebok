@@ -60,10 +60,10 @@ pub use build_test_gate::check_build_test_policy;
 pub use build_test_prompt::build_test_section;
 pub use catalog::{AgentCatalog, AgentInfo, spawn_agent_watcher};
 pub use code_ast_tools::CodeAstSearch;
-pub use code_graph_prompt::code_graph_section;
+pub use code_graph_prompt::{code_graph_section, code_graph_section_for_transport};
 pub use code_graph_tools::{CodeGraphDependents, CodeGraphDepends, CodeGraphImpact};
 pub use code_index_tools::{CodeIndexSearch, CodeIndexStatus};
-pub use code_map_prompt::code_map_section;
+pub use code_map_prompt::{code_map_section, code_map_section_for_transport};
 pub use delegation::{
     LOOP_MIN_REPEAT, LOOP_WINDOW, LoopHit, TaskProgress, WANDER_MIN_DISTINCT_READS,
     WANDER_NO_ADVANCE_WINDOW, WANDER_READ_RATIO, WanderHit, summarize_progress,
@@ -80,14 +80,14 @@ pub use images::{
     ALLOWED_IMAGE_TYPES, AgentImageInput, MAX_IMAGE_BASE64_LEN, MAX_IMAGE_BYTES,
     MAX_IMAGES_PER_PROMPT, model_supports_images, validate_agent_images,
 };
-pub use index_prompt::index_section;
+pub use index_prompt::{index_section, index_section_for_transport};
 pub use model_policy::{HEAVY, resolve_subagent_model};
 pub use observe::{emit_message, emit_part, emit_session, title_from};
 pub use preset::Agent;
-pub use prompt_env::host_os_note;
+pub use prompt_env::{host_os_note, host_os_note_for_transport, tool_ref};
 pub use request::{RequestBuilder, build_request, prune_for_budget};
 pub use status_rows::{format_duration, format_tokens};
 pub use supervision_tools::{TaskCancelTool, TaskReportTool, TaskStatusTool, TaskWaitTool};
 pub use task_tool::TaskTool;
 pub use turn::{TurnRunner, run_turn};
-pub use verify_prompt::verification_section;
+pub use verify_prompt::{verification_section, verification_section_for_transport};

@@ -8,7 +8,9 @@ description = "Drive agentic CLIs (Claude Code, and future ones) as Bebok provid
 [dependencies]
 async-trait.workspace = true
 bebok-llm = { path = "../bebok-llm" }
+dirs.workspace = true
 futures.workspace = true
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

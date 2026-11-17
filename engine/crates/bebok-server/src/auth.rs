@@ -38,6 +38,8 @@
 //! - `GET /pty/{id}/connect` — a browser cannot set headers on a WebSocket
 //!   upgrade; that route is already authenticated by a one-time, scope-bound
 //!   PTY ticket issued by the token-protected `POST /pty/{id}/ticket`.
+//! - `POST /cli-hook/{session}/{event}` — the CLI hook bridge, authenticated
+//!   per turn by a short-lived turn token (see `bebok_core::cli_turn_token`).
 //! - `OPTIONS` — CORS preflight never carries credentials (it is answered by
 //!   the CORS layer wrapped around this one; the check here only matters when
 //!   the router is used without it, e.g. in tests).
@@ -241,8 +243,14 @@ fn is_exempt(req: &Request) -> bool {
     }
     // `GET /pty/{id}/connect`: WebSocket upgrade, authenticated by the one-time
     // ticket in the query string (browsers cannot set WS headers).
+    //
+    // `POST /cli-hook/{session}/{event}`: called by the `bebok-server cli-hook`
+    // child of a CLI provider, which carries a short-lived per-turn token
+    // (`bebok_core::cli_turn_token`) scoped to one session instead of the
+    // engine capability token. The route validates it itself and refuses
+    // non-loopback peers.
     let path = req.uri().path();
-    path.starts_with("/pty/") && path.ends_with("/connect")
+    (path.starts_with("/pty/") && path.ends_with("/connect")) || path.starts_with("/cli-hook/")
 }
 
 /// Extract the presented token from the `Authorization` header or `?token=`.
@@ -547,13 +555,13 @@ pub(crate) mod tests {
         );
     }
 
-    /// The WebSocket upgrade cannot carry an `Authorization` header, so it is
-    /// exempt from the token layer and authenticated by the one-time PTY ticket
-    /// instead. The exemption is path+suffix bound: nothing else under `/pty`
-    /// gets it.
+    /// Two routes are exempt from the engine token, each with a narrower
+    /// credential of its own: the PTY WebSocket upgrade (a one-time ticket; a
+    /// browser cannot set WS headers) and the CLI hook bridge (a per-turn turn
+    /// token). Both exemptions are path-bound: nothing else gets them.
     #[cfg(not(target_os = "android"))]
     #[test]
-    fn pty_connect_is_the_only_exempt_route() {
+    fn only_the_pty_connect_and_cli_hook_routes_are_exempt() {
         let _env = env_guard();
         let connect = HttpRequest::builder()
             .uri("/pty/abc/connect?ticket=nope")
@@ -561,12 +569,21 @@ pub(crate) mod tests {
             .unwrap();
         assert!(is_authorized(&connect), "WS upgrade must skip the token");
 
+        let hook = HttpRequest::builder()
+            .method(Method::POST)
+            .uri("/cli-hook/00000000-0000-0000-0000-000000000000/pre")
+            .body(Body::empty())
+            .unwrap();
+        assert!(is_authorized(&hook), "CLI hooks use their own turn token");
+
         for uri in [
             "/pty",
             "/pty/abc/ticket",
             "/pty/abc",
             "/connect",
             "/fs/file",
+            "/cli-hook",
+            "/cli-hooks/x/pre",
         ] {
             let req = HttpRequest::builder().uri(uri).body(Body::empty()).unwrap();
             assert!(!is_authorized(&req), "{uri} must still require the token");

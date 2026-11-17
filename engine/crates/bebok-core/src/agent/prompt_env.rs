@@ -11,6 +11,18 @@
 //! pipelines that `cmd /C` could not run and the delegated `task` failed
 //! while the same work succeeded on Linux.
 
+/// Map a Bebok tool name to the name the model should call for `transport`.
+pub fn tool_ref(name: &str, transport: bebok_llm::Transport) -> String {
+    match transport {
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: true, ..
+        } => {
+            format!("mcp__bebok__{name}")
+        }
+        _ => name.to_string(),
+    }
+}
+
 /// Human-readable host OS label (`Windows`, `macOS`, `Linux`, …).
 pub fn host_os_label() -> &'static str {
     match std::env::consts::OS {
@@ -25,8 +37,13 @@ pub fn host_os_label() -> &'static str {
 /// will therefore use. Append this to every assembled prompt — including
 /// delegated sub-agents.
 pub fn host_os_note() -> String {
+    host_os_note_for_transport(bebok_llm::Transport::Http)
+}
+
+pub fn host_os_note_for_transport(transport: bebok_llm::Transport) -> String {
+    let bash = tool_ref("bash", transport);
     format!(
-        "Host OS: {}. The `bash` tool runs that OS's native shell: `cmd /C` on \
+        "Host OS: {}. The `{bash}` tool runs that OS's native shell: `cmd /C` on \
          Windows, POSIX `sh -c` on macOS/Linux. On Windows use `cmd` syntax \
          (or, preferably, the native file/search tools) — never POSIX-only \
          pipelines like `head`, `tail`, `grep`, `wc` or `|` chains.",

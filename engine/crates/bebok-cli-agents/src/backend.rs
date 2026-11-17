@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::profile::{ProfileInput, ProfileWriter};
+
 /// What a backend can do. The runner and the provider consult these instead of
 /// probing the binary at call time.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -73,24 +75,47 @@ pub enum PromptBlock {
     },
 }
 
-/// What the installed binary says about itself, read once per binary from
-/// `<binary> --help` (see `runner.rs`). Backends gate every flag they are not
-/// certain of on [`CliProbe::mentions`], so an older or newer CLI gets the
-/// conservative argv path instead of a flag it rejects.
+/// What the installed binary says about itself, read once per binary (see
+/// [`crate::probe`]). Backends gate every flag they are not certain of on
+/// [`CliProbe::has`] or [`CliProbe::mentions`], so an older or newer CLI gets
+/// the conservative argv path instead of a flag it rejects.
 #[derive(Debug, Clone, Default)]
 pub struct CliProbe {
-    help: String,
+    features: crate::probe::CliFeatures,
 }
 
 impl CliProbe {
+    /// A probe built from help text alone (no version). Used by tests and by
+    /// callers that only hold the help output.
     pub fn new(help: String) -> Self {
-        Self { help }
+        Self {
+            features: crate::probe::CliFeatures::from_outputs(None, &help),
+        }
+    }
+
+    pub fn from_features(features: crate::probe::CliFeatures) -> Self {
+        Self { features }
+    }
+
+    /// The full feature set, for the profile lock and diagnostics.
+    pub fn features(&self) -> &crate::probe::CliFeatures {
+        &self.features
     }
 
     /// True when the help text contains `needle`. An empty probe (the binary
     /// did not answer `--help`) mentions nothing.
     pub fn mentions(&self, needle: &str) -> bool {
-        self.help.contains(needle)
+        self.features.mentions(needle)
+    }
+
+    /// True when the help lists `flag` as an option of its own.
+    pub fn has(&self, flag: &str) -> bool {
+        self.features.has(flag)
+    }
+
+    /// Case-insensitive substring match over the help text.
+    pub fn mentions_ci(&self, needle: &str) -> bool {
+        self.features.mentions_ci(needle)
     }
 }
 
@@ -165,6 +190,45 @@ pub struct CliRequest {
     pub write: bool,
     pub max_turns: Option<u32>,
     pub timeout: Duration,
+    /// Extra environment variables for this turn (e.g. the hook endpoint and
+    /// its turn-scoped token, see `bebok_core::cli_turn_token`). Merged into
+    /// the scrubbed inherited environment by the runner.
+    pub extra_env: Vec<(String, String)>,
+}
+
+/// Where the managed CLI profile lives.
+///
+/// `dir: None` means "the default location for this project and backend" (see
+/// `ProfileDir::resolve` in `profile.rs`). How the CLI is layered on top of the
+/// user's own settings is decided by `CliSpec::profile`, not here, so there is
+/// one source of truth for the mode.
+#[derive(Debug, Clone, Default)]
+pub struct ProfileDir {
+    /// Explicit profile directory. `None` selects the default location.
+    pub dir: Option<PathBuf>,
+}
+
+/// Everything a backend prepares for one turn beyond `build_command`'s argv:
+/// the extra environment, extra argv and the stdin payload.
+///
+/// The runner consumes this as the single source of truth for the child's
+/// environment (after scrubbing). Keeping it a separate value lets a backend
+/// assemble env/argv from the profile without threading half a dozen
+/// parameters through `build_command`.
+#[derive(Debug, Default)]
+pub struct PreparedTurn {
+    /// Extra argv appended to the built command (empty for now: `build_command`
+    /// stays the authority on argv).
+    pub args_extra: Vec<String>,
+    /// Environment variables for the child (merged over the scrubbed inherited
+    /// environment; these win on a name collision).
+    pub env: Vec<(String, String)>,
+    /// stdin payload, when the backend overrides `stdin_payload` per turn.
+    pub stdin: Option<Vec<u8>>,
+    /// Digest of the rendered profile this turn runs with (`None` when the
+    /// backend has no profile writer). A resumed conversation is only valid
+    /// while this digest is unchanged, see `CliSessionMeta::profile_hash`.
+    pub profile_hash: Option<String>,
 }
 
 /// An event parsed out of the CLI's output.
@@ -235,6 +299,11 @@ pub enum CliError {
     Scratch(String),
     #[error("invalid CLI provider config: {0}")]
     Config(String),
+    /// The CLI no longer knows the conversation this turn tried to resume
+    /// (purged, or a different binary). Never retried as-is: the caller sends
+    /// the full transcript instead.
+    #[error("the CLI no longer has the resumed conversation: {0}")]
+    ResumeLost(String),
 }
 
 impl CliError {
@@ -280,6 +349,55 @@ pub trait CliBackend: Send + Sync {
         probe: &CliProbe,
         scratch: &mut TurnScratch,
     ) -> Result<(String, Vec<String>), CliError>;
+    /// Profile generator for this backend, when it supports managed profiles.
+    fn profile_writer(&self) -> Option<&dyn ProfileWriter> {
+        None
+    }
+    /// Everything beyond argv that this turn needs: the managed profile files
+    /// (written only when their content hash changed), the profile's extra argv
+    /// and env, and the caller's `req.extra_env` (hook endpoint + turn token).
+    ///
+    /// Default for a backend without a profile writer: forward `req.extra_env`
+    /// untouched. A backend with a writer gets profile generation for free.
+    fn prepare(
+        &self,
+        spec: &crate::spec::CliSpec,
+        req: &CliRequest,
+        probe: &CliProbe,
+        profile: &ProfileDir,
+    ) -> Result<PreparedTurn, CliError> {
+        let mut env = req.extra_env.clone();
+        let Some(writer) = self.profile_writer() else {
+            return Ok(PreparedTurn {
+                args_extra: Vec::new(),
+                env,
+                stdin: None,
+                profile_hash: None,
+            });
+        };
+        let dir = profile.resolve(&req.cwd, self.id())?;
+        let rendered = writer.render(&ProfileInput {
+            spec,
+            req,
+            probe,
+            dir: &dir,
+        })?;
+        crate::profile::sync_profile(&dir, &rendered)?;
+        let profile_hash = Some(crate::profile::content_hash(&rendered));
+        env.extend(rendered.env.iter().cloned());
+        Ok(PreparedTurn {
+            args_extra: rendered.args,
+            env,
+            stdin: None,
+            profile_hash,
+        })
+    }
+    /// Whether the installed binary can continue a conversation by key
+    /// (`--resume`). Probe-gated: a binary that cannot resume gets the full
+    /// transcript every turn, never a tail that the CLI would read as a whole.
+    fn resume_flag_available(&self, _probe: &CliProbe) -> bool {
+        self.capabilities().resume
+    }
     /// Bytes to write to the child's stdin, or `None` to leave stdin closed
     /// (the prompt then travels on the command line). When `Some`, the runner
     /// closes stdin after the write, which is what lets the CLI start.

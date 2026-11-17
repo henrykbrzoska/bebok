@@ -311,7 +311,7 @@ impl Tool for TaskTool {
             );
         }
         let model = crate::agent::resolve_subagent_model(
-            &cfg.delegation,
+            &cfg,
             &parent_model,
             &agent_name,
             |a| cfg.model_for(a),

@@ -444,7 +444,31 @@ impl SessionState {
                 return;
             }
             meta.model = model;
+            // A CLI conversation belongs to the model it ran with.
+            meta.cli_session = None;
             meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// The CLI conversation this session can continue, if any.
+    pub async fn cli_session(&self) -> Option<crate::session::CliSessionMeta> {
+        self.meta.read().await.cli_session.clone()
+    }
+
+    /// Replace (or with `None`, forget) the CLI conversation record and
+    /// persist it. Called at the end of a CLI turn and by anything that makes
+    /// the recorded conversation stale.
+    pub async fn set_cli_session(&self, cli: Option<crate::session::CliSessionMeta>) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            if meta.cli_session == cli {
+                return;
+            }
+            meta.cli_session = cli;
             meta.clone()
         };
         if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {

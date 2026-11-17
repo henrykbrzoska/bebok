@@ -21,11 +21,11 @@
 //! Bebok's own tool registry); the process-tree helpers it needs are duplicated
 //! here, mirroring `bebok-tools/src/processes.rs`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use futures::stream::{BoxStream, StreamExt};
@@ -34,7 +34,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::backend::{
-    CliBackend, CliError, CliEvent, CliProbe, CliRequest, CliStreamState, TurnScratch,
+    CliBackend, CliError, CliEvent, CliProbe, CliRequest, CliStreamState, PreparedTurn, ProfileDir,
+    TurnScratch,
 };
 use crate::spec::CliSpec;
 
@@ -47,14 +48,6 @@ const EVENT_CHANNEL: usize = 64;
 const LOG_ARG_CHARS: usize = 120;
 /// How long the reader waits for the process to be reaped after stdout EOF.
 const REAP_GRACE: Duration = Duration::from_secs(5);
-/// How long `<binary> --help` may take. On timeout the turn still runs, with
-/// every probe-gated flag off.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Probe results per resolved binary path, for the life of the process. A
-/// CLI upgrade is picked up on the next engine start.
-static PROBE_CACHE: OnceLock<StdMutex<HashMap<PathBuf, CliProbe>>> = OnceLock::new();
-
 /// A running CLI: the parsed event stream plus the exit handle.
 ///
 /// The child process is owned *by the stream*: dropping `events` (an aborted
@@ -63,6 +56,34 @@ static PROBE_CACHE: OnceLock<StdMutex<HashMap<PathBuf, CliProbe>>> = OnceLock::n
 pub struct CliRun {
     pub events: BoxStream<'static, Result<CliEvent, CliError>>,
     pub exit: tokio::task::JoinHandle<Result<Option<i32>, CliError>>,
+    /// Profile digest this turn was started with (see `PreparedTurn`).
+    pub profile_hash: Option<String>,
+}
+
+/// What a resumed turn needs to know before its request is final: whether the
+/// binary can resume at all, and the profile it would run with.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumePreflight {
+    pub resume_supported: bool,
+    pub profile_hash: Option<String>,
+}
+
+/// Probe the binary and render the profile for `req`, without spawning
+/// anything. The provider calls this before choosing between a tail-only
+/// prompt and the full transcript. Rendering is idempotent (the profile lock
+/// short-circuits), so the spawn that follows writes nothing new.
+pub async fn preflight(
+    backend: &dyn CliBackend,
+    spec: &CliSpec,
+    req: &CliRequest,
+) -> Result<ResumePreflight, CliError> {
+    let resolved = resolve_program(backend, spec)?;
+    let probe = probe_binary(&resolved).await;
+    let prepared = backend.prepare(spec, req, &probe, &ProfileDir::default())?;
+    Ok(ResumePreflight {
+        resume_supported: backend.resume_flag_available(&probe),
+        profile_hash: prepared.profile_hash,
+    })
 }
 
 /// State shared by the event stream, the exit supervisor and the watchdog.
@@ -117,8 +138,19 @@ pub async fn spawn_cli(
     let probe = probe_binary(&resolved).await;
     let mut scratch = TurnScratch::default();
     let (requested, args) = backend.build_command(&spec, &req, &probe, &mut scratch)?;
-    let stdin_payload = backend.stdin_payload(&req, &probe);
+    // The profile directory is owned by the backend (see `ProfileDir`); the
+    // runner only cares about the env/stdin it produces.
+    let prepared: PreparedTurn = backend.prepare(&spec, &req, &probe, &ProfileDir::default())?;
+    let profile_hash = prepared.profile_hash.clone();
+    let stdin_payload = prepared
+        .stdin
+        .clone()
+        .or_else(|| backend.stdin_payload(&req, &probe));
     let program = effective_program(&requested, &resolved);
+    let args = args
+        .into_iter()
+        .chain(prepared.args_extra.clone())
+        .collect();
     let (program, args) = prepare_command(&program, args);
     let timeout = spec.timeout();
 
@@ -133,6 +165,13 @@ pub async fn spawn_cli(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // The child gets the scrubbed inherited environment plus this turn's
+    // extras (hook endpoint + turn token, profile overrides). `env_clear` makes
+    // the scrubbing authoritative: nothing is inherited implicitly.
+    cmd.env_clear();
+    for (key, value) in build_env(&prepared.env) {
+        cmd.env(&key, &value);
+    }
     apply_process_flags(&mut cmd);
 
     tracing::debug!(
@@ -325,7 +364,11 @@ pub async fn spawn_cli(
     })
     .boxed();
 
-    Ok(CliRun { events, exit })
+    Ok(CliRun {
+        events,
+        exit,
+        profile_hash,
+    })
 }
 
 /// Resolve the executable: explicit config, then the backend's env override,
@@ -358,44 +401,39 @@ fn resolve_program(backend: &dyn CliBackend, spec: &CliSpec) -> Result<PathBuf, 
     })
 }
 
-/// Ask the resolved binary what it supports: `<binary> --help`, cached per path.
+/// Ask the resolved binary what it supports (see [`crate::probe`]).
 ///
 /// Feature detection by help text is deliberately crude. It can only say a
 /// flag is *advertised*; a backend therefore gates each flag it is unsure of
 /// and keeps a fallback that works without it. A failed or timed-out probe
 /// yields an empty [`CliProbe`], which turns every gated flag off.
 async fn probe_binary(resolved: &Path) -> CliProbe {
-    let cache = PROBE_CACHE.get_or_init(|| StdMutex::new(HashMap::new()));
-    if let Ok(map) = cache.lock()
-        && let Some(hit) = map.get(resolved)
-    {
-        return hit.clone();
-    }
+    CliProbe::from_features(crate::probe::probe_features(resolved).await)
+}
 
-    let (program, args) = prepare_command(&resolved.to_string_lossy(), vec!["--help".to_string()]);
+/// Run `binary args` with a hard timeout and return its stdout when it exits 0.
+///
+/// Shared by the feature probe. Platform quirks (the `.cmd` shim, the console
+/// window on Windows) are handled here so the probe module stays portable.
+pub(crate) async fn capture_stdout(
+    binary: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<String> {
+    let argv: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let (program, argv) = prepare_command(&binary.to_string_lossy(), argv);
     let mut cmd = Command::new(&program);
-    cmd.args(&args)
+    cmd.args(&argv)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
     apply_process_flags(&mut cmd);
 
-    match tokio::time::timeout(PROBE_TIMEOUT, cmd.output()).await {
+    match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(Ok(output)) if output.status.success() => {
-            let probe = CliProbe::new(String::from_utf8_lossy(&output.stdout).into_owned());
-            if let Ok(mut map) = cache.lock() {
-                map.insert(resolved.to_path_buf(), probe.clone());
-            }
-            probe
+            Some(String::from_utf8_lossy(&output.stdout).into_owned())
         }
-        _ => {
-            // Not cached: a transient failure should get another try next turn.
-            tracing::debug!(
-                program = %resolved.display(),
-                "CLI --help probe failed; probe-gated flags stay off"
-            );
-            CliProbe::default()
-        }
+        _ => None,
     }
 }
 
@@ -591,6 +629,43 @@ mod platform {
     }
 }
 
+/// A variable name that looks like a credential and must not be handed to a
+/// child process. Mirrors `bebok-pty`'s PTY scrubbing rule (that crate is not a
+/// dependency here, so the check is duplicated like the process-tree helpers).
+fn is_secret(key: &str) -> bool {
+    let up = key.to_ascii_uppercase();
+    up.contains("PASSWORD")
+        || up.contains("API_KEY")
+        || up.contains("TOKEN")
+        || up.contains("SECRET")
+        || up.contains("CREDENTIAL")
+        || up == "BEBOK_PASSWORD"
+}
+
+/// Credentials the CLI genuinely needs to log in. They are provider
+/// credentials of the CLI's own vendor, not Bebok's: keeping them is what makes
+/// `bebok` profile mode use the user's existing account. Anything Bebok-side
+/// (`ZAI_API_KEY`, `BEBOK_TOKEN`, ...) stays scrubbed.
+fn is_cli_credential(key: &str) -> bool {
+    matches!(
+        key.to_ascii_uppercase().as_str(),
+        "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" | "CLAUDE_CODE_OAUTH_TOKEN"
+    )
+}
+
+/// The child's environment: inherited variables minus secrets, then `extra`
+/// merged on top (an extra of the same name wins).
+fn build_env(extra: &[(String, String)]) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(key, _)| !is_secret(key) || is_cli_credential(key))
+        .collect();
+    for (key, value) in extra {
+        env.retain(|(existing, _)| existing != key);
+        env.push((key.clone(), value.clone()));
+    }
+    env
+}
+
 /// Shorten a string for the debug log without splitting a UTF-8 character.
 fn truncate(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
@@ -734,6 +809,45 @@ mod tests {
     }
 
     #[test]
+    fn secrets_are_scrubbed_but_cli_credentials_survive() {
+        assert!(is_secret("ZAI_API_KEY"));
+        assert!(is_secret("BEBOK_TOKEN"));
+        assert!(is_secret("GITHUB_TOKEN"));
+        assert!(is_secret("DB_SECRET"));
+        assert!(!is_secret("PATH"));
+        // The CLI's own login must reach the child, or a `bebok` profile turn
+        // cannot authenticate.
+        assert!(is_cli_credential("ANTHROPIC_API_KEY"));
+        assert!(is_cli_credential("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!is_cli_credential("ZAI_API_KEY"));
+    }
+
+    #[test]
+    fn build_env_merges_extras_over_the_inherited_environment() {
+        let env = build_env(&[
+            (
+                "BEBOK_HOOK_URL".to_string(),
+                "http://127.0.0.1:1/x".to_string(),
+            ),
+            ("PATH".to_string(), "/tmp/overridden".to_string()),
+        ]);
+        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        assert_eq!(
+            get("BEBOK_HOOK_URL").as_deref(),
+            Some("http://127.0.0.1:1/x")
+        );
+        // An extra wins over the inherited value instead of duplicating it.
+        assert_eq!(get("PATH").as_deref(), Some("/tmp/overridden"));
+        assert_eq!(env.iter().filter(|(k, _)| k == "PATH").count(), 1);
+        for (key, _) in &env {
+            assert!(
+                !is_secret(key) || is_cli_credential(key),
+                "secret {key} leaked into the CLI env"
+            );
+        }
+    }
+
+    #[test]
     fn truncate_respects_char_boundaries() {
         assert_eq!(truncate("claude", 10), "claude");
         assert_eq!(truncate("zażółć", 2), "za…");
@@ -810,6 +924,9 @@ mod tests {
             allow_write: false,
             timeout_secs: 30,
             max_turns: None,
+            profile: Default::default(),
+            profile_overrides: None,
+            system_prompt_mode: Default::default(),
         }
     }
 
@@ -825,6 +942,7 @@ mod tests {
             write: false,
             max_turns: None,
             timeout: Duration::from_secs(30),
+            extra_env: Vec::new(),
         }
     }
 

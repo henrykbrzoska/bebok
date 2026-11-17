@@ -24,13 +24,19 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Json;
-use axum::extract::Path as UrlPath;
+use axum::extract::{Path as UrlPath, Query, State};
 use serde::Serialize;
 use tokio::process::Command;
 
-use bebok_cli_agents::{CliBackend, CliCapabilities, all_backends, backend_for, discover_binary};
+use bebok_cli_agents::{
+    CliBackend, CliCapabilities, CliFeatures, CliProbe, CliSpec, ProfilePreview, all_backends,
+    backend_for, discover_binary, preview_profile, probe_features,
+};
+use bebok_llm::ProviderKind;
 
 use crate::error::ApiError;
+use crate::routes::common::DirectoryQuery;
+use crate::state::AppState;
 
 /// How long `backend.probe_args()` may take for the *cached* listing. Short on
 /// purpose: the GUI's settings card would rather show "unknown version" than
@@ -110,6 +116,25 @@ pub struct CliProbeDto {
     pub code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
+    /// What the installed binary advertises (`--version`, `--help`). `None`
+    /// when no binary was found.
+    pub features: Option<CliFeaturesDto>,
+}
+
+/// camelCase mirror of [`CliFeatures`] for the settings card.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliFeaturesDto {
+    pub version: Option<String>,
+    /// Advertised long flags, sorted. Empty when `--help` did not answer.
+    pub flags: Vec<String>,
+}
+
+fn features_dto(features: &CliFeatures) -> CliFeaturesDto {
+    CliFeaturesDto {
+        version: features.version.clone(),
+        flags: features.sorted_flags(),
+    }
 }
 
 /// Raw result of one bounded subprocess run.
@@ -168,17 +193,59 @@ pub async fn probe_cli_backend(
         },
     };
 
+    let features = probe_features(&binary).await;
     let dto = CliProbeDto {
         id: backend.id().to_string(),
         ok: outcome.code == Some(0),
         code: outcome.code,
         stdout: truncate(&outcome.stdout, OUTPUT_CAP),
         stderr: truncate(&outcome.stderr, OUTPUT_CAP),
+        features: Some(features_dto(&features)),
     };
     // The install state may have changed since the listing was cached (that is
     // the point of a manual probe), so drop it and let the next read rebuild.
     invalidate_cache();
     Ok(Json(dto))
+}
+
+/// `GET /cli/profile/{provider}?directory=` -> the managed profile the provider
+/// would write for this project: files, extra argv and env.
+///
+/// Read-only: nothing is written, and the render uses the installed binary's
+/// feature probe. The turn-specific system prompt and the per-turn hook token
+/// are absent by design, so the preview carries no secrets.
+pub async fn get_cli_profile(
+    State(state): State<AppState>,
+    UrlPath(provider): UrlPath<String>,
+    Query(q): Query<DirectoryQuery>,
+) -> Result<Json<ProfilePreview>, ApiError> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| ApiError::from_core(&e))?;
+    let cfg = instance.config_snapshot();
+    let spec = cfg
+        .provider_spec(&provider)
+        .ok_or_else(|| ApiError::not_found(format!("unknown provider '{provider}'")))?;
+    if spec.kind != ProviderKind::Cli {
+        return Err(ApiError::bad_request(format!(
+            "provider '{provider}' is not a CLI provider"
+        )));
+    }
+    let cli_spec =
+        CliSpec::from_extra(&spec.extra).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let backend = backend_for(&cli_spec.backend).ok_or_else(|| {
+        ApiError::bad_request(format!("unknown CLI backend '{}'", cli_spec.backend))
+    })?;
+
+    let probe = match discover_binary(backend.as_ref()) {
+        Some(binary) => CliProbe::from_features(probe_features(&binary).await),
+        None => CliProbe::default(),
+    };
+    preview_profile(backend.as_ref(), &cli_spec, &instance.root, &probe)
+        .map(Json)
+        .map_err(|e| ApiError::bad_request(e.to_string()))
 }
 
 /// Probe result reported when discovery found nothing: still a `200`, with the
@@ -195,6 +262,7 @@ fn missing_binary_probe(backend: &dyn CliBackend) -> CliProbeDto {
             backend.binary_names().join(", "),
             backend.env_override(),
         ),
+        features: None,
     }
 }
 
@@ -370,8 +438,14 @@ mod tests {
         fn env_override(&self) -> &'static str {
             "BEBOK_STUB_BIN"
         }
-        fn build_command(&self, _spec: &CliSpec, _req: &CliRequest) -> (String, Vec<String>) {
-            ("stub".to_string(), Vec::new())
+        fn build_command(
+            &self,
+            _spec: &CliSpec,
+            _req: &CliRequest,
+            _probe: &bebok_cli_agents::backend::CliProbe,
+            _scratch: &mut bebok_cli_agents::backend::TurnScratch,
+        ) -> Result<(String, Vec<String>), CliError> {
+            Ok(("stub".to_string(), Vec::new()))
         }
         fn parse_line(
             &self,
@@ -446,9 +520,13 @@ mod tests {
             code: Some(0),
             stdout: "Stub CLI 1.0\n".into(),
             stderr: String::new(),
+            features: Some(CliFeaturesDto {
+                version: Some("1.0".into()),
+                flags: vec!["--settings".into()],
+            }),
         };
         let json = serde_json::to_value(&dto).expect("serialisable");
-        for key in ["id", "ok", "code", "stdout", "stderr"] {
+        for key in ["id", "ok", "code", "stdout", "stderr", "features"] {
             assert!(json.get(key).is_some(), "{key} missing from {json}");
         }
         assert_eq!(json["ok"], true);
