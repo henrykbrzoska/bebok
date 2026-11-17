@@ -54,14 +54,21 @@ pub fn should_restart(
     None
 }
 
-/// Snapshot the loop compares across ticks: tool-call count + step count.
-/// (Full `analyze_supervision` needs private `delegation` internals; the
-/// count pair is the cheap, stable proxy. A caller that already computed a
-/// verdict passes it in — see `run_child`.)
+/// Snapshot the loop compares across ticks.
+///
+/// `tool_calls` / `steps` are Bebok-tool progress; `activity` is the session's
+/// monotonic transcript-activity counter, and it is the field that keeps the
+/// watchdog honest. A CLI provider reports its own tool use as text (see
+/// `bebok_cli_agents::provider`), so a claude-cli child that is busy running a
+/// build shows `tool_calls == 0, steps == 1` for its whole turn — an unchanged
+/// pair that used to be read as "silent" and restarted the child (twice, then
+/// a hard error for the orchestrator). `activity` grows on every streamed
+/// delta, so only a genuinely quiet child trips the restart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ProgressSnapshot {
     pub tool_calls: usize,
     pub steps: usize,
+    pub activity: u64,
 }
 
 /// Watchdog loop for one child task. Ticks every `watchdog_secs`, asks
@@ -145,6 +152,44 @@ mod tests {
         assert!(should_restart("looping", false, 1, 2).is_some());
     }
 
+    /// Regression: a busy CLI child. Its tool use arrives as text, so
+    /// `tool_calls`/`steps` stay frozen for the whole turn while `activity`
+    /// climbs. That must NOT be read as silence (it used to be, and the child
+    /// was restarted until the orchestrator got a hard error).
+    #[tokio::test]
+    async fn a_busy_cli_child_is_not_restarted() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let done = CancellationToken::new();
+        let done2 = done.clone();
+        let tick = std::sync::atomic::AtomicU64::new(0);
+        let handle = tokio::spawn(watchdog_loop(
+            move || {
+                let activity = tick.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                (
+                    ProgressSnapshot {
+                        // Frozen: the CLI's tool use is presented as text.
+                        tool_calls: 0,
+                        steps: 1,
+                        activity,
+                    },
+                    "ok".to_string(),
+                )
+            },
+            done2,
+            tx,
+            2,
+            0,
+            1,
+        ));
+        let signalled = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await;
+        assert!(
+            signalled.is_err(),
+            "a child whose activity keeps growing must not be restarted: {signalled:?}"
+        );
+        done.cancel();
+        handle.await.expect("loop must exit cleanly");
+    }
+
     #[tokio::test]
     async fn loop_signals_silent_child() {
         let (tx, mut rx) = mpsc::channel(1);
@@ -156,6 +201,7 @@ mod tests {
                     ProgressSnapshot {
                         tool_calls: 3,
                         steps: 5,
+                        activity: 9,
                     },
                     "ok".to_string(),
                 )

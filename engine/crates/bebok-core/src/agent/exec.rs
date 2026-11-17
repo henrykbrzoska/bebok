@@ -62,6 +62,33 @@ fn ok_tool_mutation(tool_name: &str, output_text: &str) -> bool {
     FILE_MUTATING_TOOLS.contains(&tool_name) && !output_text.trim_start().starts_with("error:")
 }
 
+/// Tools whose output comes from the network, where an anti-bot / CAPTCHA
+/// wall can show up as ordinary-looking "successful" text.
+fn is_network_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "fetch" | "browser_open" | "browser_get_text")
+        || tool_name.starts_with("mcp__")
+}
+
+/// A challenge page returned by a plain HTTP tool is a dead end: the model
+/// cannot solve it and retrying only deepens the block. Append one hint line
+/// pointing at `browser_solve_captcha`, which opens a visible window and
+/// keeps the cookies the user earns by solving it.
+pub fn with_challenge_hint(tool_name: &str, text: String) -> String {
+    if !is_network_tool(tool_name) || text.trim_start().starts_with("error:") {
+        return text;
+    }
+    let Some(marker) = bebok_tools::browser::detect_challenge(&text) else {
+        return text;
+    };
+    format!(
+        "{text}\n\n[hint: this result looks like a CAPTCHA / anti-bot page (matched \"{marker}\"). \
+         Do not retry the same request: call `browser_solve_captcha` with the URL that returned \
+         it (for an MCP server without a URL, use its own HTTP address, e.g. a search URL) — a \
+         visible browser window opens, the user solves the challenge, and you continue with \
+         `browser_get_text` on the solved page, which keeps the cookies.]"
+    )
+}
+
 /// Execute one permission-gated tool call (the `Run` arm of the turn loop).
 /// Returns `false` when the turn loop should stop processing further calls
 /// (abort); `true` to continue with the next pending call.
@@ -171,6 +198,9 @@ pub async fn exec_gated_call(
     let compressed = compress_tool_output(&output.text);
     let scrubbed = scrub_secrets(&compressed);
     let text = truncate_output(&scrubbed, ctx.tool_output_cap);
+    // A challenge page from a network tool must not look like a normal
+    // answer: point the model at `browser_solve_captcha` (WP-CAPTCHA).
+    let text = with_challenge_hint(tool_name, text);
 
     let ok = ctx
         .state
@@ -298,7 +328,35 @@ pub fn emit_llm_response(bus: &EventBus, state: &SessionState, model: &str, deta
 #[cfg(test)]
 mod tests {
     use super::attach_tool_image;
+    use super::with_challenge_hint;
     use crate::session::{Message, Part};
+
+    /// WP-CAPTCHA: a challenge body from `fetch` / an MCP server carries a
+    /// hint naming `browser_solve_captcha`; ordinary results do not.
+    #[test]
+    fn challenge_output_gets_a_handoff_hint() {
+        let wall = "Please verify you are human before continuing.";
+        let hinted = with_challenge_hint("fetch", wall.to_string());
+        assert!(hinted.starts_with(wall), "{hinted}");
+        assert!(hinted.contains("browser_solve_captcha"), "{hinted}");
+
+        let hinted = with_challenge_hint("mcp__searxng__searxng_web_search", wall.to_string());
+        assert!(hinted.contains("browser_solve_captcha"), "{hinted}");
+
+        // Not a challenge, not a network tool, or already an error: untouched.
+        assert_eq!(
+            with_challenge_hint("fetch", "sunny, 21C".to_string()),
+            "sunny, 21C"
+        );
+        assert_eq!(
+            with_challenge_hint("read_file", wall.to_string()),
+            wall.to_string()
+        );
+        assert_eq!(
+            with_challenge_hint("fetch", "error: 429 too many requests".to_string()),
+            "error: 429 too many requests"
+        );
+    }
 
     fn message_with_tool(call_id: &str) -> Message {
         let mut m = Message::assistant_with("code", "m");

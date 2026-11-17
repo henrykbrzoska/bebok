@@ -58,7 +58,18 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
              errors since the last navigation; `browser_wait` waits for a selector, text or network \
              idle; `browser_find` lists interactive elements with reliable selectors for \
              `browser_click` / `browser_type`; `browser_get_text` reads the page text; \
-             `browser_eval` runs JavaScript. Any http(s) URL works, including localhost dev servers.\n",
+             `browser_eval` runs JavaScript. Any http(s) URL works, including localhost dev servers.\n\
+             - CAPTCHA / anti-bot walls: when `fetch`, an MCP tool (a search server, say) or a \
+             page returns a challenge (\"verify you are human\", \"unusual traffic\", Cloudflare \
+             \"Just a moment...\", a recaptcha/hcaptcha/turnstile widget), do NOT retry the \
+             blocked request in a loop. Call `browser_solve_captcha` with that URL: it opens a \
+             VISIBLE Chromium window and waits (up to `timeout_secs`) while the user solves the \
+             challenge, then returns the page text. The cookies gained by solving live in that \
+             browser, so continue there (`browser_get_text`, `browser_find`, `browser_click`) \
+             instead of calling the blocked API again. When the blocked call belongs to an MCP \
+             server and carries no URL (a search server, say), open the server's own HTTP address \
+             (e.g. `http://127.0.0.1:9090/search?q=<query>` for SearXNG) in the browser and do \
+             the search there.\n",
         );
     } else {
         s.push_str(

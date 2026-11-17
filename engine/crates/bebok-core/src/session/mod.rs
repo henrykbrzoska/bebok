@@ -483,6 +483,13 @@ pub struct Session {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<(Uuid, usize)>,
+    /// True only for sessions spawned by the `task`/`fleet` tools
+    /// (`create_subagent_session`). Fork/compact sessions keep `parent` for
+    /// genealogy but are NOT sub-agents — they must keep their delegation
+    /// tools. `request.rs` gates delegation tools on this flag, never on
+    /// `parent` (see `is_subagent`).
+    #[serde(default)]
+    pub subagent: bool,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
@@ -522,6 +529,7 @@ impl Session {
             agent: agent.into(),
             model: None,
             parent: None,
+            subagent: false,
             created_at: now,
             updated_at: now,
             usage: UsageTotals::default(),

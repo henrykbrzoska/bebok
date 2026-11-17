@@ -198,11 +198,14 @@ async function ask() {
 }
 
 function consumePendingSelection() {
-  if (!chrome.storage || !chrome.storage.session) return;
-  chrome.storage.session.get({ pendingSelection: null }, (values) => {
+  if (!chrome.storage) return;
+  // storage.session (Chrome 102+/Firefox 115+) with a local fallback.
+  const area = chrome.storage.session || chrome.storage.local;
+  if (!area) return;
+  area.get({ pendingSelection: null }, (values) => {
     const pending = values && values.pendingSelection;
     if (!pending || !pending.text) return;
-    chrome.storage.session.remove('pendingSelection', () => {});
+    area.remove('pendingSelection', () => {});
     const current = dom.question.value.trim();
     const quote = pending.text.trim();
     const prefix = pending.url ? `(from ${pending.url})\n` : '';

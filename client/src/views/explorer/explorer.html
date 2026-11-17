@@ -3,9 +3,25 @@
     <div class="error-banner">{{ error() }}</div>
   }
 
+  @if (directory()) {
+    <app-explorer-nav-bar
+      [directory]="directory()!"
+      [path]="selectedPath()"
+      [dirty]="dirty()"
+      (opened)="onNavOpen($event)"
+      (revealed)="onNavReveal($event)"
+      (searchRequested)="openGoto('files')"
+    />
+  }
+
   <div class="explorer-body">
     <!-- F2-16: 260px lazy, gitignore-aware tree (engine `GET /fs/tree`). -->
-    <aside class="tree" [attr.aria-label]="t('explorer.title')">
+    <aside
+      class="tree"
+      [attr.aria-label]="t('explorer.title')"
+      [appContextMenu]="'explorer.tree'"
+      [appContextMenuData]="treeMenuData()"
+    >
       @if (loading() && rows().length === 0) {
         <p class="tree-note">{{ t('explorer.loading') }}</p>
       } @else if (rows().length === 0) {
@@ -23,15 +39,80 @@
             [attr.aria-current]="!row.is_dir && selectedPath() === row.path ? 'true' : null"
             (click)="toggle(row)"
             (contextmenu)="onRowContextMenu($event, row)"
+            [appContextMenu]="'explorer.file'"
+            [appContextMenuData]="fileMenuData(row)"
             [title]="row.path"
           >
             <span class="twisty" aria-hidden="true">{{
               row.is_dir ? (row.expanded ? '▾' : '▸') : '📄'
             }}</span>
-            <span class="name">{{ row.name }}</span>
+            @if (inlineMode() === 'rename' && inlineTarget() === row.path) {
+              <input
+                class="inline-input"
+                [ngModel]="inlineName()"
+                (ngModelChange)="inlineName.set($event)"
+                (keydown.enter)="commitInline()"
+                (keydown.escape)="cancelInline()"
+                (click)="$event.stopPropagation()"
+                (contextmenu)="$event.stopPropagation()"
+                [attr.aria-label]="t('explorer.renameLabel')"
+                autofocus
+              />
+            } @else {
+              <span class="name">{{ row.name }}</span>
+            }
+            @if (!row.is_dir && selectedPath() === row.path && dirty()) {
+              <span class="dirty-dot" aria-hidden="true">•</span>
+            }
+          </li>
+          @if (
+            inlineMode() !== null &&
+            inlineMode() !== 'rename' &&
+            inlineParent() === row.path &&
+            row.is_dir
+          ) {
+            <li class="tree-row inline-row" [style.padding-left.px]="8 + (row.depth + 1) * 14">
+              <span class="twisty" aria-hidden="true">📄</span>
+              <input
+                class="inline-input"
+                [ngModel]="inlineName()"
+                (ngModelChange)="inlineName.set($event)"
+                (keydown.enter)="commitInline()"
+                (keydown.escape)="cancelInline()"
+                (click)="$event.stopPropagation()"
+                (contextmenu)="$event.stopPropagation()"
+                [placeholder]="
+                  t(inlineMode() === 'file' ? 'explorer.newFileHint' : 'explorer.newFolderHint')
+                "
+                [attr.aria-label]="t('explorer.nameLabel')"
+                autofocus
+              />
+            </li>
+          }
+        }
+        @if (inlineMode() !== null && inlineMode() !== 'rename' && inlineParent() === '') {
+          <li class="tree-row inline-row" [style.padding-left.px]="8">
+            <span class="twisty" aria-hidden="true">📄</span>
+            <input
+              class="inline-input"
+              [ngModel]="inlineName()"
+              (ngModelChange)="inlineName.set($event)"
+              (keydown.enter)="commitInline()"
+              (keydown.escape)="cancelInline()"
+              (click)="$event.stopPropagation()"
+              (contextmenu)="$event.stopPropagation()"
+              [placeholder]="
+                t(inlineMode() === 'file' ? 'explorer.newFileHint' : 'explorer.newFolderHint')
+              "
+              [attr.aria-label]="t('explorer.nameLabel')"
+              autofocus
+            />
           </li>
         }
       </ul>
+      @if (inlineError()) {
+        <p class="inline-error">{{ inlineError() }}</p>
+      }
     </aside>
 
     <!-- F2-17: content pane - 44px header + body/editor. -->
@@ -42,40 +123,96 @@
         <header
           class="pane-head"
           (contextmenu)="onPreviewContextMenu($event)"
+          [appContextMenu]="'explorer.pane'"
+          [appContextMenuData]="paneMenuData()"
           [title]="isHtmlSelection() ? t('htmlPreview.rightClickHint') : ''"
         >
           <span class="file-name">{{ selectedName() }}</span>
-          <span class="file-path">{{ selectedPath() }}</span>
+          @if (dirty()) {
+            <span class="dirty-dot" aria-hidden="true" [title]="t('explorer.unsavedHint')">•</span>
+          }
           <span class="spacer"></span>
-          @if (!editing()) {
-            @if (isHtmlSelection()) {
-              <button
-                class="pane-btn"
-                (click)="htmlPreview.set(htmlPreview() === null ? fileContent() : null)"
-              >
-                {{ t('htmlPreview.preview') }}
-              </button>
-            }
-            <button class="pane-btn" (click)="openInPreview()">{{ t('explorer.openInPreview') }}</button>
-            <button class="pane-btn" (click)="startEdit()">{{ t('explorer.edit') }}</button>
-          } @else {
-            <button class="pane-btn" (click)="cancelEdit()">{{ t('explorer.cancel') }}</button>
-            <button class="pane-btn primary" (click)="saveEdit()" [disabled]="saving()">
+          @if (gotoBusy()) {
+            <span class="goto-busy">{{ t('explorer.gotoSearching') }}</span>
+          } @else if (editing() && canGoto()) {
+            <span class="goto-hint" [title]="t('explorer.gotoHint')">{{ t('explorer.gotoHint') }}</span>
+          }
+          @if (isHtmlSelection()) {
+            <button
+              class="pane-btn"
+              [class.active]="htmlPreview() !== null"
+              (click)="htmlPreview.set(htmlPreview() === null ? draftContent() : null)"
+            >
+              {{ t('htmlPreview.preview') }}
+            </button>
+          }
+          @if (isMarkdownSelection()) {
+            <button
+              class="pane-btn"
+              data-testid="explorer-md-preview"
+              [class.active]="mdPreview()"
+              (click)="mdPreview.set(!mdPreview())"
+            >
+              {{ t('explorer.mdPreview') }}
+            </button>
+          }
+          <button
+            class="pane-btn"
+            data-testid="explorer-find-in-files"
+            (click)="openFindInFiles()"
+            [title]="t('findInFiles.title') + ' (Ctrl+Shift+F)'"
+          >
+            {{ t('findInFiles.button') }}
+          </button>
+          <button
+            class="pane-btn"
+            data-testid="explorer-open-in-preview"
+            [class.active]="sidePreview()"
+            (click)="openInPreview()"
+          >
+            {{ t('explorer.openInPreview') }}
+          </button>
+          @if (editing()) {
+            <button
+              class="pane-btn"
+              data-testid="explorer-discard"
+              (click)="cancelEdit()"
+              [disabled]="!dirty() || saving()"
+            >
+              {{ t('explorer.discard') }}
+            </button>
+            <button
+              class="pane-btn primary"
+              data-testid="explorer-save"
+              (click)="saveEdit()"
+              [disabled]="!dirty() || saving()"
+            >
               {{ saving() ? t('explorer.saving') : t('explorer.save') }}
             </button>
           }
         </header>
 
+        @if (gotoChoices(); as choices) {
+          <div class="goto-picker" role="listbox" [attr.aria-label]="t('explorer.gotoPick', { symbol: gotoSymbol() })">
+            <div class="goto-picker-head">
+              <span>{{ t('explorer.gotoPick', { symbol: gotoSymbol() }) }}</span>
+              <button class="pane-btn" (click)="gotoChoices.set(null)">✕</button>
+            </div>
+            @for (hit of choices; track hit.path + ':' + hit.line) {
+              <button
+                class="goto-choice"
+                role="option"
+                data-testid="explorer-goto-choice"
+                (click)="jumpTo(hit)"
+              >
+                <span class="goto-loc">{{ hit.path }}:{{ hit.line }}</span>
+                <span class="goto-snippet">{{ hit.snippet }}</span>
+              </button>
+            }
+          </div>
+        }
         @if (fileLoading()) {
           <div class="placeholder">{{ t('explorer.loading') }}</div>
-        } @else if (editing()) {
-          <textarea
-            class="file-editor"
-            [ngModel]="draftContent()"
-            (ngModelChange)="draftContent.set($event)"
-            spellcheck="false"
-            [attr.aria-label]="t('explorer.editorLabel')"
-          ></textarea>
         } @else if (htmlPreview() !== null) {
           <div class="html-preview-wrap">
             <app-html-preview
@@ -83,6 +220,66 @@
               [label]="selectedName() ?? ''"
               (closed)="htmlPreview.set(null)"
             />
+          </div>
+        } @else if (editing() && !mdPreview()) {
+          @if (find.open()) {
+            <app-find-bar scope="explorer" [text]="draftContent()" [container]="findContainer()" />
+          }
+          <div class="code-editor" [class.goto-armed]="gotoArmed() && canGoto()">
+            <pre
+              #editorLayer
+              class="editor-layer"
+              aria-hidden="true"
+              (scroll)="syncArea(editorLayer)"
+            ><code class="hljs" [innerHTML]="highlightedDraft()"></code></pre>
+            <textarea
+              #editorArea
+              class="file-editor"
+              wrap="off"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              data-testid="explorer-editor"
+              [ngModel]="draftContent()"
+              (ngModelChange)="onDraftChange($event)"
+              (scroll)="syncLayer(editorArea); closeCompletion()"
+              (click)="onEditorClick($event, editorArea); closeCompletion()"
+              (keydown)="onEditorKeydown($event, editorArea)"
+              (input)="onEditorInput(editorArea)"
+              (blur)="closeCompletion()"
+              [appContextMenu]="'explorer.editor'"
+              [appContextMenuData]="editorMenuData(editorArea)"
+              [attr.aria-label]="t('explorer.editorLabel')"
+            ></textarea>
+            @if (completePos(); as pos) {
+              <ul
+                class="complete-popup"
+                role="listbox"
+                data-testid="explorer-complete"
+                [attr.aria-label]="t('explorer.completeLabel')"
+                [style.left.px]="pos.left"
+                [style.top.px]="pos.top ?? null"
+                [style.bottom.px]="pos.bottom ?? null"
+              >
+                @for (item of completeItems(); track $index; let i = $index) {
+                  <li
+                    role="option"
+                    class="complete-item"
+                    data-testid="explorer-complete-item"
+                    [class.active]="i === completeIndex()"
+                    [attr.aria-selected]="i === completeIndex()"
+                    [title]="item.detail ?? item.kind"
+                    (mousedown)="onCompletePick($event, i, editorArea)"
+                  >
+                    <span class="complete-kind">{{ item.kind }}</span>
+                    <span class="complete-label">{{ item.label }}</span>
+                    @if (item.path) {
+                      <span class="complete-detail">{{ item.path }}:{{ item.line }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+            }
           </div>
         } @else if (isImageSelection()) {
           <div class="image-preview-wrap">
@@ -136,5 +333,100 @@
         }
       }
     </main>
+
+    @if (sidePreview()) {
+      <aside class="side-preview" data-testid="explorer-side-preview">
+        <div class="side-preview-bar">
+          <span>{{ t('explorer.openInPreview') }}</span>
+          <span class="spacer"></span>
+          <button
+          class="side-preview-close"
+          data-testid="explorer-side-preview-close"
+          (click)="sidePreview.set(false)"
+          [title]="t('explorer.closePreview')"
+          [attr.aria-label]="t('explorer.closePreview')"
+        >
+            ✕
+          </button>
+        </div>
+        <app-preview-panel />
+      </aside>
+    }
   </div>
+  @if (findInFilesOpen() && directory()) {
+    <app-find-in-files
+      [directory]="directory()!"
+      [initialQuery]="findInFilesQuery()"
+      (opened)="onFindInFilesOpen($event)"
+      (closed)="findInFilesOpen.set(false)"
+    />
+  }
+  @if (gotoOpen() && directory()) {
+    <app-goto-dialog
+      [directory]="directory()!"
+      [initialTab]="gotoTab()"
+      [initialQuery]="gotoQuery()"
+      [recent]="recentFiles()"
+      (opened)="onGotoOpen($event)"
+      (closed)="gotoOpen.set(false)"
+    />
+  }
+  @if (pendingDelete()) {
+    <div class="delete-overlay" (click)="cancelDelete()">
+      <div
+        class="delete-modal"
+        role="alertdialog"
+        [attr.aria-label]="t('explorer.deleteTitle')"
+        (click)="$event.stopPropagation()"
+      >
+        <p class="delete-text">{{ t('explorer.deleteConfirm') }}</p>
+        <p class="delete-path">{{ pendingDelete() }}</p>
+        @if (pendingDeleteIsDir()) {
+          <label class="delete-recursive">
+            <input
+              type="checkbox"
+              [ngModel]="deleteRecursive()"
+              (ngModelChange)="deleteRecursive.set($event)"
+            />
+            {{ t('explorer.deleteRecursive') }}
+          </label>
+        }
+        <div class="delete-actions">
+          <button class="pane-btn" (click)="cancelDelete()">{{ t('explorer.cancel') }}</button>
+          <button class="pane-btn danger" (click)="confirmDelete()">
+            {{ t('explorer.deleteButton') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+  @if (pendingNav()) {
+    <div class="delete-overlay" (click)="cancelNav()">
+      <div
+        class="delete-modal"
+        role="alertdialog"
+        [attr.aria-label]="t('explorer.unsavedTitle')"
+        (click)="$event.stopPropagation()"
+      >
+        <p class="delete-text">{{ t('explorer.unsavedConfirm') }}</p>
+        <p class="delete-path">{{ selectedPath() }}</p>
+        <div class="delete-actions">
+          <button class="pane-btn" data-testid="explorer-nav-cancel" (click)="cancelNav()">
+            {{ t('explorer.cancel') }}
+          </button>
+          <button class="pane-btn" data-testid="explorer-nav-discard" (click)="discardAndContinue()">
+            {{ t('explorer.dontSave') }}
+          </button>
+          <button
+            class="pane-btn primary"
+            data-testid="explorer-nav-save"
+            (click)="saveAndContinue()"
+            [disabled]="saving()"
+          >
+            {{ t('explorer.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  }
 </section>

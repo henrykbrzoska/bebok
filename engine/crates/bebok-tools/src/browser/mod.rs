@@ -1,11 +1,12 @@
 //! `browser_*`: headless-browser automation tools (WP-BROWSER / F6-17).
 //!
-//! Nine tools — `browser_open`, `browser_screenshot`, `browser_click`,
+//! Ten tools — `browser_open`, `browser_screenshot`, `browser_click`,
 //! `browser_type`, `browser_get_text`, `browser_eval` plus the verification
 //! trio `browser_console`, `browser_wait`, `browser_find` (WP-AUTOVERIFY /
-//! F8-1, see [`verify_tools`] and [`console`]) — that drive one headless
-//! Chromium page per Bebok session over the Chrome DevTools Protocol (via
-//! the `chromiumoxide` crate). The browser executable is an installed
+//! F8-1, see [`verify_tools`] and [`console`]) and `browser_solve_captcha`
+//! (see [`handoff`], which hands a CAPTCHA page to the user in a visible
+//! window) — that drive one Chromium page per Bebok session over the Chrome
+//! DevTools Protocol (via the `chromiumoxide` crate). The browser executable is an installed
 //! Chrome / Edge / Chromium found by [`discovery`]; nothing is downloaded.
 //!
 //! Permissions: every `browser_*` call is `Ask` by default. The mutating
@@ -34,6 +35,7 @@ pub mod console;
 pub mod discovery;
 pub mod driver;
 pub mod frames;
+pub mod handoff;
 pub mod page;
 pub mod remote;
 pub mod settings;
@@ -48,6 +50,7 @@ pub use driver::{
     resolve_executable, set_frame_sink,
 };
 pub use frames::{Frame, FrameSink};
+pub use handoff::detect_challenge;
 pub use page::{AnyPage, BrowserPage, LocalPage, evaluate_checked};
 pub use remote::{RemoteClient, RemotePage};
 pub use settings::{BrowserDisplay, BrowserSettings};
@@ -65,6 +68,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "browser_console",
     "browser_wait",
     "browser_find",
+    "browser_solve_captcha",
 ];
 
 /// The `browser_*` family sharing the process-wide [`BrowserDriver`].
@@ -99,7 +103,10 @@ pub fn tools_with(driver: Arc<BrowserDriver>) -> Vec<Arc<dyn Tool>> {
         Arc::new(verify_tools::BrowserWait {
             driver: driver.clone(),
         }),
-        Arc::new(verify_tools::BrowserFind { driver }),
+        Arc::new(verify_tools::BrowserFind {
+            driver: driver.clone(),
+        }),
+        Arc::new(handoff::BrowserSolveCaptcha { driver }),
     ]
 }
 

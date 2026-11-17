@@ -106,8 +106,15 @@ describe('StartView (F6-16 new-session dialog + worktree removal offer)', () => 
     ping: jasmine.Spy;
     isTauri: () => boolean;
     connected: () => boolean;
+    connection: ReturnType<typeof signal<null>>;
+    engineUrlWithToken: () => string;
     remoteDefaults: () => { baseUrl: string };
     readLastDirectory: () => string | null;
+    isFixedProfile: () => boolean;
+    reconfigure: jasmine.Spy;
+    getProfile: () => { kind: string; token: string | null };
+    saveFixedProfile: jasmine.Spy;
+    clearProfile: jasmine.Spy;
   };
   let projectSessions: {
     directory: ReturnType<typeof signal<string | null>>;
@@ -149,8 +156,15 @@ describe('StartView (F6-16 new-session dialog + worktree removal offer)', () => 
       ping: jasmine.createSpy('ping').and.resolveTo(undefined),
       isTauri: () => false,
       connected: () => true,
+      connection: signal(null),
+      engineUrlWithToken: () => '',
       remoteDefaults: () => ({ baseUrl: 'http://127.0.0.1:8787' }),
       readLastDirectory: () => DIR,
+      isFixedProfile: () => false,
+      reconfigure: jasmine.createSpy('reconfigure'),
+      getProfile: () => ({ kind: 'manual', token: null }),
+      saveFixedProfile: jasmine.createSpy('saveFixedProfile'),
+      clearProfile: jasmine.createSpy('clearProfile'),
     };
     projectSessions = {
       directory: signal<string | null>(DIR),

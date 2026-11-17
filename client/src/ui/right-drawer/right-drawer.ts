@@ -29,6 +29,7 @@ import {
   ElementRef,
   afterRenderEffect,
   inject,
+  signal,
   untracked,
 } from '@angular/core';
 
@@ -99,6 +100,9 @@ export class RightDrawer {
     { id: 'batch', labelKey: 'drawer.batch' },
   ];
 
+  /** True while a drag is in flight (highlight + no text selection). */
+  readonly resizing = signal(false);
+
   private dragPointerId: number | null = null;
   private dragStartX = 0;
   private dragStartWidth = 0;
@@ -156,6 +160,7 @@ export class RightDrawer {
     this.dragPointerId = event.pointerId;
     this.dragStartX = event.clientX;
     this.dragStartWidth = this.width();
+    this.resizing.set(true);
     handle.setPointerCapture(event.pointerId);
   }
 
@@ -172,6 +177,7 @@ export class RightDrawer {
     }
     (event.target as HTMLElement).releasePointerCapture(event.pointerId);
     this.dragPointerId = null;
+    this.resizing.set(false);
   }
 
   private scrollPanelIntoView(panel: PanelId): void {

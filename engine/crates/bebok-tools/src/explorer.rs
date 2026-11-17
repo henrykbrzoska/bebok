@@ -179,6 +179,72 @@ pub fn write_file_text(root: &Path, rel: &str, content: &str) -> Result<(), Stri
     std::fs::write(&path, content).map_err(|e| format!("failed to write {rel}: {e}"))
 }
 
+/// Create an empty file (explorer "New file"). Creates parent directories as
+/// needed. Refuses when the target already exists.
+pub fn create_file(root: &Path, rel: &str) -> Result<(), String> {
+    let path = normalize_rel(root, rel)?;
+    if path.exists() {
+        return Err(format!("already exists: {rel}"));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create parent: {e}"))?;
+    }
+    std::fs::write(&path, "").map_err(|e| format!("failed to create {rel}: {e}"))
+}
+
+/// Create a directory (explorer "New folder"). Creates parents as needed.
+/// Refuses when the target already exists.
+pub fn create_dir(root: &Path, rel: &str) -> Result<(), String> {
+    let path = normalize_rel(root, rel)?;
+    if path.exists() {
+        return Err(format!("already exists: {rel}"));
+    }
+    std::fs::create_dir_all(&path).map_err(|e| format!("failed to create {rel}: {e}"))
+}
+
+/// Delete a file or directory (explorer "Delete"). Directories must be empty
+/// unless `recursive` is set. Refuses to delete the project root itself.
+pub fn delete_path(root: &Path, rel: &str, recursive: bool) -> Result<(), String> {
+    let path = normalize_rel(root, rel)?;
+    if path == root {
+        return Err("refusing to delete the project root".to_string());
+    }
+    if !path.exists() && !path.is_symlink() {
+        return Err(format!("not found: {rel}"));
+    }
+    if path.is_dir() && !path.is_symlink() {
+        if recursive {
+            std::fs::remove_dir_all(&path).map_err(|e| format!("failed to delete {rel}: {e}"))
+        } else {
+            std::fs::remove_dir(&path)
+                .map_err(|e| format!("failed to delete {rel} (directory not empty?): {e}"))
+        }
+    } else {
+        std::fs::remove_file(&path).map_err(|e| format!("failed to delete {rel}: {e}"))
+    }
+}
+
+/// Atomically rename / move a file or directory within the project root
+/// (explorer "Rename"). Both sides must stay inside the root; refuses when
+/// the destination already exists.
+pub fn rename_path(root: &Path, from: &str, to: &str) -> Result<(), String> {
+    let src = normalize_rel(root, from)?;
+    let dst = normalize_rel(root, to)?;
+    if src == root || dst == root {
+        return Err("refusing to rename the project root".to_string());
+    }
+    if !src.exists() && !src.is_symlink() {
+        return Err(format!("not found: {from}"));
+    }
+    if dst.exists() {
+        return Err(format!("already exists: {to}"));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create parent: {e}"))?;
+    }
+    std::fs::rename(&src, &dst).map_err(|e| format!("failed to rename {from}: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +406,57 @@ mod tests {
             &root,
             &data_dir
         ));
+    }
+
+    #[test]
+    fn create_rename_delete_roundtrip() {
+        let base =
+            std::env::temp_dir().join(format!("bebok-explorer-crud-{}", uuid::Uuid::new_v4()));
+        let root = base.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // Create file + dir.
+        create_file(&root, "src/main.ts").unwrap();
+        assert!(root.join("src/main.ts").exists());
+        create_dir(&root, "docs/api").unwrap();
+        assert!(root.join("docs/api").is_dir());
+
+        // Refuse duplicates.
+        assert!(create_file(&root, "src/main.ts").is_err());
+        assert!(create_dir(&root, "docs/api").is_err());
+
+        // Rename.
+        rename_path(&root, "src/main.ts", "src/app.ts").unwrap();
+        assert!(!root.join("src/main.ts").exists());
+        assert!(root.join("src/app.ts").exists());
+        // Rename onto an existing target is refused.
+        create_file(&root, "src/other.ts").unwrap();
+        assert!(rename_path(&root, "src/app.ts", "src/other.ts").is_err());
+
+        // Delete file.
+        delete_path(&root, "src/other.ts", false).unwrap();
+        assert!(!root.join("src/other.ts").exists());
+
+        // Non-empty dir without recursive is refused.
+        assert!(delete_path(&root, "src", false).is_err());
+        assert!(root.join("src/app.ts").exists());
+        // With recursive it goes.
+        delete_path(&root, "src", true).unwrap();
+        assert!(!root.join("src").exists());
+
+        // Root itself is never deletable/renamable.
+        assert!(delete_path(&root, ".", true).is_err());
+        assert!(rename_path(&root, ".", "other").is_err());
+
+        // Traversal is rejected everywhere.
+        for rel in ["../evil.txt", r"..\evil.txt"] {
+            assert!(create_file(&root, rel).is_err(), "{rel}");
+            assert!(create_dir(&root, rel).is_err(), "{rel}");
+            assert!(delete_path(&root, rel, true).is_err(), "{rel}");
+            assert!(rename_path(&root, "docs/api", rel).is_err(), "{rel}");
+        }
+        assert!(!base.join("evil.txt").exists());
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

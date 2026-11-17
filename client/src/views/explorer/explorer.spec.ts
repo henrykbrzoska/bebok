@@ -156,7 +156,12 @@ describe('ExplorerView "open in Explorer" request (F7-3)', () => {
         provideRouter([]),
         {
           provide: EngineClient,
-          useValue: { connected: () => true, fsFile, fsTree: () => Promise.resolve({ entries: [] }) },
+          useValue: {
+            connected: () => true,
+            fsFile,
+            fsTree: () => Promise.resolve({ entries: [] }),
+            readLastDirectory: () => null,
+          },
         },
         {
           provide: ActivatedRoute,
@@ -258,7 +263,12 @@ describe('ExplorerView "open in Explorer" request (F7-3)', () => {
         provideRouter([]),
         {
           provide: EngineClient,
-          useValue: { connected: () => true, fsFile, fsTree: () => Promise.resolve({ entries: [] }) },
+          useValue: {
+            connected: () => true,
+            fsFile,
+            fsTree: () => Promise.resolve({ entries: [] }),
+            readLastDirectory: () => null,
+          },
         },
         routeStub,
       ],

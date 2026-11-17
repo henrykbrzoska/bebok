@@ -1,4 +1,6 @@
-//! Explorer routes: `GET /fs/tree`, `GET /fs/file`, `PUT /fs/file`.
+//! Explorer routes: `GET /fs/tree`, `GET/PUT/POST /fs/file`, `POST /fs/dir`,
+//! `DELETE /fs/path`, `POST /fs/rename`, `GET /fs/definition`, `GET /fs/search`,
+//! `POST /fs/complete`.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -191,7 +193,123 @@ pub async fn fs_file_write(
         .and_then(|c| c.as_str())
         .ok_or_else(|| ApiError::bad_request("missing 'content'").into_response())?;
     match bebok_core::explorer::write_file_text(&instance.root, rel, content) {
-        Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "saved": true }))),
+        Ok(()) => {
+            instance.symbols.invalidate(&rel.replace('\\', "/"));
+            Ok(Json(serde_json::json!({ "path": rel, "saved": true })))
+        }
+        Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+    }
+}
+
+/// `POST /fs/file?directory=&path=` -> create an empty file (explorer "New
+/// file"). Parents are created as needed; refuses existing targets.
+pub async fn fs_file_create(
+    State(state): State<AppState>,
+    Query(q): Query<FsQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let rel = q.path.as_deref().unwrap_or(".");
+    if is_project_config_path(&instance.root, rel) {
+        return Err(
+            ApiError::forbidden("use /config to modify project configuration").into_response(),
+        );
+    }
+    match bebok_core::explorer::create_file(&instance.root, rel) {
+        Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "created": true }))),
+        Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+    }
+}
+
+/// `POST /fs/dir?directory=&path=` -> create a directory (explorer "New
+/// folder"). Parents are created as needed; refuses existing targets.
+pub async fn fs_dir_create(
+    State(state): State<AppState>,
+    Query(q): Query<FsQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let rel = q.path.as_deref().unwrap_or(".");
+    match bebok_core::explorer::create_dir(&instance.root, rel) {
+        Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "created": true }))),
+        Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+    }
+}
+
+/// `DELETE /fs/path?directory=&path=[&recursive=true]` -> delete a file or
+/// directory (explorer "Delete"). Non-empty directories need `recursive`.
+pub async fn fs_path_delete(
+    State(state): State<AppState>,
+    Query(q): Query<FsDeleteQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let rel = q.path.as_deref().unwrap_or(".");
+    if is_project_config_path(&instance.root, rel) {
+        return Err(
+            ApiError::forbidden("use /config to modify project configuration").into_response(),
+        );
+    }
+    match bebok_core::explorer::delete_path(&instance.root, rel, q.recursive()) {
+        Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "deleted": true }))),
+        Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
+    }
+}
+
+/// `DELETE /fs/path` query: `recursive` accepts `true`/`1`.
+#[derive(Deserialize)]
+pub struct FsDeleteQuery {
+    pub directory: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub recursive: Option<String>,
+}
+
+impl FsDeleteQuery {
+    fn recursive(&self) -> bool {
+        matches!(self.recursive.as_deref(), Some("true") | Some("1"))
+    }
+}
+
+/// `POST /fs/rename?directory=` with `{ from, to }` -> atomic rename / move
+/// (explorer "Rename"). Both sides must stay inside the project root.
+pub async fn fs_rename(
+    State(state): State<AppState>,
+    Query(q): Query<FsQuery>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let from = body
+        .get("from")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::bad_request("missing 'from'").into_response())?;
+    let to = body
+        .get("to")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::bad_request("missing 'to'").into_response())?;
+    if is_project_config_path(&instance.root, from) || is_project_config_path(&instance.root, to) {
+        return Err(
+            ApiError::forbidden("use /config to modify project configuration").into_response(),
+        );
+    }
+    match bebok_core::explorer::rename_path(&instance.root, from, to) {
+        Ok(()) => Ok(Json(
+            serde_json::json!({ "from": from, "to": to, "renamed": true }),
+        )),
         Err(e) => Err(ApiError::bad_request(e.to_string()).into_response()),
     }
 }
@@ -317,4 +435,208 @@ mod tests {
         server.abort();
         std::fs::remove_dir_all(base).unwrap();
     }
+}
+
+/// `GET /fs/definition?directory=&path=&symbol=` query.
+#[derive(Deserialize)]
+pub struct FsDefinitionQuery {
+    pub directory: String,
+    /// File the Ctrl/Cmd+click happened in (picks the language family and
+    /// is searched first).
+    #[serde(default)]
+    pub path: Option<String>,
+    pub symbol: String,
+}
+
+/// `GET /fs/definition` -> definition sites of `symbol` (Explorer editor
+/// Ctrl/Cmd+click, tree-sitter based: Rust, TS/JS, PHP, Go, Python).
+pub async fn fs_definition(
+    State(state): State<AppState>,
+    Query(q): Query<FsDefinitionQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    if let Some(rel) = q.path.as_deref() {
+        bebok_core::explorer::validate_rel(&instance.root, rel)
+            .map_err(|e| ApiError::bad_request(e).into_response())?;
+    }
+    let root = instance.root.clone();
+    let resp = tokio::task::spawn_blocking(move || {
+        bebok_core::agent::goto_definition::find_definitions(
+            &root,
+            q.path.as_deref(),
+            &q.symbol,
+            50,
+            20_000,
+        )
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    Ok(Json(serde_json::to_value(resp).unwrap_or_default()))
+}
+
+/// `GET /fs/search` query (Explorer "Find in Files", Ctrl/Cmd+Shift+F).
+#[derive(Deserialize)]
+pub struct FsSearchQuery {
+    pub directory: String,
+    pub q: String,
+    #[serde(default)]
+    pub case: bool,
+    #[serde(default)]
+    pub word: bool,
+    #[serde(default)]
+    pub regex: bool,
+    /// File-name globs, `*.rs, !*.min.js`.
+    #[serde(default)]
+    pub mask: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// `GET /fs/search` -> `{ text: {results, files_matched, files_searched,
+/// truncated}, symbols: [...], indexed: bool }`. Text hits come from a
+/// gitignore-aware scan whose file order follows the `bebok-index` ranking
+/// when the plugin is available; symbols are tree-sitter definitions whose
+/// name contains the query (only for identifier-like, non-regex queries).
+pub async fn fs_search(
+    State(state): State<AppState>,
+    Query(q): Query<FsSearchQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let root = instance.root.clone();
+    let limit = q.limit.unwrap_or(500).clamp(1, 2000);
+    let priority = if q.regex {
+        Vec::new()
+    } else {
+        bebok_core::agent::code_index_tools::index_ranked_paths(&root, &q.q, 200).await
+    };
+    let indexed = !priority.is_empty();
+    let opts = bebok_core::agent::project_search::TextSearchOptions {
+        case_sensitive: q.case,
+        whole_word: q.word,
+        regex: q.regex,
+        file_mask: q.mask.clone(),
+        limit,
+        max_files: 50_000,
+    };
+    let query = q.q.clone();
+    let want_symbols = !q.regex;
+    let (text, symbols) = tokio::task::spawn_blocking(move || {
+        let text = bebok_core::agent::project_search::search_text(&root, &query, &opts, &priority);
+        let symbols = if want_symbols {
+            bebok_core::agent::goto_definition::find_symbols(&root, &query, 100, 20_000)
+        } else {
+            Vec::new()
+        };
+        (text, symbols)
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    let text = text.map_err(|e| ApiError::bad_request(e).into_response())?;
+    Ok(Json(serde_json::json!({
+        "text": text,
+        "symbols": symbols,
+        "indexed": indexed,
+    })))
+}
+
+/// `GET /fs/files?directory=` query (Explorer "Go to File", Ctrl/Cmd+Shift+N).
+#[derive(Deserialize)]
+pub struct FsFilesQuery {
+    pub directory: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// `GET /fs/files` -> `{ files: [rel, ...], truncated }`: every project file
+/// (gitignore-aware), sorted. The client fuzzy-matches names over it.
+pub async fn fs_files(
+    State(state): State<AppState>,
+    Query(q): Query<FsFilesQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let root = instance.root.clone();
+    let limit = q.limit.unwrap_or(50_000).clamp(1, 200_000);
+    let (files, truncated) = tokio::task::spawn_blocking(move || {
+        bebok_core::agent::project_search::list_files(&root, limit)
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    Ok(Json(
+        serde_json::json!({ "files": files, "truncated": truncated }),
+    ))
+}
+
+/// `GET /fs/symbols?directory=&q=` query (Explorer "Go to Class / Symbol").
+#[derive(Deserialize)]
+pub struct FsSymbolsQuery {
+    pub directory: String,
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// `GET /fs/symbols` -> `{ symbols: [...] }`: definitions whose name holds
+/// `q` as a case-insensitive subsequence, served from the per-instance
+/// symbol cache (no full re-parse per keystroke, unlike `/fs/search`).
+pub async fn fs_symbols(
+    State(state): State<AppState>,
+    Query(q): Query<FsSymbolsQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let root = instance.root.clone();
+    let index = instance.symbols.clone();
+    let limit = q.limit.unwrap_or(300).clamp(1, 2000);
+    let symbols = tokio::task::spawn_blocking(move || {
+        index.refresh(&root);
+        index.fuzzy(&q.q, limit)
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    Ok(Json(serde_json::json!({ "symbols": symbols })))
+}
+
+/// `POST /fs/complete?directory=` query (the buffer travels in the body).
+#[derive(Deserialize)]
+pub struct FsCompleteQuery {
+    pub directory: String,
+}
+
+/// `POST /fs/complete` -> ranked completion items for an unsaved buffer
+/// (Explorer editor autocomplete, no AI). Body: `{ path, text, offset, limit? }`.
+pub async fn fs_complete(
+    State(state): State<AppState>,
+    Query(q): Query<FsCompleteQuery>,
+    Json(body): Json<bebok_core::agent::complete::CompleteRequest>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    bebok_core::explorer::validate_rel(&instance.root, &body.path)
+        .map_err(|e| ApiError::bad_request(e).into_response())?;
+    let root = instance.root.clone();
+    let symbols = instance.symbols.clone();
+    let resp = tokio::task::spawn_blocking(move || {
+        bebok_core::agent::complete::complete(&root, &symbols, &body)
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    Ok(Json(serde_json::to_value(resp).unwrap_or_default()))
 }

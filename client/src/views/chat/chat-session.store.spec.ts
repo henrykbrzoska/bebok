@@ -278,6 +278,7 @@ describe('right drawer default state (F2-15)', () => {
       changes: false,
       preview: false,
       browser: false,
+      batch: false,
     });
   });
 });

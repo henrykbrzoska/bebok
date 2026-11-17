@@ -7,7 +7,7 @@
 
 import { Injectable, computed, signal } from '@angular/core';
 
-import { authFetch, onEngineUnauthorized } from './auth.interceptor';
+import { authFetch, getEngineToken, onEngineUnauthorized } from './auth.interceptor';
 import {
   AbortResponse,
   AbortTaskResponse,
@@ -33,6 +33,13 @@ import {
   ExportResponse,
   FleetGenResponse,
   FsBrowseResponse,
+  FsCompleteRequest,
+  FsCompleteResponse,
+  FsDefinitionResponse,
+  FsSearchOptions,
+  FsSearchResponse,
+  FsFilesResponse,
+  FsSymbolsResponse,
   FsFileResponse,
   FsTreeResponse,
   McpListResponse,
@@ -76,7 +83,12 @@ import {
   ScheduleTask,
   SshSessionInfo,
 } from './engine.dtos';
-import { ConnectionProfile, EngineConnection, TransportStrategy } from './transport.strategy';
+import {
+  BOOTSTRAP_ENGINE_PARAM,
+  ConnectionProfile,
+  EngineConnection,
+  TransportStrategy,
+} from './transport.strategy';
 
 export interface PermissionDecisionInput {
   decision: 'allow' | 'deny';
@@ -113,8 +125,92 @@ export class EngineClient {
    */
   readonly isDisconnected = signal(false);
 
+  /**
+   * The engine's base URL (`http://host:port`), empty while disconnected.
+   * Everything that shows the address to a human should use
+   * `engineUrlWithToken()` instead: the engine refuses a request without the
+   * per-launch capability token, so a bare base URL pasted into a browser is
+   * a 401.
+   */
+  readonly engineBaseUrl = computed(() => this.connection()?.baseUrl ?? '');
+
+  /**
+   * Base URL plus the current capability token,
+   * e.g. `http://127.0.0.1:38117/?token=…` - the exact string a browser needs
+   * to open the engine. Falls back to the bare base URL when this engine
+   * issued no token (`BEBOK_NO_AUTH=1`).
+   */
+  readonly engineUrlWithToken = computed(() => {
+    const base = this.engineBaseUrl();
+    if (!base) {
+      return '';
+    }
+    const token = getEngineToken();
+    return token ? `${base}/?token=${encodeURIComponent(token)}` : base;
+  });
+
   constructor() {
     onEngineUnauthorized(() => this.unauthorized.set(true));
+  }
+
+  /** Origin of this client app (`http://localhost:4200` in dev), read lazily
+   * so the value is correct even if the service was instantiated before the
+   * DOM was ready (tests / early bootstrap). Empty inside the desktop shell. */
+  private clientOrigin(): string {
+    try {
+      const origin = globalThis.location?.origin ?? '';
+      return /^https?:\/\//i.test(origin) ? origin : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Turn a URL into one the user's own browser can actually open, i.e. one
+   * that is already authenticated. Used by the "open in my browser" entry
+   * points (browser panel, browser viewer):
+   *
+   * - a page on the engine itself gets `?token=<capability token>`;
+   * - a page on this client app (the agent browsing Bebok's own UI, e.g.
+   *   `http://localhost:4200/explorer`) gets `?engine=<engine url + token>`,
+   *   which is how the opened tab adopts the same engine and token instead of
+   *   starting up disconnected;
+   * - anything else (the web at large) is handed back untouched.
+   */
+  withEngineToken(url: string): string {
+    const base = this.engineBaseUrl();
+    const trimmed = (url ?? '').trim();
+    if (!base || !trimmed) {
+      return trimmed;
+    }
+    let target: URL;
+    let engine: URL;
+    try {
+      target = new URL(trimmed);
+      engine = new URL(base);
+    } catch {
+      return trimmed;
+    }
+    const bootstrap = this.engineUrlWithToken();
+    const clientOrigin = this.clientOrigin();
+    if (clientOrigin && target.origin === clientOrigin && target.origin !== engine.origin && bootstrap) {
+      if (!target.searchParams.has(BOOTSTRAP_ENGINE_PARAM)) {
+        target.searchParams.set(BOOTSTRAP_ENGINE_PARAM, bootstrap);
+      }
+      return target.toString();
+    }
+    if (target.origin !== engine.origin) {
+      return trimmed;
+    }
+    if (target.searchParams.has('token')) {
+      return trimmed;
+    }
+    const token = getEngineToken();
+    if (!token) {
+      return trimmed;
+    }
+    target.searchParams.set('token', token);
+    return target.toString();
   }
 
   get platform(): TransportStrategy['platform'] {
@@ -131,10 +227,6 @@ export class EngineClient {
     // A deliberate disconnect blocks automatic reconnection until the user
     // explicitly reconnects (sidebar button or start screen).
     if (this.isDisconnected()) {
-      const existing = this.connection();
-      if (existing) {
-        return existing;
-      }
       throw new Error('engine disconnected by user');
     }
     const existing = this.connection();
@@ -782,6 +874,87 @@ export class EngineClient {
       'PUT',
       `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
       { content },
+    );
+  }
+
+  /** `POST /fs/file` — create an empty file (explorer "New file"). */
+  fsFileCreate(directory: string, path: string): Promise<{ path: string; created: boolean }> {
+    return this.request<{ path: string; created: boolean }>(
+      'POST',
+      `/fs/file?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** `POST /fs/dir` — create a directory (explorer "New folder"). */
+  fsDirCreate(directory: string, path: string): Promise<{ path: string; created: boolean }> {
+    return this.request<{ path: string; created: boolean }>(
+      'POST',
+      `/fs/dir?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** `DELETE /fs/path` — delete a file or directory (explorer "Delete"). */
+  fsPathDelete(
+    directory: string,
+    path: string,
+    recursive = false,
+  ): Promise<{ path: string; deleted: boolean }> {
+    const query =
+      `directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}` +
+      (recursive ? '&recursive=true' : '');
+    return this.request<{ path: string; deleted: boolean }>('DELETE', `/fs/path?${query}`);
+  }
+
+  /** `POST /fs/rename` — atomic rename/move (explorer "Rename"). */
+  /** Go-to-definition (tree-sitter: Rust, TS/JS, PHP, Go, Python). `path` is
+   *  the file the click happened in - it picks the language and ranks first. */
+  fsDefinition(directory: string, path: string, symbol: string): Promise<FsDefinitionResponse> {
+    return this.request<FsDefinitionResponse>(
+      'GET',
+      `/fs/definition?directory=${encodeURIComponent(directory)}&path=${encodeURIComponent(path)}&symbol=${encodeURIComponent(symbol)}`,
+    );
+  }
+
+  /** Editor completion for the unsaved buffer (Explorer editor popup). */
+  fsComplete(directory: string, body: FsCompleteRequest): Promise<FsCompleteResponse> {
+    return this.request<FsCompleteResponse>(
+      'POST',
+      `/fs/complete?directory=${encodeURIComponent(directory)}`,
+      body,
+    );
+  }
+
+  /** Every project file, gitignore-aware (Explorer Go to File, Ctrl/Cmd+Shift+N). */
+  fsFiles(directory: string): Promise<FsFilesResponse> {
+    return this.request<FsFilesResponse>('GET', `/fs/files?directory=${encodeURIComponent(directory)}`);
+  }
+
+  /** Definitions whose name contains `query` (Explorer Go to Class / Symbol). */
+  fsSymbols(directory: string, query: string, limit = 200): Promise<FsSymbolsResponse> {
+    const p = new URLSearchParams({ directory, q: query, limit: String(limit) });
+    return this.request<FsSymbolsResponse>('GET', `/fs/symbols?${p.toString()}`);
+  }
+
+  /** Project-wide text + symbol search (Explorer Ctrl/Cmd+Shift+F). */
+  fsSearch(directory: string, query: string, opts: FsSearchOptions = {}): Promise<FsSearchResponse> {
+    const p = new URLSearchParams({ directory, q: query });
+    if (opts.caseSensitive) p.set('case', 'true');
+    if (opts.wholeWord) p.set('word', 'true');
+    if (opts.regex) p.set('regex', 'true');
+    if (opts.mask) p.set('mask', opts.mask);
+    if (opts.limit) p.set('limit', String(opts.limit));
+    return this.request<FsSearchResponse>('GET', `/fs/search?${p.toString()}`);
+  }
+
+  fsRename(
+    directory: string,
+    from: string,
+    to: string,
+  ): Promise<{ from: string; to: string; renamed: boolean }> {
+    return this.request<{ from: string; to: string; renamed: boolean }>(
+      'POST',
+      `/fs/rename?directory=${encodeURIComponent(directory)}`,
+      { from, to },
     );
   }
 

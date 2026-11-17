@@ -89,9 +89,16 @@ settings UI hides the key and base-URL fields.
 - `allow_write` defaults to **false**. The Claude backend then emits
   `--permission-mode plan` *and* `--disallowedTools Edit Write Bash` — belt and
   braces, because a permission mode alone is one config key away from wrong.
+- With `allow_write: true` the backend emits `--permission-mode acceptEdits`
+  **and** `--allowedTools`, naming exactly the shell and file tools that mode
+  covers. The second flag is not redundant: `-p` has nobody to answer a
+  permission prompt, so a tool that would still ask — `Bash` above all — is
+  denied outright and reported back as a `permission_denials` entry. Without it
+  a write-enabled CLI can edit files but never run a build or a test, and the
+  turn reads as stuck. `--permission-mode plan` + `--disallowedTools` stay the
+  read-only path, and nothing outside that tool list is loosened.
 - `--permission-mode bypassPermissions` and `--dangerously-skip-permissions` are
-  **never** emitted, even with `allow_write: true` (`acceptEdits` still keeps the
-  CLI's shell prompts).
+  **never** emitted, even with `allow_write: true`.
 - The CLI always runs with `current_dir` set to the instance root. No `--add-dir`
   is added without explicit configuration.
 - `spec.api_key` is never passed to the child process; the CLI has its own

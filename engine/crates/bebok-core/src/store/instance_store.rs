@@ -454,6 +454,7 @@ impl InstanceStore {
             agents,
             mcp,
             context_notes: std::sync::RwLock::new(Vec::new()),
+            symbols: Arc::new(crate::agent::symbol_index::SymbolIndex::new()),
         });
 
         // Insert under the write lock (double-check to avoid a race).
@@ -763,6 +764,7 @@ impl InstanceStore {
         session.model = model.map(str::to_string);
         session.alias = alias.map(str::to_string);
         session.parent = Some((parent_id, parent_len.saturating_sub(1)));
+        session.subagent = true;
         self.spawn_session(&instance, session).await
     }
 

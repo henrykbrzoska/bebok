@@ -40,7 +40,13 @@ describe('Sidebar (F6-16 new-session dialog + branch badge)', () => {
     agents: ReturnType<typeof signal<AgentInfo[]>>;
     refresh: jasmine.Spy;
   };
-  let engine: { createSession: jasmine.Spy; connected: () => boolean };
+  let engine: {
+    createSession: jasmine.Spy;
+    connected: () => boolean;
+    connection: ReturnType<typeof signal<null>>;
+    isDisconnected: ReturnType<typeof signal<boolean>>;
+    engineUrlWithToken: () => string;
+  };
   let uncategorizedCount: ReturnType<typeof signal<number>>;
 
   beforeEach(() => {
@@ -52,7 +58,13 @@ describe('Sidebar (F6-16 new-session dialog + branch badge)', () => {
       agents: signal<AgentInfo[]>([{ name: 'code', builtin: true }, { name: 'plan', builtin: true }]),
       refresh: jasmine.createSpy('refresh').and.resolveTo(undefined),
     };
-    engine = { createSession: jasmine.createSpy('createSession'), connected: () => false };
+    engine = {
+      createSession: jasmine.createSpy('createSession'),
+      connected: () => false,
+      connection: signal(null),
+      isDisconnected: signal(false),
+      engineUrlWithToken: () => '',
+    };
 
     TestBed.configureTestingModule({
       imports: [Sidebar],

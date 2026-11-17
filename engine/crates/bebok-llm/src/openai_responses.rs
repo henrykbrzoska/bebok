@@ -325,6 +325,7 @@ impl ResponsesParser {
             cost: None,
             cache_read_input_tokens: self.cache_read,
             cache_creation_input_tokens: None,
+            context_tokens: None,
         })));
     }
 

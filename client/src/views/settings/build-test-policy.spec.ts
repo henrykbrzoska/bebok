@@ -116,6 +116,7 @@ describe('BuildTestPolicyCard', () => {
   it('stages a pending selection without saving', async () => {
     await setup();
     component.selectMode('off');
+    fixture.detectChanges();
     expect(component.pending()).toBe('off');
     expect(component.hasChanges()).toBeTrue();
     expect(component.effectiveMode()).toBe('off');
@@ -135,6 +136,7 @@ describe('BuildTestPolicyCard', () => {
     await setup();
     component.selectMode('off');
     fixture.detectChanges();
+    fixture.detectChanges();
     const btn = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
       '[data-testid="build-test-save"]',
     )!;
@@ -144,6 +146,7 @@ describe('BuildTestPolicyCard', () => {
   it('save() persists the staged mode to the project config layer by default', async () => {
     await setup();
     component.selectMode('off');
+    fixture.detectChanges();
     await component.save();
     expect(engine.putConfig).toHaveBeenCalledWith(
       'C:/tmp/project',
@@ -206,6 +209,7 @@ describe('BuildTestPolicyCard', () => {
   it('is a no-op while another save is running', async () => {
     await setup();
     component.selectMode('off');
+    fixture.detectChanges();
     component.store.saving.set(true);
     await component.save();
     expect(engine.putConfig).not.toHaveBeenCalled();

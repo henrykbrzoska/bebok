@@ -93,6 +93,10 @@ fn merge_usage(total: &mut Usage, next: Usage) {
     if let Some(v) = next.cache_creation_input_tokens {
         *total.cache_creation_input_tokens.get_or_insert(0) += v;
     }
+    // The prompt size is a snapshot of the latest API call, not a total.
+    if next.context_tokens.is_some() {
+        total.context_tokens = next.context_tokens;
+    }
 }
 
 /// How a CLI event is presented to the agent loop.
@@ -199,6 +203,7 @@ impl Provider for CliProvider {
 
         let cli_req = CliRequest {
             prompt: crate::transcript::render_prompt(&req),
+            blocks: crate::transcript::render_blocks(&req),
             system,
             model,
             cwd: self.cwd.clone(),
@@ -396,6 +401,7 @@ mod tests {
                 cost: Some(0.01),
                 cache_read_input_tokens: Some(3),
                 cache_creation_input_tokens: None,
+                context_tokens: None,
             },
         );
         merge_usage(
@@ -406,6 +412,7 @@ mod tests {
                 cost: Some(0.02),
                 cache_read_input_tokens: Some(4),
                 cache_creation_input_tokens: Some(7),
+                context_tokens: None,
             },
         );
         assert_eq!(total.input_tokens, 11);
@@ -413,6 +420,21 @@ mod tests {
         assert_eq!(total.cost, Some(0.02));
         assert_eq!(total.cache_read_input_tokens, Some(7));
         assert_eq!(total.cache_creation_input_tokens, Some(7));
+    }
+
+    #[test]
+    fn context_size_is_the_latest_snapshot_not_a_sum() {
+        let mut total = Usage::default();
+        for context in [Some(10_000), Some(25_000), None] {
+            merge_usage(
+                &mut total,
+                Usage {
+                    context_tokens: context,
+                    ..Usage::default()
+                },
+            );
+        }
+        assert_eq!(total.context_tokens, Some(25_000));
     }
 
     #[test]
@@ -463,7 +485,13 @@ mod tests {
             fn env_override(&self) -> &'static str {
                 "BEBOK_FAKE_CLI_BIN"
             }
-            fn build_command(&self, _spec: &CliSpec, _req: &CliRequest) -> (String, Vec<String>) {
+            fn build_command(
+                &self,
+                _spec: &CliSpec,
+                _req: &CliRequest,
+                _probe: &crate::backend::CliProbe,
+                _scratch: &mut crate::backend::TurnScratch,
+            ) -> Result<(String, Vec<String>), CliError> {
                 let jsonl = concat!(
                     r#"{"type":"system","subtype":"init","session_id":"s-1"}"#,
                     "\n",
@@ -474,13 +502,13 @@ mod tests {
                     r#"{"type":"result","subtype":"success","session_id":"s-1","usage":{"input_tokens":7,"output_tokens":3},"total_cost_usd":0.5}"#,
                     "\n",
                 );
-                (
+                Ok((
                     "sh".to_string(),
                     vec![
                         "-c".to_string(),
                         format!("printf '%s' \"{}\"", jsonl.replace('"', "\\\"")),
                     ],
-                )
+                ))
             }
             fn parse_line(
                 &self,

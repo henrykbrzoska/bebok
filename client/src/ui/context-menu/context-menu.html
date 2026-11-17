@@ -1,0 +1,79 @@
+@if (items().length > 0) {
+  <div
+    #menu
+    class="ctx-menu"
+    role="menu"
+    tabindex="-1"
+    [style.left.px]="position().x"
+    [style.top.px]="position().y"
+    (mouseleave)="onItemEnter({ id: '', labelKey: 'ctx.close' })"
+  >
+    @for (item of items(); track item.id) {
+      @if (item.separated) {
+        <div class="ctx-sep" aria-hidden="true"></div>
+      }
+      @if (item.children) {
+        <div
+          class="ctx-item ctx-parent"
+          role="menuitem"
+          aria-haspopup="true"
+          [class.disabled]="item.disabled"
+          [attr.title]="item.disabled ? disabledReason(item) : null"
+          [attr.data-testid]="'ctx-' + item.id"
+          (mouseenter)="onItemEnter(item)"
+        >
+          @if (item.icon) {
+            <span class="ctx-icon" aria-hidden="true">{{ item.icon }}</span>
+          }
+          <span class="ctx-label">{{ label(item) }}</span>
+          <span class="ctx-arrow" aria-hidden="true">▸</span>
+        </div>
+      } @else {
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          [class.disabled]="item.disabled"
+          [disabled]="item.disabled"
+          [attr.title]="item.disabled ? disabledReason(item) : null"
+          [attr.data-testid]="'ctx-' + item.id"
+          [attr.data-ctx-index]="$index"
+          (mouseenter)="onItemEnter(item)"
+          (click)="onItemClick(item)"
+        >
+          @if (item.icon) {
+            <span class="ctx-icon" aria-hidden="true">{{ item.icon }}</span>
+          }
+          <span class="ctx-label">{{ label(item) }}</span>
+          @if (item.hint) {
+            <span class="ctx-hint" aria-hidden="true">{{ item.hint }}</span>
+          }
+        </button>
+      }
+    }
+  </div>
+  @if (submenu(); as sub) {
+    <div class="ctx-menu ctx-sub" role="menu" [style.left.px]="position().x + 260" [style.top.px]="position().y + 24">
+      @for (child of sub; track child.id) {
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          [class.disabled]="child.disabled"
+          [disabled]="child.disabled"
+          [attr.title]="child.disabled ? disabledReason(child) : null"
+          [attr.data-testid]="'ctx-' + child.id"
+          (click)="onSubItemClick(child)"
+        >
+          @if (child.icon) {
+            <span class="ctx-icon" aria-hidden="true">{{ child.icon }}</span>
+          }
+          <span class="ctx-label">{{ label(child) }}</span>
+          @if (child.hint) {
+            <span class="ctx-hint" aria-hidden="true">{{ child.hint }}</span>
+          }
+        </button>
+      }
+    </div>
+  }
+}

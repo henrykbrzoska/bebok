@@ -72,11 +72,55 @@ fn agent_description(ty: &str) -> &'static str {
     }
 }
 
+fn is_xiaomi_model(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("xiaomi")
+}
+
 /// Build the candidate pool from the resolved config.
+///
+/// Only models mentioned in config are considered: global `model`,
+/// all `models.*` values, and already-configured `fleet.members[].model`.
+/// Xiaomi models are always excluded. This prevents fleet generation from
+/// pulling in unrelated provider models (e.g. xiaomi) that would then
+/// override `models.code` via the member's `model` field.
 fn build_candidate_pool(cfg: &ResolvedConfig) -> Vec<Candidate> {
     let catalog = bebok_llm::ModelCatalog::global();
-    let providers = cfg.resolved_providers();
 
+    // Allowed models: every `models.<agent>` + existing fleet members.
+    // Global `model` is NOT used as allowlist — it's the default for the
+    // main turn, not a restriction for fleet generation. Only when the user
+    // explicitly configured `models.*` or `fleet.members` do we restrict.
+    let mut allowed: HashSet<String> = HashSet::new();
+    let mut has_explicit_models = false;
+    if let Some(map) = cfg.models.as_object() {
+        if !map.is_empty() {
+            has_explicit_models = true;
+        }
+        for v in map.values() {
+            if let Some(s) = v.as_str() {
+                let m = s.trim().to_ascii_lowercase();
+                if !m.is_empty() && !is_xiaomi_model(&m) {
+                    allowed.insert(m);
+                }
+            }
+        }
+    }
+    if !cfg.fleet.members.is_empty() {
+        has_explicit_models = true;
+    }
+    for m in &cfg.fleet.members {
+        let s = m.model.trim().to_ascii_lowercase();
+        if !s.is_empty() && !is_xiaomi_model(&s) {
+            allowed.insert(s);
+        }
+    }
+
+    // Only restrict when user explicitly configured models.* or fleet.members.
+    // Otherwise allow all provider models (except xiaomi) — keeps tests and
+    // default installs working.
+    let use_allowlist = has_explicit_models && !allowed.is_empty();
+
+    let providers = cfg.resolved_providers();
     let mut seen: HashSet<String> = HashSet::new();
     let mut candidates: Vec<Candidate> = Vec::new();
 
@@ -108,6 +152,12 @@ fn build_candidate_pool(cfg: &ResolvedConfig) -> Vec<Candidate> {
         }
 
         for full in model_ids {
+            if is_xiaomi_model(&full) {
+                continue;
+            }
+            if use_allowlist && !allowed.contains(&full) {
+                continue;
+            }
             let caps = catalog.get(&full);
             if !caps.supports_tools {
                 continue;

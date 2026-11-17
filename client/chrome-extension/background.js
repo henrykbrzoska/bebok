@@ -1,5 +1,11 @@
 /**
- * Bebok Chrome extension - background service worker.
+ * Bebok browser extension - background script.
+ *
+ * Runs as an MV3 service worker in Chrome/Edge/Brave and as an event page
+ * (`background.scripts`, `persistent: false`) in Firefox — the same file serves
+ * both, see `manifest.firefox.json` and `scripts/build-firefox-extension.mjs`.
+ * The keepalive alarm below is what brings the worker/event page back after
+ * the browser suspends it.
  *
  * Owns every HTTP call to the local Bebok engine (only the worker is covered
  * by the extension's `host_permissions`). Message types served:
@@ -61,6 +67,36 @@ function buildEngineUrl(base, path) {
   return url.toString();
 }
 
+/**
+ * Promise wrapper around callback-style extension APIs.
+ *
+ * Chrome MV3 returns a promise when the callback is omitted; Firefox's
+ * `chrome` namespace is callback-based and only settles the call you hand a
+ * callback to. Passing a callback every time works on both, so every awaited
+ * API call in this file goes through here. Rejects with `runtime.lastError`
+ * (the extension equivalent of an HTTP error).
+ */
+function callApi(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      const err = chrome.runtime && chrome.runtime.lastError;
+      if (err) reject(new Error(err.message || String(err)));
+      else resolve(value);
+    };
+    const returned = fn.apply(null, args.concat([done]));
+    if (returned && typeof returned.then === 'function') {
+      returned.then(done, (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      });
+    }
+  });
+}
+
 /** Try to parse and read JSON from a fetch response. */
 async function readJsonSafe(res) {
   try {
@@ -114,7 +150,7 @@ async function fetchPendingCommands() {
  * Returns `{tabId, url, title}` or throws.
  */
 async function requireActiveTab() {
-  const [tab] = await chrome.tabs.query({
+  const [tab] = await callApi(chrome.tabs.query, {
     active: true,
     lastFocusedWindow: true,
   });
@@ -140,7 +176,7 @@ const handlers = {
     if (!url) throw new Error('navigate: missing url');
 
     // chrome.tabs.update navigates and returns the tab.
-    const updated = await chrome.tabs.update(tabId, { url });
+    const updated = await callApi(chrome.tabs.update, tabId, { url });
 
     // Wait for the page to finish loading.
     await new Promise((resolve, reject) => {
@@ -159,7 +195,7 @@ const handlers = {
     });
 
     // Re-read tab metadata after load.
-    const tab = await chrome.tabs.get(updated.id);
+    const tab = await callApi(chrome.tabs.get, updated.id);
     return { url: tab.url || '', title: tab.title || '' };
   },
 
@@ -168,7 +204,7 @@ const handlers = {
   screenshot: async (params) => {
     const format = params.format === 'jpeg' ? 'jpeg' : 'png';
     const opts = { format };
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, opts);
+    const dataUrl = await callApi(chrome.tabs.captureVisibleTab, null, opts);
     const prefix = 'data:image/' + format + ';base64,';
     const data =
       typeof dataUrl === 'string' && dataUrl.startsWith(prefix)
@@ -185,7 +221,7 @@ const handlers = {
     const js = params.js;
     if (!js) throw new Error('evaluate: missing js');
 
-    const results = await chrome.scripting.executeScript({
+    const results = await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (code) => {
         try {
@@ -210,7 +246,7 @@ const handlers = {
   click: async (params) => {
     const { tabId, url, title } = await requireActiveTab();
 
-    await chrome.scripting.executeScript({
+    await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (selector, x, y) => {
         if (selector) {
@@ -244,7 +280,7 @@ const handlers = {
     const text = params.text || '';
     if (!selector) throw new Error('type: missing selector');
 
-    await chrome.scripting.executeScript({
+    await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (sel, txt, clear, submit) => {
         const el = document.querySelector(sel);
@@ -281,7 +317,7 @@ const handlers = {
   getText: async (params) => {
     const { tabId, url, title } = await requireActiveTab();
 
-    const results = await chrome.scripting.executeScript({
+    const results = await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (selector, maxChars) => {
         const el = selector
@@ -303,7 +339,7 @@ const handlers = {
   getPageContext: async (params) => {
     const { tabId } = await requireActiveTab();
 
-    const results = await chrome.scripting.executeScript({
+    const results = await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (maxChars) => {
         const NOISE =
@@ -352,18 +388,18 @@ const handlers = {
     const action = params.action;
 
     if (action === 'reload') {
-      await chrome.tabs.reload(tabId);
+      await callApi(chrome.tabs.reload, tabId);
     } else if (action === 'back') {
-      await chrome.tabs.goBack(tabId);
+      await callApi(chrome.tabs.goBack, tabId);
     } else if (action === 'forward') {
-      await chrome.tabs.goForward(tabId);
+      await callApi(chrome.tabs.goForward, tabId);
     } else {
       throw new Error('history: unknown action: ' + action);
     }
 
     await new Promise((r) => setTimeout(r, 500));
 
-    const tab = await chrome.tabs.get(tabId);
+    const tab = await callApi(chrome.tabs.get, tabId);
     return { url: tab.url || '', title: tab.title || '' };
   },
 
@@ -373,7 +409,7 @@ const handlers = {
     let q;
     try {
       q = normalizeTabsParams(params);
-      const tabs = await chrome.tabs.query(q);
+      const tabs = await callApi(chrome.tabs.query, q);
       return tabs.map((t) => ({
         id: t.id,
         title: t.title || '',
@@ -383,7 +419,7 @@ const handlers = {
       }));
     } catch (err) {
       if (String(err?.message || err).includes('No matching signature')) {
-        const tabs = await chrome.tabs.query({});
+        const tabs = await callApi(chrome.tabs.query, {});
         return tabs.map((t) => ({
           id: t.id,
           title: t.title || '',
@@ -410,7 +446,7 @@ const handlers = {
     try {
       // {active:true} switches to the tab; focus its window as well so the
       // user sees the switch when the tab lives in another window.
-      tab = await chrome.tabs.update(tabId, { active: true });
+      tab = await callApi(chrome.tabs.update, tabId, { active: true });
     } catch (err) {
       const msg = String(err?.message || err);
       if (/no tab with id|invalid tab id/i.test(msg)) {
@@ -421,14 +457,14 @@ const handlers = {
 
     if (tab && tab.windowId != null) {
       try {
-        await chrome.windows.update(tab.windowId, { focused: true });
+        await callApi(chrome.windows.update, tab.windowId, { focused: true });
       } catch (_) {
         // Focusing the window is best-effort; the tab is active either way.
       }
     }
 
     // Re-read metadata: url/title are only populated after the update.
-    const fresh = tab && tab.id != null ? await chrome.tabs.get(tab.id) : tab;
+    const fresh = tab && tab.id != null ? await callApi(chrome.tabs.get, tab.id) : tab;
     return {
       id: fresh.id,
       title: fresh.title || '',
@@ -443,7 +479,7 @@ const handlers = {
   find: async (params) => {
     const { tabId } = await requireActiveTab();
 
-    const results = await chrome.scripting.executeScript({
+    const results = await callApi(chrome.scripting.executeScript, {
       target: { tabId },
       func: (query) => {
         const interactive =
@@ -494,7 +530,7 @@ const handlers = {
     const deadline = Date.now() + (params.timeout_ms || 5000);
 
     while (Date.now() < deadline) {
-      const results = await chrome.scripting.executeScript({
+      const results = await callApi(chrome.scripting.executeScript, {
         target: { tabId },
         func: (selector, text) => {
           if (selector && !document.querySelector(selector)) return false;
@@ -623,9 +659,17 @@ async function sendHeartbeat() {
   }
 }
 
+/** `action` (MV3) with a `browserAction` (MV2-style) fallback for Firefox. */
+function actionApi() {
+  if (chrome.action) return chrome.action;
+  if (chrome.browserAction) return chrome.browserAction;
+  return null;
+}
+
 function updateBadge(text) {
-  if (chrome.action && chrome.action.setBadgeText) {
-    chrome.action.setBadgeText({ text });
+  const api = actionApi();
+  if (api && api.setBadgeText) {
+    api.setBadgeText({ text });
   }
 }
 
@@ -679,6 +723,43 @@ function stopHeartbeat() {
     clearInterval(_heartbeatInterval);
     _heartbeatInterval = null;
   }
+}
+
+// ── Keepalive (Firefox event page / MV3 service worker suspension) ────────
+//
+// Both Firefox event pages and Chrome service workers get suspended when the
+// browser decides the extension is idle, which silently kills the heartbeat
+// and the long-poll loop. A periodic alarm wakes the script again; the init
+// block at the bottom then re-reads storage and resumes remote piloting.
+
+const KEEPALIVE_ALARM = 'bebok.keepalive';
+
+function startKeepaliveAlarm() {
+  if (!chrome.alarms) return;
+  try {
+    chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 1 });
+  } catch (_) {
+    // Alarms are a safety net; the in-memory loop still runs while awake.
+  }
+}
+
+function stopKeepaliveAlarm() {
+  if (!chrome.alarms) return;
+  try {
+    chrome.alarms.clear(KEEPALIVE_ALARM);
+  } catch (_) {
+    // ignore
+  }
+}
+
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm || alarm.name !== KEEPALIVE_ALARM) return;
+    if (!_remoteEnabled) return;
+    // This tick may have started the worker from scratch; resume the loops.
+    startHeartbeat();
+    startPollingLoop();
+  });
 }
 
 // ── Engine discovery (Phase 1) ────────────────────────────────────────────
@@ -819,6 +900,7 @@ let _engineUrl = '';
 let _directory = '';
 let _pinnedToken = '';
 let _lastGoodPort = 0;
+let _remoteEnabled = false;
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const POLL_BACKOFF_BASE_MS = 1_000;
@@ -990,7 +1072,7 @@ async function handleAsk(payload) {
     const body = { message: String(question) };
     if (screenshot) {
       try {
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+        const dataUrl = await callApi(chrome.tabs.captureVisibleTab, null, { format: 'png' });
         const data = String(dataUrl || '').split(',')[1];
         if (data) body.images = [{ media_type: 'image/png', data }];
       } catch (_) {
@@ -1104,14 +1186,19 @@ if (chrome.contextMenus && chrome.contextMenus.onClicked) {
       url: (tab && tab.url) || '',
       title: (tab && tab.title) || '',
     };
-    if (chrome.storage && chrome.storage.session) {
-      chrome.storage.session.set({ pendingSelection: pending }, () => {
-        void chrome.runtime.lastError;
-      });
+    if (chrome.storage) {
+      // storage.session (Chrome 102+/Firefox 115+) with a local fallback.
+      const area = chrome.storage.session || chrome.storage.local;
+      if (area) {
+        area.set({ pendingSelection: pending }, () => {
+          void chrome.runtime.lastError;
+        });
+      }
     }
     try {
-      if (chrome.action && chrome.action.openPopup) {
-        const opened = chrome.action.openPopup();
+      const api = actionApi();
+      if (api && api.openPopup) {
+        const opened = api.openPopup();
         if (opened && typeof opened.catch === 'function') opened.catch(() => {});
       }
     } catch (_) {
@@ -1123,13 +1210,16 @@ if (chrome.contextMenus && chrome.contextMenus.onClicked) {
 // ── Lifecycle: respond to storage changes ────────────────────────────────
 
 function applyRemotePilotingState(remoteEnabled) {
+  _remoteEnabled = Boolean(remoteEnabled);
   if (remoteEnabled) {
     registerExtension();
     startHeartbeat();
     startPollingLoop();
+    startKeepaliveAlarm();
   } else {
     stopHeartbeat();
     stopPollingLoop();
+    stopKeepaliveAlarm();
   }
 }
 

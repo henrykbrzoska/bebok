@@ -107,6 +107,7 @@
 .status-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-10);
   margin-top: var(--space-14);
   font-size: var(--fs-11-5);
@@ -124,9 +125,12 @@
 }
 
 .engine-url {
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+  user-select: all;
 }
 
 .status-row[data-phase='live'] app-status-dot {

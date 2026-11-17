@@ -1057,6 +1057,7 @@ mod parallel_tests {
                     cost: None,
                     cache_read_input_tokens: Some(40_000),
                     cache_creation_input_tokens: Some(800),
+                    context_tokens: None,
                 }),
             ]],
         });

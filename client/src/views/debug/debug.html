@@ -37,7 +37,11 @@
     <div class="calls">
       <div class="calls-title">{{ t('debug.lastCalls') }}</div>
       @for (call of calls(); track call.id) {
-        <div class="call">
+        <div
+          class="call"
+          [appContextMenu]="'debug.call'"
+          [appContextMenuData]="callMenuData(call)"
+        >
           <div class="call-head">
             <span class="ts">{{ formatTime(call.ts) }}</span>
             <span class="pill tone-accent">#{{ call.id }}</span>
@@ -76,7 +80,11 @@
       </div>
     } @else {
       @for (row of rows(); track row.index) {
-        <div class="row">
+        <div
+          class="row"
+          [appContextMenu]="'debug.row'"
+          [appContextMenuData]="rowMenuData(row)"
+        >
           <span class="ts">{{ row.time }}</span>
           <span class="source">{{ row.source }}</span>
           <span class="pill" [class]="'pill tone-' + row.tone">{{ row.pill }}</span>

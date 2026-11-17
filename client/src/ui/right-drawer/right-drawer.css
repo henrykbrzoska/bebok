@@ -19,13 +19,24 @@
 
 .resize-handle {
   position: absolute;
-  left: -3px;
+  /* Fully inside the drawer: `overflow: hidden` used to clip the outboard
+     half, leaving a 3px strip that was almost impossible to grab. */
+  left: 0;
   top: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
   touch-action: none;
-  z-index: 3;
+  z-index: 5;
+}
+
+.resize-handle:hover,
+.drawer.resizing .resize-handle {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.drawer.resizing {
+  user-select: none;
 }
 
 .pill-row {

@@ -149,8 +149,14 @@ mod tests {
         fn env_override(&self) -> &'static str {
             self.env
         }
-        fn build_command(&self, _spec: &CliSpec, _req: &CliRequest) -> (String, Vec<String>) {
-            (String::from("fake"), Vec::new())
+        fn build_command(
+            &self,
+            _spec: &CliSpec,
+            _req: &CliRequest,
+            _probe: &crate::backend::CliProbe,
+            _scratch: &mut crate::backend::TurnScratch,
+        ) -> Result<(String, Vec<String>), CliError> {
+            Ok((String::from("fake"), Vec::new()))
         }
         fn parse_line(
             &self,

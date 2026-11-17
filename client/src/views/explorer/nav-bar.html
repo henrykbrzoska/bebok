@@ -1,0 +1,98 @@
+<nav class="nav-bar" [attr.aria-label]="t('explorer.navBar')" data-testid="explorer-nav-bar">
+  @for (seg of segments(); track seg.path; let i = $index; let last = $last) {
+    <button
+      #segBtn
+      class="nav-seg"
+      data-testid="explorer-nav-seg"
+      [class.is-file]="!seg.isDir"
+      [class.is-root]="i === 0"
+      [class.active]="openIndex() === i"
+      [attr.aria-expanded]="openIndex() === i"
+      [title]="seg.path || directory()"
+      (click)="openAt(i, segBtn)"
+      (dblclick)="revealed.emit(seg.path)"
+    >
+      <span class="nav-icon" aria-hidden="true">{{
+        seg.isDir ? (i === 0 ? '▣' : '▸') : '📄'
+      }}</span>
+      <span class="nav-name">{{ seg.name }}</span>
+      @if (!seg.isDir && dirty()) {
+        <span class="nav-dirty" aria-hidden="true">•</span>
+      }
+    </button>
+    @if (!last) {
+      <span class="nav-sep" aria-hidden="true">›</span>
+    }
+  }
+  <span class="nav-spacer"></span>
+  <button
+    class="nav-search"
+    data-testid="explorer-nav-search"
+    (click)="searchRequested.emit()"
+    [title]="t('goto.title') + ' (Ctrl+Shift+N · Shift Shift)'"
+  >
+    ⌕ {{ t('goto.button') }}
+  </button>
+</nav>
+
+@if (openIndex() !== null) {
+  <div
+    #popup
+    class="nav-popup"
+    role="listbox"
+    tabindex="-1"
+    data-testid="explorer-nav-popup"
+    [style.left.px]="popupLeft()"
+    [attr.aria-label]="popupTitle()"
+    (keydown)="onPopupKeydown($event)"
+  >
+    <div class="nav-popup-head">
+      <button
+        class="nav-up"
+        [disabled]="!popupDir()"
+        (click)="up()"
+        [title]="t('explorer.navUp')"
+        [attr.aria-label]="t('explorer.navUp')"
+      >
+        ↑
+      </button>
+      <span class="nav-popup-title">{{ popupTitle() }}</span>
+      @if (filter()) {
+        <span class="nav-filter">⌕ {{ filter() }}</span>
+      }
+    </div>
+    @if (entries() === null) {
+      <div class="nav-note">{{ t('explorer.loading') }}</div>
+    } @else if (error()) {
+      <div class="nav-note nav-error">{{ error() }}</div>
+    } @else {
+      <ul class="nav-list">
+        @for (item of visibleEntries(); track item.entry.path; let j = $index) {
+          <li
+            class="nav-item"
+            role="option"
+            data-testid="explorer-nav-item"
+            [class.is-dir]="item.entry.is_dir"
+            [class.is-current]="item.entry.path === path()"
+            [class.is-selected]="j === popupIndex()"
+            [attr.aria-selected]="j === popupIndex()"
+            (mousemove)="popupIndex.set(j)"
+            (click)="pick(item.entry)"
+          >
+            <span class="nav-icon" aria-hidden="true">{{ item.entry.is_dir ? '▸' : '📄' }}</span>
+            <span class="nav-item-name">
+              @for (r of item.runs; track $index) {
+                <span [class.hit]="r.hit">{{ r.text }}</span>
+              }
+            </span>
+            @if (item.entry.is_dir) {
+              <span class="nav-chevron" aria-hidden="true">›</span>
+            }
+          </li>
+        } @empty {
+          <li class="nav-note">{{ t('explorer.empty') }}</li>
+        }
+      </ul>
+    }
+  </div>
+}

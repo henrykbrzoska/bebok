@@ -1,4 +1,23 @@
-<aside class="sidebar" [class.collapsed]="!expanded()">
+<aside
+  class="sidebar"
+  [class.collapsed]="!expanded()"
+  [class.resizing]="resizing()"
+  [style.width.px]="expanded() ? width() : null"
+>
+  @if (expanded()) {
+    <div
+      class="resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      [attr.aria-label]="t('sidebar.resize')"
+      [attr.title]="t('sidebar.resize')"
+      data-testid="sidebar-resize"
+      (pointerdown)="onResizeStart($event)"
+      (pointermove)="onResizeMove($event)"
+      (pointerup)="onResizeEnd($event)"
+      (pointercancel)="onResizeEnd($event)"
+    ></div>
+  }
   <div class="head">
     <img class="logo" src="/logo.svg" alt="" aria-hidden="true" />
     @if (expanded()) {

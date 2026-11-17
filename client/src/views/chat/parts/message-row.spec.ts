@@ -244,7 +244,7 @@ describe('MessageRowComponent tool groups (F6-1)', () => {
     expect(parts.length).toBe(1);
     const head = toolHeads()[0];
     expect(head.getAttribute('aria-expanded')).toBe('false');
-    expect(head.classList.contains('collapsed')).toBeTrue();
+    expect(head.closest('.tool-head')!.classList.contains('collapsed')).toBeTrue();
     expect(root().querySelector('.tool-details')).toBeNull();
   });
 

@@ -506,6 +506,11 @@ pub struct Usage {
     /// Prompt tokens written to the provider's prompt cache (cache miss/write).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u64>,
+    /// Size of the last API-call prompt as reported by the CLI (input + its
+    /// cache buckets from the last `assistant` usage line). Lets the context
+    /// meter show the real window fill instead of the turn's token sum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
 }
 
 /// A typed event emitted by a provider stream.

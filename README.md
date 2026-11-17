@@ -21,6 +21,8 @@ yet and nothing is released.
 
 ![Provider settings with a masked API key](docs/screenshots/settings-providers.jpg)
 
+![Right-click context menu on an Explorer file](docs/screenshots/context-menu-explorer.png)
+
 ## Features
 
 ### Chat
@@ -141,11 +143,13 @@ yet and nothing is released.
   per-project; ships with `remote-browser-extension`.
 - Dynamic plugins: external plugin binaries as subprocesses (JSON-lines over
   stdio), install/toggle/update from Settings → General.
-- Chrome companion extension (`client/chrome-extension`, MV3, unpacked): ask
-  the local engine about the page you read (popup, "Ask Bebok about
-  selection", Options with Test connection), plus remote piloting of the
-  user's own tabs (`POST /browser/remote/*`, `session_id=extension`) with
-  pinned token + port search for stable reconnects.
+- Companion browser extension (`client/chrome-extension`, MV3, unpacked in
+  Chrome/Edge/Brave; `npm run extension:firefox` builds the Firefox copy into
+  `dist/firefox-extension`): ask the local engine about the page you read
+  (popup, "Ask Bebok about selection", Options with Test connection), plus
+  remote piloting of the user's own tabs (`POST /browser/remote/*`,
+  `session_id=extension`) with pinned token + port search for stable
+  reconnects.
 - Sampling parameters (`temperature`, `top_p`, `frequency_penalty`,
   `presence_penalty`, `seed`, `top_k`) via `sampling` / `sampling.<agent>`.
 - Searchable model picker (filterable combobox, grouped by provider).
@@ -156,6 +160,10 @@ yet and nothing is released.
   `tree`, `stat`, `du`, `head`, `tail`, `wc`, `sort`, `uniq`, `diff`, `which`,
   `glob`, `grep`, `find`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `chmod`, `ln`,
   `gzip`, `realpath`, `basename`, `dirname`, `sha256sum`, `base64`.
+- Right-click context menus (chat, Explorer, terminal, debug log, settings):
+  one DOM overlay shared by the web and Tauri builds, per-view providers
+  (`client/src/views/*/[view].menus.ts`) — see
+  [docs/context-menu.md](docs/context-menu.md).
 
 ## Supported providers
 
@@ -357,7 +365,7 @@ client/                    Angular 20.3 (standalone, signals, zoneless) + Tauri 
   src/app | core | views (start, chat, explorer, terminal, settings, stats, about, debug,
     browser-view, updates, schedules) | src/ui (shell, sidebar, right-drawer/panels,
     command-palette, diff-view, ...) | src/i18n (12 languages)
-  chrome-extension/        Companion MV3 extension (popup, options, remote piloting)
+  chrome-extension/        Companion MV3 extension (popup, options, remote piloting); Firefox build via scripts/build-firefox-extension.mjs
   android/                 Capacitor shell + EngineLauncher plugin (unreleased scaffolding)
 skills/                    bundled skills (e.g. remote-browser-extension)
 scripts/bebok.mjs          doctor / full-build-dev / full-build-app / engine / client

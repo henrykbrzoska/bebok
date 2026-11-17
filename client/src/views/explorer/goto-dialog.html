@@ -1,0 +1,106 @@
+<div class="goto-overlay" (click)="close()">
+  <div
+    class="goto-dialog"
+    role="dialog"
+    [attr.aria-label]="t('goto.title')"
+    data-testid="goto-dialog"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="goto-head">
+      <div class="goto-tabs" role="tablist">
+        @for (tb of tabs; track tb) {
+          <button
+            class="goto-tab"
+            role="tab"
+            [attr.data-testid]="'goto-tab-' + tb"
+            [class.active]="tab() === tb"
+            [attr.aria-selected]="tab() === tb"
+            (click)="setTab(tb)"
+          >
+            @switch (tb) {
+              @case ('all') {
+                {{ t('goto.tabAll') }}
+              }
+              @case ('classes') {
+                {{ t('goto.tabClasses') }}
+              }
+              @case ('files') {
+                {{ t('goto.tabFiles') }}
+              }
+              @case ('symbols') {
+                {{ t('goto.tabSymbols') }}
+              }
+            }
+          </button>
+        }
+      </div>
+      <span class="goto-spacer"></span>
+      <span class="goto-keys">{{ t('goto.keysHint') }}</span>
+      <button class="goto-close" (click)="close()" [attr.aria-label]="t('findInFiles.close')">
+        ✕
+      </button>
+    </header>
+
+    <div class="goto-search">
+      <span class="goto-glass" aria-hidden="true">⌕</span>
+      <input
+        #queryInput
+        class="goto-query"
+        data-testid="goto-query"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="query()"
+        (input)="onQuery($any($event.target).value)"
+        [placeholder]="t('goto.placeholder')"
+        [attr.aria-label]="t('goto.placeholder')"
+      />
+      @if (loading()) {
+        <span class="goto-spinner">{{ t('goto.loading') }}</span>
+      }
+    </div>
+    @if (error()) {
+      <div class="goto-error">{{ error() }}</div>
+    }
+
+    <ul class="goto-list" #list role="listbox">
+      @if (!parsed().pattern && rows().length > 0) {
+        <li class="goto-group">{{ t('goto.recent') }}</li>
+      }
+      @for (row of rows(); track $index) {
+        @if (row.group) {
+          <li class="goto-group">{{ row.group }}</li>
+        }
+        <li
+          class="goto-row"
+          role="option"
+          data-testid="goto-row"
+          [class.is-selected]="$index === index()"
+          [attr.aria-selected]="$index === index()"
+          (mousemove)="select($index)"
+          (click)="open(row)"
+          [title]="row.target.path"
+        >
+          <span class="goto-badge" [class.is-symbol]="row.kind === 'symbol'">{{ row.badge }}</span>
+          <span class="goto-label">
+            @for (r of row.label; track $index) {
+              <span [class.hit]="r.hit">{{ r.text }}</span>
+            }
+          </span>
+          <span class="goto-detail">
+            @for (r of row.detail; track $index) {
+              <span [class.hit]="r.hit">{{ r.text }}</span>
+            }
+          </span>
+        </li>
+      } @empty {
+        <li class="goto-empty">{{ emptyText() }}</li>
+      }
+    </ul>
+    <footer class="goto-foot">
+      <span>{{ t('goto.footHint') }}</span>
+      @if (filesTruncated()) {
+        <span class="goto-warn">{{ t('goto.truncated') }}</span>
+      }
+    </footer>
+  </div>
+</div>

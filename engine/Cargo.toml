@@ -59,6 +59,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-php = "0.25"
 tree-sitter-javascript = "0.25"
 tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
 
 # Keep engine/target small: full debug info dominates it (every dependency
 # rlib and test binary carries it, which is how the dir used to grow to 40+ GB

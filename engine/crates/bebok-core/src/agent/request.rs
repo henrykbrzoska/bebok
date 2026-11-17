@@ -22,9 +22,7 @@ use crate::util::scrub_secrets;
 
 /// Delegation tool sets: the orchestrator owns fleet fan-out plus the
 /// supervision tools (including `task_report`, the read-out of a child's
-/// work after an abort); every other agent (and every sub-agent) gets none
-/// of them. The plain `task` tool stays registered (it is not in these
-/// lists) so non-orchestrator agents and manual calls keep working as before.
+/// work after an abort). These names are withheld from every other agent.
 pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] = &[
     "fleet",
     "task_status",
@@ -34,6 +32,18 @@ pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] = &[
 ];
 /// Back-compat alias for tests/callers iterating the full delegation set.
 pub const DELEGATION_TOOLS: &[&str] = ORCHESTRATOR_DELEGATION_TOOLS;
+
+/// Presets that own delegation and therefore see the delegation tools
+/// (`task` here, plus [`ORCHESTRATOR_DELEGATION_TOOLS`] for the orchestrator)
+/// and the delegation prompt section: the orchestrator (fleet fan-out +
+/// supervision) and `hub` (the multi-project operator whose only write path is
+/// delegating a `code` subtask).
+///
+/// Every other preset runs as a worker: it gets no `task`/`fleet`/supervision
+/// tools and no delegation text, so a plain coding or debugging session is
+/// never nudged into fanning out. Sub-agents of any parent are always workers,
+/// whatever preset they were spawned with.
+pub const DELEGATING_AGENTS: &[&str] = &[super::delegation_policy::FLEET_AGENT, "hub"];
 
 /// Builder for provider requests (transcript + system prompt + tool defs).
 pub struct RequestBuilder<'a> {
@@ -196,13 +206,18 @@ impl<'a> RequestBuilder<'a> {
         // for unused tools (e.g. fs_tree, fs_file, debug_log, mcp list are
         // rarely needed in a simple code-editing session).
         let used_tools = collect_used_tools(&messages);
-        // The orchestrator owns fleet fan-out + supervision (`fleet`,
-        // `task_status`, `task_wait`, `task_cancel`, `task_report`);
-        // sub-agents of any parent are workers and get none of them. Every
-        // other agent keeps the plain `task` tool (registered, not gated
-        // here) but never sees the fleet/supervision set.
-        let hide_delegation = self.state.meta_snapshot().await.parent.is_some()
-            || self.agent.name != super::delegation_policy::FLEET_AGENT;
+        // Delegation is a coordinator capability: the orchestrator (fleet
+        // fan-out + supervision) and `hub` (delegation-only operator) own it;
+        // a sub-agent spawned by `task`/`fleet` never has it — a worker that
+        // could fan out further is exactly the recursive-delegation failure
+        // mode. Fork/compact sessions keep `parent` for genealogy but are NOT
+        // sub-agents (`Session::subagent` is only set by
+        // `create_subagent_session`), so they keep their delegation tools.
+        // Every other preset sees no delegation tool at all, so nothing in
+        // its request advertises fan-out it cannot do.
+        let is_subagent = self.state.meta_snapshot().await.subagent;
+        let delegation_owner =
+            !is_subagent && DELEGATING_AGENTS.contains(&self.agent.name.as_str());
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -216,7 +231,8 @@ impl<'a> RequestBuilder<'a> {
                 if t.name() == "fleet" && self.agent.name != super::delegation_policy::FLEET_AGENT {
                     return false;
                 }
-                if hide_delegation && DELEGATION_TOOLS.contains(&t.name()) {
+                if !delegation_owner && (t.name() == "task" || DELEGATION_TOOLS.contains(&t.name()))
+                {
                     return false;
                 }
                 self.agent.tools.is_empty() || self.agent.tools.iter().any(|n| n == t.name())

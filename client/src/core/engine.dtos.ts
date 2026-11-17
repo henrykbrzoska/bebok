@@ -881,6 +881,101 @@ export interface FsTreeResponse {
   entries: FsEntry[];
 }
 
+/** One hit of `GET /fs/definition` (Explorer Ctrl/Cmd+click). */
+export interface FsDefinitionHit {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based. */
+  column: number;
+  kind: string;
+  snippet: string;
+}
+
+export interface FsDefinitionResponse {
+  symbol: string;
+  results: FsDefinitionHit[];
+  parsed_files: number;
+  truncated: boolean;
+}
+
+/** One completion suggestion (`POST /fs/complete`). */
+export interface FsCompleteItem {
+  label: string;
+  /** `variable`, `parameter`, `function`, `class`, …, `keyword`. */
+  kind: string;
+  detail?: string;
+  path?: string;
+  line?: number;
+  /** `local` | `file` | `project` | `keyword`. */
+  source: 'local' | 'file' | 'project' | 'keyword';
+}
+
+/** Body of `POST /fs/complete`. `text` is the unsaved buffer, `offset` a UTF-8 byte offset. */
+export interface FsCompleteRequest {
+  path: string;
+  text: string;
+  offset: number;
+  limit?: number;
+}
+
+export interface FsCompleteResponse {
+  prefix: string;
+  items: FsCompleteItem[];
+}
+
+/** Options of `GET /fs/search` (Explorer "Find in Files"). */
+export interface FsSearchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+  /** File-name globs, e.g. `*.rs, !*.min.js`. */
+  mask?: string;
+  limit?: number;
+}
+
+export interface FsTextHit {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based, in characters. */
+  column: number;
+  length: number;
+  text: string;
+}
+
+export interface FsSymbolHit {
+  name: string;
+  path: string;
+  line: number;
+  column: number;
+  kind: string;
+  snippet: string;
+}
+
+/** `GET /fs/files` - every project file (Go to File, Ctrl/Cmd+Shift+N). */
+export interface FsFilesResponse {
+  files: string[];
+  truncated: boolean;
+}
+
+/** `GET /fs/symbols` - definitions whose name contains the query. */
+export interface FsSymbolsResponse {
+  symbols: FsSymbolHit[];
+}
+
+export interface FsSearchResponse {
+  text: {
+    results: FsTextHit[];
+    files_matched: number;
+    files_searched: number;
+    truncated: boolean;
+  };
+  symbols: FsSymbolHit[];
+  /** The bebok-index plugin ranked the scanned files. */
+  indexed: boolean;
+}
+
 export interface FsFileResponse {
   path: string;
   content: string;

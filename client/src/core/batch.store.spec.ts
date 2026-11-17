@@ -45,7 +45,7 @@ describe('BatchStore', () => {
         provideZonelessChangeDetection(),
         BatchStore,
         { provide: EngineClient, useValue: engine },
-        { provide: EventsStore, useValue: { subscribe: () => () => undefined } },
+        { provide: EventsStore, useValue: { onEvent: () => () => undefined } },
       ],
     });
     store = TestBed.inject(BatchStore);

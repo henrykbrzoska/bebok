@@ -32,6 +32,9 @@ import {
 } from '../../core/engine.dtos';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
+import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
+import { SETTINGS_RULE_PROVIDER, type SettingsRulePayload } from '../debug/debug.menus';
 import { PermissionRule, SettingsStore } from './settings.store';
 
 /** One category bucket of the "all tools" table (F7-7). */
@@ -68,13 +71,14 @@ export function windowPositionRightOf(
 
 @Component({
   selector: 'app-settings-permissions',
-  imports: [FormsModule],
+  imports: [FormsModule, ContextMenuDirective],
   templateUrl: './permissions-tab.html',
   styleUrls: ['./settings-shared.css', './permissions-tab.css'],
 })
 export class PermissionsTab implements OnInit {
   private readonly i18n = inject(I18nService);
   private readonly engine = inject(EngineClient);
+  private readonly menus = inject(ContextMenuService);
 
   readonly store = inject(SettingsStore);
   readonly toolSafety = inject(ToolSafetyStore);
@@ -91,10 +95,23 @@ export class PermissionsTab implements OnInit {
   readonly safetyGroups = computed(() => groupBySafety(this.toolSafety.entries()));
 
   constructor() {
+    this.menus.register(SETTINGS_RULE_PROVIDER);
     // The tool list is directory-scoped like the config itself.
     effect(() => {
       void this.toolSafety.ensure(this.store.directory());
     });
+  }
+
+  /** Payload for the `settings.rule` provider (permission rule rows). */
+  ruleMenuData(rule: PermissionRule, index: number): SettingsRulePayload {
+    const text = `${rule.pattern} -> ${rule.action}`;
+    return {
+      description: text,
+      actions: {
+        copyRule: () => void this.menus.copyText(text),
+        deleteRule: () => this.store.removeRule(index),
+      },
+    };
   }
 
   ngOnInit(): void {

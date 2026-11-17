@@ -10,7 +10,9 @@
 //! Adding a new CLI is meant to be one file under [`crate::backends`] plus a
 //! registry line — see `docs/cli-agents.md`.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -60,11 +62,95 @@ pub enum CliMode {
     Text,
 }
 
+/// One piece of a prompt that can travel as structured content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptBlock {
+    Text(String),
+    /// Base64 payload, already validated upstream (`agent/images.rs`).
+    Image {
+        media_type: String,
+        data: String,
+    },
+}
+
+/// What the installed binary says about itself, read once per binary from
+/// `<binary> --help` (see `runner.rs`). Backends gate every flag they are not
+/// certain of on [`CliProbe::mentions`], so an older or newer CLI gets the
+/// conservative argv path instead of a flag it rejects.
+#[derive(Debug, Clone, Default)]
+pub struct CliProbe {
+    help: String,
+}
+
+impl CliProbe {
+    pub fn new(help: String) -> Self {
+        Self { help }
+    }
+
+    /// True when the help text contains `needle`. An empty probe (the binary
+    /// did not answer `--help`) mentions nothing.
+    pub fn mentions(&self, needle: &str) -> bool {
+        self.help.contains(needle)
+    }
+}
+
+/// Files a single turn must leave on disk while the CLI runs (for example a
+/// system prompt passed by path). The directory is created lazily and removed
+/// on drop; the runner keeps the value alive for as long as the process
+/// stream, so the CLI can read its files at startup.
+#[derive(Debug, Default)]
+pub struct TurnScratch {
+    dir: Option<PathBuf>,
+}
+
+impl TurnScratch {
+    /// Write `contents` to `name` inside this turn's directory and return the
+    /// absolute path.
+    pub fn write_file(&mut self, name: &str, contents: &str) -> Result<PathBuf, CliError> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = match &self.dir {
+            Some(dir) => dir.clone(),
+            None => {
+                let unique = format!(
+                    "bebok-cli-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                );
+                let dir = std::env::temp_dir().join(unique);
+                // `create_dir`, not `create_dir_all`: an existing directory is
+                // refused rather than reused, so a pre-planted one is never
+                // written into.
+                std::fs::create_dir(&dir)
+                    .map_err(|e| CliError::Scratch(format!("{}: {e}", dir.display())))?;
+                self.dir = Some(dir.clone());
+                dir
+            }
+        };
+        let path = dir.join(name);
+        std::fs::write(&path, contents)
+            .map_err(|e| CliError::Scratch(format!("{}: {e}", path.display())))?;
+        Ok(path)
+    }
+}
+
+impl Drop for TurnScratch {
+    fn drop(&mut self) {
+        if let Some(dir) = self.dir.take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
 /// One turn handed to a CLI backend.
 #[derive(Debug, Clone)]
 pub struct CliRequest {
-    /// The prompt: the rendered transcript (see [`crate::transcript`]).
+    /// The prompt as plain text: the rendered transcript (see
+    /// [`crate::transcript`]), with images replaced by placeholders. Used when
+    /// the CLI takes the prompt on its command line.
     pub prompt: String,
+    /// The same prompt as structured blocks, images included. Used when the
+    /// CLI takes the prompt on stdin (see [`CliBackend::stdin_payload`]).
+    pub blocks: Vec<PromptBlock>,
     /// System prompt to append, when the backend supports one.
     pub system: Option<String>,
     /// Model id as the CLI understands it (`opus`, `sonnet`, ...).
@@ -106,6 +192,24 @@ pub struct CliStreamState {
     /// Partial line buffer for backends that do not emit one JSON object per
     /// line.
     pub buffer: String,
+    /// Events one line produced beyond the one `parse_line` returned. The
+    /// runner delivers them, in order, right after that event.
+    pub pending: VecDeque<CliEvent>,
+    /// Set when the backend reports the run itself as failed (for example a
+    /// `result` with `is_error`). The runner delivers it as
+    /// [`CliError::RunFailed`] after `pending`, so usage reported on the same
+    /// line is still accounted for.
+    pub failure: Option<String>,
+    /// Id of the message whose partial deltas were streamed, if any.
+    pub message_id: Option<String>,
+    /// Text and thinking blocks of `message_id` already shown from deltas, so
+    /// the full message that follows does not show them a second time.
+    pub streamed: Vec<String>,
+    /// Text of the content block currently streaming, if it is text/thinking.
+    pub block: Option<String>,
+    /// Prompt size of the latest API call (input plus cache buckets), from the
+    /// latest `assistant` message's usage.
+    pub context_tokens: Option<u64>,
 }
 
 /// Errors a backend or the runner can produce.
@@ -123,6 +227,12 @@ pub enum CliError {
     Timeout(Duration),
     #[error("CLI stream error: {0}")]
     Stream(String),
+    /// The CLI reported the run as failed (`result` with `is_error`, or an
+    /// `error_*` subtype). The message is meant for the user.
+    #[error("CLI run failed: {0}")]
+    RunFailed(String),
+    #[error("cannot prepare files for the CLI turn: {0}")]
+    Scratch(String),
     #[error("invalid CLI provider config: {0}")]
     Config(String),
 }
@@ -131,6 +241,8 @@ impl CliError {
     /// True when retrying the same turn could succeed. A missing binary or a
     /// bad config never becomes good on the second attempt — and the agent loop
     /// retries transient errors 3x, which would triple the wait for nothing.
+    /// A run the CLI itself reported as failed is not retried either: the same
+    /// prompt would most likely hit the same limit again.
     pub fn is_transient(&self) -> bool {
         matches!(self, CliError::Stream(_))
     }
@@ -159,10 +271,28 @@ pub trait CliBackend: Send + Sync {
     fn binary_names(&self) -> &'static [&'static str];
     /// Environment variable that overrides the binary path.
     fn env_override(&self) -> &'static str;
-    /// Build `(program, args)` for one turn.
-    fn build_command(&self, spec: &crate::spec::CliSpec, req: &CliRequest)
-    -> (String, Vec<String>);
-    /// Parse one stdout line; `Ok(None)` = nothing to emit.
+    /// Build `(program, args)` for one turn. `probe` says what the installed
+    /// binary supports; files the CLI must read go through `scratch`.
+    fn build_command(
+        &self,
+        spec: &crate::spec::CliSpec,
+        req: &CliRequest,
+        probe: &CliProbe,
+        scratch: &mut TurnScratch,
+    ) -> Result<(String, Vec<String>), CliError>;
+    /// Bytes to write to the child's stdin, or `None` to leave stdin closed
+    /// (the prompt then travels on the command line). When `Some`, the runner
+    /// closes stdin after the write, which is what lets the CLI start.
+    fn stdin_payload(&self, _req: &CliRequest, _probe: &CliProbe) -> Option<Vec<u8>> {
+        None
+    }
+    /// Map the CLI's own model name (and the id it reported at startup, if
+    /// any) to an id in the model catalog, for context-window lookup.
+    fn catalog_model(&self, _cli_model: &str, _init_model: Option<&str>) -> Option<String> {
+        None
+    }
+    /// Parse one stdout line; `Ok(None)` = nothing to emit. Extra events and a
+    /// failure go into `st` (see [`CliStreamState::pending`]).
     fn parse_line(&self, line: &str, st: &mut CliStreamState)
     -> Result<Option<CliEvent>, CliError>;
     /// Args for availability probing.
@@ -205,5 +335,28 @@ mod tests {
     fn mode_serde_is_lowercase() {
         assert_eq!(serde_json::to_string(&CliMode::Agent).unwrap(), "\"agent\"");
         assert_eq!(serde_json::to_string(&CliMode::Text).unwrap(), "\"text\"");
+    }
+
+    #[test]
+    fn empty_probe_mentions_nothing() {
+        assert!(!CliProbe::default().mentions("--input-format"));
+        let probe = CliProbe::new("  --input-format <format>  ...".into());
+        assert!(probe.mentions("--input-format"));
+        assert!(!probe.mentions("--include-partial-messages"));
+    }
+
+    #[test]
+    fn turn_scratch_writes_under_a_temp_dir_and_removes_it_on_drop() {
+        let mut scratch = TurnScratch::default();
+        let path = scratch.write_file("system-prompt.txt", "be terse").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "be terse");
+        assert!(path.is_absolute());
+
+        let second = scratch.write_file("other.txt", "x").unwrap();
+        assert_eq!(second.parent(), path.parent(), "one directory per turn");
+
+        let dir = path.parent().unwrap().to_path_buf();
+        drop(scratch);
+        assert!(!dir.exists(), "scratch dir must be removed on drop");
     }
 }

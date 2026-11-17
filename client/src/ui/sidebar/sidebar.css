@@ -13,10 +13,31 @@
   border-right: 1px solid var(--border);
   transition: width var(--shell-transition);
   overflow: hidden;
+  position: relative;
 }
 
 .sidebar.collapsed {
   width: var(--sidebar-collapsed-width);
+}
+
+/* Dragging must not fight the expand/collapse width transition. */
+.sidebar.resizing {
+  transition: none;
+}
+
+.resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 4;
+}
+
+.resize-handle:hover {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* --- Header ----------------------------------------------------------- */
@@ -481,6 +502,8 @@
   gap: var(--space-8);
   font-size: var(--fs-11-5);
   flex: none;
+  /* The engine URL (with its capability token) wraps onto its own line. */
+  flex-wrap: wrap;
 }
 
 .engine-live-btn {
@@ -495,9 +518,12 @@
 }
 
 .engine-url {
+  flex: 1 0 100%;
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--text-muted);
+  word-break: break-all;
+  user-select: all;
 }
 
 .connect-btn,

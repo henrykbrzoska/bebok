@@ -255,10 +255,13 @@ fn supervision_note() -> String {
 /// worker: complete its own brief, respect the ownership boundaries it was
 /// given, do not fan out further, and end with a report the parent can use.
 pub fn subagent_note() -> &'static str {
-    "You are a SUB-AGENT working on one delegated part of a larger task. Do exactly the brief \
-     you were given, stay within the files/areas it assigns to you, do not delegate further \
-     (do the work directly, including any workspace inspection you need), and finish with a \
-     concise report that starts with `Status: PASS`, `Status: PASS WITH NOTES` or \
+    "## Sub-agent (you are NOT the main thread)\n\
+     This conversation is one delegated part of a larger task: a coordinating agent spawned you, \
+     the user is not talking to you directly, and you have no delegation tools (`task`, `fleet`, \
+     `task_status`, `task_wait`, `task_cancel` and `task_report` are absent from your tool list by \
+     design). Do exactly the brief you were given, stay within the files/areas it assigns to you, \
+     do not delegate further (do the work directly, including any workspace inspection you need), \
+     and finish with a concise report that starts with `Status: PASS`, `Status: PASS WITH NOTES` or \
      `Status: FAIL`, then: what you changed (files), how you verified it (commands you actually \
      ran and their result — never claim a build or test you did not run), and anything the \
      coordinating agent still needs to do. With FAIL say what does not work and what you tried; \
@@ -505,8 +508,11 @@ mod tests {
     #[test]
     fn subagent_note_forbids_further_delegation() {
         let n = subagent_note();
-        assert!(n.contains("SUB-AGENT"));
-        assert!(n.contains("do not delegate further"));
+        assert!(n.contains("## Sub-agent"), "{n}");
+        assert!(n.to_lowercase().contains("sub-agent"), "{n}");
+        assert!(n.contains("NOT the main thread"), "{n}");
+        assert!(n.contains("no delegation tools"), "{n}");
+        assert!(n.contains("do not delegate further"), "{n}");
         assert!(n.contains("report"));
     }
 }

@@ -86,6 +86,7 @@ describe('CodeFeaturesCard', () => {
     );
 
     await component.toggleCodeMap(true);
+    fixture.detectChanges();
 
     expect(engine.putConfig).toHaveBeenCalledWith('/tmp/project', { code_map: { enabled: true } });
     expect(component.codeMapEnabled()).toBeTrue();
@@ -103,6 +104,7 @@ describe('CodeFeaturesCard', () => {
     );
 
     await component.toggleCodeGraph(true);
+    fixture.detectChanges();
 
     expect(engine.putConfig).toHaveBeenCalledWith('/tmp/project', {
       code_graph: { enabled: true },
@@ -119,6 +121,7 @@ describe('CodeFeaturesCard', () => {
     );
 
     await component.toggleAstSearch(true);
+    fixture.detectChanges();
 
     expect(engine.putConfig).toHaveBeenCalledWith('/tmp/project', {
       ast_search: { enabled: true },
@@ -135,6 +138,7 @@ describe('CodeFeaturesCard', () => {
     );
 
     await component.toggleSsh(false);
+    fixture.detectChanges();
 
     expect(engine.putConfig).toHaveBeenCalledWith('/tmp/project', {
       ssh: { enabled: false },
@@ -152,6 +156,7 @@ describe('CodeFeaturesCard', () => {
     spyOn(engine, 'putConfig').and.returnValue(Promise.reject(new Error('engine down')));
 
     await component.toggleCodeMap(true);
+    fixture.detectChanges();
 
     expect(component.codeMapEnabled()).toBeFalse();
     expect(component.saving()).toBeFalse();
@@ -167,8 +172,16 @@ describe('CodeFeaturesCard', () => {
         section: 'Project code map:',
       }),
     );
+    spyOn(engine, 'getCodeMap').and.returnValue(
+      Promise.resolve({
+        enabled: true,
+        map: { entries: [{}, {}, {}] },
+        section: 'Project code map:',
+      }),
+    );
 
     await component.regenerateCodeMap();
+    fixture.detectChanges();
 
     expect(component.codeMapEntries()).toBe(3);
     expect(component.codeMapRegenerating()).toBeFalse();
@@ -181,6 +194,7 @@ describe('CodeFeaturesCard', () => {
     );
 
     await component.regenerateCodeGraph();
+    fixture.detectChanges();
 
     expect(component.codeGraphRegenerating()).toBeFalse();
     expect(component.store.error()).toContain('scan failed');

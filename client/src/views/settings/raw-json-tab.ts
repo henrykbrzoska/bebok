@@ -13,18 +13,22 @@ import { Component, computed, effect, inject, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { I18nService } from '../../i18n/i18n.service';
+import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
+import { SETTINGS_RAW_PROVIDER, type SettingsRawPayload } from '../debug/debug.menus';
 import { SettingsStore } from './settings.store';
 import { TreeJsonEditor } from './tree-json-editor';
 import { JsonDiagnostic, highlightJson, validateConfig } from './json-highlight';
 
 @Component({
   selector: 'app-settings-raw-json',
-  imports: [FormsModule, TreeJsonEditor],
+  imports: [FormsModule, TreeJsonEditor, ContextMenuDirective],
   templateUrl: './raw-json-tab.html',
   styleUrls: ['./settings-shared.css', './raw-json-tab.css'],
 })
 export class RawJsonTab {
   private readonly i18n = inject(I18nService);
+  private readonly menus = inject(ContextMenuService);
 
   readonly store = inject(SettingsStore);
   readonly t = this.i18n.t.bind(this.i18n);
@@ -76,11 +80,50 @@ export class RawJsonTab {
   private treeTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
+    this.menus.register(SETTINGS_RAW_PROVIDER);
     // Text -> tree: push freshly parsed raw text (layer switches included).
     // TreeJsonEditor.setValue() no-ops on identical values, so no echo loop.
     effect(() => {
       const value = this.treeValue();
       this.tree()?.setValue(value);
+    });
+  }
+
+  /** Payload for the `settings.raw` provider (raw JSON textarea). */
+  rawMenuData(area: HTMLTextAreaElement): SettingsRawPayload {
+    const start = area.selectionStart ?? 0;
+    const end = area.selectionEnd ?? 0;
+    return {
+      hasSelection: end > start,
+      canPaste: true,
+      actions: {
+        copy: () => {
+          const text = area.value.slice(start, end) || area.value;
+          void this.menus.copyText(text);
+        },
+        paste: () => void this.pasteInto(area),
+        format: () => this.format(),
+        selectAll: () => {
+          area.focus();
+          area.select();
+        },
+      },
+    };
+  }
+
+  /** Best-effort paste at the caret (falls back to appending). */
+  private async pasteInto(area: HTMLTextAreaElement): Promise<void> {
+    const text = await this.menus.readText();
+    if (!text) {
+      return;
+    }
+    const start = area.selectionStart ?? area.value.length;
+    const end = area.selectionEnd ?? area.value.length;
+    const next = area.value.slice(0, start) + text + area.value.slice(end);
+    this.setText(next);
+    queueMicrotask(() => {
+      area.focus();
+      area.setSelectionRange(start + text.length, start + text.length);
     });
   }
 

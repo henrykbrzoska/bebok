@@ -836,6 +836,14 @@ async fn run_child_turn_with_watchdog(
     let watchdog_secs = spec.parent.config_snapshot().delegation.watchdog_secs;
 
     loop {
+        // One token per *attempt*, derived from the child's registered token.
+        // Cancelling the registered token (task_cancel, parent turn abort)
+        // still cascades into the attempt; cancelling the attempt on a
+        // watchdog restart must NOT touch the registered one, or the respawned
+        // turn would see an already-cancelled token and abort instantly —
+        // which turned every restart into a burn of `max_restarts` and a hard
+        // error for the orchestrator.
+        let attempt_abort = abort.child_token();
         let stop = CancellationToken::new();
         let reporter = spawn_progress_reporter(
             bus.clone(),
@@ -852,6 +860,10 @@ async fn run_child_turn_with_watchdog(
         let wd_handle = tokio::spawn(super::watchdog::watchdog_loop(
             move || {
                 // Best-effort sync snapshot: the loop only needs counters.
+                // `activity` is read independently of the transcript lock (it
+                // is an atomic), so a contended transcript can no longer look
+                // like a silent child.
+                let activity = wd_child.activity();
                 let (tool_calls, steps, verdict) = match wd_child.try_read_messages_snapshot() {
                     Some(messages) => {
                         let p = summarize_progress(&messages);
@@ -860,7 +872,11 @@ async fn run_child_turn_with_watchdog(
                     None => (0, 0, "ok".to_string()),
                 };
                 (
-                    super::watchdog::ProgressSnapshot { tool_calls, steps },
+                    super::watchdog::ProgressSnapshot {
+                        tool_calls,
+                        steps,
+                        activity,
+                    },
                     verdict,
                 )
             },
@@ -878,7 +894,7 @@ async fn run_child_turn_with_watchdog(
             spec.provider.clone(),
             spec.instance.permission.clone(),
             bus.clone(),
-            abort.clone(),
+            attempt_abort.clone(),
             spec.model.clone(),
         )
         .with_sampling(spec.sampling.clone())
@@ -902,8 +918,9 @@ async fn run_child_turn_with_watchdog(
         match end {
             TurnEnd::Done(r) => return r,
             TurnEnd::Restart(reason) => {
-                // Stop the stuck turn before respawning.
-                abort.cancel();
+                // Stop the stuck attempt before respawning. Only this
+                // attempt's token: the child keeps its identity and its slot.
+                attempt_abort.cancel();
                 if restarts >= max_restarts {
                     return Err(crate::error::CoreError::BadRequest(format!(
                         "child {task_id} got stuck {} times ({reason}); take over yourself",

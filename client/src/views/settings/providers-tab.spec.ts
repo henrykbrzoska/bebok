@@ -35,6 +35,7 @@ function configResponse(): ConfigResponse {
     providers: [
       { name: 'openai', kind: 'openai', endpoint: null, api_key: null, models: [], has_key: true },
       { name: 'mycorp', kind: 'openai', endpoint: null, api_key: null, models: [], has_key: false },
+      { name: 'claude-cli', kind: 'cli', endpoint: null, models: [], has_key: false },
     ],
     skills: [],
     mcp: [],
@@ -194,7 +195,11 @@ describe('ProvidersTab', () => {
     component.store.removeProvider('claude-cli');
     await component.addCliProvider(component.backends()[0]);
 
-    const added = component.store.providers().find((p) => p.name === 'claude-cli');
+    expect(engine.putConfig).toHaveBeenCalled();
+    const putArg = (engine.putConfig as jasmine.Spy).calls.mostRecent().args[1] as {
+      providers: { name: string; kind: string; models: string[]; extra: unknown }[];
+    };
+    const added = putArg.providers.find((p) => p.name === 'claude-cli');
     expect(added).withContext('the backend becomes a provider').toBeDefined();
     expect(added!.kind).toBe('cli');
     expect(added!.models).toEqual(['opus', 'sonnet', 'haiku']);
@@ -204,9 +209,19 @@ describe('ProvidersTab', () => {
       allow_write: false,
       timeout_secs: 900,
     });
-    expect(engine.putConfig).toHaveBeenCalled();
 
     // The new provider is keyless by construction, so no key field appears.
+    // putConfig triggers a reload from the (static) mock, so re-select it.
+    component.store.addProvider({
+      name: 'claude-cli',
+      kind: 'cli',
+      endpoint: null,
+      api_key: "[REDACTED SECRET]",
+      models: ['opus', 'sonnet', 'haiku'],
+      extra: { backend: 'claude', mode: 'agent', allow_write: false, timeout_secs: 900 },
+    });
+    component.select('claude-cli');
+    await fixture.whenStable();
     fixture.detectChanges();
     const host = fixture.nativeElement as HTMLElement;
     expect(host.querySelector('input[data-testid="provider-api-key"]')).toBeNull();

@@ -42,7 +42,8 @@ Tools:
   `code_graph_*` (dependencies) → `code_ast` (structural queries) → `code_index_search` (full-text) → `grep`/`glob`.
 - Use `glob`/`grep` to find files and matches, `which` to check a tool is installed, `du`/`stat` to size things up.
 - Reach for `bash` only when no native tool fits: builds, tests, git, package managers.
-- For a direct coding task, do the implementation yourself. Use `task` only for a substantial, independent subtask that benefits from a separate agent; do not delegate routine workspace inspection.
+- For a direct coding task, do the implementation yourself — a plain coding
+  session has no sub-agent delegation tools.
 - Do not litter the repo with scratch scripts; if you truly need one, put it in a temp dir.
 
 Guidelines:
@@ -127,8 +128,8 @@ pub(crate) const DEBUG_PROMPT: &str = r#"You are Bebok in "debug" mode.
 Diagnose the reported problem methodically: reproduce it, gather evidence
 (logs, tests, git status), form and test a hypothesis, and fix the root cause.
 Explain the cause and the fix clearly.
-Investigate and fix a focused bug yourself. Use `task` only for a substantial,
-independent subtask; do not delegate the same diagnosis to another debug agent.
+Investigate and fix a focused bug yourself; a plain debugging session has no
+sub-agent delegation tools.
 "#;
 
 pub(crate) const ORCHESTRATOR_PROMPT: &str = r#"You are Bebok in "orchestrator" mode.

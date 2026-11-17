@@ -120,6 +120,7 @@ if __name__ == "__main__":
                 cost: None,
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                context_tokens: None,
             }),
         ]
     }
@@ -133,6 +134,7 @@ if __name__ == "__main__":
                 cost: None,
                 cache_read_input_tokens: None,
                 cache_creation_input_tokens: None,
+                context_tokens: None,
             }),
         ]
     }
@@ -1334,7 +1336,7 @@ if __name__ == "__main__":
     /// set; every sub-agent (child of any parent) gets none of them.
     #[tokio::test]
     async fn orchestrator_only_gets_fleet_and_supervision_tools() {
-        use crate::agent::request::{DELEGATION_TOOLS, RequestBuilder};
+        use crate::agent::request::{DELEGATING_AGENTS, DELEGATION_TOOLS, RequestBuilder};
 
         let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
@@ -1408,6 +1410,7 @@ if __name__ == "__main__":
             "task_status",
             "task_cancel",
             "task_report",
+            "task",
         ] {
             assert!(parent_tools.iter().any(|n| n == t), "parent lacks {t}");
             assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
@@ -1415,8 +1418,8 @@ if __name__ == "__main__":
         assert!(child_tools.iter().any(|n| n == "read_file"));
         assert_eq!(DELEGATION_TOOLS.len(), 5);
 
-        // Non-orchestrator parent: no fleet/supervision tools (plain `task`
-        // stays registered for manual use); its child gets none either.
+        // Non-orchestrator parent (`code`): no delegation tools at all — the
+        // request must not advertise fan-out a plain coding session cannot do.
         let store2 = InstanceStore::with_data_dir(base.join("data2"));
         let (code_tools, code_child) = build(&store2, "code").await;
         for t in [
@@ -1425,11 +1428,141 @@ if __name__ == "__main__":
             "task_status",
             "task_cancel",
             "task_report",
+            "task",
         ] {
             assert!(!code_tools.iter().any(|n| n == t), "code got {t}");
             assert!(!code_child.iter().any(|n| n == t), "code child got {t}");
         }
-        assert!(code_tools.iter().any(|n| n == "task"), "{code_tools:?}");
+        assert!(
+            code_tools.iter().any(|n| n == "read_file"),
+            "{code_tools:?}"
+        );
+        // `hub` is the delegation-only operator preset: it keeps `task`, but
+        // never the fleet/supervision set.
+        assert!(
+            DELEGATING_AGENTS.contains(&"hub"),
+            "hub must stay a delegation owner"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Fork/compact sessions keep `parent` for genealogy but are NOT
+    /// sub-agents: an orchestrator that went through compact/fork must keep
+    /// its delegation tools. Only `create_subagent_session` sets
+    /// `Session::subagent`.
+    #[tokio::test]
+    async fn fork_and_compact_keep_delegation_tools() {
+        use crate::agent::request::RequestBuilder;
+
+        let base = std::env::temp_dir().join(format!("bebok-forkdeleg-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        tokio::fs::create_dir_all(project.join(".bebok"))
+            .await
+            .unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+
+        let tools = Arc::new(ToolRegistry::new(builtin_tools()));
+        for t in [
+            Arc::new(crate::agent::TaskTool::new(Arc::downgrade(&store)))
+                as Arc<dyn bebok_tools::Tool>,
+            Arc::new(crate::agent::FleetTool::new(Arc::downgrade(&store))),
+            Arc::new(crate::agent::TaskWaitTool::new(Arc::downgrade(&store))),
+            Arc::new(crate::agent::TaskStatusTool::new(Arc::downgrade(&store))),
+            Arc::new(crate::agent::TaskCancelTool::new(Arc::downgrade(&store))),
+            Arc::new(crate::agent::TaskReportTool::new(Arc::downgrade(&store))),
+        ] {
+            tools.register_tool(t);
+        }
+        let names = |state: &Arc<SessionState>| {
+            let tools = tools.clone();
+            let state = state.clone();
+            async move {
+                let req = RequestBuilder::new(
+                    &state,
+                    &Agent::orchestrator(),
+                    &tools,
+                    "test/model",
+                    1024,
+                    bebok_llm::Thinking::Off,
+                )
+                .build()
+                .await
+                .unwrap();
+                req.tools.into_iter().map(|t| t.name).collect::<Vec<_>>()
+            }
+        };
+
+        let parent = store
+            .create_session(project.to_str().unwrap(), "orchestrator", None)
+            .await
+            .unwrap();
+        parent.append_user_message("plan the work").await.unwrap();
+        parent.append_user_message("more context").await.unwrap();
+
+        // Fork: genealogy is recorded, but the fork is not a sub-agent.
+        let fork = store.fork_session(parent.id(), 0).await.unwrap();
+        assert!(fork.meta_snapshot().await.parent.is_some());
+        assert!(!fork.meta_snapshot().await.subagent);
+        let fork_tools = names(&fork).await;
+        for t in [
+            "fleet",
+            "task",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
+            assert!(fork_tools.iter().any(|n| n == t), "fork lacks {t}");
+        }
+
+        // Compact: same — summary + tail, still a delegation owner.
+        let compact = store
+            .compact_session(parent.id(), "summary".to_string(), 1)
+            .await
+            .unwrap();
+        assert!(compact.meta_snapshot().await.parent.is_some());
+        assert!(!compact.meta_snapshot().await.subagent);
+        let compact_tools = names(&compact).await;
+        for t in [
+            "fleet",
+            "task",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
+            assert!(compact_tools.iter().any(|n| n == t), "compact lacks {t}");
+        }
+
+        // A real sub-agent still gets none of them.
+        let child = store
+            .create_subagent_session(&parent, "code", None, Some("worker"))
+            .await
+            .unwrap();
+        assert!(child.meta_snapshot().await.subagent);
+        child.append_user_message("do it").await.unwrap();
+        let req = RequestBuilder::new(
+            &child,
+            &Agent::code(),
+            &tools,
+            "test/model",
+            1024,
+            bebok_llm::Thinking::Off,
+        )
+        .build()
+        .await
+        .unwrap();
+        let child_tools: Vec<_> = req.tools.into_iter().map(|t| t.name).collect();
+        for t in [
+            "fleet",
+            "task",
+            "task_wait",
+            "task_status",
+            "task_cancel",
+            "task_report",
+        ] {
+            assert!(!child_tools.iter().any(|n| n == t), "child got {t}");
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

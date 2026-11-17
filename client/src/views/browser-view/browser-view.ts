@@ -117,6 +117,8 @@ export class BrowserView implements OnInit {
   readonly open = computed(() => this.state()?.open ?? this.frame() !== null);
   readonly headed = computed(() => this.frame()?.headed ?? this.state()?.headed ?? false);
   readonly linkable = computed(() => isLinkable(this.currentUrl()));
+  /** Outbound link target: the engine's own pages keep the capability token. */
+  readonly externalUrl = computed(() => this.engine.withEngineToken(this.currentUrl()));
 
   private readonly img = viewChild<ElementRef<HTMLImageElement>>('frameImg');
   private lastSeq = -1;
