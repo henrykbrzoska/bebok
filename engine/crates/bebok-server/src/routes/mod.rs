@@ -131,7 +131,10 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/fs/dir", post(fs::fs_dir_create))
         .route("/fs/path", delete(fs::fs_path_delete))
         .route("/fs/rename", post(fs::fs_rename))
-        .route("/fs/definition", get(fs::fs_definition))
+        .route(
+            "/fs/definition",
+            get(fs::fs_definition).post(fs::fs_definition_buffer),
+        )
         .route("/fs/search", get(fs::fs_search))
         .route("/fs/files", get(fs::fs_files))
         .route("/fs/symbols", get(fs::fs_symbols))

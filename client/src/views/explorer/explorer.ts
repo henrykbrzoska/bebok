@@ -245,6 +245,8 @@ export class ExplorerView implements OnInit {
   readonly pendingNav = signal<EditorLocation | null>(null);
   /** Back stack for Alt+Left after a jump. */
   private readonly navHistory: EditorLocation[] = [];
+  /** Locations undone by Alt+Left (Alt+Right replays them). */
+  private readonly navForward: EditorLocation[] = [];
 
   readonly editorArea = viewChild<ElementRef<HTMLTextAreaElement>>('editorArea');
   readonly editorLayer = viewChild<ElementRef<HTMLElement>>('editorLayer');
@@ -721,13 +723,15 @@ export class ExplorerView implements OnInit {
 
   // --- IDE: Find in Files (Ctrl/Cmd+Shift+F) -----------------------------------
 
-  openFindInFiles(): void {
+  openFindInFiles(query?: string): void {
     if (!this.directory()) {
       return;
     }
     const area = this.editorArea()?.nativeElement;
     let prefill = '';
-    if (area && area.selectionEnd > area.selectionStart) {
+    if (query) {
+      prefill = query;
+    } else if (area && area.selectionEnd > area.selectionStart) {
       prefill = area.value.slice(area.selectionStart, area.selectionEnd);
     } else if (area && this.editing()) {
       prefill = symbolAt(area.value, area.selectionStart ?? 0) ?? '';
@@ -879,9 +883,20 @@ export class ExplorerView implements OnInit {
     this.gotoBusy.set(true);
     this.gotoChoices.set(null);
     try {
-      const res = await this.engine.fsDefinition(dir, path, symbol);
+      // The buffer travels along: locals/params/destructured consts, imports
+      // and unsaved edits resolve, and the engine knows the caret's scope.
+      const res = await this.engine.fsDefinitionAt(dir, {
+        path,
+        symbol,
+        text,
+        offset: utf8Offset(text, offset),
+      });
+      if (res.on_declaration) {
+        // IntelliJ: Ctrl+click on a declaration shows its usages.
+        this.openFindInFiles(symbol);
+        return;
+      }
       const here = lineOf(text, offset);
-      // Clicking the declaration itself should not "jump" onto itself.
       const hits = res.results.filter((h) => !(h.path === path && h.line === here));
       if (hits.length === 0) {
         this.toasts.show(this.i18n.t('explorer.gotoNotFound', { symbol }), { kind: 'info' });
@@ -908,6 +923,7 @@ export class ExplorerView implements OnInit {
         this.navHistory.shift();
       }
     }
+    this.navForward.length = 0;
     await this.requestOpen({ path: hit.path, line: hit.line, column: hit.column });
   }
 
@@ -915,6 +931,22 @@ export class ExplorerView implements OnInit {
   async goBack(): Promise<void> {
     const loc = this.navHistory.pop();
     if (loc) {
+      const here = this.currentLocation();
+      if (here) {
+        this.navForward.push(here);
+      }
+      await this.requestOpen(loc);
+    }
+  }
+
+  /** Alt+Right: redo the jump undone by Alt+Left. */
+  async goForward(): Promise<void> {
+    const loc = this.navForward.pop();
+    if (loc) {
+      const here = this.currentLocation();
+      if (here) {
+        this.navHistory.push(here);
+      }
       await this.requestOpen(loc);
     }
   }
@@ -936,12 +968,18 @@ export class ExplorerView implements OnInit {
 
   // --- IDE: editor plumbing ------------------------------------------------------
 
-  /** Keep the highlighted layer aligned with the textarea's scroll. */
+  /** Keep the highlighted layer aligned with the textarea's scroll.
+   *  Uses a compositor `transform` instead of `scrollTop`: setting scrollTop
+   *  on the layer forces WebKitGTK (the Tauri webview) to repaint thousands
+   *  of highlight spans synchronously on every wheel tick, which throttled
+   *  wheel scrolling ~11x (measured 6.8 px/wheel vs 85 px/wheel on a plain
+   *  div). A transform just re-composites the already-painted layer. */
   syncLayer(area: HTMLTextAreaElement): void {
     const layer = this.editorLayer()?.nativeElement;
     if (layer) {
-      layer.scrollTop = area.scrollTop;
-      layer.scrollLeft = area.scrollLeft;
+      const code = layer.firstElementChild as HTMLElement | null;
+      const target = code ?? layer;
+      target.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
     }
   }
 
@@ -951,12 +989,22 @@ export class ExplorerView implements OnInit {
     if (area && (area.scrollTop !== layer.scrollTop || area.scrollLeft !== layer.scrollLeft)) {
       area.scrollTop = layer.scrollTop;
       area.scrollLeft = layer.scrollLeft;
+      this.syncLayer(area);
     }
   }
 
   /** Tab inserts two spaces instead of leaving the editor; the completion
    *  popup, when open, owns the navigation keys and Enter/Tab. */
   onEditorKeydown(event: KeyboardEvent, area: HTMLTextAreaElement): void {
+    // Go to declaration from the keyboard: Ctrl/Cmd+B (IntelliJ), F12 (VS Code).
+    const gotoKey =
+      (event.key === 'F12' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) ||
+      ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.code === 'KeyB');
+    if (gotoKey && this.canGoto()) {
+      event.preventDefault();
+      void this.gotoDefinitionAt(area.selectionStart ?? 0);
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key === ' ') {
       event.preventDefault();
       void this.requestCompletion(area);
@@ -1334,6 +1382,11 @@ export class ExplorerView implements OnInit {
     if (event.altKey && event.key === 'ArrowLeft' && this.navHistory.length > 0) {
       event.preventDefault();
       void this.goBack();
+      return;
+    }
+    if (event.altKey && event.key === 'ArrowRight' && this.navForward.length > 0) {
+      event.preventDefault();
+      void this.goForward();
       return;
     }
     const mod = event.ctrlKey || event.metaKey;

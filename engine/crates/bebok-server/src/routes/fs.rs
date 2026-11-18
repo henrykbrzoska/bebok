@@ -478,6 +478,56 @@ pub async fn fs_definition(
     Ok(Json(serde_json::to_value(resp).unwrap_or_default()))
 }
 
+/// `POST /fs/definition?directory=` body: the unsaved buffer and the caret.
+#[derive(Deserialize)]
+pub struct FsDefinitionBody {
+    pub path: String,
+    pub symbol: String,
+    pub text: String,
+    /// UTF-8 byte offset of the caret in `text`.
+    pub offset: usize,
+}
+
+/// `POST /fs/definition` -> like `GET`, but scope-aware: locals, imports and
+/// same-file definitions come from the buffer, so unsaved edits count and a
+/// `const` inside a function resolves. Sets `on_declaration` when the caret
+/// is on the declaration itself.
+pub async fn fs_definition_buffer(
+    State(state): State<AppState>,
+    Query(q): Query<FsCompleteQuery>,
+    Json(body): Json<FsDefinitionBody>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    bebok_core::explorer::validate_rel(&instance.root, &body.path)
+        .map_err(|e| ApiError::bad_request(e).into_response())?;
+    let root = instance.root.clone();
+    let symbol = body.symbol.trim_start_matches('$').to_string();
+    let priority =
+        bebok_core::agent::code_index_tools::index_ranked_paths(&root, &symbol, 200).await;
+    let resp = tokio::task::spawn_blocking(move || {
+        let ctx = bebok_core::agent::goto_definition::DefinitionContext {
+            text: Some(&body.text),
+            offset: Some(body.offset),
+            priority: &priority,
+        };
+        bebok_core::agent::goto_definition::find_definitions_in(
+            &root,
+            Some(&body.path),
+            &symbol,
+            ctx,
+            50,
+            200_000,
+        )
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    Ok(Json(serde_json::to_value(resp).unwrap_or_default()))
+}
+
 /// `GET /fs/search` query (Explorer "Find in Files", Ctrl/Cmd+Shift+F).
 #[derive(Deserialize)]
 pub struct FsSearchQuery {
