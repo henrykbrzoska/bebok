@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.11.0 — 2026-11-18
+
+### Features
+- Grok backend, mid-turn injection, scope-aware go-to-definition (#46) (14f1de3)
+- **cli**: CLI parity — managed profile, permission hooks, resume, transport-aware prompt, docs + Settings UI (#44) (d1370b5)
+
+### Other
+- release 1.10.0 (d462eb7)
+
 ## 1.10.6 — 2026-11-18
 
 ### Features
