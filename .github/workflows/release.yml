@@ -384,18 +384,23 @@ jobs:
           stage="stage/bebok-$VERSION"
           rm -rf "$out" stage && mkdir -p "$out" "$stage"
           exe=""; [ "$RUNNER_OS" = "Windows" ] && exe=".exe"
+          # The sidecar tauri-build copies from binaries/ into $bin is not
+          # reliable (a missing source is silently skipped), so use the engine
+          # binary built earlier in this job - same file sidecar:copy used.
+          sidecar="engine/target/$TARGET/release/bebok-server$exe"
+          [ -f "$sidecar" ] || { echo "::error::engine binary not found: $sidecar"; exit 1; }
           # Tauri 2 keeps the Cargo binary name (bebok-desktop); fall back to productName.
           app="$bin/bebok-desktop$exe"; [ -f "$app" ] || app="$bin/bebok$exe"
           [ -f "$app" ] || { echo "::error::desktop binary not found in $bin"; ls -la "$bin"; exit 1; }
           # Standalone headless engine (browser mode / remote engine for mobile).
-          cp "engine/target/$TARGET/release/bebok-server$exe" "$out/bebok-server-$VERSION-$PLATFORM$exe"
+          cp "$sidecar" "$out/bebok-server-$VERSION-$PLATFORM$exe"
           case "$PLATFORM" in
             linux-x64)
               cp "$bundle"/deb/*.deb "$out"/
               cp "$bundle"/appimage/*.AppImage "$out"/
               cp "$bundle"/appimage/*.AppImage.sig "$out"/ 2>/dev/null || true
               cp "$bundle"/deb/*.deb.sig "$out"/ 2>/dev/null || true
-              cp "$app" "$bin/bebok-server" LICENSE README.md "$stage"/
+              cp "$app" "$sidecar" LICENSE README.md "$stage"/
               tar -czf "$out/bebok-$VERSION-$PLATFORM-portable.tar.gz" -C stage "bebok-$VERSION"
               ;;
             windows-x64)
@@ -403,7 +408,7 @@ jobs:
               cp "$bundle"/nsis/*-setup.exe "$out"/
               cp "$bundle"/msi/*.msi.sig "$out"/ 2>/dev/null || true
               cp "$bundle"/nsis/*-setup.exe.sig "$out"/ 2>/dev/null || true
-              cp "$app" "$bin/bebok-server.exe" LICENSE README.md "$stage"/
+              cp "$app" "$sidecar" LICENSE README.md "$stage"/
               if command -v 7z > /dev/null 2>&1; then
                 (cd stage && 7z a -tzip "../$out/bebok-$VERSION-$PLATFORM-portable.zip" "bebok-$VERSION" > /dev/null)
               else
