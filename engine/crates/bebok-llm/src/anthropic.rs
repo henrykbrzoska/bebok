@@ -359,6 +359,7 @@ impl AnthropicParser {
                 cost: None,
                 cache_read_input_tokens: self.cache_read_in,
                 cache_creation_input_tokens: self.cache_creation_in,
+                context_tokens: None,
             }))),
             "error" => {
                 let msg = v

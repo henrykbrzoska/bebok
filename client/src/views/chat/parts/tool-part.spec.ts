@@ -18,6 +18,7 @@ import { provideRouter } from '@angular/router';
 import { Part, ToolSafetyEntry } from '../../../core/engine.dtos';
 import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
+import { CHAT_TOOL_PROVIDER } from '../chat.menus';
 import { ToolPartComponent } from './tool-part';
 
 function entry(name: string, category: ToolSafetyEntry['category']): ToolSafetyEntry {
@@ -348,15 +349,13 @@ describe('ToolPartComponent delegation bar (task link + empty-space toggle)', ()
     fixture.componentRef.setInput('taskLinks', new Map([['auth-audit', 'child-1']]));
     await fixture.whenStable();
 
-    const link = head().querySelector('a.head-target') as HTMLAnchorElement;
+    const link = head().querySelector('a.target-name') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     expect(link.getAttribute('href')).toBe('/chat/child-1');
     expect(link.getAttribute('title')).toBe('Open sub-agent session');
     expect(link.textContent).toContain('auth-audit');
-    // The link contains the label cluster (dot + tool-name + delegation badge).
-    expect(link.querySelector('.dot')).not.toBeNull();
-    expect(link.querySelector('.tool-name')!.textContent!.trim()).toBe('task');
-    expect(link.querySelector('.badge.delegation')).not.toBeNull();
+    // The link carries the muted-off state (a real navigation target).
+    expect(link.classList.contains('muted')).toBeFalse();
 
     // The toggle button is a sibling of the link, not nested inside it.
     const children = [...head().children];
@@ -375,18 +374,19 @@ describe('ToolPartComponent delegation bar (task link + empty-space toggle)', ()
     setPart(TASK_NO_CHILD);
     await fixture.whenStable();
 
-    // No navigational link.
-    expect(head().querySelector('a.head-target')).toBeNull();
+    // No navigational link (routerLink is null without a child id).
+    const target = head().querySelector('.target-name') as HTMLAnchorElement;
+    expect(target).not.toBeNull();
+    expect(target.getAttribute('href')).toBeNull();
 
     // A muted label shows the task name.
-    const muted = head().querySelector('.target-name.muted') as HTMLElement;
-    expect(muted).not.toBeNull();
-    expect(muted.textContent!.trim()).toBe('research-x');
+    expect(target.classList.contains('muted')).toBeTrue();
+    expect(target.textContent!.trim()).toBe('research-x');
 
-    // The toggle button is still present with the label cluster.
+    // The toggle button is still present; the label cluster sits beside it.
     expect(toggle()).not.toBeNull();
-    expect(toggle().querySelector('.tool-name')!.textContent!.trim()).toBe('task');
-    expect(toggle().querySelector('.badge.delegation')).not.toBeNull();
+    expect(head().querySelector('.tool-name')!.textContent!.trim()).toBe('task');
+    expect(head().querySelector('.badge.delegation')).not.toBeNull();
 
     // Clicking the toggle expands the call.
     toggle().click();
@@ -398,11 +398,11 @@ describe('ToolPartComponent delegation bar (task link + empty-space toggle)', ()
     expect(fixture.nativeElement.querySelector('.task-row')).toBeNull();
   });
 
-  it('fleet call: no head-target link (fleet fans out to many children)', async () => {
+  it('fleet call: no task link (fleet fans out to many children)', async () => {
     setPart(FLEET_COMPLETED);
     await fixture.whenStable();
 
-    expect(head().querySelector('a.head-target')).toBeNull();
+    expect(head().querySelector('a.target-name')).toBeNull();
     // No muted target-name either (fleet is not a task).
     expect(head().querySelector('.target-name')).toBeNull();
   });
@@ -429,5 +429,47 @@ describe('ToolPartComponent delegation bar (task link + empty-space toggle)', ()
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     expect(head().classList.contains('collapsed')).toBeTrue();
     expect(fixture.nativeElement.querySelector('.tool-details')).toBeNull();
+  });
+});
+
+describe('ToolPartComponent context menu (chat.tool)', () => {
+  let fixture: ComponentFixture<ToolPartComponent>;
+
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [ToolPartComponent],
+      providers: [provideZonelessChangeDetection(), provideRouter([])],
+    });
+    fixture = TestBed.createComponent(ToolPartComponent);
+    fixture.componentRef.setInput('part', BASH);
+  });
+
+  it('exposes copy-output and copy-input items through the chat.tool provider', async () => {
+    await fixture.whenStable();
+    const data = fixture.componentInstance.toolMenuData();
+    expect(data.toolName).toBe('bash');
+    expect(data.output).toBe('ok');
+    const items = CHAT_TOOL_PROVIDER.build({ data, selection: '' });
+    expect(items.map((i) => i.id)).toEqual(['copy-output', 'copy-input']);
+    expect(items[0].disabled).toBeFalse();
+  });
+
+  it('falls back to the error text when the call failed', async () => {
+    fixture.componentRef.setInput('part', FAILED);
+    await fixture.whenStable();
+    const data = fixture.componentInstance.toolMenuData();
+    expect(data.output).toBe('boom');
+    const items = CHAT_TOOL_PROVIDER.build({ data, selection: '' });
+    expect(items[0].disabled).toBeFalse();
+  });
+
+  it('disables copy-output for a running call without output', async () => {
+    fixture.componentRef.setInput('part', FETCH_RUNNING);
+    await fixture.whenStable();
+    const data = fixture.componentInstance.toolMenuData();
+    expect(data.output).toBe('');
+    const items = CHAT_TOOL_PROVIDER.build({ data, selection: '' });
+    expect(items[0].disabled).toBeTrue();
   });
 });

@@ -28,6 +28,7 @@ import { Injectable, signal } from '@angular/core';
 const KEY_SIDEBAR = 'bebok.ui.sidebarVisible';
 const KEY_SIDEBAR_WIDTH = 'bebok.ui.sidebarWidth';
 const KEY_SHELL_SIDEBAR_EXPANDED = 'bebok.ui.shell.sidebarExpanded';
+const KEY_SHELL_SIDEBAR_WIDTH = 'bebok.ui.shell.sidebarWidth';
 const KEY_RIGHT_DRAWER_OPEN = 'bebok.ui.shell.rightDrawerOpen';
 const KEY_RIGHT_DRAWER_PANELS = 'bebok.ui.shell.rightDrawerPanels';
 const KEY_RIGHT_DRAWER_WIDTH = 'bebok.ui.shell.rightDrawerWidth';
@@ -42,6 +43,11 @@ export const MAX_SIDEBAR_WIDTH = 480;
 export const DEFAULT_DRAWER_WIDTH = 320;
 export const MIN_DRAWER_WIDTH = 280;
 export const MAX_DRAWER_WIDTH = 560;
+
+/** Shell left sidebar: 252px by default (matches `--sidebar-width`), drag-resizable. */
+export const DEFAULT_SHELL_SIDEBAR_WIDTH = 252;
+export const MIN_SHELL_SIDEBAR_WIDTH = 190;
+export const MAX_SHELL_SIDEBAR_WIDTH = 560;
 
 /** The stacked sections of the right drawer - independent, not tabs. */
 export interface RightDrawerPanels {
@@ -201,8 +207,17 @@ export class UiPrefsStore {
   /** Chat sidebar width in px (drag handle). */
   readonly sidebarWidth = signal(readWidth());
 
-  /** Shell: left sidebar expanded (252px) vs collapsed icon rail (60px). */
+  /** Shell: left sidebar expanded (default 252px, drag-resizable) vs collapsed icon rail (60px). */
   readonly sidebarExpanded = signal(readBool(KEY_SHELL_SIDEBAR_EXPANDED, true));
+  /** Shell: left sidebar width in px (pointer-drag resize handle). */
+  readonly shellSidebarWidth = signal(
+    readNumber(
+      KEY_SHELL_SIDEBAR_WIDTH,
+      DEFAULT_SHELL_SIDEBAR_WIDTH,
+      MIN_SHELL_SIDEBAR_WIDTH,
+      MAX_SHELL_SIDEBAR_WIDTH,
+    ),
+  );
   /** Shell: right drawer visible (chat screen only). */
   readonly rightDrawerOpen = signal(readBool(KEY_RIGHT_DRAWER_OPEN, true));
   /** Shell: which stacked sections of the right drawer are open. */
@@ -241,6 +256,16 @@ export class UiPrefsStore {
   setSidebarExpanded(expanded: boolean): void {
     this.sidebarExpanded.set(expanded);
     writeString(KEY_SHELL_SIDEBAR_EXPANDED, String(expanded));
+  }
+
+  /** Shell: drag-resize the left sidebar (clamped, persisted). */
+  setShellSidebarWidth(px: number): void {
+    const clamped = Math.min(
+      MAX_SHELL_SIDEBAR_WIDTH,
+      Math.max(MIN_SHELL_SIDEBAR_WIDTH, Math.round(px)),
+    );
+    this.shellSidebarWidth.set(clamped);
+    writeString(KEY_SHELL_SIDEBAR_WIDTH, String(clamped));
   }
 
   toggleRightDrawer(): void {

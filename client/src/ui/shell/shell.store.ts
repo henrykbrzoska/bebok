@@ -54,6 +54,8 @@ export class ShellStore {
 
   /** Layout preferences (persisted). */
   readonly sidebarExpanded = this.prefs.sidebarExpanded;
+  /** Drag-resizable width of the expanded left sidebar (px). */
+  readonly sidebarWidth = this.prefs.shellSidebarWidth;
   readonly rightDrawerOpen = this.prefs.rightDrawerOpen;
   readonly rightDrawerPanels = this.prefs.rightDrawerPanels;
   readonly rightDrawerWidth = this.prefs.rightDrawerWidth;
@@ -113,6 +115,11 @@ export class ShellStore {
 
   setRightDrawerWidth(px: number): void {
     this.prefs.setRightDrawerWidth(px);
+  }
+
+  /** Drag-resize the expanded left sidebar (clamped, persisted). */
+  setSidebarWidth(px: number): void {
+    this.prefs.setShellSidebarWidth(px);
   }
 
   /** F9-2: collapse/expand a stacked section (header stays visible). */

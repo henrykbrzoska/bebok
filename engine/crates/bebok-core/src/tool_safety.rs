@@ -128,6 +128,8 @@ pub const BUILTIN_DEFAULTS: &[(&str, SafetyCategory)] = &[
     ("browser_screenshot", SafetyCategory::Caution),
     ("browser_click", SafetyCategory::Caution),
     ("browser_type", SafetyCategory::Caution),
+    // Hands a CAPTCHA page to the user in a visible window and waits.
+    ("browser_solve_captcha", SafetyCategory::Caution),
     ("browser_eval", SafetyCategory::Caution),
     // --- dangerous: writes / deletes / executes --------------------------
     ("write_file", SafetyCategory::Dangerous),

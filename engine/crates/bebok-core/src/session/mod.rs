@@ -71,6 +71,10 @@ pub enum Part {
         /// derive it from the tool name via `GET /tools/safety` then.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         safety: Option<crate::tool_safety::SafetyCategory>,
+        /// True when this tool row was produced by an external CLI (e.g. Claude Code)
+        /// via `StreamEvent::ExternalTool`. Never executed by Bebok's tool loop.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        external: Option<bool>,
     },
     Usage {
         input_tokens: u64,
@@ -256,6 +260,39 @@ impl Message {
             permission: None,
             mutating: None,
             safety: None,
+            external: None,
+        });
+    }
+
+    pub fn add_external_tool(
+        &mut self,
+        id: String,
+        name: String,
+        input: Value,
+        output: String,
+        is_error: bool,
+    ) {
+        let state = if is_error {
+            ToolState::Error {
+                input: input.clone(),
+                error: output,
+            }
+        } else {
+            ToolState::Completed {
+                input: input.clone(),
+                output,
+                title: name.clone(),
+                structured: None,
+            }
+        };
+        self.parts.push(Part::Tool {
+            id,
+            name,
+            state,
+            permission: None,
+            mutating: None,
+            safety: None,
+            external: Some(true),
         });
     }
 
@@ -483,6 +520,13 @@ pub struct Session {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<(Uuid, usize)>,
+    /// True only for sessions spawned by the `task`/`fleet` tools
+    /// (`create_subagent_session`). Fork/compact sessions keep `parent` for
+    /// genealogy but are NOT sub-agents — they must keep their delegation
+    /// tools. `request.rs` gates delegation tools on this flag, never on
+    /// `parent` (see `is_subagent`).
+    #[serde(default)]
+    pub subagent: bool,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
@@ -509,6 +553,34 @@ pub struct Session {
     /// F6-12: error text that accompanied `task_status` (if any).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_error: Option<String>,
+    /// The Claude-Code-style CLI conversation this session continues, when
+    /// its last turn ran through a CLI provider. Cleared by anything that
+    /// rewrites history or switches model/provider (see `store::lifecycle`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session: Option<CliSessionMeta>,
+}
+
+/// Where a CLI-side conversation stands, as of the end of the last turn.
+///
+/// The CLI holds messages `[0..msg_index]`; the next turn sends only the
+/// messages from `msg_index` on, and only while the provider, model, system
+/// prompt and profile are the same as they were when the conversation was
+/// recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CliSessionMeta {
+    /// The CLI's conversation id (`--resume <key>`).
+    pub key: String,
+    /// Bebok provider name (`claude-cli`).
+    pub provider: String,
+    /// Full Bebok model string the turn ran with (`claude-cli/sonnet`).
+    pub model: String,
+    /// Digest of the system prompt the turn ran with.
+    pub system_hash: String,
+    /// Count of session messages the CLI already has.
+    pub msg_index: usize,
+    /// Digest of the managed profile the turn ran with (`""` when none).
+    #[serde(default)]
+    pub profile_hash: String,
 }
 
 impl Session {
@@ -522,6 +594,7 @@ impl Session {
             agent: agent.into(),
             model: None,
             parent: None,
+            subagent: false,
             created_at: now,
             updated_at: now,
             usage: UsageTotals::default(),
@@ -530,6 +603,7 @@ impl Session {
             share: None,
             task_status: None,
             task_error: None,
+            cli_session: None,
         }
     }
 
@@ -719,5 +793,42 @@ mod tool_permission_tests {
         assert!(permission.is_none());
         assert!(mutating.is_none());
         assert!(safety.is_none());
+    }
+}
+
+#[cfg(test)]
+mod cli_session_tests {
+    use super::*;
+
+    #[test]
+    fn sessions_saved_before_cli_resume_still_load() {
+        let mut value = serde_json::to_value(Session::new("/p", "code")).unwrap();
+        value.as_object_mut().unwrap().remove("cli_session");
+        let session: Session = serde_json::from_value(value).expect("legacy session loads");
+        assert!(session.cli_session.is_none());
+    }
+
+    #[test]
+    fn cli_record_round_trips_and_profile_hash_defaults_to_empty() {
+        let mut session = Session::new("/p", "code");
+        session.cli_session = Some(CliSessionMeta {
+            key: "k".into(),
+            provider: "claude-cli".into(),
+            model: "claude-cli/sonnet".into(),
+            system_hash: "s".into(),
+            msg_index: 3,
+            profile_hash: "p".into(),
+        });
+        let value = serde_json::to_value(&session).unwrap();
+        let back: Session = serde_json::from_value(value).unwrap();
+        assert_eq!(back.cli_session, session.cli_session);
+
+        let mut value = serde_json::to_value(&session).unwrap();
+        value["cli_session"]
+            .as_object_mut()
+            .unwrap()
+            .remove("profile_hash");
+        let older: Session = serde_json::from_value(value).unwrap();
+        assert_eq!(older.cli_session.unwrap().profile_hash, "");
     }
 }

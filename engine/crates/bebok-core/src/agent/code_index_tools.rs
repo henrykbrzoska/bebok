@@ -232,6 +232,34 @@ impl Tool for CodeIndexSearch {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Project-relative paths the `bebok-index` plugin ranks best for `query`
+/// (empty when the plugin is absent, disabled or not ready). Used by the
+/// Explorer "Find in Files" search to order the files it scans.
+pub async fn index_ranked_paths(root: &std::path::Path, query: &str, limit: usize) -> Vec<String> {
+    let query = query.trim();
+    if query.is_empty() || !ensure_index_plugin(root).await {
+        return Vec::new();
+    }
+    let input = json!({
+        "directory": root.to_string_lossy(),
+        "query": query,
+        "limit": limit,
+    });
+    let Some(value) = invoke_plugin("bebok-index", "search", &input).await else {
+        return Vec::new();
+    };
+    value
+        .get("results")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| r.get("path").and_then(|p| p.as_str()))
+                .map(|p| p.replace('\\', "/"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 async fn invoke_plugin(name: &str, action: &str, input: &Value) -> Option<Value> {
     crate::plugin::PluginHost::global()
         .invoke(name, action, input)

@@ -52,11 +52,13 @@ describe('TerminalView processes section (F9-14)', () => {
     processLog: jasmine.Spy;
     killProcess: jasmine.Spy;
   };
-  let listener: ((event: EngineEvent) => void) | null;
+  let listeners: ((event: EngineEvent) => void)[] = [];
+  let listener: ((event: EngineEvent) => void) | null = null;
   let session: ChatSessionStore;
   let store: ProcessesStore;
 
   beforeEach(() => {
+    listeners = [];
     listener = null;
     engine = {
       connected: signal(true),
@@ -76,9 +78,11 @@ describe('TerminalView processes section (F9-14)', () => {
     const events = {
       reconnectVersion: signal(0),
       onEvent: jasmine.createSpy('onEvent').and.callFake((fn: (event: EngineEvent) => void) => {
+        listeners.push(fn);
         listener = fn;
         return () => {
-          listener = null;
+          listeners = listeners.filter((f) => f !== fn);
+          listener = listeners[listeners.length - 1] ?? null;
         };
       }),
     };
@@ -159,12 +163,15 @@ describe('TerminalView processes section (F9-14)', () => {
 
   it('patches a row on process.exited', async () => {
     await settle();
-    listener!({
+    const event: EngineEvent = {
       type: 'process.exited',
       directory: '/p',
       sessionID: 's1',
       properties: { id: 'a', sessionID: 's1', code: 0 },
-    });
+    };
+    for (const fn of [...listeners]) {
+      fn(event);
+    }
     await settle();
     const first = rows().find((r) => r.textContent!.includes('workspace a'))!;
     expect(first.querySelector('.dot')!.classList).toContain('tone-exited');

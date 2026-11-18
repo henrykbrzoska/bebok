@@ -44,6 +44,7 @@
       <div class="editor">
         <pre class="highlight mono" aria-hidden="true" [innerHTML]="highlighted()"></pre>
         <textarea
+          #rawArea
           class="input mono"
           spellcheck="false"
           autocomplete="off"
@@ -53,6 +54,8 @@
           [ngModel]="text()"
           (ngModelChange)="setText($event)"
           (scroll)="syncScroll($event)"
+          [appContextMenu]="'settings.raw'"
+          [appContextMenuData]="rawMenuData(rawArea)"
         ></textarea>
       </div>
     </section>

@@ -95,9 +95,10 @@ describe('SchedulesView', () => {
   });
 
   it('should reset form when closing add form', () => {
+    component.toggleForm(); // open
     component.newName.set('Test');
     component.newPrompt.set('Test prompt');
-    component.toggleForm();
+    component.toggleForm(); // close -> reset
     expect(component.newName()).toBe('');
     expect(component.newPrompt()).toBe('');
   });

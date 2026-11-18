@@ -5,6 +5,13 @@ import { ToolSafetyStore } from '../../../core/tool-safety.store';
 import { UiPrefsStore } from '../../../core/ui-prefs.store';
 import { I18nService } from '../../../i18n/i18n.service';
 import { formatMs } from '../../../core/format';
+import { ContextMenuDirective } from '../../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../../ui/context-menu/context-menu.service';
+import {
+  CHAT_ASSISTANT_PROVIDER,
+  CHAT_USER_PROVIDER,
+  type ChatMessagePayload,
+} from '../chat.menus';
 import { PartRendererComponent } from './part-renderer';
 import { RenderedPart, SafetyCounts, ToolGroupComponent, summarizeToolRun } from './tool-group';
 
@@ -105,11 +112,15 @@ function makeGroup(
  */
 @Component({
   selector: 'app-message-row',
-  imports: [PartRendererComponent, ToolGroupComponent],
+  imports: [PartRendererComponent, ToolGroupComponent, ContextMenuDirective],
   host: { '[id]': 'rowId()', '[class.user]': 'isUser()' },
   template: `
     @if (isUser()) {
-      <div class="user-row">
+      <div
+        class="user-row"
+        [appContextMenu]="'chat.message-user'"
+        [appContextMenuData]="menuData()"
+      >
         @if (rollbackEnabled()) {
           <button
             type="button"
@@ -132,7 +143,11 @@ function makeGroup(
         </div>
       </div>
     } @else {
-      <div class="assistant-row">
+      <div
+        class="assistant-row"
+        [appContextMenu]="'chat.message-assistant'"
+        [appContextMenuData]="menuData()"
+      >
         <div class="label-row">
           <span class="who">{{ t('chat.assistantLabel') }}</span>
           @if (agentModel()) {
@@ -263,6 +278,7 @@ export class MessageRowComponent {
   private readonly i18n = inject(I18nService);
   private readonly prefs = inject(UiPrefsStore);
   private readonly toolSafety = inject(ToolSafetyStore);
+  private readonly menus = inject(ContextMenuService);
   readonly t = this.i18n.t.bind(this.i18n);
   readonly message = input.required<Message>();
   readonly rollbackEnabled = input(false);
@@ -273,6 +289,30 @@ export class MessageRowComponent {
   /** F9-9: the session's effective model; child models equal to it are not badged. */
   readonly sessionModel = input<string>('');
   readonly isUser = computed(() => this.message().role === 'user');
+
+  constructor() {
+    this.menus.register(CHAT_USER_PROVIDER);
+    this.menus.register(CHAT_ASSISTANT_PROVIDER);
+  }
+
+  /** Plain text of the message (text/thinking parts joined) for copy/quote. */
+  readonly plainText = computed(() =>
+    this.message()
+      .parts.map((p) => (p.type === 'text' || p.type === 'thinking' ? p.text : ''))
+      .filter(Boolean)
+      .join('\n\n'),
+  );
+
+  readonly menuData = computed<ChatMessagePayload>(() => ({
+    messageId: this.message().id,
+    role: this.isUser() ? 'user' : 'assistant',
+    text: this.plainText(),
+    canRollback: this.isUser() && this.rollbackEnabled(),
+    actions: {
+      copyText: () => void this.menus.copyText(this.plainText()),
+      rollback: () => this.rollback.emit(this.message().id),
+    },
+  }));
 
   /**
    * Parts plus their tool ordinal (F2-6, now only used for numbering - every

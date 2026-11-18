@@ -50,7 +50,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use super::task_tool::MAX_TASK_DEPTH;
-use crate::provider::{ProviderCtx, build_provider_for};
+use crate::provider::child_provider;
 use crate::store::InstanceStore;
 
 /// The `fleet` tool. One instance is registered per directory `Instance`.
@@ -632,21 +632,52 @@ async fn run_member(
     };
     let mut agent = instance.resolve_agent(agent_name);
 
-    // Effective model: member override, else what the config says for the
-    // child agent (`models.<agent>` when set, else the parent's model).
+    // Effective model for fleet: member.model wins over models.<agent>
+    // (fleet is the roster). Only models listed in providers[].models are
+    // allowed — anything else falls back to models.<agent> / parent / global.
     let parent_model =
         crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
-    let model = crate::agent::resolve_subagent_model(
-        &cfg.delegation,
-        &parent_model,
-        agent_name,
-        |a| cfg.model_for(a),
-        Some(member.model.trim()),
-    );
+    let requested = member.model.trim();
+    let model = if requested.is_empty() {
+        crate::agent::resolve_subagent_model(
+            cfg,
+            &parent_model,
+            agent_name,
+            |a| cfg.model_for(a),
+            None,
+        )
+    } else if requested.eq_ignore_ascii_case(crate::agent::model_policy::HEAVY) {
+        // "heavy" -> parent/global (validated inside)
+        crate::agent::resolve_subagent_model(
+            cfg,
+            &parent_model,
+            agent_name,
+            |a| cfg.model_for(a),
+            Some(requested),
+        )
+    } else if cfg.is_model_available(requested) {
+        requested.to_string()
+    } else {
+        tracing::warn!(
+            "fleet member '{}' model '{}' not in providers[].models; falling back to models.{}/parent",
+            member.name,
+            requested,
+            agent_name
+        );
+        crate::agent::resolve_subagent_model(
+            cfg,
+            &parent_model,
+            agent_name,
+            |a| cfg.model_for(a),
+            None,
+        )
+    };
 
     assemble_prompt(instance, &mut agent, cfg);
 
-    let provider = match build_provider_for(cfg, &model, &ProviderCtx::root(&instance.root)) {
+    // A CLI provider is built later, once the child session exists, so its hook
+    // environment carries a token scoped to that session.
+    let provider = match child_provider(cfg, &model, &instance.root) {
         Ok(p) => p,
         Err(e) => {
             return MemberResult {

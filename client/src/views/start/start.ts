@@ -88,8 +88,8 @@ export class StartView implements OnInit, OnDestroy {
   toggleEngineUrl(): void {
     this.showEngineUrl.update((v) => !v);
   }
-  /** The engine base URL from the live connection. */
-  readonly engineUrl = computed(() => this.engine.connection()?.baseUrl ?? '');
+  /** The live engine URL including its capability token (`…/?token=…`). */
+  readonly engineUrl = computed(() => this.engine.engineUrlWithToken());
   private deleteTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** One of the three states the handoff asks for: connecting / live / error. */

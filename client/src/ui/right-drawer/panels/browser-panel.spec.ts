@@ -165,7 +165,14 @@ describe('BrowserPanel (F6-19)', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        { provide: EngineClient, useValue: {} },
+        {
+          provide: EngineClient,
+          useValue: {
+            // No engine token in the spec: links pass through unchanged.
+            withEngineToken: (url: string) => url,
+            engineUrlWithToken: () => '',
+          },
+        },
         { provide: EventsStore, useValue: events },
         { provide: BrowserViewerService, useValue: viewer },
       ],
@@ -231,12 +238,34 @@ describe('BrowserPanel (F6-19)', () => {
     expect(img!.getAttribute('src')).toBe('data:image/png;base64,NEW=');
   });
 
-  it('does not offer a link for non-http URLs', async () => {
+  it('puts "open in my browser" in the toolbar next to "open in window", tokenised', async () => {
+    const client = TestBed.inject(EngineClient) as unknown as {
+      withEngineToken: (url: string) => string;
+    };
+    spyOn(client, 'withEngineToken').and.callFake((url: string) => `${url}?token=T`);
+    session.meta.set(META);
+    session.messages.set([openMessage('http://127.0.0.1:8787/stats', 'Bebok')]);
+    await settle();
+    const toolbar = el().querySelector('.toolbar')!;
+    const ids = Array.from(toolbar.children).map((c) => c.getAttribute('data-testid'));
+    expect(ids).toEqual(['browser-open-window', 'browser-open-link']);
+    const link = toolbar.querySelector<HTMLAnchorElement>('[data-testid="browser-open-link"]');
+    expect(link!.getAttribute('href')).toBe('http://127.0.0.1:8787/stats?token=T');
+    expect(client.withEngineToken).toHaveBeenCalledWith('http://127.0.0.1:8787/stats');
+  });
+
+  it('falls back to a bootstrapped Bebok URL when the agent has no http(s) page yet', async () => {
+    const client = TestBed.inject(EngineClient) as unknown as {
+      engineUrlWithToken: () => string;
+    };
+    spyOn(client, 'engineUrlWithToken').and.returnValue('http://127.0.0.1:8787/?token=T');
     session.meta.set(META);
     session.messages.set([openMessage('file:///C:/x.html', 'local')]);
     await settle();
-    expect(el().textContent).toContain('file:///C:/x.html');
-    expect(el().querySelector('[data-testid="browser-open-link"]')).toBeNull();
+    const link = el().querySelector<HTMLAnchorElement>('[data-testid="browser-open-link"]');
+    expect(link).not.toBeNull();
+    expect(link!.getAttribute('href')).toContain('?engine=');
+    expect(link!.getAttribute('href')).toContain(encodeURIComponent('http://127.0.0.1:8787/?token=T'));
   });
 
   // --- WP-BROWSER2 (F7-6): "Open in window" ---------------------------------

@@ -37,48 +37,106 @@ pub fn agent_has_browser(agent: &Agent) -> bool {
 /// The section for the resolved config and agent, or `None` when the agent
 /// cannot use the browser (read-only presets such as `ask`/`plan`).
 pub fn verification_section(cfg: &ResolvedConfig, agent: &Agent) -> Option<String> {
+    verification_section_for_transport(cfg, agent, bebok_llm::Transport::Http)
+}
+
+pub fn verification_section_for_transport(
+    cfg: &ResolvedConfig,
+    agent: &Agent,
+    transport: bebok_llm::Transport,
+) -> Option<String> {
     if !agent_has_browser(agent) {
         return None;
     }
-    Some(render(cfg.frontend_verify(), browser_available()))
+    if matches!(
+        transport,
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            ..
+        }
+    ) {
+        return None;
+    }
+    Some(render_for_transport(
+        cfg.frontend_verify(),
+        browser_available(),
+        transport,
+    ))
 }
 
 /// Render the section for a policy. `browser_installed = false` keeps the
 /// capability facts honest (the tools exist but every `browser_open` would
 /// fail) and downgrades the policy to "verify by other means".
 pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
+    render_for_transport(mode, browser_installed, bebok_llm::Transport::Http)
+}
+
+pub fn render_for_transport(
+    mode: FrontendVerify,
+    browser_installed: bool,
+    transport: bebok_llm::Transport,
+) -> String {
+    let tr = |name| super::prompt_env::tool_ref(name, transport);
     let mut s = String::new();
     s.push_str(SECTION_HEADING);
     s.push_str(":\n");
     if browser_installed {
-        s.push_str(
-            "- You have a real browser. `browser_open` starts a Chromium page bound to this \
-             session (headless or a visible window per the user's settings); `browser_screenshot` \
-             returns an image you can see; `browser_console` lists console messages and uncaught \
-             errors since the last navigation; `browser_wait` waits for a selector, text or network \
-             idle; `browser_find` lists interactive elements with reliable selectors for \
-             `browser_click` / `browser_type`; `browser_get_text` reads the page text; \
-             `browser_eval` runs JavaScript. Any http(s) URL works, including localhost dev servers.\n",
-        );
+        s.push_str(&format!(
+            "- You have a real browser. `{}` starts a Chromium page bound to this \
+             session (headless or a visible window per the user's settings); `{}` \
+             returns an image you can see; `{}` lists console messages and uncaught \
+             errors since the last navigation; `{}` waits for a selector, text or network \
+             idle; `{}` lists interactive elements with reliable selectors for \
+             `{}` / `{}`; `{}` reads the page text; \
+             `{}` runs JavaScript. Any http(s) URL works, including localhost dev servers.\n\
+             - CAPTCHA / anti-bot walls: when `{}`, an MCP tool (a search server, say) or a \
+             page returns a challenge (\"verify you are human\", \"unusual traffic\", Cloudflare \
+             \"Just a moment...\", a recaptcha/hcaptcha/turnstile widget), do NOT retry the \
+             blocked request in a loop. Call `{}` with that URL: it opens a \
+             VISIBLE Chromium window and waits (up to `timeout_secs`) while the user solves the \
+             challenge, then returns the page text. The cookies gained by solving live in that \
+             browser, so continue there (`{}`, `{}`, `{}`) \
+             instead of calling the blocked API again. When the blocked call belongs to an MCP \
+             server and carries no URL (a search server, say), open the server's own HTTP address \
+             (e.g. `http://127.0.0.1:9090/search?q=<query>` for SearXNG) in the browser and do \
+             the search there.\n",
+            tr("browser_open"),
+            tr("browser_screenshot"),
+            tr("browser_console"),
+            tr("browser_wait"),
+            tr("browser_find"),
+            tr("browser_click"),
+            tr("browser_type"),
+            tr("browser_get_text"),
+            tr("browser_eval"),
+            tr("fetch"),
+            tr("browser_solve_captcha"),
+            tr("browser_get_text"),
+            tr("browser_find"),
+            tr("browser_click"),
+        ));
     } else {
-        s.push_str(
-            "- The `browser_*` tools exist but no Chrome/Edge/Chromium is installed on this host, \
-             so `browser_open` will fail; verify frontend work through builds, tests and `fetch` \
+        s.push_str(&format!(
+            "- The `{}*` tools exist but no Chrome/Edge/Chromium is installed on this host, \
+             so `{}` will fail; verify frontend work through builds, tests and `{}` \
              instead, and tell the user a browser install would let you check pages visually.\n",
-        );
+            tr("browser_").trim_end_matches('_'),
+            tr("browser_open"),
+            tr("fetch"),
+        ));
     }
-    s.push_str(
-        "- Dev servers: start them with `bash` and `background: true` plus `ready_port` (the \
+    s.push_str(&format!(
+        "- Dev servers: start them with `{}` and `background: true` plus `ready_port` (the \
          port the server will listen on) and/or `ready_text` (its ready line) with \
          `ready_timeout` 120000-180000: the call blocks until the server answers and returns \
          `ready` with the log tail, or tells you the process exited / timed out (with the \
          log) so you can fix it — no polling, no guessing. You get an `id`, the `pid` and a \
          log path under `.bebok/run/` (read it with `tail`); stop the process later with \
-         `bash_kill` (id). With `npm exec` / `npm run`, put server flags after `--` (`npm \
+         `{}` (id). With `npm exec` / `npm run`, put server flags after `--` (`npm \
          exec nx serve app -- --port 4317`) or use `npx` directly; npm swallows a bare \
          `--port`. Never run a server in the foreground and never use \
-         `start /B`, `nohup` or `&` tricks: a foreground `bash` call blocks until its timeout. \
-         Before starting one, check whether the project's port already answers (`fetch` \
+         `start /B`, `nohup` or `&` tricks: a foreground `{}` call blocks until its timeout. \
+         Before starting one, check whether the project's port already answers (`{}` \
          http://localhost:<port>/) and that the response really is this project; reuse it only \
          then, otherwise start your own on a free port.\n\
          - A frontend usually depends on more than one server: check for a dev-server proxy \
@@ -87,7 +145,11 @@ pub fn render(mode: FrontendVerify, browser_installed: bool) -> String {
          `.env`) and start EVERY target the page calls (api, backend, mock server, database \
          container) before you open the page. A page stuck on a spinner / \"loading\" state with \
          its API down is a FAILED verification, not a note for the user.\n",
-    );
+        tr("bash"),
+        tr("bash_kill"),
+        tr("bash"),
+        tr("fetch"),
+    ));
     match mode {
         FrontendVerify::Auto => s.push_str(AUTO_POLICY),
         FrontendVerify::Ask => s.push_str(

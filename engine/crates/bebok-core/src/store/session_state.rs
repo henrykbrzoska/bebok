@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, oneshot};
@@ -122,6 +122,14 @@ pub struct SessionState {
     pub(crate) meta: RwLock<Session>,
     pub(crate) messages: RwLock<Vec<Message>>,
     pub(crate) max_message_index: AtomicUsize,
+    /// Monotonic count of transcript mutations (every streamed part delta and
+    /// every tool-state change). A *liveness* signal, not a progress metric:
+    /// the orchestrator watchdog uses it to tell "a slow model is still
+    /// writing" from "this child is stuck". Needed because a CLI provider
+    /// reports its tool use as text — see `bebok_cli_agents::provider` — so a
+    /// busy CLI child has a perfectly static `tool_calls`/`steps` count while
+    /// it works, which the old snapshot misread as silence and restarted.
+    activity: AtomicU64,
     /// One running turn per session; a second prompt -> `SessionBusy` (409).
     pub turn: Mutex<()>,
     running: AtomicBool,
@@ -167,6 +175,7 @@ impl SessionState {
             meta: RwLock::new(meta),
             messages: RwLock::new(Vec::new()),
             max_message_index: AtomicUsize::new(0),
+            activity: AtomicU64::new(0),
             turn: Mutex::new(()),
             running: AtomicBool::new(false),
             abort: Mutex::new(None),
@@ -244,6 +253,8 @@ impl SessionState {
         let mut messages = self.messages.write().await;
         if let Some(m) = messages.get_mut(idx) {
             f(m);
+            drop(messages);
+            self.bump_activity();
         }
     }
 
@@ -264,9 +275,25 @@ impl SessionState {
                     _ => None,
                 })
                 .unwrap_or_default();
-            return f(m, &name);
+            let changed = f(m, &name);
+            if changed {
+                drop(messages);
+                self.bump_activity();
+            }
+            return changed;
         }
         false
+    }
+
+    /// Record one unit of transcript activity (see the `activity` field).
+    pub fn bump_activity(&self) {
+        self.activity.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Current activity counter. Cheap and lock-free, so the orchestrator
+    /// watchdog can sample it from a non-async `FnMut` tick.
+    pub fn activity(&self) -> u64 {
+        self.activity.load(Ordering::Relaxed)
     }
 
     /// Flush a message to disk (atomic, 1 file = 1 message).
@@ -417,7 +444,31 @@ impl SessionState {
                 return;
             }
             meta.model = model;
+            // A CLI conversation belongs to the model it ran with.
+            meta.cli_session = None;
             meta.touch();
+            meta.clone()
+        };
+        if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {
+            tracing::error!("failed to persist session meta: {e}");
+        }
+    }
+
+    /// The CLI conversation this session can continue, if any.
+    pub async fn cli_session(&self) -> Option<crate::session::CliSessionMeta> {
+        self.meta.read().await.cli_session.clone()
+    }
+
+    /// Replace (or with `None`, forget) the CLI conversation record and
+    /// persist it. Called at the end of a CLI turn and by anything that makes
+    /// the recorded conversation stale.
+    pub async fn set_cli_session(&self, cli: Option<crate::session::CliSessionMeta>) {
+        let session = {
+            let mut meta = self.meta.write().await;
+            if meta.cli_session == cli {
+                return;
+            }
+            meta.cli_session = cli;
             meta.clone()
         };
         if let Err(e) = persist::persist_session_meta(&self.disk_dir, &session).await {

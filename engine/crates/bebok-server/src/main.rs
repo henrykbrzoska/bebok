@@ -20,6 +20,7 @@ mod auth;
 mod cli;
 mod cors;
 mod error;
+mod mcp_server;
 mod middleware;
 mod routes;
 mod server;
@@ -36,21 +37,49 @@ fn default_log_filter() -> &'static str {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `bebok-server cli-hook <pre|post|stop>`: a CLI provider's hook calling
+    // back into the engine. Runs before anything else (no token generation, no
+    // listener, no logging setup): stdout carries only the hook decision.
+    if args.first().is_some_and(|a| a == "cli-hook") {
+        let event = args.get(1).map(String::as_str).unwrap_or_default();
+        let code = cli::run_hook(event).await;
+        bebok_tools::processes::ProcessRegistry::global().kill_all_blocking();
+        std::process::exit(code);
+    }
+
+    // `bebok-server mcp ...`: stdio MCP server instead of the HTTP engine.
+    let mcp_mode = args.first().is_some_and(|a| a == "mcp");
+
     // Logs go to stderr; stdout stays clean for the `BEBOK_READY` line that
-    // the Tauri shell (sidecar) parses to discover the random port.
+    // the Tauri shell (sidecar) parses to discover the random port (or, in
+    // MCP mode, for the JSON-RPC stream).
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| default_log_filter().into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                if mcp_mode {
+                    "warn,chromiumoxide::handler=error".into()
+                } else {
+                    default_log_filter().into()
+                }
+            }),
         )
         .init();
+
+    if mcp_mode {
+        let spec = mcp_server::parse_mcp_cli(&args[1..])?;
+        let result = mcp_server::run(spec).await;
+        bebok_tools::processes::ProcessRegistry::global().kill_all_blocking();
+        return result;
+    }
 
     if std::env::var("ZAI_API_KEY").is_err() {
         tracing::warn!("ZAI_API_KEY is not set; prompts will fail until it is provided");
     }
 
-    let spec = cli::parse_cli(&std::env::args().skip(1).collect::<Vec<_>>())?;
+    let spec = cli::parse_cli(&args)?;
 
     // Initialize the capability token once: `--token` flag > `BEBOK_TOKEN` env
     // > token file > memory-only random. Must happen before any code reads

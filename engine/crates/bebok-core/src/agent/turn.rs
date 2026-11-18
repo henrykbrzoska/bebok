@@ -259,6 +259,40 @@ impl TurnRunner {
                             .await;
                         emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
                     }
+                    StreamEvent::ExternalTool {
+                        id,
+                        name,
+                        input,
+                        output,
+                        is_error,
+                        source: _,
+                    } => {
+                        // Deduplicate by tool_use_id: hooks and JSONL fallback may both emit.
+                        let already = {
+                            let msgs = state.messages.read().await;
+                            msgs.iter().any(|m| {
+                                m.parts.iter().any(|p| match p {
+                                    crate::session::Part::Tool { id: pid, .. } => pid == &id,
+                                    _ => false,
+                                })
+                            })
+                        };
+                        if !already {
+                            saw_any = true;
+                            state
+                                .append_to_part(assistant_idx, |m| {
+                                    m.add_external_tool(
+                                        id.clone(),
+                                        name.clone(),
+                                        input.clone(),
+                                        output.clone(),
+                                        is_error,
+                                    )
+                                })
+                                .await;
+                            emit_part(&bus, &state, "message.part.updated", assistant_idx).await;
+                        }
+                    }
                     StreamEvent::Done(usage) => {
                         let cost = bebok_llm::compute_cost(
                             model_ref,
@@ -1057,6 +1091,7 @@ mod parallel_tests {
                     cost: None,
                     cache_read_input_tokens: Some(40_000),
                     cache_creation_input_tokens: Some(800),
+                    context_tokens: None,
                 }),
             ]],
         });

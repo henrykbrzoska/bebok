@@ -18,6 +18,12 @@ pub const TEXT_MAX_CHARS_LIMIT: usize = 200_000;
 pub const DEFAULT_WAIT_MS: u64 = 500;
 /// Hard cap on any caller-supplied wait (ms).
 pub const WAIT_MS_LIMIT: u64 = 30_000;
+/// Default `browser_solve_captcha` wait for the user (seconds).
+pub const DEFAULT_HANDOFF_TIMEOUT_SECS: u64 = 300;
+/// Hard cap on the `browser_solve_captcha` wait (seconds).
+pub const HANDOFF_TIMEOUT_LIMIT: u64 = 900;
+/// Floor on the `browser_solve_captcha` wait (seconds).
+pub const HANDOFF_TIMEOUT_MIN_SECS: u64 = 10;
 
 /// Validated `browser_open` arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +78,17 @@ pub struct TypeArgs {
 pub struct GetTextArgs {
     pub selector: Option<String>,
     pub max_chars: usize,
+}
+
+/// Validated `browser_solve_captcha` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandoffArgs {
+    /// The page that shows the challenge.
+    pub url: String,
+    /// How long the user gets to solve it.
+    pub timeout_secs: u64,
+    /// Optional text that must appear before the page counts as solved.
+    pub done_text: Option<String>,
 }
 
 fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -161,6 +178,26 @@ pub fn parse_open(args: &Value) -> Result<OpenArgs, String> {
     Ok(OpenArgs {
         url,
         wait_ms: wait_ms(args, DEFAULT_WAIT_MS),
+    })
+}
+
+/// Validate `browser_solve_captcha` arguments: the challenge URL, the wait
+/// budget (clamped to `10..=900` s) and an optional "solved" marker text.
+pub fn parse_handoff(args: &Value) -> Result<HandoffArgs, String> {
+    let url = validate_url(required_str(args, "url")?)?;
+    let timeout_secs = args
+        .get("timeout_secs")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_HANDOFF_TIMEOUT_SECS)
+        .clamp(HANDOFF_TIMEOUT_MIN_SECS, HANDOFF_TIMEOUT_LIMIT);
+    let done_text = str_arg(args, "done_text")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Ok(HandoffArgs {
+        url,
+        timeout_secs,
+        done_text,
     })
 }
 

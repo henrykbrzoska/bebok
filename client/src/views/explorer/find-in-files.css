@@ -1,0 +1,321 @@
+.fif-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8vh;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.fif-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 92vw);
+  height: min(680px, 84vh);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  font-size: var(--fs-12-5);
+  color: var(--text);
+}
+
+.fif-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--border);
+}
+
+.fif-title {
+  font-weight: 600;
+  font-size: var(--fs-13);
+}
+
+.fif-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.fif-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+  padding: 3px var(--space-10);
+  cursor: pointer;
+  font: inherit;
+}
+
+.fif-tab:hover:not(:disabled):not(.active) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.fif-tab.active {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.fif-tab:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.fif-count {
+  margin-left: 4px;
+  color: var(--text-faint);
+  font-size: var(--fs-12);
+}
+
+.fif-spacer {
+  flex: 1;
+}
+
+.fif-badge {
+  font-size: var(--fs-12);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control-sm);
+  padding: 0 6px;
+}
+
+.fif-close {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-14);
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.fif-close:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.fif-search {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: var(--space-8) var(--space-12);
+}
+
+.fif-query,
+.fif-mask {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  padding: 5px var(--space-8);
+  outline: none;
+  min-width: 0;
+}
+
+.fif-query {
+  flex: 1;
+}
+
+.fif-mask {
+  width: 150px;
+  font-size: var(--fs-12);
+}
+
+.fif-query:focus,
+.fif-mask:focus {
+  border-color: var(--accent);
+}
+
+.fif-toggle {
+  min-width: 30px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  padding: 0 var(--space-8);
+  cursor: pointer;
+}
+
+.fif-toggle:hover:not(.active) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.fif-toggle.active,
+.fif-toggle.active:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.fif-status {
+  padding: 0 var(--space-12) var(--space-8);
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+  min-height: 18px;
+}
+
+.fif-error {
+  color: var(--danger);
+}
+
+.fif-faint {
+  color: var(--text-faint);
+}
+
+.fif-list {
+  flex: 1 1 50%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.fif-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: 3px var(--space-12);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fif-row:hover {
+  background: var(--surface-2);
+}
+
+.fif-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+.fif-kind {
+  flex: none;
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+  min-width: 72px;
+}
+
+.fif-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.fif-text mark {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--code-text-strong, var(--text));
+  border-radius: 2px;
+}
+
+.fif-loc {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  max-width: 45%;
+  overflow: hidden;
+}
+
+.fif-file {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.fif-dir {
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.fif-empty {
+  padding: var(--space-12);
+  color: var(--text-faint);
+}
+
+.fif-preview {
+  flex: 1 1 50%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-strong);
+  background: var(--bg);
+}
+
+.fif-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 4px var(--space-12);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.fif-preview-head .fif-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fif-open {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-12);
+  padding: 2px var(--space-8);
+  cursor: pointer;
+}
+
+.fif-open:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.fif-preview-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  padding: 4px 0;
+}
+
+.fif-line {
+  padding-right: var(--space-12);
+  white-space: pre;
+}
+
+.fif-line.is-hit {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.fif-ln {
+  display: inline-block;
+  width: 48px;
+  padding-right: var(--space-10);
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}

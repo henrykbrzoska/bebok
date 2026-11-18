@@ -29,11 +29,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures::stream::{BoxStream, StreamExt};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, watch};
 
-use crate::backend::{CliBackend, CliError, CliEvent, CliRequest, CliStreamState};
+use crate::backend::{
+    CliBackend, CliError, CliEvent, CliProbe, CliRequest, CliStreamState, PreparedTurn, ProfileDir,
+    TurnScratch,
+};
 use crate::spec::CliSpec;
 
 /// How many stderr lines are kept for the error message.
@@ -45,7 +48,6 @@ const EVENT_CHANNEL: usize = 64;
 const LOG_ARG_CHARS: usize = 120;
 /// How long the reader waits for the process to be reaped after stdout EOF.
 const REAP_GRACE: Duration = Duration::from_secs(5);
-
 /// A running CLI: the parsed event stream plus the exit handle.
 ///
 /// The child process is owned *by the stream*: dropping `events` (an aborted
@@ -54,6 +56,34 @@ const REAP_GRACE: Duration = Duration::from_secs(5);
 pub struct CliRun {
     pub events: BoxStream<'static, Result<CliEvent, CliError>>,
     pub exit: tokio::task::JoinHandle<Result<Option<i32>, CliError>>,
+    /// Profile digest this turn was started with (see `PreparedTurn`).
+    pub profile_hash: Option<String>,
+}
+
+/// What a resumed turn needs to know before its request is final: whether the
+/// binary can resume at all, and the profile it would run with.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumePreflight {
+    pub resume_supported: bool,
+    pub profile_hash: Option<String>,
+}
+
+/// Probe the binary and render the profile for `req`, without spawning
+/// anything. The provider calls this before choosing between a tail-only
+/// prompt and the full transcript. Rendering is idempotent (the profile lock
+/// short-circuits), so the spawn that follows writes nothing new.
+pub async fn preflight(
+    backend: &dyn CliBackend,
+    spec: &CliSpec,
+    req: &CliRequest,
+) -> Result<ResumePreflight, CliError> {
+    let resolved = resolve_program(backend, spec)?;
+    let probe = probe_binary(&resolved).await;
+    let prepared = backend.prepare(spec, req, &probe, &ProfileDir::default())?;
+    Ok(ResumePreflight {
+        resume_supported: backend.resume_flag_available(&probe),
+        profile_hash: prepared.profile_hash,
+    })
 }
 
 /// State shared by the event stream, the exit supervisor and the watchdog.
@@ -62,6 +92,9 @@ struct ProcessShared {
     /// The child handle. It lives here — and this struct is owned by the
     /// stream's state — so the process cannot outlive the stream.
     child: Mutex<Option<Child>>,
+    /// Files the CLI reads at startup (system prompt, ...). Removed when the
+    /// stream is dropped, which happens only after the CLI has exited.
+    _scratch: TurnScratch,
     /// The child has been waited on, so its pid may already be reused.
     finished: AtomicBool,
     /// The hard timeout elapsed and the watchdog killed the tree.
@@ -102,24 +135,50 @@ pub async fn spawn_cli(
     req: CliRequest,
 ) -> Result<CliRun, CliError> {
     let resolved = resolve_program(backend.as_ref(), &spec)?;
-    let (requested, args) = backend.build_command(&spec, &req);
+    let probe = probe_binary(&resolved).await;
+    let mut scratch = TurnScratch::default();
+    let (requested, args) = backend.build_command(&spec, &req, &probe, &mut scratch)?;
+    // The profile directory is owned by the backend (see `ProfileDir`); the
+    // runner only cares about the env/stdin it produces.
+    let prepared: PreparedTurn = backend.prepare(&spec, &req, &probe, &ProfileDir::default())?;
+    let profile_hash = prepared.profile_hash.clone();
+    let stdin_payload = prepared
+        .stdin
+        .clone()
+        .or_else(|| backend.stdin_payload(&req, &probe));
     let program = effective_program(&requested, &resolved);
+    let args = args
+        .into_iter()
+        .chain(prepared.args_extra.clone())
+        .collect();
     let (program, args) = prepare_command(&program, args);
     let timeout = spec.timeout();
 
     let mut cmd = Command::new(&program);
     cmd.args(&args)
         .current_dir(&req.cwd)
-        .stdin(Stdio::null())
+        .stdin(if stdin_payload.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // The child gets the scrubbed inherited environment plus this turn's
+    // extras (hook endpoint + turn token, profile overrides). `env_clear` makes
+    // the scrubbing authoritative: nothing is inherited implicitly.
+    cmd.env_clear();
+    for (key, value) in build_env(&prepared.env) {
+        cmd.env(&key, &value);
+    }
     apply_process_flags(&mut cmd);
 
     tracing::debug!(
         program = %program,
         argc = args.len(),
         cwd = %req.cwd.display(),
+        stdin_bytes = stdin_payload.as_ref().map_or(0, Vec::len),
         "spawning CLI backend"
     );
     for (index, arg) in args.iter().enumerate() {
@@ -137,9 +196,25 @@ pub async fn spawn_cli(
         .ok_or_else(|| CliError::Spawn("CLI stdout pipe unavailable".into()))?;
     let stderr = child.stderr.take();
 
+    if let (Some(payload), Some(mut stdin)) = (stdin_payload, child.stdin.take()) {
+        // Written off the critical path: a CLI that exits early (or never
+        // reads) must not block the reader. A failed write is only a debug
+        // note here — the CLI's own exit status and stderr explain the real
+        // failure, and those are what the turn reports.
+        tokio::spawn(async move {
+            if let Err(err) = stdin.write_all(&payload).await {
+                tracing::debug!(error = %err, "CLI stdin write failed");
+            }
+            // Dropping the pipe closes stdin. EOF is what lets `claude -p`
+            // start; an open stdin makes it wait for more input.
+            drop(stdin);
+        });
+    }
+
     let shared = Arc::new(ProcessShared {
         pid,
         child: Mutex::new(Some(child)),
+        _scratch: scratch,
         finished: AtomicBool::new(false),
         timed_out: AtomicBool::new(false),
         killed: AtomicBool::new(false),
@@ -170,32 +245,41 @@ pub async fn spawn_cli(
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         let mut state = CliStreamState::default();
-        loop {
+        'read: loop {
             if reader_shared.timed_out.load(Ordering::SeqCst) {
                 break;
             }
-            match lines.next_line().await {
-                Ok(Some(line)) => match reader_backend.parse_line(&line, &mut state) {
-                    Ok(None) => {}
-                    Ok(Some(event)) => {
-                        if matches!(event, CliEvent::Usage(_)) {
-                            reader_shared.saw_usage.store(true, Ordering::SeqCst);
-                        }
-                        if reader_tx.send(Ok(event)).await.is_err() {
-                            // The consumer went away; stop reading.
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        let _ = reader_tx.send(Err(err)).await;
-                        break;
-                    }
-                },
+            let line = match lines.next_line().await {
+                Ok(Some(line)) => line,
                 Ok(None) => break,
                 Err(err) => {
                     let _ = reader_tx.send(Err(CliError::Stream(err.to_string()))).await;
                     break;
                 }
+            };
+            let primary = match reader_backend.parse_line(&line, &mut state) {
+                Ok(primary) => primary,
+                Err(err) => {
+                    let _ = reader_tx.send(Err(err)).await;
+                    break;
+                }
+            };
+            // One line may carry several events: the primary one first, then
+            // whatever the backend queued, in order.
+            let events = primary.into_iter().chain(state.pending.drain(..));
+            for event in events {
+                if matches!(event, CliEvent::Usage(_)) {
+                    reader_shared.saw_usage.store(true, Ordering::SeqCst);
+                }
+                if reader_tx.send(Ok(event)).await.is_err() {
+                    // The consumer went away; stop reading.
+                    break 'read;
+                }
+            }
+            // A failed run is reported last, after the usage it still billed.
+            if let Some(message) = state.failure.take() {
+                let _ = reader_tx.send(Err(CliError::RunFailed(message))).await;
+                break;
             }
         }
         // Normally stdout EOF precedes the exit by milliseconds; waiting for
@@ -280,7 +364,11 @@ pub async fn spawn_cli(
     })
     .boxed();
 
-    Ok(CliRun { events, exit })
+    Ok(CliRun {
+        events,
+        exit,
+        profile_hash,
+    })
 }
 
 /// Resolve the executable: explicit config, then the backend's env override,
@@ -311,6 +399,42 @@ fn resolve_program(backend: &dyn CliBackend, spec: &CliSpec) -> Result<PathBuf, 
         names: names.join(", "),
         env_var: env_var.to_string(),
     })
+}
+
+/// Ask the resolved binary what it supports (see [`crate::probe`]).
+///
+/// Feature detection by help text is deliberately crude. It can only say a
+/// flag is *advertised*; a backend therefore gates each flag it is unsure of
+/// and keeps a fallback that works without it. A failed or timed-out probe
+/// yields an empty [`CliProbe`], which turns every gated flag off.
+async fn probe_binary(resolved: &Path) -> CliProbe {
+    CliProbe::from_features(crate::probe::probe_features(resolved).await)
+}
+
+/// Run `binary args` with a hard timeout and return its stdout when it exits 0.
+///
+/// Shared by the feature probe. Platform quirks (the `.cmd` shim, the console
+/// window on Windows) are handled here so the probe module stays portable.
+pub(crate) async fn capture_stdout(
+    binary: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<String> {
+    let argv: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let (program, argv) = prepare_command(&binary.to_string_lossy(), argv);
+    let mut cmd = Command::new(&program);
+    cmd.args(&argv)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    apply_process_flags(&mut cmd);
+
+    match tokio::time::timeout(timeout, cmd.output()).await {
+        Ok(Ok(output)) if output.status.success() => {
+            Some(String::from_utf8_lossy(&output.stdout).into_owned())
+        }
+        _ => None,
+    }
 }
 
 /// `CliBackend::build_command` may return a bare program name (`claude`) that
@@ -505,6 +629,43 @@ mod platform {
     }
 }
 
+/// A variable name that looks like a credential and must not be handed to a
+/// child process. Mirrors `bebok-pty`'s PTY scrubbing rule (that crate is not a
+/// dependency here, so the check is duplicated like the process-tree helpers).
+fn is_secret(key: &str) -> bool {
+    let up = key.to_ascii_uppercase();
+    up.contains("PASSWORD")
+        || up.contains("API_KEY")
+        || up.contains("TOKEN")
+        || up.contains("SECRET")
+        || up.contains("CREDENTIAL")
+        || up == "BEBOK_PASSWORD"
+}
+
+/// Credentials the CLI genuinely needs to log in. They are provider
+/// credentials of the CLI's own vendor, not Bebok's: keeping them is what makes
+/// `bebok` profile mode use the user's existing account. Anything Bebok-side
+/// (`ZAI_API_KEY`, `BEBOK_TOKEN`, ...) stays scrubbed.
+fn is_cli_credential(key: &str) -> bool {
+    matches!(
+        key.to_ascii_uppercase().as_str(),
+        "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" | "CLAUDE_CODE_OAUTH_TOKEN"
+    )
+}
+
+/// The child's environment: inherited variables minus secrets, then `extra`
+/// merged on top (an extra of the same name wins).
+fn build_env(extra: &[(String, String)]) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(key, _)| !is_secret(key) || is_cli_credential(key))
+        .collect();
+    for (key, value) in extra {
+        env.retain(|(existing, _)| existing != key);
+        env.push((key.clone(), value.clone()));
+    }
+    env
+}
+
 /// Shorten a string for the debug log without splitting a UTF-8 character.
 fn truncate(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
@@ -648,9 +809,201 @@ mod tests {
     }
 
     #[test]
+    fn secrets_are_scrubbed_but_cli_credentials_survive() {
+        assert!(is_secret("ZAI_API_KEY"));
+        assert!(is_secret("BEBOK_TOKEN"));
+        assert!(is_secret("GITHUB_TOKEN"));
+        assert!(is_secret("DB_SECRET"));
+        assert!(!is_secret("PATH"));
+        // The CLI's own login must reach the child, or a `bebok` profile turn
+        // cannot authenticate.
+        assert!(is_cli_credential("ANTHROPIC_API_KEY"));
+        assert!(is_cli_credential("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!is_cli_credential("ZAI_API_KEY"));
+    }
+
+    #[test]
+    fn build_env_merges_extras_over_the_inherited_environment() {
+        let env = build_env(&[
+            (
+                "BEBOK_HOOK_URL".to_string(),
+                "http://127.0.0.1:1/x".to_string(),
+            ),
+            ("PATH".to_string(), "/tmp/overridden".to_string()),
+        ]);
+        let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        assert_eq!(
+            get("BEBOK_HOOK_URL").as_deref(),
+            Some("http://127.0.0.1:1/x")
+        );
+        // An extra wins over the inherited value instead of duplicating it.
+        assert_eq!(get("PATH").as_deref(), Some("/tmp/overridden"));
+        assert_eq!(env.iter().filter(|(k, _)| k == "PATH").count(), 1);
+        for (key, _) in &env {
+            assert!(
+                !is_secret(key) || is_cli_credential(key),
+                "secret {key} leaked into the CLI env"
+            );
+        }
+    }
+
+    #[test]
     fn truncate_respects_char_boundaries() {
         assert_eq!(truncate("claude", 10), "claude");
         assert_eq!(truncate("zażółć", 2), "za…");
         assert_eq!(truncate("", 0), "");
+    }
+
+    #[tokio::test]
+    async fn missing_binary_probes_to_an_empty_help_text() {
+        let probe = probe_binary(Path::new("/nonexistent/bebok-probe-target")).await;
+        assert!(!probe.mentions("--input-format"));
+    }
+
+    /// A backend that runs a shell snippet. Each stdout line becomes a text
+    /// event, except `fail`, which exercises the pending/failure path.
+    #[cfg(unix)]
+    struct ShellBackend {
+        script: &'static str,
+        stdin: Option<Vec<u8>>,
+    }
+
+    #[cfg(unix)]
+    impl CliBackend for ShellBackend {
+        fn id(&self) -> &'static str {
+            "shell-test"
+        }
+        fn label(&self) -> &'static str {
+            "Shell test"
+        }
+        fn capabilities(&self) -> crate::backend::CliCapabilities {
+            crate::backend::CliCapabilities::default()
+        }
+        fn default_models(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn binary_names(&self) -> &'static [&'static str] {
+            &["sh"]
+        }
+        fn env_override(&self) -> &'static str {
+            "BEBOK_SHELL_TEST_BIN"
+        }
+        fn build_command(
+            &self,
+            _spec: &CliSpec,
+            _req: &CliRequest,
+            _probe: &CliProbe,
+            _scratch: &mut TurnScratch,
+        ) -> Result<(String, Vec<String>), CliError> {
+            Ok(("sh".into(), vec!["-c".into(), self.script.into()]))
+        }
+        fn stdin_payload(&self, _req: &CliRequest, _probe: &CliProbe) -> Option<Vec<u8>> {
+            self.stdin.clone()
+        }
+        fn parse_line(
+            &self,
+            line: &str,
+            st: &mut CliStreamState,
+        ) -> Result<Option<CliEvent>, CliError> {
+            if line == "fail" {
+                st.pending.push_back(CliEvent::Thinking("note".into()));
+                st.failure = Some("boom".into());
+                return Ok(Some(CliEvent::Text("before".into())));
+            }
+            Ok(Some(CliEvent::Text(line.to_string())))
+        }
+    }
+
+    #[cfg(unix)]
+    fn shell_spec() -> CliSpec {
+        CliSpec {
+            backend: "shell-test".into(),
+            command: Some("/bin/sh".into()),
+            args: Vec::new(),
+            mode: crate::backend::CliMode::Agent,
+            allow_write: false,
+            timeout_secs: 30,
+            max_turns: None,
+            profile: Default::default(),
+            profile_overrides: None,
+            system_prompt_mode: Default::default(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn shell_request() -> CliRequest {
+        CliRequest {
+            prompt: String::new(),
+            blocks: Vec::new(),
+            system: None,
+            model: None,
+            cwd: std::env::temp_dir(),
+            resume_key: None,
+            write: false,
+            max_turns: None,
+            timeout: Duration::from_secs(30),
+            extra_env: Vec::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdin_payload_reaches_the_child_and_then_eof() {
+        let backend = Arc::new(ShellBackend {
+            script: "cat",
+            stdin: Some(b"one\ntwo\n".to_vec()),
+        });
+        let run = spawn_cli(backend, shell_spec(), shell_request())
+            .await
+            .expect("spawns");
+        // `cat` only exits once stdin is closed, so this also proves EOF.
+        let events = tokio::time::timeout(Duration::from_secs(20), run.events.collect::<Vec<_>>())
+            .await
+            .expect("cat exits on EOF");
+        let texts: Vec<String> = events
+            .into_iter()
+            .map(|event| match event {
+                Ok(CliEvent::Text(text)) => text,
+                other => panic!("unexpected event {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, vec!["one".to_string(), "two".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_stdin_write_does_not_hide_the_exit_status() {
+        // The CLI exits without reading a payload larger than the pipe buffer,
+        // so the write fails with EPIPE. The exit status must still win.
+        let backend = Arc::new(ShellBackend {
+            script: "exit 3",
+            stdin: Some(vec![b'x'; 1 << 20]),
+        });
+        let run = spawn_cli(backend, shell_spec(), shell_request())
+            .await
+            .expect("spawns");
+        let events: Vec<_> = run.events.collect().await;
+        assert!(events.is_empty(), "{events:?}");
+        match run.exit.await.expect("supervisor joined") {
+            Err(CliError::Exit { status: 3, .. }) => {}
+            other => panic!("expected exit status 3, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn queued_events_come_before_the_run_failure() {
+        let backend = Arc::new(ShellBackend {
+            script: "printf 'fail\\n'",
+            stdin: None,
+        });
+        let run = spawn_cli(backend, shell_spec(), shell_request())
+            .await
+            .expect("spawns");
+        let events: Vec<_> = run.events.collect().await;
+        assert_eq!(events.len(), 3, "{events:?}");
+        assert!(matches!(&events[0], Ok(CliEvent::Text(t)) if t == "before"));
+        assert!(matches!(&events[1], Ok(CliEvent::Thinking(t)) if t == "note"));
+        assert!(matches!(&events[2], Err(CliError::RunFailed(m)) if m == "boom"));
     }
 }

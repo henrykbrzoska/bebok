@@ -80,6 +80,7 @@ describe('ShellStore', () => {
       changes: false,
       preview: false,
       browser: false,
+      batch: false,
     });
     store.toggleRightDrawerPanel('terminal');
     expect(store.rightDrawerPanels().terminal).toBeTrue();

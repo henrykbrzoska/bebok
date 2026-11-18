@@ -44,13 +44,13 @@ describe('EngineClient (Phase 2: disconnect / profile)', () => {
     await expectAsync(engine.connect()).toBeRejectedWithError('engine disconnected by user');
   });
 
-  it('connect() returns existing connection even when isDisconnected is true', async () => {
+  it('connect() throws when isDisconnected is true even with a cached connection', async () => {
     const conn = { kind: 'http' as const, baseUrl: 'http://127.0.0.1:8787' };
     engine.connection.set(conn);
-    engine.disconnect();
-    // Should return the cached connection, not throw.
-    const result = await engine.connect();
-    expect(result).toBe(conn);
+    engine.isDisconnected.set(true);
+    // A deliberate disconnect blocks reconnects until the user reconnects,
+    // even when a connection is still cached.
+    await expectAsync(engine.connect()).toBeRejectedWithError('engine disconnected by user');
   });
 
   it('reconnect() clears isDisconnected so automatic reconnect works again', async () => {
@@ -75,5 +75,35 @@ describe('EngineClient (Phase 2: disconnect / profile)', () => {
     expect(engine.getProfile().token).toBe('tok-123');
     engine.clearProfile();
     expect(engine.isFixedProfile()).toBeFalse();
+  });
+
+  describe('withEngineToken (handing a URL to the user\'s browser)', () => {
+    const ENGINE = 'http://127.0.0.1:8787';
+
+    beforeEach(() => {
+      engine.connection.set({ kind: 'http', baseUrl: ENGINE });
+      setEngineToken('tok-abc');
+    });
+
+    it('adds ?token= to a page on the engine itself', () => {
+      expect(engine.withEngineToken(`${ENGINE}/stats`)).toBe(`${ENGINE}/stats?token=tok-abc`);
+    });
+
+    it('keeps an existing token untouched', () => {
+      expect(engine.withEngineToken(`${ENGINE}/stats?token=other`)).toBe(
+        `${ENGINE}/stats?token=other`,
+      );
+    });
+
+    it('leaves third-party URLs alone', () => {
+      expect(engine.withEngineToken('https://example.com/x')).toBe('https://example.com/x');
+    });
+
+    it('bootstraps the engine on a page of this client app', () => {
+      // The agent browsing Bebok's own dev server must open authenticated.
+      const origin = globalThis.location.origin;
+      const out = new URL(engine.withEngineToken(`${origin}/explorer`));
+      expect(out.searchParams.get('engine')).toBe(`${ENGINE}/?token=tok-abc`);
+    });
   });
 });

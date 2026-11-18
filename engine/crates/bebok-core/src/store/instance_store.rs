@@ -454,6 +454,7 @@ impl InstanceStore {
             agents,
             mcp,
             context_notes: std::sync::RwLock::new(Vec::new()),
+            symbols: Arc::new(crate::agent::symbol_index::SymbolIndex::new()),
         });
 
         // Insert under the write lock (double-check to avoid a race).
@@ -605,6 +606,11 @@ impl InstanceStore {
         let runtimes = Runtimes::from_config(&config.runtimes);
         let mcp_tools = instance.mcp.sync(&specs, &runtimes).await;
         instance.tools.set_mcp_tools(mcp_tools);
+
+        // A CLI profile embeds config-derived settings (permissions, prompt,
+        // MCP list), so a config change must invalidate its cached hash and
+        // force a regeneration on the next CLI turn.
+        bebok_cli_agents::invalidate_profile_cache();
 
         self.bus.publish(crate::event::Event::new(
             "config.changed",
@@ -763,6 +769,7 @@ impl InstanceStore {
         session.model = model.map(str::to_string);
         session.alias = alias.map(str::to_string);
         session.parent = Some((parent_id, parent_len.saturating_sub(1)));
+        session.subagent = true;
         self.spawn_session(&instance, session).await
     }
 

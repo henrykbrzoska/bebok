@@ -148,3 +148,25 @@
   align-items: center;
   gap: var(--space-8);
 }
+
+/* Managed CLI profile preview (read-only). */
+.cli-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.cli-profile-dir {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.cli-profile-dir code {
+  word-break: break-all;
+}
+
+.cli-profile-file {
+  margin-top: var(--space-4);
+}

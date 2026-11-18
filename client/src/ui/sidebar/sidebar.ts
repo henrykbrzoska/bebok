@@ -64,8 +64,8 @@ export class Sidebar {
   private readonly i18n = inject(I18nService);
   private readonly router = inject(Router);
 
-  /** Engine base URL (http://host:port, no token) shown on click. */
-  readonly engineUrl = computed(() => this.engine.connection()?.baseUrl ?? '');
+  /** Engine URL with the per-launch capability token (`…/?token=…`), shown on click. */
+  readonly engineUrl = computed(() => this.engine.engineUrlWithToken());
   readonly showEngineUrl = signal(false);
   toggleEngineUrl(): void {
     this.showEngineUrl.update((v) => !v);
@@ -77,6 +77,41 @@ export class Sidebar {
 
   readonly expanded = this.shell.sidebarExpanded;
   readonly activeScreen = this.shell.activeScreen;
+
+  /** Drag-resizable width of the expanded sidebar (persisted in ui-prefs). */
+  readonly width = this.shell.sidebarWidth;
+  /** True while a drag is in flight (disables the width CSS transition). */
+  readonly resizing = signal(false);
+
+  private dragPointerId: number | null = null;
+  private dragStartX = 0;
+  private dragStartWidth = 0;
+
+  /** Pointer-drag resize: dragging the right edge rightwards widens the sidebar. */
+  onResizeStart(event: PointerEvent): void {
+    event.preventDefault();
+    this.dragPointerId = event.pointerId;
+    this.dragStartX = event.clientX;
+    this.dragStartWidth = this.width();
+    this.resizing.set(true);
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  onResizeMove(event: PointerEvent): void {
+    if (this.dragPointerId !== event.pointerId) {
+      return;
+    }
+    this.shell.setSidebarWidth(this.dragStartWidth + (event.clientX - this.dragStartX));
+  }
+
+  onResizeEnd(event: PointerEvent): void {
+    if (this.dragPointerId !== event.pointerId) {
+      return;
+    }
+    (event.target as HTMLElement).releasePointerCapture(event.pointerId);
+    this.dragPointerId = null;
+    this.resizing.set(false);
+  }
 
   /** Whether the user deliberately disconnected (sidebar Disconnect button). */
   readonly isDisconnected = this.engine.isDisconnected;

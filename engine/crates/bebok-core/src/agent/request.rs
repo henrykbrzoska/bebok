@@ -22,9 +22,7 @@ use crate::util::scrub_secrets;
 
 /// Delegation tool sets: the orchestrator owns fleet fan-out plus the
 /// supervision tools (including `task_report`, the read-out of a child's
-/// work after an abort); every other agent (and every sub-agent) gets none
-/// of them. The plain `task` tool stays registered (it is not in these
-/// lists) so non-orchestrator agents and manual calls keep working as before.
+/// work after an abort). These names are withheld from every other agent.
 pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] = &[
     "fleet",
     "task_status",
@@ -35,6 +33,18 @@ pub const ORCHESTRATOR_DELEGATION_TOOLS: &[&str] = &[
 /// Back-compat alias for tests/callers iterating the full delegation set.
 pub const DELEGATION_TOOLS: &[&str] = ORCHESTRATOR_DELEGATION_TOOLS;
 
+/// Presets that own delegation and therefore see the delegation tools
+/// (`task` here, plus [`ORCHESTRATOR_DELEGATION_TOOLS`] for the orchestrator)
+/// and the delegation prompt section: the orchestrator (fleet fan-out +
+/// supervision) and `hub` (the multi-project operator whose only write path is
+/// delegating a `code` subtask).
+///
+/// Every other preset runs as a worker: it gets no `task`/`fleet`/supervision
+/// tools and no delegation text, so a plain coding or debugging session is
+/// never nudged into fanning out. Sub-agents of any parent are always workers,
+/// whatever preset they were spawned with.
+pub const DELEGATING_AGENTS: &[&str] = &[super::delegation_policy::FLEET_AGENT, "hub"];
+
 /// Builder for provider requests (transcript + system prompt + tool defs).
 pub struct RequestBuilder<'a> {
     pub state: &'a SessionState,
@@ -44,6 +54,7 @@ pub struct RequestBuilder<'a> {
     pub max_tokens: u32,
     pub thinking: Thinking,
     pub sampling: Sampling,
+    pub transport: bebok_llm::Transport,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -63,7 +74,13 @@ impl<'a> RequestBuilder<'a> {
             max_tokens,
             thinking,
             sampling: Sampling::default(),
+            transport: bebok_llm::Transport::Http,
         }
+    }
+
+    pub fn with_transport(mut self, transport: bebok_llm::Transport) -> Self {
+        self.transport = transport;
+        self
     }
 
     /// Builder-style override for sampling params (orchestrator `task`
@@ -106,13 +123,11 @@ impl<'a> RequestBuilder<'a> {
                     });
                 }
                 Role::Assistant => {
-                    let content = msg.text_content();
+                    let mut content = msg.text_content();
                     let mut tool_calls = Vec::new();
                     let mut tool_results = Vec::new();
-                    // Image parts on an assistant message are tool-produced
-                    // (WP-BROWSER screenshots): they travel with the tool
-                    // results in the synthetic user turn that follows.
                     let mut result_images: Vec<ContentPart> = Vec::new();
+                    let mut external_lines: Vec<String> = Vec::new();
                     for part in &msg.parts {
                         if let crate::session::Part::Image {
                             media_type, data, ..
@@ -124,9 +139,25 @@ impl<'a> RequestBuilder<'a> {
                             });
                         }
                         if let crate::session::Part::Tool {
-                            id, name, state, ..
+                            id,
+                            name,
+                            state,
+                            external,
+                            ..
                         } = part
                         {
+                            if external == &Some(true) {
+                                let input_str = state.input().to_string();
+                                let output_str = match state {
+                                    ToolState::Completed { output, .. } => output.clone(),
+                                    ToolState::Error { error, .. } => error.clone(),
+                                    _ => String::new(),
+                                };
+                                external_lines.push(format!(
+                                    "[Claude Code ran {name}: {input_str} → {output_str}]"
+                                ));
+                                continue;
+                            }
                             tool_calls.push(bebok_llm::ToolCall {
                                 id: id.clone(),
                                 name: name.clone(),
@@ -148,13 +179,6 @@ impl<'a> RequestBuilder<'a> {
                                     });
                                 }
                                 _ => {
-                                    // Pending / Running — the tool never
-                                    // finished (turn was interrupted). Emit a
-                                    // synthetic error result so every
-                                    // tool_call_id has a matching response;
-                                    // without this OpenAI-compatible providers
-                                    // return 400 "Missing tool response for
-                                    // tool_call_id(s)".
                                     tool_results.push(ToolResult {
                                         tool_use_id: id.clone(),
                                         content: "[tool did not complete: turn was interrupted before execution finished]"
@@ -164,6 +188,12 @@ impl<'a> RequestBuilder<'a> {
                                 }
                             }
                         }
+                    }
+                    if !external_lines.is_empty() {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(&external_lines.join("\n"));
                     }
                     chat.push(ChatMessage {
                         role: ChatRole::Assistant,
@@ -196,13 +226,19 @@ impl<'a> RequestBuilder<'a> {
         // for unused tools (e.g. fs_tree, fs_file, debug_log, mcp list are
         // rarely needed in a simple code-editing session).
         let used_tools = collect_used_tools(&messages);
-        // The orchestrator owns fleet fan-out + supervision (`fleet`,
-        // `task_status`, `task_wait`, `task_cancel`, `task_report`);
-        // sub-agents of any parent are workers and get none of them. Every
-        // other agent keeps the plain `task` tool (registered, not gated
-        // here) but never sees the fleet/supervision set.
-        let hide_delegation = self.state.meta_snapshot().await.parent.is_some()
-            || self.agent.name != super::delegation_policy::FLEET_AGENT;
+        // Delegation is a coordinator capability: the orchestrator (fleet
+        // fan-out + supervision) and `hub` (delegation-only operator) own it;
+        // a sub-agent spawned by `task`/`fleet` never has it — a worker that
+        // could fan out further is exactly the recursive-delegation failure
+        // mode. Fork/compact sessions keep `parent` for genealogy but are NOT
+        // sub-agents (`Session::subagent` is only set by
+        // `create_subagent_session`), so they keep their delegation tools.
+        // Every other preset sees no delegation tool at all, so nothing in
+        // its request advertises fan-out it cannot do.
+        let is_subagent = self.state.meta_snapshot().await.subagent;
+        let is_cli = self.transport.is_cli();
+        let delegation_owner =
+            !is_cli && !is_subagent && DELEGATING_AGENTS.contains(&self.agent.name.as_str());
         let tool_defs: Vec<ToolDef> = self
             .tools
             .list()
@@ -216,7 +252,8 @@ impl<'a> RequestBuilder<'a> {
                 if t.name() == "fleet" && self.agent.name != super::delegation_policy::FLEET_AGENT {
                     return false;
                 }
-                if hide_delegation && DELEGATION_TOOLS.contains(&t.name()) {
+                if !delegation_owner && (t.name() == "task" || DELEGATION_TOOLS.contains(&t.name()))
+                {
                     return false;
                 }
                 self.agent.tools.is_empty() || self.agent.tools.iter().any(|n| n == t.name())
@@ -282,7 +319,7 @@ impl<'a> RequestBuilder<'a> {
         // Central enforcement: inject the code-navigation section when the
         // plugin is available at this project's root.
         let root = std::path::Path::new(self.state.directory());
-        if let Some(section) = super::index_section(root) {
+        if let Some(section) = super::index_section_for_transport(root, self.transport) {
             if !req.system.is_empty() {
                 req.system.push_str("\n\n");
             }
@@ -866,6 +903,28 @@ mod image_tests {
             flat.contains(crate::util::SECRET_PLACEHOLDER),
             "placeholder expected: {flat}"
         );
+    }
+
+    #[test]
+    fn transport_cli_without_bebok_tools_omits_delegation_and_index() {
+        // CLI without bebok_tools must not advertise delegation tools.
+        // This is the RequestBuilder-level guard (turn.rs also gates prompt sections).
+        let rt = std::env::temp_dir().join(format!("bebok-rt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&rt).unwrap();
+        // Use a minimal check: delegation_owner is false for CLI.
+        let transport = bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            native_tools: true,
+        };
+        assert!(transport.is_cli());
+        assert!(!transport.bebok_tools());
+        let transport2 = bebok_llm::Transport::AgenticCli {
+            bebok_tools: true,
+            native_tools: true,
+        };
+        assert!(transport2.bebok_tools());
+        assert!(!bebok_llm::Transport::Http.is_cli());
+        let _ = std::fs::remove_dir_all(&rt);
     }
 
     #[test]

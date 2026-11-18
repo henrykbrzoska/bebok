@@ -23,6 +23,14 @@ import { EngineClient } from '../../core/engine-client.service';
 import { prettyJson } from '../../core/format';
 import { DebugEntry, DebugLlmCall } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
+import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
+import {
+  DEBUG_CALL_PROVIDER,
+  DEBUG_ROW_PROVIDER,
+  type DebugCallPayload,
+  type DebugRowPayload,
+} from './debug.menus';
 
 const MAX_JSON_CHARS = 111150000;
 
@@ -41,13 +49,14 @@ export interface LogRow {
 
 @Component({
   selector: 'app-debug',
-  imports: [FormsModule],
+  imports: [FormsModule, ContextMenuDirective],
   templateUrl: './debug.html',
   styleUrl: './debug.css',
 })
 export class DebugView implements OnInit, OnDestroy {
   private readonly engine = inject(EngineClient);
   private readonly i18n = inject(I18nService);
+  private readonly menus = inject(ContextMenuService);
 
   readonly t = this.i18n.t.bind(this.i18n);
 
@@ -65,6 +74,37 @@ export class DebugView implements OnInit, OnDestroy {
   readonly expanded = signal<Set<number>>(new Set());
 
   private timer?: number;
+
+  constructor() {
+    this.menus.register(DEBUG_ROW_PROVIDER);
+    this.menus.register(DEBUG_CALL_PROVIDER);
+  }
+
+  /** Payload for the `debug.row` provider (log rows). */
+  rowMenuData(row: LogRow): DebugRowPayload {
+    const text = `${row.time} ${row.source} ${row.pill} ${row.path} ${row.meta}`;
+    return {
+      text,
+      actions: {
+        copyRow: () => void this.menus.copyText(text),
+        copyPath: row.path ? () => void this.menus.copyText(row.path) : undefined,
+        setFilter: (value: string) => this.filter.set(value),
+      },
+    };
+  }
+
+  /** Payload for the `debug.call` provider (LLM call cards). */
+  callMenuData(call: DebugLlmCall): DebugCallPayload {
+    return {
+      model: call.model,
+      requestJson: this.jsonText(call.request),
+      responseJson: this.jsonText(call.response),
+      actions: {
+        copyRequest: () => void this.menus.copyText(this.jsonText(call.request)),
+        copyResponse: () => void this.menus.copyText(this.jsonText(call.response)),
+      },
+    };
+  }
 
   /** "10 000" - grouped like the handoff's "max 10 000 chars" note. */
   readonly maxCharsLabel = computed(() =>

@@ -183,6 +183,93 @@
             <span class="micro-label">{{ t('settings.cliExtraAllowWrite') }}</span>
           </label>
           <div class="note">{{ t('settings.cliAllowWriteWarning') }}</div>
+
+          <label class="field">
+            <span class="micro-label">{{ t('settings.cliProfileLabel') }}</span>
+            <select
+              class="mono"
+              data-testid="cli-profile-mode"
+              [ngModel]="cliProfile(provider)"
+              (ngModelChange)="setCliProfile(provider, $event)"
+            >
+              @for (mode of cliProfileModes; track mode.value) {
+                <option [value]="mode.value">{{ t(mode.labelKey) }}</option>
+              }
+            </select>
+            <span class="small faint">{{ t('settings.cliProfileHint') }}</span>
+          </label>
+
+          @if (!profileUnsupported()) {
+            <div class="cli-profile" data-testid="cli-profile-section">
+              <div class="actions spread">
+                <span class="small faint">{{ t('settings.cliProfileSavedHint') }}</span>
+                <button
+                  type="button"
+                  data-testid="cli-profile-load"
+                  [disabled]="profileLoading() !== null || !store.directory()"
+                  (click)="loadProfile(provider)"
+                >
+                  @if (profileLoading() === provider.name) {
+                    <span class="spinner" aria-hidden="true"></span>{{ t('settings.cliProfileLoading') }}
+                  } @else {
+                    {{ t('settings.cliProfileShow') }}
+                  }
+                </button>
+              </div>
+
+              @if (profileError()) {
+                <div class="inline-error">{{ profileError() }}</div>
+              }
+
+              @if (profilePreview(provider.name); as preview) {
+                <div class="cli-profile-dir">
+                  <span class="micro-label">{{ t('settings.cliProfileDir') }}</span>
+                  <code class="mono small" data-testid="cli-profile-dir">{{ preview.dir }}</code>
+                  <button
+                    type="button"
+                    data-testid="cli-profile-copy-dir"
+                    (click)="copyProfileDir(preview)"
+                  >
+                    {{ profileCopied() ? t('settings.cliProfileCopied') : t('settings.cliProfileCopyDir') }}
+                  </button>
+                </div>
+
+                <div class="small faint">
+                  {{ t('settings.cliProfileVersion') }}: {{ preview.version ?? t('settings.cliProfileUnknown') }}
+                </div>
+
+                <details data-testid="cli-profile-details">
+                  <summary class="small">{{ t('settings.cliProfileFiles', { count: preview.files.length }) }}</summary>
+                  @for (file of preview.files; track file.name) {
+                    <details class="cli-profile-file" [attr.data-testid]="'cli-profile-file-' + file.name">
+                      <summary class="mono small">{{ file.name }}</summary>
+                      <pre class="mono cli-output">{{ file.contents }}</pre>
+                    </details>
+                  }
+                  <div class="small">
+                    <span class="micro-label">{{ t('settings.cliProfileArgs') }}</span>
+                    <code class="mono" data-testid="cli-profile-args">{{ preview.args.join(' ') || '—' }}</code>
+                  </div>
+                  <div class="small">
+                    <span class="micro-label">{{ t('settings.cliProfileFlags') }}</span>
+                    <code class="mono" data-testid="cli-profile-flags">{{ preview.flags.join(', ') || '—' }}</code>
+                  </div>
+                  <div class="small">
+                    <span class="micro-label">{{ t('settings.cliProfileEnv') }}</span>
+                    @if (preview.env.length > 0) {
+                      <ul class="mono" data-testid="cli-profile-env">
+                        @for (pair of preview.env; track pair[0]) {
+                          <li>{{ pair[0] }}={{ pair[1] }}</li>
+                        }
+                      </ul>
+                    } @else {
+                      <code class="mono">—</code>
+                    }
+                  </div>
+                </details>
+              }
+            </div>
+          }
         }
 
         <div class="actions spread">
@@ -326,6 +413,12 @@
               }
               @if (probe.stderr) {
                 <pre class="mono cli-output err">{{ probe.stderr }}</pre>
+              }
+              @if (probe.features; as features) {
+                <div class="small faint" [attr.data-testid]="'cli-probe-features-' + backend.id">
+                  <span>{{ t('settings.cliProbeVersion') }}: {{ features.version ?? t('settings.cliProfileUnknown') }}</span>
+                  <span>· {{ t('settings.cliProbeFlags') }}: {{ probeFlagsLine(probe) || '—' }}</span>
+                </div>
               }
             </div>
           }

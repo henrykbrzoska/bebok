@@ -59,6 +59,10 @@ pub const SECTION_HEADING: &str = "Code navigation";
 /// falling back to `AGENT_INDEX.md`). If the file is absent or unreadable,
 /// the built-in [`FALLBACK_SECTION`] is returned.
 pub fn index_section(root: &Path) -> Option<String> {
+    index_section_for_transport(root, bebok_llm::Transport::Http)
+}
+
+pub fn index_section_for_transport(root: &Path, transport: bebok_llm::Transport) -> Option<String> {
     let name = plugin_decl::KNOWN_PLUGIN_NAME;
     let slot = plugin_decl::install_dir(root, name);
     let decl_path = plugin_decl::decl_path(root, name);
@@ -83,6 +87,15 @@ pub fn index_section(root: &Path) -> Option<String> {
     };
 
     if !available {
+        return None;
+    }
+    if matches!(
+        transport,
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            ..
+        }
+    ) {
         return None;
     }
 

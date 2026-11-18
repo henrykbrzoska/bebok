@@ -34,6 +34,8 @@
             (click)="openLog(p.id)"
             (keydown.enter)="openLog(p.id)"
             (keydown.space)="$event.preventDefault(); openLog(p.id)"
+            [appContextMenu]="'terminal.process'"
+            [appContextMenuData]="processMenuData(p)"
             [title]="p.command + ' — ' + processStatusLabel(p)"
             [attr.data-testid]="'process-' + p.id"
           >
@@ -60,6 +62,8 @@
         [class.active]="activePtyId() === tab.ptyId"
         [attr.aria-selected]="activePtyId() === tab.ptyId"
         (click)="activate(tab.ptyId)"
+        [appContextMenu]="'terminal.tab'"
+        [appContextMenuData]="tabMenuData(tab)"
         [title]="tab.title + ' — ' + statusLabel(tab.status)"
       >
         <span class="dot" [class]="'tone-' + tab.status" aria-hidden="true"></span>

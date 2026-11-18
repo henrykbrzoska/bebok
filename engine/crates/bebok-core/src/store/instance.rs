@@ -25,6 +25,8 @@ pub struct Instance {
     /// Pending "environment changed" notes (MCP/skill/yolo toggles) injected
     /// into the next prompt's context and then cleared.
     pub context_notes: std::sync::RwLock<Vec<String>>,
+    /// Project symbol cache for editor completion (`/fs/complete`).
+    pub symbols: Arc<crate::agent::symbol_index::SymbolIndex>,
 }
 
 impl Instance {

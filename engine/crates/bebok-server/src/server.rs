@@ -145,6 +145,11 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
     let actual = listener.local_addr()?;
     tracing::info!("bebok engine listening on http://{actual}");
 
+    // CLI hooks (`bebok-server cli-hook <event>`) are a child process of a CLI
+    // provider and need a URL to call back to; the desktop sidecar binds a
+    // random port, so this is only knowable here.
+    crate::routes::cli_hook::set_engine_base_url(format!("http://{actual}"));
+
     // Apply CORS *after* binding so the actual port (random or custom) is
     // included in the allowed origins.
     let app = app.layer(cors_layer(actual.port()));
@@ -170,11 +175,16 @@ pub async fn serve(bind: BindSpec) -> anyhow::Result<()> {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
+    // `into_make_service_with_connect_info` gives handlers the peer address,
+    // which is how the CLI hook bridge enforces loopback-only.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await?;
 
     // F9-14: no background process (dev server, watcher) outlives the engine.
     let killed = bebok_tools::processes::ProcessRegistry::global()

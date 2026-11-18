@@ -466,6 +466,44 @@ impl ResolvedConfig {
             .unwrap_or_else(|| self.model.clone())
     }
 
+    /// True when `model` (`provider/model` or `provider/a/b`) is listed in
+    /// the resolved provider registry. Only models present in config
+    /// (`providers[].models`) are considered available — anything else must
+    /// not be used for sub-agents. Leading `~` and trailing `:batch` are
+    /// ignored for comparison (they are aliases, not distinct models).
+    pub fn is_model_available(&self, model: &str) -> bool {
+        let model = model.trim();
+        if model.is_empty() {
+            return false;
+        }
+        let norm = |s: &str| -> String {
+            let s = s.trim();
+            let s = s.strip_prefix('~').unwrap_or(s);
+            let s = if s.len() >= 6 && s[s.len() - 6..].eq_ignore_ascii_case(":batch") {
+                &s[..s.len() - 6]
+            } else {
+                s
+            };
+            s.to_string()
+        };
+        let model_norm = norm(model);
+        let Some((provider_name, rest)) = model_norm.split_once('/') else {
+            return false;
+        };
+        let provider_name = provider_name.trim().to_ascii_lowercase();
+        let rest = rest.trim();
+        if provider_name.is_empty() || rest.is_empty() {
+            return false;
+        }
+        let Some(spec) = self.provider_spec(&provider_name) else {
+            return false;
+        };
+        spec.models.iter().any(|m| {
+            let m_norm = norm(m);
+            m_norm.eq_ignore_ascii_case(rest) || m_norm.eq_ignore_ascii_case(&model_norm)
+        })
+    }
+
     /// The effective sampling params for an agent type. Precedence (each    /// layer wins per-field via `Sampling::merge`):
     /// hardcoded per-agent default → global `sampling` → `sampling.<agent>`.
     /// (An explicit `task`-call override merges on top at the call site.)
@@ -490,6 +528,32 @@ impl ResolvedConfig {
     /// Fleet members (empty when the fleet is disabled/unconfigured).
     pub fn fleet_members(&self) -> &[FleetMember] {
         &self.fleet.members
+    }
+
+    /// True when `model` is listed among `fleet.members[].model` (case-insensitive,
+    /// `~` prefix and `:batch` suffix ignored, same normalisation as
+    /// `is_model_available`). Empty fleet → false.
+    pub fn is_model_in_fleet(&self, model: &str) -> bool {
+        let norm = Self::normalize_model_id(model);
+        if norm.is_empty() {
+            return false;
+        }
+        self.fleet.members.iter().any(|m| {
+            let n = Self::normalize_model_id(&m.model);
+            !n.is_empty() && n.eq_ignore_ascii_case(&norm)
+        })
+    }
+
+    /// Normalised `provider/model` id for fleet/provider comparisons.
+    fn normalize_model_id(model: &str) -> String {
+        let s = model.trim();
+        let s = s.strip_prefix('~').unwrap_or(s);
+        let s = if s.len() >= 6 && s[s.len() - 6..].eq_ignore_ascii_case(":batch") {
+            &s[..s.len() - 6]
+        } else {
+            s
+        };
+        s.trim().to_string()
     }
 
     /// The effective `verify.frontend` policy (WP-AUTOVERIFY / F8-1).

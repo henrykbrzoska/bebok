@@ -14,16 +14,36 @@ use crate::config::ResolvedConfig;
 /// The section for the resolved config and project root, or `None` when the
 /// feature is off or no cached graph exists.
 pub fn code_graph_section(root: &Path, cfg: &ResolvedConfig) -> Option<String> {
+    code_graph_section_for_transport(root, cfg, bebok_llm::Transport::Http)
+}
+
+pub fn code_graph_section_for_transport(
+    root: &Path,
+    cfg: &ResolvedConfig,
+    transport: bebok_llm::Transport,
+) -> Option<String> {
+    if matches!(
+        transport,
+        bebok_llm::Transport::AgenticCli {
+            bebok_tools: false,
+            ..
+        }
+    ) {
+        return None;
+    }
     if !cfg.code_graph.enabled {
         return None;
     }
     let g = code_graph::load_graph(root)?;
+    let a = crate::agent::prompt_env::tool_ref("code_graph_depends", transport);
+    let b = crate::agent::prompt_env::tool_ref("code_graph_dependents", transport);
+    let c = crate::agent::prompt_env::tool_ref("code_graph_impact", transport);
     Some(format!(
         "Module dependency graph: {} modules, {} edges (built {}).\n\
          Tools (read-only, use before modifying code):\n\
-         - `code_graph_depends(module)` — what does `module` import? (outgoing edges)\n\
-         - `code_graph_dependents(module)` — what imports `module`? (reverse edges)\n\
-         - `code_graph_impact(module, max_depth?)` — blast-radius analysis (BFS over reverse edges, default depth 3, cap 10).\n\
+         - `{a}(module)` — what does `module` import? (outgoing edges)\n\
+         - `{b}(module)` — what imports `module`? (reverse edges)\n\
+         - `{c}(module, max_depth?)` — blast-radius analysis (BFS over reverse edges, default depth 3, cap 10).\n\
          Modules are project-relative paths (e.g. `engine/crates/bebok-core/src/store`).",
         g.modules.len(),
         g.edges.len(),

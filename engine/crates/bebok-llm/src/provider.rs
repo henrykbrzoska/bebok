@@ -506,6 +506,16 @@ pub struct Usage {
     /// Prompt tokens written to the provider's prompt cache (cache miss/write).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u64>,
+    /// Size of the last API-call prompt as reported by the CLI (input + its
+    /// cache buckets from the last `assistant` usage line). Lets the context
+    /// meter show the real window fill instead of the turn's token sum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalSource {
+    Cli,
 }
 
 /// A typed event emitted by a provider stream.
@@ -514,13 +524,47 @@ pub enum StreamEvent {
     Text(String),
     Thinking(String),
     ToolCall(ToolCall),
+    ExternalTool {
+        id: String,
+        name: String,
+        input: Value,
+        output: String,
+        is_error: bool,
+        source: ExternalSource,
+    },
     Done(Usage),
+}
+
+/// How the prompt reaches the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transport {
+    Http,
+    AgenticCli {
+        bebok_tools: bool,
+        native_tools: bool,
+    },
+}
+
+impl Transport {
+    pub fn is_cli(&self) -> bool {
+        matches!(self, Transport::AgenticCli { .. })
+    }
+    pub fn bebok_tools(&self) -> bool {
+        match self {
+            Transport::AgenticCli { bebok_tools, .. } => *bebok_tools,
+            Transport::Http => true,
+        }
+    }
 }
 
 /// The streaming interface the agent loop consumes.
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
+
+    fn transport(&self) -> Transport {
+        Transport::Http
+    }
 
     async fn stream(
         &self,

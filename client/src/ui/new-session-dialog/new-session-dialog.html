@@ -18,6 +18,7 @@
             <input
               type="text"
               class="control agent-filter"
+              name="agentFilter"
               [ngModel]="agentFilter()"
               (ngModelChange)="agentFilter.set($event)"
               [placeholder]="t('settings.agentFilter')"

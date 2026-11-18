@@ -20,7 +20,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
 import { BrowserViewerService } from '../../../core/browser-viewer.service';
+import { EngineClient } from '../../../core/engine-client.service';
 import { ImagePart, Message, Part, ToolPart } from '../../../core/engine.dtos';
+import { BOOTSTRAP_ENGINE_PARAM } from '../../../core/transport.strategy';
 import { I18nService } from '../../../i18n/i18n.service';
 import { ChatSessionStore } from '../../../views/chat/chat-session.store';
 
@@ -137,6 +139,15 @@ export function isLinkable(url: string): boolean {
         >
           {{ t('browser.openWindow') }}
         </button>
+        <a
+          class="open-window"
+          data-testid="browser-open-link"
+          [href]="externalLink()"
+          target="_blank"
+          rel="noopener noreferrer"
+          [title]="externalLink()"
+          >{{ t('browser.openExternal') }} ↗</a
+        >
       </div>
     } @else {
       <div class="panel-body">
@@ -149,6 +160,15 @@ export function isLinkable(url: string): boolean {
           >
             {{ t('browser.openWindow') }}
           </button>
+          <a
+            class="open-window"
+            data-testid="browser-open-link"
+            [href]="externalLink()"
+            target="_blank"
+            rel="noopener noreferrer"
+            [title]="externalLink()"
+            >{{ t('browser.openExternal') }} ↗</a
+          >
           @if (openFailed()) {
             <span class="error">{{ t('browser.openWindowBlocked') }}</span>
           }
@@ -164,16 +184,6 @@ export function isLinkable(url: string): boolean {
                 <div class="title" [title]="loc.title">{{ loc.title }}</div>
               }
               <div class="url" [title]="loc.url">{{ loc.url }}</div>
-              @if (isLinkable(loc.url)) {
-                <a
-                  class="open"
-                  data-testid="browser-open-link"
-                  [href]="loc.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  >{{ t('browser.openExternal') }} ↗</a
-                >
-              }
             }
           </div>
         }
@@ -212,6 +222,7 @@ export function isLinkable(url: string): boolean {
       .toolbar {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: var(--space-8);
         padding: 0 var(--space-10) var(--space-8);
         min-width: 0;
@@ -230,6 +241,8 @@ export function isLinkable(url: string): boolean {
         background: var(--surface-2);
         color: var(--text);
         cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
       }
 
       .open-window:hover {
@@ -269,17 +282,6 @@ export function isLinkable(url: string): boolean {
         white-space: nowrap;
       }
 
-      .open {
-        align-self: flex-start;
-        margin-top: 2px;
-        font-size: var(--fs-11-5);
-        color: var(--accent);
-        text-decoration: none;
-      }
-
-      .open:hover {
-        text-decoration: underline;
-      }
 
       .error {
         font-size: var(--fs-11);
@@ -323,6 +325,7 @@ export function isLinkable(url: string): boolean {
 export class BrowserPanel {
   private readonly i18n = inject(I18nService);
   private readonly viewer = inject(BrowserViewerService);
+  private readonly engine = inject(EngineClient);
   readonly session = inject(ChatSessionStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -345,4 +348,47 @@ export class BrowserPanel {
   readonly location = computed(() => latestLocation(this.session.messages()));
 
   readonly isLinkable = isLinkable;
+
+  /**
+   * Target for the "open in my browser" button. Always an authenticated URL
+   * for the user's own browser: when the agent has reported an http(s) page
+   * it is that page (`?token=` on engine pages, `?engine=<url+token>` on
+   * Bebok's own origin); otherwise it is the Bebok app itself bootstrapped
+   * with the engine (`?engine=<url+token>`), so the tab always lands
+   * connected to this engine instead of a disconnected copy.
+   */
+  readonly externalLink = computed(() => {
+    const url = this.location()?.url ?? '';
+    if (isLinkable(url)) {
+      return this.engine.withEngineToken(url);
+    }
+    const bootstrap = this.engine.engineUrlWithToken();
+    if (!bootstrap) {
+      return '';
+    }
+    // Fallback: open the Bebok app itself bootstrapped with this engine,
+    // so the new tab lands connected instead of on the bare engine (which
+    // serves no UI and would show a black screen).
+    try {
+      const href = globalThis.location?.href ?? '';
+      if (href && /^https?:\/\//i.test(href)) {
+        const target = new URL(href);
+        target.searchParams.set(BOOTSTRAP_ENGINE_PARAM, bootstrap);
+        target.hash = '';
+        return target.toString();
+      }
+      const origin = globalThis.location?.origin ?? '';
+      if (origin && /^https?:\/\//i.test(origin)) {
+        const target = new URL(origin + '/');
+        target.searchParams.set(BOOTSTRAP_ENGINE_PARAM, bootstrap);
+        return target.toString();
+      }
+    } catch {
+      /* fall through */
+    }
+    // Tauri / non-http shell has no http origin to bootstrap — fall back to
+    // the engine URL itself (the best we can do; the user can paste it into
+    // a browser that already has the app open).
+    return bootstrap;
+  });
 }

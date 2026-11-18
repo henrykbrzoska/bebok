@@ -325,6 +325,7 @@ impl ResponsesParser {
             cost: None,
             cache_read_input_tokens: self.cache_read,
             cache_creation_input_tokens: None,
+            context_tokens: None,
         })));
     }
 
@@ -707,6 +708,7 @@ mod tests {
                 StreamEvent::Text(_) => "text",
                 StreamEvent::Thinking(_) => "thinking",
                 StreamEvent::ToolCall(_) => "tool",
+                StreamEvent::ExternalTool { .. } => "external",
                 StreamEvent::Done(_) => "done",
             })
             .collect()

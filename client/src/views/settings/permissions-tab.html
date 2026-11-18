@@ -18,7 +18,10 @@
       </thead>
       <tbody>
         @for (rule of store.rules(); track $index; let i = $index) {
-          <tr>
+          <tr
+            [appContextMenu]="'settings.rule'"
+            [appContextMenuData]="ruleMenuData(rule, i)"
+          >
             <td>
               <input
                 type="text"

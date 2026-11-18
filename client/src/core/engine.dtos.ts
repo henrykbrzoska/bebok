@@ -94,6 +94,7 @@ export interface ToolPart {
    *  parts persisted before this field existed - derive it from the tool
    *  name via `GET /tools/safety` then (`ToolSafetyStore.categoryOf`). */
   safety?: SafetyCategory;
+  external?: boolean;
 }
 
 export interface UsagePart {
@@ -815,6 +816,14 @@ export interface CliBackend {
   envOverride: string;
 }
 
+/** What the installed binary advertises (`features` of a probe result). */
+export interface CliProbeFeatures {
+  /** First line of `--version`; null when the binary did not answer. */
+  version: string | null;
+  /** Advertised long flags (`--foo`), sorted. Empty when `--help` did not answer. */
+  flags: string[];
+}
+
 /** `POST /cli/backends/{id}/probe` result; `code` is null when killed. */
 export interface CliProbeResult {
   id: string;
@@ -822,6 +831,29 @@ export interface CliProbeResult {
   code: number | null;
   stdout: string;
   stderr: string;
+  /** Null when no binary was found. The engine has no login-status probe. */
+  features: CliProbeFeatures | null;
+}
+
+/** One file of a managed CLI profile (`GET /cli/profile/{provider}`). */
+export interface CliProfileFile {
+  /** Path relative to the profile directory. */
+  name: string;
+  contents: string;
+}
+
+/**
+ * Read-only preview of the managed profile a CLI provider would use
+ * (`GET /cli/profile/{provider}?directory=`). Serialised snake_case by the
+ * engine (plain serde struct); `env` is a list of `[key, value]` pairs.
+ */
+export interface CliProfilePreview {
+  dir: string;
+  files: CliProfileFile[];
+  args: string[];
+  env: [string, string][];
+  flags: string[];
+  version: string | null;
 }
 
 /** Executable paths for language runtimes (resolved with defaults). */
@@ -879,6 +911,101 @@ export interface FsEntry {
 export interface FsTreeResponse {
   path: string;
   entries: FsEntry[];
+}
+
+/** One hit of `GET /fs/definition` (Explorer Ctrl/Cmd+click). */
+export interface FsDefinitionHit {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based. */
+  column: number;
+  kind: string;
+  snippet: string;
+}
+
+export interface FsDefinitionResponse {
+  symbol: string;
+  results: FsDefinitionHit[];
+  parsed_files: number;
+  truncated: boolean;
+}
+
+/** One completion suggestion (`POST /fs/complete`). */
+export interface FsCompleteItem {
+  label: string;
+  /** `variable`, `parameter`, `function`, `class`, …, `keyword`. */
+  kind: string;
+  detail?: string;
+  path?: string;
+  line?: number;
+  /** `local` | `file` | `project` | `keyword`. */
+  source: 'local' | 'file' | 'project' | 'keyword';
+}
+
+/** Body of `POST /fs/complete`. `text` is the unsaved buffer, `offset` a UTF-8 byte offset. */
+export interface FsCompleteRequest {
+  path: string;
+  text: string;
+  offset: number;
+  limit?: number;
+}
+
+export interface FsCompleteResponse {
+  prefix: string;
+  items: FsCompleteItem[];
+}
+
+/** Options of `GET /fs/search` (Explorer "Find in Files"). */
+export interface FsSearchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+  /** File-name globs, e.g. `*.rs, !*.min.js`. */
+  mask?: string;
+  limit?: number;
+}
+
+export interface FsTextHit {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based, in characters. */
+  column: number;
+  length: number;
+  text: string;
+}
+
+export interface FsSymbolHit {
+  name: string;
+  path: string;
+  line: number;
+  column: number;
+  kind: string;
+  snippet: string;
+}
+
+/** `GET /fs/files` - every project file (Go to File, Ctrl/Cmd+Shift+N). */
+export interface FsFilesResponse {
+  files: string[];
+  truncated: boolean;
+}
+
+/** `GET /fs/symbols` - definitions whose name contains the query. */
+export interface FsSymbolsResponse {
+  symbols: FsSymbolHit[];
+}
+
+export interface FsSearchResponse {
+  text: {
+    results: FsTextHit[];
+    files_matched: number;
+    files_searched: number;
+    truncated: boolean;
+  };
+  symbols: FsSymbolHit[];
+  /** The bebok-index plugin ranked the scanned files. */
+  indexed: boolean;
 }
 
 export interface FsFileResponse {

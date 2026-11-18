@@ -538,3 +538,27 @@ To daje działający MVP w ~500 linii nowego kodu.
 - `client/chrome-extension/background.js` — handler komend
 - `client/chrome-extension/manifest.json` — nowe permisje
 - `client/chrome-extension/options.html` — opcja remote
+
+---
+
+## Firefox
+
+Extension działa też w Firefoksie z tych samych źródeł — różni się tylko
+manifest (Firefox nie ma service workera w MV3):
+
+- `client/chrome-extension/manifest.firefox.json` — `background.scripts`
+  (event page) zamiast `background.service_worker`, plus
+  `browser_specific_settings.gecko` (id, `strict_min_version`, AMO-owe
+  `data_collection_permissions`),
+- `npm run extension:firefox` (`scripts/build-firefox-extension.mjs`) —
+  kopiuje wspólne pliki do `dist/firefox-extension/` i zapisuje tam
+  `manifest.json` (wersja brana z `manifest.json` Chromiuma),
+- `background.js` jest wspólny: wywołania API idą przez `callApi()` (callback
+  działa w obu przeglądarkach), a `alarms` trzyma event page przy życiu, żeby
+  heartbeat i long-poll wznawiały się po uśpieniu.
+
+Ładowanie: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…**
+→ `dist/firefox-extension/manifest.json` (albo `npx web-ext run --source-dir
+dist/firefox-extension`). CORS: origin to `moz-extension://<uuid>` — dopisz go
+do `BEBOK_CORS`, jeśli popup nie może się połączyć. Uprawnienia hostów w MV3
+Firefoksa są opt-in (`about:addons` → Uprawnienia).

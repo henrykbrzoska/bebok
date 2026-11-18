@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Bebok Companion",
+  "version": "1.5.0",
+  "description": "Ask the local Bebok engine about the page you are reading.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bebok-companion@bebok.dev",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Ask Bebok",
+    "default_icon": {
+      "16": "icons/icon-16.svg",
+      "48": "icons/icon-48.svg",
+      "128": "icons/icon-128.svg"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "tabs", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.svg",
+    "48": "icons/icon-48.svg",
+    "128": "icons/icon-128.svg"
+  }
+}

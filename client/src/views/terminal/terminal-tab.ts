@@ -22,6 +22,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 
 import { EngineClient } from '../../core/engine-client.service';
+import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
+import { TERMINAL_SCREEN_PROVIDER, type TerminalScreenPayload } from './terminal.menus';
 
 export type TerminalTabStatus = 'connecting' | 'live' | 'exited' | 'error';
 
@@ -63,7 +66,8 @@ export function createXterm(options: ITerminalOptions = {}): Terminal {
 
 @Component({
   selector: 'app-terminal-tab',
-  template: '<div class="xterm-screen" #screen></div>',
+  imports: [ContextMenuDirective],
+  template: '<div class="xterm-screen" #screen [appContextMenu]="\'terminal.screen\'" [appContextMenuData]="menuData()"></div>',
   styles: [
     `
       :host {
@@ -85,6 +89,7 @@ export class TerminalTab implements AfterViewInit, OnDestroy {
   @ViewChild('screen') screen!: ElementRef<HTMLElement>;
 
   private readonly engine = inject(EngineClient);
+  private readonly menus = inject(ContextMenuService);
 
   private term?: Terminal;
   private fit?: FitAddon;
@@ -92,6 +97,10 @@ export class TerminalTab implements AfterViewInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: number;
   private terminated = false;
+
+  constructor() {
+    this.menus.register(TERMINAL_SCREEN_PROVIDER);
+  }
 
   ngAfterViewInit(): void {
     void this.connect();
@@ -169,6 +178,30 @@ export class TerminalTab implements AfterViewInit, OnDestroy {
   private onMessage(ev: MessageEvent): void {
     if (ev.data instanceof ArrayBuffer && this.term) {
       this.term.write(new Uint8Array(ev.data));
+    }
+  }
+
+  /** Payload for the `terminal.screen` provider (xterm selection/clipboard). */
+  menuData(): TerminalScreenPayload {
+    return {
+      hasSelection: !!this.term?.hasSelection(),
+      canPaste: true,
+      actions: {
+        copySelection: () => {
+          const text = this.term?.getSelection() ?? '';
+          void this.menus.copyText(text);
+        },
+        paste: () => void this.pasteFromClipboard(),
+        clearScreen: () => this.term?.clear(),
+      },
+    };
+  }
+
+  /** Best-effort paste: async clipboard -> xterm input (bracketed as typed). */
+  private async pasteFromClipboard(): Promise<void> {
+    const text = await this.menus.readText();
+    if (text) {
+      this.sendInput(text);
     }
   }
 

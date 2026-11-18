@@ -106,6 +106,8 @@ impl InstanceStore {
             idx += 1;
         }
         state.max_message_index.store(keep, Ordering::Relaxed);
+        // The CLI still remembers the dropped tail: never resume into it.
+        state.set_cli_session(None).await;
         state.touch().await;
         self.bus.publish(crate::event::Event::new(
             "session.updated",
@@ -295,6 +297,55 @@ mod tests {
         );
         // Deleting again -> 404 (already gone).
         assert!(store.delete_session(fork.id()).await.is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn truncate_forgets_the_cli_conversation() {
+        use crate::session::CliSessionMeta;
+
+        let base = std::env::temp_dir().join(format!("bebok-cli-trunc-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let store = InstanceStore::with_data_dir(base.join("data"));
+        let s = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        for text in ["one", "two", "three"] {
+            s.append_user_message(text).await.unwrap();
+        }
+        s.set_cli_session(Some(CliSessionMeta {
+            key: "conv".into(),
+            provider: "claude-cli".into(),
+            model: "claude-cli/sonnet".into(),
+            system_hash: "h".into(),
+            msg_index: 3,
+            profile_hash: String::new(),
+        }))
+        .await;
+        assert!(s.cli_session().await.is_some());
+
+        store.truncate_session(s.id(), 2).await.unwrap();
+        assert!(
+            s.cli_session().await.is_none(),
+            "the CLI still remembers the dropped tail"
+        );
+
+        // A fork starts without a CLI conversation of its own.
+        s.set_cli_session(Some(CliSessionMeta {
+            key: "conv2".into(),
+            provider: "claude-cli".into(),
+            model: "claude-cli/sonnet".into(),
+            system_hash: "h".into(),
+            msg_index: 2,
+            profile_hash: String::new(),
+        }))
+        .await;
+        let fork = store.fork_session(s.id(), 1).await.unwrap();
+        assert!(fork.cli_session().await.is_none());
+        assert!(s.cli_session().await.is_some(), "source keeps its record");
 
         let _ = std::fs::remove_dir_all(&base);
     }

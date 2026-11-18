@@ -1,8 +1,13 @@
-# Bebok Companion (Chrome, MV3)
+# Bebok Companion (Chrome / Edge / Brave + Firefox, MV3)
 
-Unpacked Chrome extension that asks the **local Bebok engine** about the page
+Unpacked browser extension that asks the **local Bebok engine** about the page
 you are reading, and optionally lets the agent drive your browser remotely
 ("remote piloting"). No bundler, no dependencies — plain HTML/CSS/JS.
+
+Chrome/Edge/Brave load this directory directly (`manifest.json`). Firefox uses
+a generated copy with a Firefox manifest — see [Firefox](#firefox) below. The
+four scripts are shared: `chrome.*` with callbacks works in Firefox too, and
+Firefox returns promises when the callback is omitted.
 
 ## Install
 
@@ -30,9 +35,62 @@ you are reading, and optionally lets the agent drive your browser remotely
 4. Press **Test connection** (expects `OK`). A positive test saves both
    fields automatically. Then click the toolbar icon.
 
-> CORS: extension origins are `chrome-extension://<id>`. If the popup reports
-> a CORS failure, restart the engine with the extension id allowed:
-> `set BEBOK_CORS=chrome-extension://<id>` (see `engine/.../cors.rs`).
+> CORS: extension origins are `chrome-extension://<id>` (Chrome) and
+> `moz-extension://<uuid>` (Firefox). If the popup reports a CORS failure,
+> restart the engine with that origin allowed:
+> `BEBOK_CORS=chrome-extension://<id>` / `BEBOK_CORS=moz-extension://<uuid>`
+> (see `engine/.../cors.rs`).
+
+## Firefox
+
+Firefox has no MV3 service worker: the background script runs as an **event
+page** (`background.scripts`, `persistent: false`) and the manifest needs a
+`browser_specific_settings.gecko.id`. Everything else — popup, options, content
+script, remote piloting protocol — is the same code.
+
+```bash
+npm run extension:firefox          # -> dist/firefox-extension/
+# or: node scripts/build-firefox-extension.mjs --out build/ff
+```
+
+The script copies `background.js`, `content.js`, `popup.*`, `options.*`,
+`icons/` from this directory and writes a `manifest.json` from
+`manifest.firefox.json` (version taken from `manifest.json`, so both builds
+always match).
+
+Load it:
+
+1. Open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…**
+   and pick `dist/firefox-extension/manifest.json`. Temporary add-ons are
+   removed on browser restart — reload them the same way after a restart.
+2. For a live session with auto-reload use `npx web-ext run --source-dir
+   dist/firefox-extension`; for a permanent install sign it with
+   `npx web-ext sign --source-dir dist/firefox-extension --api-key … --api-secret …`.
+3. Configure **Options** exactly as in the Chrome steps (Engine URL, Working
+   directory, **Test connection**, remote piloting).
+
+Firefox specifics:
+
+- **Engine URL in Options** → still `http://127.0.0.1:8787?token=…`; the
+  engine's CORS allow-list must include the Firefox origin
+  (`moz-extension://<uuid>`, visible in `about:debugging`), e.g.
+  `BEBOK_CORS=moz-extension://<uuid>` when it is not a localhost origin the
+  engine already allows.
+- **Host permissions are opt-in in MV3.** If page reading or remote piloting
+  fails with a permission error, open `about:addons` → Bebok Companion →
+  **Permissions** and enable *Access your data for all websites*.
+- **Manifest details.** `manifest.firefox.json` targets `strict_min_version`
+  128 and declares `browser_specific_settings.gecko.data_collection_permissions`
+  (`none`), which AMO requires for new submissions — Firefox older than 140
+  ignores it with a manifest warning. Both values can be lowered/edited freely
+  before building.
+- **The background event page gets suspended** just like Chrome's worker.
+  Remote piloting installs a 1-minute keepalive alarm that wakes the page and
+  resumes the heartbeat + long-poll loop, so commands may take up to ~60 s to
+  be picked up after a long idle period. Keeping the Options tab open avoids
+  the suspension entirely.
+- Everything else in this document (commands, status messages, auto-reconnect,
+  `BEBOK_TOKEN` / `BEBOK_PORT`) applies unchanged.
 
 ## Use — Ask Bebok (popup)
 
@@ -206,6 +264,11 @@ and the long-poll loop with it. Symptom: the extension registered fine, then
 2. In `brave://extensions` (or `chrome://extensions`) click reload (🔃) on Bebok Companion, **or** untick + retick **Enable remote piloting**.
 3. Within ~30 s, issue the command — e.g. list tabs (see Test 6 below).
 
+Firefox suspends the background **event page** the same way. Remote piloting
+installs a 1-minute keepalive alarm that wakes it and resumes the loop, and an
+open Options tab prevents the suspension — there is no `chrome://extensions`
+reload; use `about:debugging` → **Reload** on the temporary add-on.
+
 ### Reload after changing extension files
 
 The extension is loaded **unpacked** (`Load unpacked` → `client/chrome-extension`),
@@ -235,10 +298,11 @@ Without the reload the old worker keeps running and new commands answer
 
 | File | Role |
 | ---- | ---- |
-| `manifest.json` | MV3 manifest (popup, worker, permissions) |
+| `manifest.json` | Chrome/Edge/Brave MV3 manifest (popup, service worker, permissions) |
+| `manifest.firefox.json` | Firefox MV3 manifest (event page instead of service worker, gecko id); copied to `manifest.json` by `npm run extension:firefox` |
 | `popup.html` / `popup.js` / `popup.css` | Ask UI |
 | `content.js` | Page-context reader |
-| `background.js` | Engine client, remote piloting loop, context menu |
+| `background.js` | Engine client, remote piloting loop, keepalive alarm, context menu |
 | `options.html` / `options.js` | Engine URL + directory + remote piloting toggle |
 | `icons/` | `B` glyph (SVG 16/48/128) |
 

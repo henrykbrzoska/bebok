@@ -1,15 +1,16 @@
 ---
 name: remote-browser-extension
-description: Drive the user's own Brave/Chrome tabs via the Bebok Companion extension (remote piloting). Use when the user asks about THEIR browser, their open tabs, or something visible on their screen — instead of the built-in headless Chromium.
+description: Drive the user's own Brave/Chrome/Firefox tabs via the Bebok Companion extension (remote piloting). Use when the user asks about THEIR browser, their open tabs, or something visible on their screen — instead of the built-in headless Chromium.
 ---
 
 # Remote browser extension — pilot the user's own tabs
 
 The user runs the **Bebok Companion** MV3 extension (unpacked from
-`client/chrome-extension`) in their own Brave/Chrome. When remote piloting is
-enabled, you can list and drive their real tabs through the engine's pull
-queue — use this whenever the user talks about *their* browser, *their* open
-tabs, or asks you to check/click/type something they see.
+`client/chrome-extension` in Brave/Chrome, `dist/firefox-extension` after
+`npm run extension:firefox` in Firefox). When remote piloting is enabled, you
+can list and drive their real tabs through the engine's pull queue — use this
+whenever the user talks about *their* browser, *their* open tabs, or asks you
+to check/click/type something they see.
 
 ## How it works
 

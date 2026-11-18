@@ -24,48 +24,81 @@
 //! tool loop, so replaying Bebok's registry calls as structured data would only
 //! invite it to answer them again.
 //!
-//! **Images are dropped in v1.** A CLI that takes `-p` has no side channel for
-//! a binary payload, so [`ContentPart::Image`] becomes a visible placeholder
-//! rather than silently vanishing — the model then knows something was attached
-//! and can say so.
+//! **Images travel as blocks, when the CLI accepts them on stdin.**
+//! [`render_blocks`] keeps each [`ContentPart::Image`] as a
+//! [`PromptBlock::Image`] (the base64 payload, which the stdin stream-json
+//! encoding carries as an `image` content block). [`render_prompt`] — used when
+//! the prompt has to go on the command line — keeps a visible placeholder
+//! instead, so the model still knows something was attached.
 
 use bebok_llm::{ChatMessage, ChatRequest, ChatRole, ContentPart};
+
+use crate::backend::PromptBlock;
 
 /// Max characters of a tool-call input kept in the prompt.
 const TOOL_INPUT_CAP: usize = 300;
 /// Max characters of a tool result kept in the prompt.
 const TOOL_RESULT_CAP: usize = 500;
 
-/// Flatten the request's conversation into one prompt.
+/// Flatten the request's conversation into one prompt string, with each image
+/// replaced by a placeholder. This is the form a CLI takes on its command line.
 ///
 /// Every message except the last is prefixed with a `## User` / `## Assistant`
 /// marker; the last message is the user's current request and is emitted last
 /// with no marker at all, so a CLI reading the whole blob sees the instruction
 /// at the end where it expects it.
 pub fn render_prompt(req: &ChatRequest) -> String {
+    render(req, false)
+        .into_iter()
+        .filter_map(|block| match block {
+            PromptBlock::Text(text) => Some(text),
+            PromptBlock::Image { .. } => None,
+        })
+        .collect()
+}
+
+/// The same conversation as structured blocks: text runs interleaved with
+/// real image payloads. This is the form a CLI takes on stdin
+/// (`--input-format stream-json`).
+pub fn render_blocks(req: &ChatRequest) -> Vec<PromptBlock> {
+    render(req, true)
+}
+
+/// Shared layout for both forms. `keep_images` decides whether an image
+/// becomes a [`PromptBlock::Image`] or a visible placeholder line.
+fn render(req: &ChatRequest, keep_images: bool) -> Vec<PromptBlock> {
     let Some((last, prior)) = req.messages.split_last() else {
-        // No messages: the caller passed an empty conversation. Emitting ""
-        // lets the provider report a clear config error instead of sending a
-        // prompt that is only scaffolding.
-        return String::new();
+        // No messages: the caller passed an empty conversation. Emitting
+        // nothing lets the provider report a clear config error instead of
+        // sending a prompt that is only scaffolding.
+        return Vec::new();
     };
 
-    let mut blocks: Vec<String> = Vec::new();
+    let mut out: Vec<PromptBlock> = Vec::new();
     for msg in prior {
-        let body = render_message(msg);
-        if body.trim().is_empty() {
+        let pieces = message_pieces(msg, keep_images);
+        if pieces_are_blank(&pieces) {
             // An empty message carries no information; its marker would only
             // add noise a CLI might mistake for a real turn.
             continue;
         }
-        blocks.push(format!("## {}\n\n{}", heading(msg.role), body));
+        separate(&mut out);
+        append_text(&mut out, &format!("## {}\n\n", heading(msg.role)));
+        push_pieces(&mut out, pieces);
     }
 
-    let current = render_message(last);
-    if !current.trim().is_empty() {
-        blocks.push(current);
+    let pieces = message_pieces(last, keep_images);
+    if !pieces_are_blank(&pieces) {
+        separate(&mut out);
+        push_pieces(&mut out, pieces);
     }
-    blocks.join("\n\n")
+    out
+}
+
+/// One piece of a message body before it is laid out into blocks.
+enum Piece {
+    Text(String),
+    Image { media_type: String, data: String },
 }
 
 fn heading(role: ChatRole) -> &'static str {
@@ -76,22 +109,27 @@ fn heading(role: ChatRole) -> &'static str {
 }
 
 /// One message body: text, then content parts, then tool calls, then results.
-fn render_message(msg: &ChatMessage) -> String {
-    let mut lines: Vec<String> = Vec::new();
+fn message_pieces(msg: &ChatMessage, keep_images: bool) -> Vec<Piece> {
+    let mut pieces: Vec<Piece> = Vec::new();
     if !msg.content.trim().is_empty() {
-        lines.push(msg.content.trim_end().to_string());
+        pieces.push(Piece::Text(msg.content.trim_end().to_string()));
     }
     for part in &msg.content_parts {
         match part {
             ContentPart::Text { text } => {
                 if !text.trim().is_empty() {
-                    lines.push(text.trim_end().to_string());
+                    pieces.push(Piece::Text(text.trim_end().to_string()));
                 }
             }
-            // v1 CLI providers get no images: the CLI takes a single text
-            // argument, so the placeholder is the honest rendering.
-            ContentPart::Image { media_type, .. } => {
-                lines.push(format!("[image omitted: {media_type}]"));
+            ContentPart::Image { media_type, data } => {
+                if keep_images {
+                    pieces.push(Piece::Image {
+                        media_type: media_type.clone(),
+                        data: data.clone(),
+                    });
+                } else {
+                    pieces.push(Piece::Text(format!("[image omitted: {media_type}]")));
+                }
             }
         }
     }
@@ -99,17 +137,55 @@ fn render_message(msg: &ChatMessage) -> String {
         // `Value::to_string` is already compact JSON and cannot fail, which is
         // why the input is not re-serialized through a `serde_json::Error` path.
         let input = truncate(&call.input.to_string(), TOOL_INPUT_CAP);
-        lines.push(format!("Tool call: {}({input})", call.name));
+        pieces.push(Piece::Text(format!("Tool call: {}({input})", call.name)));
     }
     for result in &msg.tool_results {
         let content = truncate(&result.content, TOOL_RESULT_CAP);
         if result.is_error {
-            lines.push(format!("Tool result (error): {content}"));
+            pieces.push(Piece::Text(format!("Tool result (error): {content}")));
         } else {
-            lines.push(format!("Tool result: {content}"));
+            pieces.push(Piece::Text(format!("Tool result: {content}")));
         }
     }
-    lines.join("\n")
+    pieces
+}
+
+fn pieces_are_blank(pieces: &[Piece]) -> bool {
+    pieces.iter().all(|piece| match piece {
+        Piece::Text(text) => text.trim().is_empty(),
+        Piece::Image { .. } => false,
+    })
+}
+
+/// Lay pieces out into blocks. Every piece after the first is preceded by a
+/// newline, so concatenating the text blocks (with each image as its
+/// placeholder) reproduces the placeholder form byte for byte.
+fn push_pieces(out: &mut Vec<PromptBlock>, pieces: Vec<Piece>) {
+    for (index, piece) in pieces.into_iter().enumerate() {
+        if index > 0 {
+            append_text(out, "\n");
+        }
+        match piece {
+            Piece::Text(text) => append_text(out, &text),
+            Piece::Image { media_type, data } => {
+                out.push(PromptBlock::Image { media_type, data });
+            }
+        }
+    }
+}
+
+/// Blank line between two messages (no-op before the first one).
+fn separate(out: &mut Vec<PromptBlock>) {
+    if !out.is_empty() {
+        append_text(out, "\n\n");
+    }
+}
+
+fn append_text(out: &mut Vec<PromptBlock>, text: &str) {
+    match out.last_mut() {
+        Some(PromptBlock::Text(existing)) => existing.push_str(text),
+        _ => out.push(PromptBlock::Text(text.to_string())),
+    }
 }
 
 /// Truncate to at most `max` characters, appending `…` when anything was cut.
@@ -320,5 +396,49 @@ mod tests {
         assert_eq!(truncate("abc", 3), "abc");
         assert_eq!(truncate("", 0), "");
         assert_eq!(truncate("ąę", 5), "ąę");
+    }
+
+    #[test]
+    fn blocks_keep_the_image_payload_between_text_runs() {
+        let mut message = ChatMessage::user("look at this");
+        message.content_parts = vec![ContentPart::Image {
+            media_type: "image/png".into(),
+            data: "AAAA".into(),
+        }];
+        let last = ChatMessage::user("what is in it?");
+        let blocks = render_blocks(&request(vec![message, last]));
+        assert_eq!(
+            blocks,
+            vec![
+                PromptBlock::Text("## User\n\nlook at this\n".into()),
+                PromptBlock::Image {
+                    media_type: "image/png".into(),
+                    data: "AAAA".into(),
+                },
+                PromptBlock::Text("\n\nwhat is in it?".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn blocks_and_prompt_agree_once_images_are_replaced() {
+        let mut message = ChatMessage::user("look");
+        message.content_parts = vec![ContentPart::Image {
+            media_type: "image/jpeg".into(),
+            data: "BBBB".into(),
+        }];
+        let req = request(vec![message, assistant("ok"), ChatMessage::user("done")]);
+
+        let text_of_blocks: String = render_blocks(&req)
+            .into_iter()
+            .map(|block| match block {
+                PromptBlock::Text(text) => text,
+                PromptBlock::Image { media_type, .. } => {
+                    format!("[image omitted: {media_type}]")
+                }
+            })
+            .collect();
+        assert_eq!(text_of_blocks, render_prompt(&req));
+        assert!(!render_prompt(&req).contains("BBBB"));
     }
 }

@@ -185,6 +185,20 @@ impl BrowserDriver {
     /// Automatically selects between local Chromium and remote extension based
     /// on the `browser.remote.enabled` config setting.
     pub async fn page(self: &Arc<Self>, session_id: &str, root: &Path) -> Result<AnyPage, String> {
+        self.page_with_display(session_id, root, None).await
+    }
+
+    /// Like [`page`](Self::page) but can force a display mode for this launch.
+    /// `browser_solve_captcha` uses `Some(BrowserDisplay::Headed)` so the user
+    /// can type into a challenge page: a headless browser already running for
+    /// the session is shut down and relaunched with a visible window (its
+    /// cookies go with it — that is exactly what the caller wants).
+    pub async fn page_with_display(
+        self: &Arc<Self>,
+        session_id: &str,
+        root: &Path,
+        forced: Option<BrowserDisplay>,
+    ) -> Result<AnyPage, String> {
         self.ensure_reaper();
         let settings = self.settings_for(root);
 
@@ -201,23 +215,20 @@ impl BrowserDriver {
             Ok(Arc::new(RemotePage::new(client)))
         } else {
             // Local browser: existing behavior
+            let headless = settings.headless_with(forced);
             let mut sessions = self.sessions.lock().await;
-            if let Some(sb) = sessions.get_mut(session_id) {
+            if let Some(mut sb) = sessions.remove(session_id) {
                 let dead = matches!(sb.browser.try_wait(), Ok(Some(_)));
-                if !dead {
+                if !dead && sb.headed != headless {
                     sb.last_used = Instant::now();
-                    return Ok(Arc::new(LocalPage::new(sb.page.clone(), sb.headed)));
+                    let page = Arc::new(LocalPage::new(sb.page.clone(), sb.headed));
+                    sessions.insert(session_id.to_string(), sb);
+                    return Ok(page);
                 }
-                if let Some(mut sb) = sessions.remove(session_id) {
-                    sb.handler.abort();
-                    if let Some(task) = sb.console_task.take() {
-                        task.abort();
-                    }
-                    let _ = sb.browser.kill().await;
-                    cleanup_user_data_dir(&sb.user_data_dir);
-                }
+                // Dead browser, or the wrong window mode for this call.
+                shutdown(sb).await;
             }
-            let sb = launch(session_id, root, &settings).await?;
+            let sb = launch(session_id, root, &settings, headless).await?;
             let page = LocalPage::new(sb.page.clone(), sb.headed);
             sessions.insert(session_id.to_string(), sb);
             Ok(Arc::new(page))
@@ -706,11 +717,11 @@ async fn launch(
     session_id: &str,
     root: &Path,
     settings: &BrowserSettings,
+    headless: bool,
 ) -> Result<SessionBrowser, String> {
     let executable = resolve_executable()?;
     let user_data_dir = user_data_dir_for(session_id);
     let _ = std::fs::create_dir_all(&user_data_dir);
-    let headless = settings.headless();
 
     let mut builder = BrowserConfig::builder()
         .chrome_executable(&executable)

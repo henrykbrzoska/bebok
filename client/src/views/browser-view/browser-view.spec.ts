@@ -92,6 +92,7 @@ describe('BrowserView (F7-6)', () => {
     browserFrame: jasmine.Spy;
     browserAction: jasmine.Spy;
     isTauri: jasmine.Spy;
+    withEngineToken: (url: string) => string;
   };
   let events: { onEvent: jasmine.Spy; start: jasmine.Spy };
   let listener: ((ev: EngineEvent) => void) | null;
@@ -109,6 +110,8 @@ describe('BrowserView (F7-6)', () => {
         .createSpy('browserAction')
         .and.returnValue(Promise.resolve({ sessionID: SID, ok: true, url: 'https://x/' })),
       isTauri: jasmine.createSpy('isTauri').and.returnValue(false),
+      // No engine token in the spec: outbound links pass through unchanged.
+      withEngineToken: (url: string) => url,
     };
     events = {
       onEvent: jasmine.createSpy('onEvent').and.callFake((fn: (ev: EngineEvent) => void) => {

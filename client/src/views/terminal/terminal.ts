@@ -16,6 +16,14 @@ import { ProcessesStore, type ProcessTone, formatUptime, processTone } from '../
 import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ChatSessionStore } from '../chat/chat-session.store';
+import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
+import {
+  TERMINAL_PROCESS_PROVIDER,
+  TERMINAL_TAB_PROVIDER,
+  type TerminalProcessPayload,
+  type TerminalTabPayload,
+} from './terminal.menus';
 import { ProcessLogTab } from './process-log-tab';
 import { TerminalTab, type TerminalTabStatus } from './terminal-tab';
 
@@ -33,7 +41,7 @@ interface TabMeta {
 
 @Component({
   selector: 'app-terminal',
-  imports: [TerminalTab, ProcessLogTab],
+  imports: [TerminalTab, ProcessLogTab, ContextMenuDirective],
   templateUrl: './terminal.html',
   styleUrl: './terminal.css',
 })
@@ -43,6 +51,7 @@ export class TerminalView implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
   private readonly session = inject(ChatSessionStore);
   private readonly project = inject(ProjectSessionsStore);
+  private readonly menus = inject(ContextMenuService);
   readonly procs = inject(ProcessesStore);
 
   readonly t = this.i18n.t.bind(this.i18n);
@@ -87,6 +96,8 @@ export class TerminalView implements OnInit, OnDestroy {
   };
 
   constructor() {
+    this.menus.register(TERMINAL_TAB_PROVIDER);
+    this.menus.register(TERMINAL_PROCESS_PROVIDER);
     // Follow the chat's active session while it matches this directory.
     effect(
       () => {
@@ -277,6 +288,40 @@ export class TerminalView implements OnInit, OnDestroy {
     this.procs.select(null);
     const ptys = this.tabs();
     this.activePtyId.set(ptys.length > 0 ? ptys[ptys.length - 1].ptyId : null);
+  }
+
+  /** Payload for the `terminal.tab` provider (PTY tab strip). */
+  tabMenuData(tab: TabMeta): TerminalTabPayload {
+    return {
+      ptyId: tab.ptyId,
+      title: tab.title,
+      active: this.activePtyId() === tab.ptyId,
+      actions: {
+        activate: () => this.activate(tab.ptyId),
+        close: () => this.closeTab(tab.ptyId),
+        copyTitle: () => void this.menus.copyText(tab.title),
+      },
+    };
+  }
+
+  /** Payload for the `terminal.process` provider (registry rows). */
+  processMenuData(p: ProcessInfo): TerminalProcessPayload {
+    return {
+      processId: p.id,
+      command: p.command,
+      url: p.url ?? null,
+      running: p.status === 'running',
+      actions: {
+        openLog: () => this.openLog(p.id),
+        openUrl: () => {
+          if (p.url) {
+            window.open(p.url, '_blank', 'noopener');
+          }
+        },
+        stop: () => void this.procs.kill(p.id),
+        copyCommand: () => void this.menus.copyText(p.command),
+      },
+    };
   }
 
   /** List existing terminal sessions from the engine (reattach targets). */

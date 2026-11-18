@@ -7,7 +7,15 @@
  * via the shared {@link BatchStore}.
  */
 
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  untracked,
+} from '@angular/core';
 
 import { BatchRecord } from '../../../core/engine.dtos';
 import { BatchStore } from '../../../core/batch.store';
@@ -25,6 +33,15 @@ const STATE_KEYS: Record<string, MessageKey> = {
   Failed: 'batch.status.failed',
   Cancelled: 'batch.status.cancelled',
 };
+
+/**
+ * Refresh cadence for the open panel while a job is still running. A batch API
+ * job sits in "processing" for minutes — sometimes tens of minutes — and the
+ * engine only learns about it on its own 30 s poll, so an SSE event can be
+ * missed (drawer opened late, stream reconnect). Polling the record keeps the
+ * panel honest without a manual refresh.
+ */
+const REFRESH_INTERVAL_MS = 15_000;
 
 @Component({
   selector: 'app-batch-panel',
@@ -68,6 +85,7 @@ const STATE_KEYS: Record<string, MessageKey> = {
                   @if (progressOf(batch.id); as p) {
                     <span>{{ p.done }}/{{ p.total }}</span>
                   }
+                  <span class="batch-age">{{ elapsed(batch) }}</span>
                   @if (!isTerminal(batch)) {
                     <button
                       type="button"
@@ -125,11 +143,47 @@ export class BatchPanel {
   private readonly session = inject(ChatSessionStore, { optional: true });
   readonly t = this.i18n.t.bind(this.i18n);
 
+  /** Session whose list this instance already started loading. */
+  private loadedFor: string | null = null;
+  private timer: number | undefined;
+
   readonly batches = computed<BatchRecord[]>(() => this.store.batches());
   readonly loading = this.store.loading;
   readonly error = this.store.error;
 
   readonly sessionId = computed(() => this.session?.meta()?.id ?? this.store.sessionId());
+
+  constructor() {
+    // The panel is the only consumer of the batch list, and the drawer
+    // destroys it while the pill is off — so it loads the list itself from
+    // the session the chat view publishes instead of relying on a caller.
+    effect(() => {
+      const meta = this.session?.meta();
+      if (!meta?.id || !meta.directory || meta.id === this.loadedFor) {
+        return;
+      }
+      untracked(() => {
+        this.loadedFor = meta.id;
+        if (this.store.sessionId() === meta.id && this.store.directory() === meta.directory) {
+          // Re-opened panel on a session the store already knows: refresh so
+          // anything that changed while the panel was closed shows up.
+          void this.store.reload();
+        } else {
+          this.store.load(meta.id, meta.directory);
+        }
+      });
+    });
+
+    // A batch API job runs for minutes and its progress event can be missed,
+    // so a running job is re-read on a timer until it reaches a terminal
+    // state — otherwise a finished job keeps looking "running 0/1".
+    this.timer = window.setInterval(() => {
+      if (this.loadedFor && this.batches().some((b) => !this.isTerminal(b))) {
+        void this.store.reload();
+      }
+    }, REFRESH_INTERVAL_MS);
+    inject(DestroyRef).onDestroy(() => window.clearInterval(this.timer));
+  }
 
   stateLabel(batch: BatchRecord): string {
     const key = STATE_KEYS[batch.state] ?? 'batch.status.submitted';
@@ -142,6 +196,23 @@ export class BatchPanel {
 
   isTerminal(batch: BatchRecord): boolean {
     return ['Completed', 'Failed', 'Cancelled'].includes(batch.state);
+  }
+
+  /**
+   * How long the job has been with the provider (`1m 04s`), frozen once it is
+   * terminal. Batch jobs routinely run for minutes with no intermediate
+   * counts, so the age is what tells the user it is progressing at all.
+   */
+  elapsed(batch: BatchRecord): string {
+    const start = Date.parse(batch.created_at);
+    if (!Number.isFinite(start)) {
+      return '';
+    }
+    const finished = this.isTerminal(batch) ? Date.parse(batch.updated_at) : Number.NaN;
+    const end = Number.isFinite(finished) ? finished : Date.now();
+    const seconds = Math.max(0, Math.round((end - start) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    return minutes > 0 ? `${minutes}m ${String(seconds % 60).padStart(2, '0')}s` : `${seconds}s`;
   }
 
   isDone(batch: BatchRecord): boolean {

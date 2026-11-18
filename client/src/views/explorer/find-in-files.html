@@ -1,0 +1,161 @@
+<div class="fif-overlay" (click)="close()">
+  <div
+    class="fif-dialog"
+    role="dialog"
+    [attr.aria-label]="t('findInFiles.title')"
+    data-testid="find-in-files"
+    (click)="$event.stopPropagation()"
+  >
+    <header class="fif-head">
+      <span class="fif-title">{{ t('findInFiles.title') }}</span>
+      <div class="fif-tabs" role="tablist">
+        <button
+          class="fif-tab"
+          role="tab"
+          data-testid="find-in-files-tab-text"
+          [class.active]="tab() === 'text'"
+          [attr.aria-selected]="tab() === 'text'"
+          (click)="setTab('text')"
+        >
+          {{ t('findInFiles.tabText') }}
+          @if (response(); as r) {
+            <span class="fif-count">{{ r.text.results.length }}</span>
+          }
+        </button>
+        <button
+          class="fif-tab"
+          role="tab"
+          data-testid="find-in-files-tab-symbols"
+          [class.active]="tab() === 'symbols'"
+          [attr.aria-selected]="tab() === 'symbols'"
+          [disabled]="regex()"
+          (click)="setTab('symbols')"
+        >
+          {{ t('findInFiles.tabSymbols') }}
+          @if (response(); as r) {
+            <span class="fif-count">{{ r.symbols.length }}</span>
+          }
+        </button>
+      </div>
+      <span class="fif-spacer"></span>
+      @if (response()?.indexed) {
+        <span class="fif-badge" [title]="t('findInFiles.indexedHint')">{{
+          t('findInFiles.indexed')
+        }}</span>
+      }
+      <button class="fif-close" (click)="close()" [attr.aria-label]="t('findInFiles.close')">
+        ✕
+      </button>
+    </header>
+
+    <div class="fif-search">
+      <input
+        #queryInput
+        class="fif-query"
+        data-testid="find-in-files-query"
+        spellcheck="false"
+        autocomplete="off"
+        [ngModel]="query()"
+        (ngModelChange)="onQuery($event)"
+        [placeholder]="t('findInFiles.placeholder')"
+        [attr.aria-label]="t('findInFiles.placeholder')"
+      />
+      <button
+        class="fif-toggle"
+        data-testid="find-in-files-case"
+        [class.active]="caseSensitive()"
+        [attr.aria-pressed]="caseSensitive()"
+        [title]="t('findInFiles.matchCase') + ' (Alt+C)'"
+        (click)="caseSensitive.set(!caseSensitive())"
+      >
+        Cc
+      </button>
+      <button
+        class="fif-toggle"
+        data-testid="find-in-files-word"
+        [class.active]="wholeWord()"
+        [attr.aria-pressed]="wholeWord()"
+        [title]="t('findInFiles.words') + ' (Alt+W)'"
+        (click)="wholeWord.set(!wholeWord())"
+      >
+        W
+      </button>
+      <button
+        class="fif-toggle"
+        data-testid="find-in-files-regex"
+        [class.active]="regex()"
+        [attr.aria-pressed]="regex()"
+        [title]="t('findInFiles.regex') + ' (Alt+X)'"
+        (click)="regex.set(!regex())"
+      >
+        .*
+      </button>
+      <input
+        class="fif-mask"
+        data-testid="find-in-files-mask"
+        spellcheck="false"
+        autocomplete="off"
+        [ngModel]="mask()"
+        (ngModelChange)="onMask($event)"
+        [placeholder]="t('findInFiles.maskPlaceholder')"
+        [title]="t('findInFiles.maskHint')"
+        [attr.aria-label]="t('findInFiles.maskHint')"
+      />
+    </div>
+
+    <div class="fif-status">
+      @if (loading()) {
+        <span>{{ t('findInFiles.searching') }}</span>
+      } @else if (error()) {
+        <span class="fif-error">{{ error() }}</span>
+      } @else if (response()) {
+        <span>{{ summary() }}</span>
+      } @else {
+        <span class="fif-faint">{{ t('findInFiles.hint') }}</span>
+      }
+    </div>
+
+    <ul class="fif-list" #list role="listbox">
+      @for (row of rows(); track $index) {
+        <li
+          class="fif-row"
+          role="option"
+          [class.is-selected]="$index === index()"
+          [attr.aria-selected]="$index === index()"
+          (click)="select($index)"
+          (dblclick)="open(row)"
+          [title]="row.path + ':' + row.line"
+        >
+          @if (row.symbol) {
+            <span class="fif-kind">{{ row.kind }}</span>
+          }
+          @let parts = split(row);
+          <span class="fif-text"
+            >{{ parts[0] }}<mark>{{ parts[1] }}</mark>{{ parts[2] }}</span
+          >
+          <span class="fif-loc">
+            <span class="fif-file">{{ nameOf(row.path) }}:{{ row.line }}</span>
+            <span class="fif-dir">{{ dirOf(row.path) }}</span>
+          </span>
+        </li>
+      } @empty {
+        @if (response() && !loading()) {
+          <li class="fif-empty">{{ t('findInFiles.noResults') }}</li>
+        }
+      }
+    </ul>
+
+    <div class="fif-preview">
+      @if (selected(); as sel) {
+        <div class="fif-preview-head">
+          <span class="fif-file">{{ sel.path }}</span>
+          <span class="fif-spacer"></span>
+          <button class="fif-open" data-testid="find-in-files-open" (click)="open()">
+            {{ t('findInFiles.open') }} ⏎
+          </button>
+        </div>
+        <pre class="fif-preview-body">@for (r of previewRows(); track r.n) {<div class="fif-line" [class.is-hit]="r.hit"><span class="fif-ln">{{ r.n }}</span>{{ r.text }}</div>}</pre>
+      }
+    </div>
+  </div>
+</div>

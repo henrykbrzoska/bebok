@@ -516,6 +516,7 @@ impl OpenAiParser {
             cost: None,
             cache_read_input_tokens: None,
             cache_creation_input_tokens: None,
+            context_tokens: None,
         })));
     }
 

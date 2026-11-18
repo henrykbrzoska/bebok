@@ -4,6 +4,9 @@ import { NgTemplateOutlet } from '@angular/common';
 
 import { escapeAndLinkify } from '../../../core/linkify';
 import { DiffViewComponent } from '../../../ui/diff-view/diff-view';
+import { ContextMenuDirective } from '../../../ui/context-menu/context-menu.directive';
+import { ContextMenuService } from '../../../ui/context-menu/context-menu.service';
+import { CHAT_TOOL_PROVIDER, type ChatToolPayload } from '../chat.menus';
 import {
   Part,
   SafetyCategory,
@@ -48,9 +51,14 @@ import { safetyLegend } from './safety-legend';
  */
 @Component({
   selector: 'app-tool-part',
-  imports: [DiffViewComponent, RouterLink, NgTemplateOutlet, TaskProgressLine],
+  imports: [DiffViewComponent, RouterLink, NgTemplateOutlet, TaskProgressLine, ContextMenuDirective],
   template: `
-    <div class="tool" [class.failed]="kind() === 'error'">
+    <div
+      class="tool"
+      [class.failed]="kind() === 'error'"
+      [appContextMenu]="'chat.tool'"
+      [appContextMenuData]="toolMenuData()"
+    >
       <div
         class="tool-head"
         [class.collapsed]="!detailsOpen()"
@@ -117,6 +125,9 @@ import { safetyLegend } from './safety-legend';
 
       @if (detailsOpen()) {
         <div class="tool-details">
+          @if (isExternal()) {
+            <span class="external-badge" data-testid="tool-external-badge">{{ t('chat.tool.externalBy') }}</span>
+          }
           <div class="section-label">{{ t('tool.arguments') }}</div>
           <pre class="panel"><code>{{ inputText() }}</code></pre>
 
@@ -401,6 +412,7 @@ export class ToolPartComponent {
   private readonly toolSafety = inject(ToolSafetyStore);
   private readonly liveTasks = inject(TaskProgressStore);
   private readonly session = inject(ChatSessionStore);
+  private readonly menus = inject(ContextMenuService);
   readonly t = this.i18n.t.bind(this.i18n);
 
   readonly part = input.required<Part>();
@@ -535,9 +547,25 @@ export class ToolPartComponent {
     this.state().state === 'error' ? (this.state() as ToolStateError) : null,
   );
 
+  readonly isExternal = computed(() => !!(this.toolPart() as ToolPart).external);
   readonly outputText = computed(() => this.completed()?.output ?? '');
   readonly errorText = computed(() => this.failed()?.error ?? '');
   /** F9-11: `errorText`, escaped and with any bare http(s) URL linkified -
    *  plain text, no markdown (it is a raw tool/engine error message). */
   readonly errorHtml = computed(() => escapeAndLinkify(this.errorText()));
+
+  constructor() {
+    this.menus.register(CHAT_TOOL_PROVIDER);
+  }
+
+  /** Payload for the `chat.tool` context menu (copy output / input). */
+  readonly toolMenuData = computed<ChatToolPayload>(() => ({
+    toolName: this.name(),
+    title: this.summary(),
+    output: this.outputText() || this.errorText(),
+    actions: {
+      copyOutput: () => void this.menus.copyText(this.outputText() || this.errorText()),
+      copyInput: () => void this.menus.copyText(this.inputText()),
+    },
+  }));
 }

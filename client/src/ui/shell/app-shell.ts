@@ -12,6 +12,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterOutlet } from '@angular/router';
 
 import { CommandPalette } from '../command-palette/command-palette';
+import { ContextMenuComponent } from '../context-menu/context-menu';
 import { DirectoryBrowser } from '../directory-browser/directory-browser';
 import { ProjectSwitcher } from '../project-switcher/project-switcher';
 import { ReconnectBanner } from '../reconnect-banner/reconnect-banner';
@@ -31,6 +32,7 @@ import { ShellStore } from './shell.store';
     Topbar,
     RightDrawer,
     CommandPalette,
+    ContextMenuComponent,
     DirectoryBrowser,
     ProjectSwitcher,
     ReconnectBanner,

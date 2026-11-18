@@ -148,6 +148,25 @@ impl BrowserSettings {
         !can_show_window()
     }
 
+    /// The headless decision for one launch, honouring an explicit display
+    /// request (`None` = use the configured mode). Only `headed` can be
+    /// forced: when no window is possible the launch stays headless and the
+    /// caller reports that through [`headed_blocked_reason`].
+    pub fn headless_with(&self, forced: Option<BrowserDisplay>) -> bool {
+        match forced {
+            None => self.headless(),
+            Some(BrowserDisplay::Headed) => !self.headed_available(),
+            Some(_) => true,
+        }
+    }
+
+    /// Whether a visible window can be opened right now, ignoring the
+    /// configured display mode (used by `browser_solve_captcha`, which needs
+    /// the user to be able to type into the page).
+    pub fn headed_available(&self) -> bool {
+        headed_blocked_reason().is_none()
+    }
+
     /// Effective window position: config, then `BEBOK_BROWSER_WINDOW_POS=x,y`.
     pub fn effective_window_position(&self) -> Option<(i32, i32)> {
         self.window_position.or_else(|| {
@@ -188,6 +207,18 @@ fn env_flag(name: &str) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Why a visible window is impossible on this host, or `None` when it is
+/// possible. The message is model-facing (it ends up in a tool error).
+pub fn headed_blocked_reason() -> Option<&'static str> {
+    if env_flag("BEBOK_BROWSER_HEADLESS") {
+        return Some("BEBOK_BROWSER_HEADLESS is set");
+    }
+    if !can_show_window() {
+        return Some("this host has no display session (DISPLAY / WAYLAND_DISPLAY is unset)");
+    }
+    None
 }
 
 /// Whether this process can open a visible browser window at all.

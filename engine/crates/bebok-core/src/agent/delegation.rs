@@ -665,7 +665,10 @@ pub struct ChildSpec {
     /// Preset name as the model asked for it (`code`, `ask`, ...).
     pub agent_name: String,
     pub model: String,
-    pub provider: Arc<dyn bebok_llm::Provider>,
+    /// Where the child's provider comes from. A CLI provider is built once the
+    /// child session exists, so its hooks get a token scoped to that session
+    /// (see [`crate::provider::ChildProvider`]).
+    pub provider: crate::provider::ChildProvider,
     /// Unique child name (already allocated on the parent).
     pub name: String,
     pub prompt: String,
@@ -825,6 +828,7 @@ pub async fn prepare_child(spec: ChildSpec) -> Result<PreparedChild, String> {
 #[allow(clippy::too_many_arguments)]
 async fn run_child_turn_with_watchdog(
     spec: &ChildSpec,
+    provider: &Arc<dyn bebok_llm::Provider>,
     child: &Arc<SessionState>,
     info: &ChildTask,
     bus: &EventBus,
@@ -836,6 +840,14 @@ async fn run_child_turn_with_watchdog(
     let watchdog_secs = spec.parent.config_snapshot().delegation.watchdog_secs;
 
     loop {
+        // One token per *attempt*, derived from the child's registered token.
+        // Cancelling the registered token (task_cancel, parent turn abort)
+        // still cascades into the attempt; cancelling the attempt on a
+        // watchdog restart must NOT touch the registered one, or the respawned
+        // turn would see an already-cancelled token and abort instantly —
+        // which turned every restart into a burn of `max_restarts` and a hard
+        // error for the orchestrator.
+        let attempt_abort = abort.child_token();
         let stop = CancellationToken::new();
         let reporter = spawn_progress_reporter(
             bus.clone(),
@@ -852,6 +864,10 @@ async fn run_child_turn_with_watchdog(
         let wd_handle = tokio::spawn(super::watchdog::watchdog_loop(
             move || {
                 // Best-effort sync snapshot: the loop only needs counters.
+                // `activity` is read independently of the transcript lock (it
+                // is an atomic), so a contended transcript can no longer look
+                // like a silent child.
+                let activity = wd_child.activity();
                 let (tool_calls, steps, verdict) = match wd_child.try_read_messages_snapshot() {
                     Some(messages) => {
                         let p = summarize_progress(&messages);
@@ -860,7 +876,11 @@ async fn run_child_turn_with_watchdog(
                     None => (0, 0, "ok".to_string()),
                 };
                 (
-                    super::watchdog::ProgressSnapshot { tool_calls, steps },
+                    super::watchdog::ProgressSnapshot {
+                        tool_calls,
+                        steps,
+                        activity,
+                    },
                     verdict,
                 )
             },
@@ -875,10 +895,10 @@ async fn run_child_turn_with_watchdog(
             child.clone(),
             spec.agent.clone(),
             spec.instance.tools.clone(),
-            spec.provider.clone(),
+            provider.clone(),
             spec.instance.permission.clone(),
             bus.clone(),
-            abort.clone(),
+            attempt_abort.clone(),
             spec.model.clone(),
         )
         .with_sampling(spec.sampling.clone())
@@ -902,8 +922,9 @@ async fn run_child_turn_with_watchdog(
         match end {
             TurnEnd::Done(r) => return r,
             TurnEnd::Restart(reason) => {
-                // Stop the stuck turn before respawning.
-                abort.cancel();
+                // Stop the stuck attempt before respawning. Only this
+                // attempt's token: the child keeps its identity and its slot.
+                attempt_abort.cancel();
                 if restarts >= max_restarts {
                     return Err(crate::error::CoreError::BadRequest(format!(
                         "child {task_id} got stuck {} times ({reason}); take over yourself",
@@ -977,11 +998,44 @@ pub async fn run_child(prepared: PreparedChild) -> ChildOutcome {
         }
     }
 
+    // Build the provider now that the child session exists: a CLI child's
+    // managed profile calls back into the engine for every tool call, and the
+    // hook token is scoped to the session it was issued for.
+    let (provider, hook_token) = match spec.provider.resolve(&child_session_id) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            if holds_slot {
+                spec.parent.child_slots().release();
+            }
+            child.clear_abort().await;
+            child.end_turn();
+            child.set_task_status("error", Some(&e)).await;
+            return ChildOutcome {
+                task_id: task_id.clone(),
+                name: name.clone(),
+                child_session_id: child_session_id.clone(),
+                status: "error".to_string(),
+                error: Some(e.clone()),
+                text: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+                started_at,
+                ended_at: crate::util::now_ms(),
+            };
+        }
+    };
+
     let result = if abort.is_cancelled() {
         Ok(())
     } else {
-        run_child_turn_with_watchdog(&spec, &child, &info, &bus, &abort, &task_id, 0).await
+        run_child_turn_with_watchdog(&spec, &provider, &child, &info, &bus, &abort, &task_id, 0)
+            .await
     };
+
+    // The child's turn is over: its hook token must not outlive it.
+    if let Some(token) = hook_token.as_deref() {
+        crate::cli_turn_token::revoke_hook_token(token);
+    }
 
     if holds_slot {
         spec.parent.child_slots().release();

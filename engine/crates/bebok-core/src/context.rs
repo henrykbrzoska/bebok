@@ -111,10 +111,25 @@ pub fn summarize_tool_output(_tool_name: &str, output: &str) -> String {
 /// sum is right for both. Returns `None` when the provider reported nothing
 /// (all zero) so the caller can fall back to a local estimate.
 pub fn context_used_from_usage(usage: &bebok_llm::Usage) -> Option<u64> {
+    // A CLI reports the prompt size of its latest API call directly. Summing a
+    // multi-call turn's counters would count the same context several times.
+    if let Some(prompt) = usage.context_tokens.filter(|n| *n > 0) {
+        return Some(prompt);
+    }
     let total = usage.input_tokens
         + usage.cache_read_input_tokens.unwrap_or(0)
         + usage.cache_creation_input_tokens.unwrap_or(0);
     (total > 0).then_some(total)
+}
+
+/// Context window of a model served through a CLI backend. The backend maps
+/// the CLI's own name for the model (and the id it reported at startup, when
+/// known) to a catalog id; an unmapped model gets the same default as
+/// [`context_window_for`].
+pub fn cli_context_window(backend: &str, cli_model: &str, init_model: Option<&str>) -> u64 {
+    let catalog_id =
+        bebok_cli_agents::backend_for(backend).and_then(|b| b.catalog_model(cli_model, init_model));
+    context_window_for(catalog_id.as_deref())
 }
 
 /// Context window (tokens) of `model`, resolved live from the model catalog.
@@ -163,6 +178,7 @@ mod tests {
             cost: None,
             cache_read_input_tokens: Some(30_000),
             cache_creation_input_tokens: Some(2_000),
+            context_tokens: None,
         };
         assert_eq!(context_used_from_usage(&usage), Some(33_000));
         // OpenAI-style: everything in input_tokens, cache fields absent.
@@ -180,6 +196,40 @@ mod tests {
         assert_eq!(context_window_for(Some("openai/gpt-4.1")), 1_048_576);
         assert_eq!(context_window_for(Some("custom/unknown-model")), 64_000);
         assert_eq!(context_window_for(None), 64_000);
+    }
+
+    #[test]
+    fn cli_reported_prompt_size_beats_the_turn_sum() {
+        let usage = bebok_llm::Usage {
+            input_tokens: 9_000,
+            cache_read_input_tokens: Some(60_000),
+            context_tokens: Some(12_000),
+            ..Default::default()
+        };
+        assert_eq!(context_used_from_usage(&usage), Some(12_000));
+
+        // Zero means "not reported": the sum is used instead.
+        let zero = bebok_llm::Usage {
+            input_tokens: 5,
+            context_tokens: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(context_used_from_usage(&zero), Some(5));
+    }
+
+    #[test]
+    fn cli_models_resolve_to_catalog_windows() {
+        let alias = cli_context_window("claude", "sonnet", None);
+        assert_ne!(alias, 64_000, "an alias must reach the catalog");
+        assert_eq!(
+            cli_context_window("claude", "sonnet", Some("claude-sonnet-5")),
+            alias
+        );
+        assert_eq!(cli_context_window("claude", "gpt-x", None), 64_000);
+        assert_eq!(
+            cli_context_window("no-such-backend", "sonnet", None),
+            64_000
+        );
     }
 
     #[test]

@@ -4,12 +4,14 @@
 //! and on `http://localhost:4200` in browser dev. Extend via `BEBOK_CORS`
 //! (comma separated); the defaults always apply.
 //!
-//! The Companion Chrome extension (`chrome-extension://<id>`, a different id
-//! per install) is NOT in the defaults: add it via
-//! `BEBOK_CORS=chrome-extension://<your-id>` (the id is shown on
-//! `chrome://extensions` with Developer mode on). Without it the popup's
-//! `fetch` fails at preflight (`net::ERR_FAILED`, not a 401 — CORS runs
-//! before the token layer). The background worker is unaffected (it is
+//! The Companion browser extension (`chrome-extension://<id>` in Chrome/Edge,
+//! `moz-extension://<uuid>` in Firefox — a different value per install) is NOT
+//! in the defaults: add it via
+//! `BEBOK_CORS=chrome-extension://<your-id>` / `BEBOK_CORS=moz-extension://<uuid>`
+//! (Chrome shows the id on `chrome://extensions` with Developer mode on;
+//! Firefox shows the uuid under the add-on in `about:debugging`). Without it
+//! the popup's `fetch` fails at preflight (`net::ERR_FAILED`, not a 401 — CORS
+//! runs before the token layer). The background worker is unaffected (it is
 //! covered by the extension's `host_permissions`), so heartbeat/long-poll
 //! keep working while the popup is blocked — a confusing combination worth
 //! checking first when Options says OK but the popup fails.
