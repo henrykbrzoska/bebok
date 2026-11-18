@@ -1,7 +1,7 @@
 # CLI agents
 
 Bebok can run a turn — or a delegated sub-agent — through an external agentic
-CLI instead of an HTTP API. Claude Code is the first backend; the design makes
+CLI instead of an HTTP API. Claude Code is the first backend, Grok Build the second; the design makes
 adding another one a single file.
 
 ## Why a separate crate
@@ -234,6 +234,28 @@ follow-up sends only the new messages.
   with the full transcript, provided nothing has been streamed yet. A second
   loss is reported as an error.
 
+## Grok Build backend
+
+`extra.backend: "grok"` (provider `grok-cli`, models `grok-4.7`, `grok-4.7-build-fast`,
+`grok-4.6`, `grok-4.5`; binary override `BEBOK_GROK_BIN`). Checked against `grok` 1.0.89.
+
+`grok --output-format streaming-messages-json` emits the same JSONL dialect as
+Claude Code's `stream-json`, so `GrokBackend::parse_line` delegates to the Claude parser.
+Differences:
+
+| | Claude | Grok |
+|---|---|---|
+| Prompt | stdin stream-json | `--prompt-file` (temp file, no argv limit) |
+| System prompt | `--append-system-prompt[-file]` / profile | `--rules` (argv, 100 KB cap) |
+| Read-only | `plan` + `--disallowedTools` | `plan` + `--disallowed-tools run_terminal_command,search_replace,write` |
+| `allow_write` | `acceptEdits` + tool list | `acceptEdits` + `--allow Bash/Edit/Write` |
+| Managed profile, permission hooks | yes | **no** (Grok uses its own `.grok/config.toml`) |
+| Images, MCP bridge | images yes | no |
+
+`--always-approve` / `bypassPermissions` is never emitted. In a headless run Grok cannot ask,
+so a shell command with a file redirect (`echo x > f`) is cancelled even with `allow_write`;
+plain commands and the `write` / `search_replace` tools work.
+
 ## Native tool rows
 
 A CLI tool call appears in the transcript as a tool part marked as executed by
@@ -246,7 +268,7 @@ Claude Code.
   appends it as a tool part with `external: true`, deduplicated by id. It is
   never executed by Bebok.
 - **Unpaired** tool results stay as activity text in the Thinking block.
-- **Client.** The tool row shows an "executed by Claude Code" badge
+- **Client.** The tool row shows an "executed by the CLI agent" badge
   (`data-testid="tool-external-badge"`) and a diff view for edits.
 - **HTTP models.** When a session continues on an HTTP provider, `agent/request.rs`
   renders external parts as text, `[Claude Code ran <name>: <input> → <output>]`,

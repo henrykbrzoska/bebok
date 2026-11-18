@@ -253,9 +253,10 @@ export interface PromptResponse {
   messageIndex: number;
   /**
    * `running` = a live turn was started (default), `batch` = the prompt was
-   * queued into an async Batch job and no turn is running for it.
+   * queued into an async Batch job and no turn is running for it,
+   * `injected` = the message was written to the running CLI turn.
    */
-  status?: 'running' | 'batch';
+  status?: 'running' | 'batch' | 'injected';
   /** Batch job the prompt was queued into (only when `status` is `batch`). */
   batchID?: string;
 }
@@ -929,6 +930,8 @@ export interface FsDefinitionResponse {
   results: FsDefinitionHit[];
   parsed_files: number;
   truncated: boolean;
+  /** The caret is on the declaration itself (POST only). */
+  on_declaration?: boolean;
 }
 
 /** One completion suggestion (`POST /fs/complete`). */

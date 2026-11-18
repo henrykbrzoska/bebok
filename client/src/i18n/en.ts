@@ -1113,7 +1113,7 @@ export const en = {
   'goto.footHint': '↑↓ select · Enter open · Tab next tab · Esc close · Ctrl+Shift+N files · Ctrl+N classes · Shift Shift all',
   'goto.truncated': 'Large project - the file list was truncated',
   'explorer.navBar': 'Navigation bar',
-  'chat.tool.externalBy': 'executed by Claude Code',
+  'chat.tool.externalBy': 'executed by the CLI agent',
   'explorer.navUp': 'Parent folder',
   'settings.cliProfileLabel': 'Profile',
   'settings.cliProfileBebok': 'Bebok (managed)',

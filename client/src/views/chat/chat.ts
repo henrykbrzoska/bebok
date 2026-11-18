@@ -1023,6 +1023,13 @@ export class ChatView implements OnInit, OnDestroy {
         ts: Date.now(),
       },
     ]);
+    // Steering: while the model works, offer the message to the engine. A CLI
+    // turn takes it on the spot; anything else answers 409 and the message
+    // stays queued for the end of the turn ("Send now" still aborts).
+    if (this.running()) {
+      await this.injectHead();
+      return;
+    }
     await this.drainQueue();
   }
 
@@ -1103,6 +1110,30 @@ export class ChatView implements OnInit, OnDestroy {
         this.error.set(message);
         this.queue.update((q) => q.slice(1));
       }
+    } finally {
+      if (sessionID === this.sessionID()) {
+        this.sending.set(false);
+      }
+    }
+  }
+
+  /** Try to hand the oldest queued message to the running turn. */
+  private async injectHead(): Promise<void> {
+    const head = this.queue()[0];
+    const sessionID = this.sessionID();
+    if (!head || !sessionID || this.sending() || head.images.length || head.files?.length) {
+      return;
+    }
+    this.sending.set(true);
+    try {
+      const result = await this.engine.prompt(sessionID, queuedPromptBody(head));
+      if (sessionID !== this.sessionID() || result?.status !== 'injected') {
+        return;
+      }
+      this.markPending(head.text, 'sent');
+      this.queue.update((q) => q.filter((x) => x !== head));
+    } catch {
+      // 409 or transport error: the message stays queued and drains normally.
     } finally {
       if (sessionID === this.sessionID()) {
         this.sending.set(false);

@@ -83,7 +83,16 @@ impl CliFeatures {
 /// description are rejected by the character check, not by position.
 pub fn parse_flags(help: &str) -> HashSet<String> {
     help.lines()
-        .filter_map(|line| line.split_whitespace().next())
+        .filter_map(|line| {
+            let mut tokens = line.split_whitespace();
+            let first = tokens.next()?;
+            // `-r, --resume <ID>`: a short alias comes first (clap style).
+            if first.starts_with('-') && !first.starts_with("--") && first.ends_with(',') {
+                tokens.next()
+            } else {
+                Some(first)
+            }
+        })
         .filter(|token| is_long_flag(token))
         .map(str::to_string)
         .collect()
@@ -147,6 +156,16 @@ pub async fn probe_features(binary: &Path) -> CliFeatures {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_alias_before_the_long_flag_is_parsed() {
+        let flags =
+            parse_flags("  -r, --resume [<ID>]\n      --model <M>\n  -v, --version\n  -p single\n");
+        assert!(flags.contains("--resume"));
+        assert!(flags.contains("--model"));
+        assert!(flags.contains("--version"));
+        assert_eq!(flags.len(), 3);
+    }
 
     /// Verbatim excerpts of `claude --help` (2.1.325), including the wrapped
     /// lines that mention flags without defining them.

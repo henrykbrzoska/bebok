@@ -138,6 +138,8 @@ pub struct SessionState {
     /// set by `prompt_turn` before the turn starts. Kept for back-compat;
     /// the `fleet` tool no longer refuses a fan-out when it is false.
     fleet_requested: AtomicBool,
+    /// Live stdin of the running CLI turn (see `bebok_cli_agents::LiveInput`).
+    cli_input: bebok_cli_agents::CliInputSlot,
     /// Pending `ask` permission requests awaiting a client decision (M2).
     pending_asks: Mutex<HashMap<String, PendingPermissionRequest>>,
     /// Session-scoped decision cache: identical `(tool, pattern)` is not asked
@@ -180,6 +182,7 @@ impl SessionState {
             running: AtomicBool::new(false),
             abort: Mutex::new(None),
             fleet_requested: AtomicBool::new(false),
+            cli_input: Default::default(),
             pending_asks: Mutex::new(HashMap::new()),
             decision_cache: Mutex::new(HashMap::new()),
             child_tasks: Mutex::new(HashMap::new()),
@@ -548,6 +551,21 @@ impl SessionState {
     /// Fetch the abort token (for `POST /session/{id}/abort`).
     pub async fn abort_token(&self) -> Option<CancellationToken> {
         self.abort.lock().await.clone()
+    }
+
+    /// Slot a CLI provider publishes its live stdin into for this session.
+    pub fn cli_input_slot(&self) -> bebok_cli_agents::CliInputSlot {
+        self.cli_input.clone()
+    }
+
+    /// Send `text` to the running CLI turn. `false` = nothing took it (no CLI
+    /// turn, a CLI that cannot take input while working, or the turn just ended).
+    pub fn inject_cli_message(&self, text: &str) -> bool {
+        if !self.is_running() {
+            return false;
+        }
+        let input = self.cli_input.lock().ok().and_then(|g| g.clone());
+        input.is_some_and(|i| i.send(text))
     }
 
     /// True while a turn is running on this session.

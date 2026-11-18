@@ -110,6 +110,25 @@ pub async fn prompt_turn(
     id: Uuid,
     body: PromptBody,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    // A prompt sent while a CLI turn runs goes straight to the CLI when it can
+    // take input (text only), instead of waiting for the turn to end.
+    if body.images.is_empty() && body.files.is_empty() {
+        let running = state.store.open_session(id).await.map_err(ApiError::from)?;
+        if running.inject_cli_message(&body.message) {
+            let idx = running
+                .append_user_message(&body.message)
+                .await
+                .map_err(ApiError::from)?;
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "sessionID": id.to_string(),
+                    "messageIndex": idx,
+                    "status": "injected",
+                })),
+            ));
+        }
+    }
     // Validate image attachments before claiming the turn slot.
     let image_parts = validate_images(body.images)?;
     let mut attachment_parts = image_parts.clone();
@@ -262,7 +281,9 @@ pub async fn prompt_turn(
         Some(ProviderKind::Cli)
     );
     let provider_ctx = if is_cli {
-        provider_ctx.with_session_sink(cli_sink.clone())
+        provider_ctx
+            .with_session_sink(cli_sink.clone())
+            .with_input_slot(session.cli_input_slot())
     } else {
         provider_ctx
     };

@@ -916,6 +916,19 @@ export class EngineClient {
     );
   }
 
+  /** Scope-aware go-to-definition for the unsaved buffer: locals, imports and
+   *  same-file definitions come from `text`; `offset` is a UTF-8 byte offset. */
+  fsDefinitionAt(
+    directory: string,
+    body: { path: string; symbol: string; text: string; offset: number },
+  ): Promise<FsDefinitionResponse> {
+    return this.request<FsDefinitionResponse>(
+      'POST',
+      `/fs/definition?directory=${encodeURIComponent(directory)}`,
+      body,
+    );
+  }
+
   /** Editor completion for the unsaved buffer (Explorer editor popup). */
   fsComplete(directory: string, body: FsCompleteRequest): Promise<FsCompleteResponse> {
     return this.request<FsCompleteResponse>(

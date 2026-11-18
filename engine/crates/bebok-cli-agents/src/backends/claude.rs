@@ -283,6 +283,22 @@ impl CliBackend for ClaudeBackend {
         Some(line)
     }
 
+    /// A mid-turn message: same stream-json user line as the first prompt.
+    /// Claude folds it into the running turn at the next tool boundary and
+    /// still emits a single `result` (verified with `claude` 2.1.x).
+    fn live_message(&self, text: &str, probe: &CliProbe) -> Option<Vec<u8>> {
+        if !supports_stream_input(probe) {
+            return None;
+        }
+        let message = json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "text", "text": text }] },
+        });
+        let mut line = message.to_string().into_bytes();
+        line.push(b'\n');
+        Some(line)
+    }
+
     /// The init line names the model exactly (`claude-opus-5`); aliases such as
     /// `opus` or `sonnet` are resolved to the newest catalog entry of that
     /// family.
@@ -416,7 +432,7 @@ impl CliBackend for ClaudeBackend {
                 let denied = permission_denials(&value);
                 if !denied.is_empty() {
                     st.pending.push_back(CliEvent::Thinking(format!(
-                        "⚠ Claude Code could not run: {}",
+                        "⚠ CLI agent could not run: {}",
                         denied.join(", ")
                     )));
                 }
@@ -1643,7 +1659,7 @@ mod tests {
         ));
         match st.pending.pop_front() {
             Some(CliEvent::Thinking(note)) => {
-                assert_eq!(note, "⚠ Claude Code could not run: Bash, Edit")
+                assert_eq!(note, "⚠ CLI agent could not run: Bash, Edit")
             }
             other => panic!("expected a denial note, got {other:?}"),
         }

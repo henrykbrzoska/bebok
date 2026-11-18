@@ -35,6 +35,7 @@ pub mod files;
 pub mod fleet_tool;
 pub mod gate;
 pub mod goto_definition;
+pub(crate) mod goto_local;
 pub mod images;
 pub mod index_prompt;
 pub mod jev_tool;

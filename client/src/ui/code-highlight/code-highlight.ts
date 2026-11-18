@@ -72,6 +72,25 @@ const LANGUAGES: Record<string, LanguageSpec> = {
   powershell: { id: 'powershell', load: () => import('highlight.js/lib/languages/powershell') },
   sql: { id: 'sql', load: () => import('highlight.js/lib/languages/sql') },
   dockerfile: { id: 'dockerfile', load: () => import('highlight.js/lib/languages/dockerfile') },
+  php: { id: 'php', load: () => import('highlight.js/lib/languages/php') },
+  twig: { id: 'twig', load: () => import('highlight.js/lib/languages/twig') },
+  ruby: { id: 'ruby', load: () => import('highlight.js/lib/languages/ruby') },
+  swift: { id: 'swift', load: () => import('highlight.js/lib/languages/swift') },
+  lua: { id: 'lua', load: () => import('highlight.js/lib/languages/lua') },
+  perl: { id: 'perl', load: () => import('highlight.js/lib/languages/perl') },
+  scala: { id: 'scala', load: () => import('highlight.js/lib/languages/scala') },
+  dart: { id: 'dart', load: () => import('highlight.js/lib/languages/dart') },
+  elixir: { id: 'elixir', load: () => import('highlight.js/lib/languages/elixir') },
+  haskell: { id: 'haskell', load: () => import('highlight.js/lib/languages/haskell') },
+  r: { id: 'r', load: () => import('highlight.js/lib/languages/r') },
+  objectivec: { id: 'objectivec', load: () => import('highlight.js/lib/languages/objectivec') },
+  less: { id: 'less', load: () => import('highlight.js/lib/languages/less') },
+  graphql: { id: 'graphql', load: () => import('highlight.js/lib/languages/graphql') },
+  protobuf: { id: 'protobuf', load: () => import('highlight.js/lib/languages/protobuf') },
+  makefile: { id: 'makefile', load: () => import('highlight.js/lib/languages/makefile') },
+  nginx: { id: 'nginx', load: () => import('highlight.js/lib/languages/nginx') },
+  properties: { id: 'properties', load: () => import('highlight.js/lib/languages/properties') },
+  diff: { id: 'diff', load: () => import('highlight.js/lib/languages/diff') },
 };
 
 /** Fence hint / file extension (lowercased, no leading dot) -> `LANGUAGES` key. */
@@ -138,6 +157,50 @@ const ALIASES: Record<string, string> = {
   dockerfile: 'dockerfile',
   docker: 'dockerfile',
   containerfile: 'dockerfile',
+  php: 'php',
+  phtml: 'php',
+  php3: 'php',
+  php4: 'php',
+  php5: 'php',
+  php7: 'php',
+  php8: 'php',
+  phps: 'php',
+  inc: 'php',
+  twig: 'twig',
+  rb: 'ruby',
+  ruby: 'ruby',
+  rake: 'ruby',
+  gemspec: 'ruby',
+  swift: 'swift',
+  lua: 'lua',
+  pl: 'perl',
+  pm: 'perl',
+  perl: 'perl',
+  scala: 'scala',
+  sc: 'scala',
+  dart: 'dart',
+  ex: 'elixir',
+  exs: 'elixir',
+  elixir: 'elixir',
+  hs: 'haskell',
+  haskell: 'haskell',
+  r: 'r',
+  m: 'objectivec',
+  mm: 'objectivec',
+  objc: 'objectivec',
+  less: 'less',
+  graphql: 'graphql',
+  gql: 'graphql',
+  proto: 'protobuf',
+  protobuf: 'protobuf',
+  makefile: 'makefile',
+  make: 'makefile',
+  mk: 'makefile',
+  nginx: 'nginx',
+  properties: 'properties',
+  env: 'properties',
+  diff: 'diff',
+  patch: 'diff',
 };
 
 const registered = new Set<string>();
@@ -169,6 +232,15 @@ export function extensionOf(filename: string | null | undefined): string | null 
   const base = filename.split(/[\\/]/).pop() ?? filename;
   if (/^dockerfile(\.[^.]+)?$/i.test(base)) {
     return 'dockerfile';
+  }
+  if (/^(gnu)?makefile$/i.test(base)) {
+    return 'makefile';
+  }
+  if (/^\.env(\..+)?$/i.test(base)) {
+    return 'env';
+  }
+  if (/^(rakefile|gemfile)$/i.test(base)) {
+    return 'rb';
   }
   const match = /\.([a-z0-9+]+)$/i.exec(base);
   return match ? match[1].toLowerCase() : null;

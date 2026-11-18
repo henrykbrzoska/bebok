@@ -38,8 +38,10 @@ pub struct DefinitionResponse {
     pub results: Vec<DefinitionHit>,
     /// Files parsed (after the text pre-filter).
     pub parsed_files: usize,
-    /// True when the file cap or `limit` cut the search short.
+    /// True when the file cap, time budget or `limit` cut the search short.
     pub truncated: bool,
+    /// The caret sits on the declaration itself (the client offers usages).
+    pub on_declaration: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -308,12 +310,26 @@ fn shared_dirs(a: &str, b: &str) -> usize {
         .count()
 }
 
-/// Find the definitions of `symbol`.
-///
-/// `from` is the project-relative file the click happened in: it picks the
-/// language family (all supported families when absent / unknown) and is
-/// searched first. Ranking: same file → a file named after the symbol
-/// (`Foo.php`, `foo.rs`, `Foo.tsx`) → nearest directory → path order.
+/// Extra input for [`find_definitions_in`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DefinitionContext<'a> {
+    /// Unsaved buffer of the clicked file (`from`): locals, imports and
+    /// same-file definitions are read from it instead of the disk copy.
+    pub text: Option<&'a str>,
+    /// UTF-8 byte offset of the caret in `text`.
+    pub offset: Option<usize>,
+    /// Files a full-text index ranked for the symbol (searched early).
+    pub priority: &'a [String],
+}
+
+/// Most paths collected by the walk (the read budget is `max_files`).
+const WALK_CAP: usize = 500_000;
+/// Stop reading once something was found and this much time went by.
+const SOFT_BUDGET: std::time::Duration = std::time::Duration::from_millis(1_500);
+/// Hard stop for one lookup.
+const HARD_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Find the definitions of `symbol` (no buffer context).
 pub fn find_definitions(
     root: &Path,
     from: Option<&str>,
@@ -321,6 +337,34 @@ pub fn find_definitions(
     limit: usize,
     max_files: usize,
 ) -> DefinitionResponse {
+    find_definitions_in(
+        root,
+        from,
+        symbol,
+        DefinitionContext::default(),
+        limit,
+        max_files,
+    )
+}
+
+/// Find the definitions of `symbol`.
+///
+/// `from` is the project-relative file the click happened in: it picks the
+/// language family (all supported families when absent / unknown). With a
+/// buffer + caret in `ctx`, a local binding in scope wins outright, the caret
+/// on a declaration reports `on_declaration`, and a bare identifier defined
+/// in the same file resolves there. Otherwise files are ranked: import /
+/// class-name path hints → a file named after the symbol → index hits →
+/// nearest directory → path order. `max_files` bounds the files *read*.
+pub fn find_definitions_in(
+    root: &Path,
+    from: Option<&str>,
+    symbol: &str,
+    ctx: DefinitionContext<'_>,
+    limit: usize,
+    max_files: usize,
+) -> DefinitionResponse {
+    let started = std::time::Instant::now();
     // PHP `$var` / `$this->x`: definitions carry the bare name.
     let symbol = symbol.trim_start_matches('$');
     let mut resp = DefinitionResponse {
@@ -328,6 +372,7 @@ pub fn find_definitions(
         results: Vec::new(),
         parsed_files: 0,
         truncated: false,
+        on_declaration: false,
     };
     if !is_valid_symbol(symbol) {
         return resp;
@@ -339,40 +384,123 @@ pub fn find_definitions(
         .and_then(|e| Lang::from_ext(&e.to_ascii_lowercase()));
     let exts: Vec<&str> = match from_lang {
         Some(l) => l.family_exts().to_vec(),
-        None => [Lang::Rust, Lang::Ts, Lang::Php, Lang::Go, Lang::Python]
-            .iter()
-            .flat_map(|l| l.family_exts().iter().copied())
-            .collect(),
+        None => source_exts(),
     };
 
-    let (mut files, truncated) = source_files(root, &exts, max_files);
-    resp.truncated = truncated;
+    // 1. The buffer: locals, declaration under the caret, imports, same file.
+    let mut lookup = symbol.to_string();
+    let mut hints: Vec<String> = Vec::new();
+    let mut buffer_done = false;
+    if let (Some(text), Some(lang), Some(rel)) = (ctx.text, from_lang, from.as_deref()) {
+        let mut offset = ctx.offset.unwrap_or(0).min(text.len());
+        while !text.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        let info = super::goto_local::analyse(lang, rel, text, offset, symbol);
+        if info.on_declaration {
+            resp.on_declaration = true;
+            return resp;
+        }
+        if let Some(local) = info.local {
+            resp.results.push(DefinitionHit {
+                path: rel.to_string(),
+                line: local.line,
+                column: local.column,
+                kind: local.kind,
+                snippet: local.snippet,
+            });
+            return resp;
+        }
+        if let Some(l) = info.lookup {
+            lookup = l;
+        }
+        hints = info.path_hints;
+        let (caret_line, caret_col) = super::goto_local::line_col(text, offset);
+        let same = definitions_in(lang, text, &lookup);
+        if same.iter().any(|(l, c, _, _)| {
+            *l == caret_line && caret_col >= *c && caret_col <= *c + lookup.len()
+        }) {
+            resp.on_declaration = true;
+            return resp;
+        }
+        for (line, column, kind, snippet) in same {
+            resp.results.push(DefinitionHit {
+                path: rel.to_string(),
+                line,
+                column,
+                kind,
+                snippet,
+            });
+        }
+        // `foo()` / `Foo` defined right here: no need to look further
+        // (member access `x.foo` may still mean another class's `foo`).
+        if !resp.results.is_empty() && (!info.member || info.self_member) {
+            return resp;
+        }
+        buffer_done = true;
+    } else if from_lang == Some(Lang::Php) || from_lang.is_none() {
+        hints = super::goto_local::analyse(Lang::Php, "", "", 0, symbol).path_hints;
+    }
+    let lookup = lookup.as_str();
 
-    let lower = symbol.to_ascii_lowercase();
+    // 2. The project.
+    let (mut files, walk_truncated) = source_files(root, &exts, WALK_CAP);
+    resp.truncated = walk_truncated;
+    let priority: std::collections::HashSet<&str> =
+        ctx.priority.iter().map(String::as_str).collect();
+    let lower = lookup.to_ascii_lowercase();
     let rank = |rel: &str| -> (u8, std::cmp::Reverse<usize>) {
         if from.as_deref() == Some(rel) {
             return (0, std::cmp::Reverse(usize::MAX));
+        }
+        let near = from.as_deref().map(|f| shared_dirs(f, rel)).unwrap_or(0);
+        if hints
+            .iter()
+            .any(|h| super::goto_local::hint_matches(rel, h))
+        {
+            return (1, std::cmp::Reverse(near));
         }
         let stem = Path::new(rel)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let near = from.as_deref().map(|f| shared_dirs(f, rel)).unwrap_or(0);
-        let tier = if stem == lower || stem.replace(['-', '_'], "") == lower {
-            1
-        } else {
+        let tier = if stem == lower || stem.replace(['-', '_', '.'], "") == lower.replace('_', "") {
             2
+        } else if priority.contains(rel) {
+            3
+        } else {
+            4
         };
         (tier, std::cmp::Reverse(near))
     };
-    files.sort_by(|a, b| rank(&a.1).cmp(&rank(&b.1)).then_with(|| a.1.cmp(&b.1)));
+    let mut ranked: Vec<((u8, std::cmp::Reverse<usize>), PathBuf, String)> =
+        files.drain(..).map(|(p, r)| (rank(&r), p, r)).collect();
+    ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
 
-    'files: for (path, rel) in &files {
+    let mut read = 0usize;
+    let mut best_tier: Option<u8> = None;
+    'files: for ((tier, _), path, rel) in &ranked {
+        if buffer_done && from.as_deref() == Some(rel.as_str()) {
+            continue;
+        }
+        // A hit in a hinted file (import / class path) is the answer.
+        if best_tier == Some(1) && *tier > 1 {
+            break;
+        }
+        let elapsed = started.elapsed();
+        if read >= max_files
+            || elapsed > HARD_BUDGET
+            || (!resp.results.is_empty() && elapsed > SOFT_BUDGET)
+        {
+            resp.truncated = true;
+            break;
+        }
+        read += 1;
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        if !content.contains(symbol) {
+        if !content.contains(lookup) {
             continue;
         }
         let ext = Path::new(rel)
@@ -384,7 +512,8 @@ pub fn find_definitions(
             continue;
         };
         resp.parsed_files += 1;
-        for (line, column, kind, snippet) in definitions_in(lang, &content, symbol) {
+        for (line, column, kind, snippet) in definitions_in(lang, &content, lookup) {
+            best_tier = Some(best_tier.map_or(*tier, |b| b.min(*tier)));
             resp.results.push(DefinitionHit {
                 path: rel.clone(),
                 line,
@@ -397,6 +526,24 @@ pub fn find_definitions(
                 break 'files;
             }
         }
+    }
+    // Nothing defines it, but an import pointed at an existing module file
+    // (`import * as m`, default export under another name): open that file.
+    if resp.results.is_empty()
+        && let Some((_, _, rel)) = ranked.iter().find(|(t, _, r)| {
+            t.0 == 1
+                && hints
+                    .iter()
+                    .any(|h| !h.ends_with('/') && r.to_ascii_lowercase() == *h)
+        })
+    {
+        resp.results.push(DefinitionHit {
+            path: rel.clone(),
+            line: 1,
+            column: 1,
+            kind: "module".to_string(),
+            snippet: String::new(),
+        });
     }
     resp
 }

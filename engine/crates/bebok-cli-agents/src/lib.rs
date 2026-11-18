@@ -28,10 +28,10 @@ pub use discovery::{discover_binary, which_on_path};
 pub use probe::{CliFeatures, probe_features};
 pub use profile::{ProfilePreview, preview_profile};
 pub use provider::{
-    CliProvider, CliResume, CliSessionReport, CliSessionSink, build_provider,
+    CliInputSlot, CliProvider, CliResume, CliSessionReport, CliSessionSink, build_provider,
     build_provider_for_turn, build_provider_with_env,
 };
-pub use runner::{CliRun, ResumePreflight, preflight, spawn_cli};
+pub use runner::{CliRun, LiveInput, ResumePreflight, preflight, spawn_cli};
 pub use spec::{CliSpec, ProfileMode, SystemPromptMode};
 
 use std::sync::atomic::{AtomicU64, Ordering};

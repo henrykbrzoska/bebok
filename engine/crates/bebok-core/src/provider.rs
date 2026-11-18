@@ -54,6 +54,8 @@ pub struct ProviderCtx {
     pub resume: Option<ResumeHint>,
     /// Receives the CLI conversation key at turn end. Ignored by HTTP providers.
     pub session_sink: Option<CliSessionSink>,
+    /// Where a CLI provider publishes its live stdin (mid-turn prompts).
+    pub input_slot: Option<bebok_cli_agents::CliInputSlot>,
 }
 
 impl ProviderCtx {
@@ -85,6 +87,12 @@ impl ProviderCtx {
     /// Have the CLI provider report its conversation key into `sink`.
     pub fn with_session_sink(mut self, sink: CliSessionSink) -> Self {
         self.session_sink = Some(sink);
+        self
+    }
+
+    /// Let the CLI provider accept prompts while it works (see `input_slot`).
+    pub fn with_input_slot(mut self, slot: bebok_cli_agents::CliInputSlot) -> Self {
+        self.input_slot = Some(slot);
         self
     }
 
@@ -135,6 +143,7 @@ pub fn build_provider_for(
             ctx.hook_env.clone(),
             resume,
             ctx.session_sink.clone(),
+            ctx.input_slot.clone(),
         )
         .map_err(CoreError::ProviderConfig);
     }

@@ -267,6 +267,7 @@
   margin: 0;
   max-width: none;
   white-space: pre;
+  tab-size: 4;
 }
 
 /* Editor: a highlighted <pre> under a transparent <textarea> (same
@@ -293,19 +294,31 @@
   letter-spacing: normal;
   white-space: pre;
   tab-size: 4;
-  overflow: auto;
   box-sizing: border-box;
 }
 
+/* Only the textarea scrolls (it owns the single scrollbar); the highlight
+   layer just follows it programmatically via scrollTop/Left (overflow:hidden
+   still allows that) so the wheel never fights two nested scrollers. */
 .editor-layer {
+  overflow: hidden;
   color: var(--code-text-strong);
   pointer-events: none;
+}
+
+.file-editor {
+  overflow: auto;
 }
 
 .editor-layer code.hljs {
   font: inherit;
   background: none;
   padding: 0;
+  /* Shifted by syncLayer() via transform on every textarea scroll: keep it
+     on its own compositor layer so WebKitGTK re-composites instead of
+     repainting the highlight spans (wheel scroll crawled otherwise). */
+  display: block;
+  will-change: transform;
 }
 
 .file-editor {

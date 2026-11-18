@@ -55,6 +55,17 @@ pub struct CliSessionReport {
 /// Where a provider leaves its [`CliSessionReport`] when a turn ends.
 pub type CliSessionSink = Arc<Mutex<Option<CliSessionReport>>>;
 
+pub use crate::runner::{CliInputSlot, LiveInput};
+
+/// Publish a run's live input (or clear a stale one) into the session slot.
+fn publish_input(slot: &Option<CliInputSlot>, input: Option<LiveInput>) {
+    if let Some(slot) = slot
+        && let Ok(mut guard) = slot.lock()
+    {
+        *guard = input;
+    }
+}
+
 /// A provider that drives an agentic CLI.
 pub struct CliProvider {
     backend: Arc<dyn CliBackend>,
@@ -68,6 +79,8 @@ pub struct CliProvider {
     resume: Option<CliResume>,
     /// Receives the conversation key and profile digest when the turn ends.
     sink: Option<CliSessionSink>,
+    /// Receives the live-input handle of the running turn.
+    input_slot: Option<CliInputSlot>,
 }
 
 impl CliProvider {
@@ -79,7 +92,15 @@ impl CliProvider {
             extra_env: Vec::new(),
             resume: None,
             sink: None,
+            input_slot: None,
         }
+    }
+
+    /// Publish the running turn's [`LiveInput`] into `slot`, so a prompt sent
+    /// mid-turn can be written to the CLI instead of aborting it.
+    pub fn with_input_slot(mut self, slot: Option<CliInputSlot>) -> Self {
+        self.input_slot = slot;
+        self
     }
 
     /// Continue an earlier conversation when the CLI still has it (see
@@ -226,6 +247,7 @@ struct RunState {
     /// Profile digest of the current attempt.
     profile_hash: Option<String>,
     sink: Option<CliSessionSink>,
+    input_slot: Option<CliInputSlot>,
 }
 
 impl RunState {
@@ -238,6 +260,7 @@ impl RunState {
             .ok_or_else(|| CliError::Stream("no full transcript to fall back to".into()))?;
         tracing::info!("CLI lost the resumed conversation; retrying with the full transcript");
         let run = runner::spawn_cli(plan.backend, plan.spec, plan.full).await?;
+        publish_input(&self.input_slot, run.input);
         self.inner = run.events;
         self.exit = Some(run.exit);
         self.profile_hash = run.profile_hash;
@@ -386,6 +409,7 @@ impl Provider for CliProvider {
             .await
             .map_err(LlmError::from)?;
 
+        publish_input(&self.input_slot, run.input.clone());
         let retry = resumed.then(|| RetryPlan {
             backend: self.backend.clone(),
             spec: self.spec.clone(),
@@ -406,6 +430,7 @@ impl Provider for CliProvider {
             session_key: None,
             profile_hash: run.profile_hash,
             sink: self.sink.clone(),
+            input_slot: self.input_slot.clone(),
         };
 
         let stream = futures::stream::unfold(Some(state), |slot: Option<RunState>| async move {
@@ -501,7 +526,7 @@ pub fn build_provider_with_env(
     project_root: Option<PathBuf>,
     extra_env: Vec<(String, String)>,
 ) -> Result<Arc<dyn Provider>, String> {
-    build_provider_for_turn(spec, project_root, extra_env, None, None)
+    build_provider_for_turn(spec, project_root, extra_env, None, None, None)
 }
 
 /// [`build_provider_with_env`] plus the conversation to continue (if any) and
@@ -512,6 +537,7 @@ pub fn build_provider_for_turn(
     extra_env: Vec<(String, String)>,
     resume: Option<CliResume>,
     sink: Option<CliSessionSink>,
+    input_slot: Option<CliInputSlot>,
 ) -> Result<Arc<dyn Provider>, String> {
     let cli_spec = CliSpec::from_extra(&spec.extra).map_err(|e| e.to_string())?;
 
@@ -539,7 +565,8 @@ pub fn build_provider_for_turn(
         CliProvider::new(backend, cli_spec, root)
             .with_extra_env(extra_env)
             .with_resume(resume)
-            .with_session_sink(sink),
+            .with_session_sink(sink)
+            .with_input_slot(input_slot),
     ))
 }
 
