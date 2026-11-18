@@ -505,12 +505,26 @@ async fn run_stop(state: &AppState, session_id: Uuid, _payload: &Value) -> Resul
 mod tests {
     use super::*;
 
+    /// A root that is absolute on every platform (`/proj` is not absolute
+    /// on Windows, so `strip_prefix` never matches there).
+    fn test_root() -> std::path::PathBuf {
+        std::env::temp_dir().join("proj")
+    }
+
+    fn test_path(name: &str) -> String {
+        test_root()
+            .join(name)
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    }
+
     #[test]
     fn bash_maps_to_a_rule_friendly_call_string() {
         let mapped = map_call(
             "Bash",
             &json!({ "command": "npm test", "description": "run tests" }),
-            std::path::Path::new("/proj"),
+            &test_root(),
         );
         assert_eq!(mapped.engine_tool, "cli:Bash");
         assert_eq!(mapped.args, json!({ "command": "npm test" }));
@@ -522,8 +536,8 @@ mod tests {
     fn edit_maps_absolute_paths_to_project_relative_ones() {
         let mapped = map_call(
             "Edit",
-            &json!({ "file_path": "/proj/src/x.rs", "old_string": "a", "new_string": "b" }),
-            std::path::Path::new("/proj"),
+            &json!({ "file_path": test_path("src/x.rs"), "old_string": "a", "new_string": "b" }),
+            &test_root(),
         );
         assert_eq!(mapped.engine_tool, "cli:Edit");
         assert_eq!(mapped.args, json!({ "path": "src/x.rs" }));
@@ -535,8 +549,8 @@ mod tests {
     fn read_tools_are_read_only_and_never_tracked() {
         let mapped = map_call(
             "Read",
-            &json!({ "file_path": "/proj/src/x.rs" }),
-            std::path::Path::new("/proj"),
+            &json!({ "file_path": test_path("src/x.rs") }),
+            &test_root(),
         );
         assert!(mapped.read_only);
         assert_eq!(mapped.tracked_path, None);
@@ -548,7 +562,7 @@ mod tests {
         let mapped = map_call(
             "WebFetch",
             &json!({ "url": "http://127.0.0.1:8787/session" }),
-            std::path::Path::new("/proj"),
+            &test_root(),
         );
         assert_eq!(
             mapped.args,
@@ -558,22 +572,23 @@ mod tests {
 
     #[test]
     fn unknown_tools_match_on_their_serialised_input() {
-        let mapped = map_call(
-            "TodoWrite",
-            &json!({ "todos": [] }),
-            std::path::Path::new("/proj"),
-        );
+        let mapped = map_call("TodoWrite", &json!({ "todos": [] }), &test_root());
         assert_eq!(mapped.engine_tool, "cli:TodoWrite");
         assert_eq!(mapped.args, Value::String("{\"todos\":[]}".to_string()));
     }
 
     #[test]
     fn project_relative_leaves_foreign_and_relative_paths_alone() {
-        let root = std::path::Path::new("/proj");
-        assert_eq!(project_relative("/proj/a/b.rs", root), "a/b.rs");
-        assert_eq!(project_relative("a/b.rs", root), "a/b.rs");
-        assert_eq!(project_relative("/elsewhere/b.rs", root), "/elsewhere/b.rs");
-        assert_eq!(project_relative("", root), "");
+        let root = test_root();
+        assert_eq!(project_relative(&test_path("a/b.rs"), &root), "a/b.rs");
+        assert_eq!(project_relative("a/b.rs", &root), "a/b.rs");
+        // A path outside the root keeps its `..` escape visible (whatever
+        // the platform's absolute form is); the permission engine and
+        // pathguard judge the result downstream.
+        let outside = root.join("..").join("elsewhere").join("b.rs");
+        let outside_str = outside.to_string_lossy().replace('\\', "/");
+        assert_eq!(project_relative(&outside_str, &root), "../elsewhere/b.rs");
+        assert_eq!(project_relative("", &root), "");
     }
 
     #[test]
@@ -702,6 +717,13 @@ mod tests {
         value["hookSpecificOutput"]["permissionDecision"]
             .as_str()
             .unwrap_or_default()
+    }
+
+    /// A project path embedded in a JSON test body. Backslashes would form
+    /// invalid JSON escapes on Windows, so they become forward slashes (the
+    /// hook normalises them the same way in `project_relative`).
+    fn json_path(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
     }
 
     #[tokio::test]
@@ -850,7 +872,7 @@ mod tests {
                 "pre",
                 Some(&token),
                 r#"{"tool_name":"Edit","tool_input":{"file_path":"REPLACED","old_string":"a","new_string":"b"}}"#
-                    .replace("REPLACED", &fx.root.join("src/x.rs").to_string_lossy())
+                    .replace("REPLACED", &json_path(&fx.root.join("src/x.rs")))
                     .as_str(),
             ),
         )
@@ -882,7 +904,7 @@ mod tests {
                 Some(&token),
                 &format!(
                     r#"{{"tool_name":"Edit","tool_input":{{"file_path":"{}"}}}}"#,
-                    fx.root.join("src/x.rs").to_string_lossy()
+                    json_path(&fx.root.join("src/x.rs"))
                 ),
             ),
         )
@@ -913,7 +935,7 @@ mod tests {
 
         let pre_body = format!(
             r#"{{"tool_name":"Edit","tool_input":{{"file_path":"{}"}}}}"#,
-            path.to_string_lossy()
+            json_path(&path)
         );
         let (_, value) = send(
             fx.router(),
