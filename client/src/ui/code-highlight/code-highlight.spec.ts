@@ -42,6 +42,16 @@ describe('resolveLanguage / extensionOf (F7-4)', () => {
     expect(resolveLanguage(null, 'Dockerfile')).toBe('dockerfile');
   });
 
+  it('resolves PHP and other extra languages / special filenames', () => {
+    expect(resolveLanguage(null, 'src/Controller/HomeController.php')).toBe('php');
+    expect(resolveLanguage(null, 'templates/view.phtml')).toBe('php');
+    expect(resolveLanguage(null, 'base.html.twig')).toBe('twig');
+    expect(resolveLanguage(null, 'app.rb')).toBe('ruby');
+    expect(resolveLanguage(null, 'Makefile')).toBe('makefile');
+    expect(resolveLanguage(null, '.env.local')).toBe('properties');
+    expect(resolveLanguage(null, 'Gemfile')).toBe('ruby');
+  });
+
   it('prefers an explicit hint over the filename', () => {
     expect(resolveLanguage('python', 'main.rs')).toBe('python');
   });
@@ -75,5 +85,14 @@ describe('highlightCode (F7-4)', () => {
     await preloadLanguage(null, 'main.go');
     const { language } = highlightCode('func main() {}', { filename: 'main.go' });
     expect(language).toBe('go');
+  });
+
+  it('tokenizes a PHP file', async () => {
+    await preloadLanguage(null, 'Foo.php');
+    const { html, language } = highlightCode('<?php\nfunction foo($a) { return $a; }\n', {
+      filename: 'Foo.php',
+    });
+    expect(language).toBe('php');
+    expect(html).toContain('hljs-keyword');
   });
 });
