@@ -10,11 +10,12 @@ use std::sync::Arc;
 use crate::backend::CliBackend;
 
 pub mod claude;
+pub mod grok;
 
 /// Every registered backend, in a stable order (the settings card renders them
 /// in this order, so keep it alphabetical by id).
 pub fn all_backends() -> Vec<Arc<dyn CliBackend>> {
-    vec![Arc::new(claude::ClaudeBackend)]
+    vec![Arc::new(claude::ClaudeBackend), Arc::new(grok::GrokBackend)]
 }
 
 /// Look up a backend by its `extra.backend` id.
@@ -36,6 +37,11 @@ mod tests {
     fn claude_is_registered() {
         let ids: Vec<&str> = all_backends().iter().map(|b| b.id()).collect();
         assert!(ids.contains(&"claude"), "{ids:?}");
+    }
+
+    #[test]
+    fn grok_is_registered() {
+        assert_eq!(backend_for("grok").map(|b| b.id()), Some("grok"));
     }
 
     #[test]

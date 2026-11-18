@@ -54,11 +54,42 @@ const REAP_GRACE: Duration = Duration::from_secs(5);
 /// turn, a dropped provider stream) kills the whole process tree. A CLI that
 /// outlives its turn is a zombie `claude` holding the project open.
 pub struct CliRun {
+    /// Live stdin, when the backend accepts messages while it works.
+    pub input: Option<LiveInput>,
     pub events: BoxStream<'static, Result<CliEvent, CliError>>,
     pub exit: tokio::task::JoinHandle<Result<Option<i32>, CliError>>,
     /// Profile digest this turn was started with (see `PreparedTurn`).
     pub profile_hash: Option<String>,
 }
+
+/// Handle for sending a message to a running CLI. Sending fails (returns
+/// `false`) once the turn is over, so a stale handle is harmless.
+#[derive(Clone)]
+pub struct LiveInput {
+    tx: mpsc::UnboundedSender<Vec<u8>>,
+    backend: Arc<dyn CliBackend>,
+    probe: CliProbe,
+}
+
+impl std::fmt::Debug for LiveInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveInput").finish_non_exhaustive()
+    }
+}
+
+impl LiveInput {
+    /// Deliver `text` to the running turn. `false` = not delivered (turn over
+    /// or the CLI cannot take it); the caller should fall back.
+    pub fn send(&self, text: &str) -> bool {
+        match self.backend.live_message(text, &self.probe) {
+            Some(bytes) => self.tx.send(bytes).is_ok(),
+            None => false,
+        }
+    }
+}
+
+/// Where a provider publishes its [`LiveInput`] for the session's current turn.
+pub type CliInputSlot = Arc<std::sync::Mutex<Option<LiveInput>>>;
 
 /// What a resumed turn needs to know before its request is final: whether the
 /// binary can resume at all, and the profile it would run with.
@@ -146,6 +177,8 @@ pub async fn spawn_cli(
         .stdin
         .clone()
         .or_else(|| backend.stdin_payload(&req, &probe));
+    // Keep stdin open for mid-turn messages only when the backend can take them.
+    let live = stdin_payload.is_some() && backend.live_message("", &probe).is_some();
     let program = effective_program(&requested, &resolved);
     let args = args
         .into_iter()
@@ -196,7 +229,22 @@ pub async fn spawn_cli(
         .ok_or_else(|| CliError::Spawn("CLI stdout pipe unavailable".into()))?;
     let stderr = child.stderr.take();
 
+    // The turn is over (result seen, stdout closed): closes a live stdin.
+    let (turn_end_tx, turn_end_rx) = watch::channel(false);
+    let mut input = None;
     if let (Some(payload), Some(mut stdin)) = (stdin_payload, child.stdin.take()) {
+        let live_rx = if live {
+            let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+            input = Some(LiveInput {
+                tx,
+                backend: Arc::clone(&backend),
+                probe: probe.clone(),
+            });
+            Some(rx)
+        } else {
+            None
+        };
+        let mut ended = turn_end_rx.clone();
         // Written off the critical path: a CLI that exits early (or never
         // reads) must not block the reader. A failed write is only a debug
         // note here — the CLI's own exit status and stderr explain the real
@@ -204,9 +252,24 @@ pub async fn spawn_cli(
         tokio::spawn(async move {
             if let Err(err) = stdin.write_all(&payload).await {
                 tracing::debug!(error = %err, "CLI stdin write failed");
+            } else if let Some(mut rx) = live_rx {
+                // Mid-turn messages, until the turn ends.
+                loop {
+                    tokio::select! {
+                        msg = rx.recv() => match msg {
+                            Some(bytes) => {
+                                if stdin.write_all(&bytes).await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => break,
+                        },
+                        _ = wait_done(&mut ended) => break,
+                    }
+                }
             }
-            // Dropping the pipe closes stdin. EOF is what lets `claude -p`
-            // start; an open stdin makes it wait for more input.
+            // Dropping the pipe closes stdin: EOF is what lets a one-shot CLI
+            // start, and what lets a live one exit after its result.
             drop(stdin);
         });
     }
@@ -242,6 +305,7 @@ pub async fn spawn_cli(
     let reader_shared = Arc::clone(&shared);
     let mut reader_done = done_rx.clone();
     let reader_tx = tx.clone();
+    let reader_turn_end = turn_end_tx;
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         let mut state = CliStreamState::default();
@@ -270,6 +334,7 @@ pub async fn spawn_cli(
             for event in events {
                 if matches!(event, CliEvent::Usage(_)) {
                     reader_shared.saw_usage.store(true, Ordering::SeqCst);
+                    let _ = reader_turn_end.send(true);
                 }
                 if reader_tx.send(Ok(event)).await.is_err() {
                     // The consumer went away; stop reading.
@@ -282,6 +347,7 @@ pub async fn spawn_cli(
                 break;
             }
         }
+        let _ = reader_turn_end.send(true);
         // Normally stdout EOF precedes the exit by milliseconds; waiting for
         // the reap here keeps the guard from killing an already exiting
         // process. Bounded, because a stuck grandchild can hold stdout open.
@@ -365,6 +431,7 @@ pub async fn spawn_cli(
     .boxed();
 
     Ok(CliRun {
+        input,
         events,
         exit,
         profile_hash,

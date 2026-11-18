@@ -1105,7 +1105,7 @@ export const pl: Record<MessageKey, string> = {
   'goto.footHint': '↑↓ wybór · Enter otwórz · Tab następna zakładka · Esc zamknij · Ctrl+Shift+N pliki · Ctrl+N klasy · Shift Shift wszystko',
   'goto.truncated': 'Duży projekt - lista plików została przycięta',
   'explorer.navBar': 'Pasek nawigacji',
-  'chat.tool.externalBy': 'wykonane przez Claude Code',
+  'chat.tool.externalBy': 'wykonane przez agenta CLI',
   'explorer.navUp': 'Folder nadrzędny',
   'settings.cliProfileLabel': 'Profil',
   'settings.cliProfileBebok': 'Bebok (zarządzany)',

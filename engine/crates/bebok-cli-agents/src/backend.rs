@@ -413,6 +413,13 @@ pub trait CliBackend: Send + Sync {
     fn stdin_payload(&self, _req: &CliRequest, _probe: &CliProbe) -> Option<Vec<u8>> {
         None
     }
+    /// One user message to write to the *running* CLI's stdin, so a prompt
+    /// sent mid-turn reaches the model without aborting it. `None` = the CLI
+    /// cannot take input while it works (the runner then closes stdin after
+    /// the first payload, as before).
+    fn live_message(&self, _text: &str, _probe: &CliProbe) -> Option<Vec<u8>> {
+        None
+    }
     /// Map the CLI's own model name (and the id it reported at startup, if
     /// any) to an id in the model catalog, for context-window lookup.
     fn catalog_model(&self, _cli_model: &str, _init_model: Option<&str>) -> Option<String> {
