@@ -1791,15 +1791,23 @@ mod tests {
         );
 
         let dir = "/profiles/claude";
+        let settings_path = std::path::Path::new(dir)
+            .join("settings.json")
+            .display()
+            .to_string();
+        let mcp_path = std::path::Path::new(dir)
+            .join("mcp.json")
+            .display()
+            .to_string();
         assert_eq!(
             out.args,
             vec![
                 "--settings".to_string(),
-                format!("{dir}/settings.json"),
+                settings_path,
                 "--setting-sources".into(),
                 "user".into(),
                 "--mcp-config".into(),
-                format!("{dir}/mcp.json"),
+                mcp_path,
                 "--strict-mcp-config".into(),
             ]
         );
@@ -1845,13 +1853,11 @@ mod tests {
     fn optional_profile_flags_are_gated_by_the_probe() {
         let probe = probe_with(&["--settings"]);
         let out = render_with(&spec_with(&[]), &request(), &probe).expect("renders");
-        assert_eq!(
-            out.args,
-            vec![
-                "--settings".to_string(),
-                "/profiles/claude/settings.json".to_string()
-            ]
-        );
+        let expected = std::path::Path::new("/profiles/claude")
+            .join("settings.json")
+            .display()
+            .to_string();
+        assert_eq!(out.args, vec!["--settings".to_string(), expected]);
         assert!(out.files.iter().all(|f| f.name != "mcp.json"));
         assert_eq!(out.flags, vec!["--settings".to_string()]);
     }
