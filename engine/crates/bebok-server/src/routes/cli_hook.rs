@@ -195,15 +195,21 @@ fn map_call(tool_name: &str, input: &Value, root: &std::path::Path) -> MappedCal
 
 /// The tracker and the permission engine work with project-relative paths; the
 /// CLI hands us absolute ones. Already-relative inputs pass through unchanged.
+///
+/// Both sides are canonicalized before comparison: the CLI may hand us a
+/// spelling with symlinks or 8.3 components (`RUNNER~1`) while the session
+/// root is already canonical (and vice versa on Windows vs Unix temp dirs).
 fn project_relative(raw: &str, root: &std::path::Path) -> String {
     if raw.is_empty() {
         return String::new();
     }
     let path = std::path::Path::new(raw);
-    if path.is_absolute()
-        && let Ok(stripped) = path.strip_prefix(root)
-    {
-        return stripped.to_string_lossy().replace('\\', "/");
+    if path.is_absolute() {
+        let canon_raw = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if let Ok(stripped) = canon_raw.strip_prefix(&canon_root) {
+            return stripped.to_string_lossy().replace('\\', "/");
+        }
     }
     raw.to_string()
 }
