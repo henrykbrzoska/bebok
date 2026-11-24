@@ -534,6 +534,8 @@ export const de: Record<MessageKey, string> = {
   'chat.compacting': 'Verdichte…',
   'chat.compactTitle': 'Ältere Nachrichten in einer neuen Sitzung zusammenfassen (Kontext verdichten)',
   'chat.compactIdle': 'Verdichten braucht eine ruhende Sitzung mit einigen Nachrichten',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'Kontext verdichten',
 
   // F6-5: unknown pricing

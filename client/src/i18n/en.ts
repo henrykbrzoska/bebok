@@ -542,6 +542,8 @@ export const en = {
   'chat.compacting': 'Compacting…',
   'chat.compactTitle': 'Summarize older messages into a new session (context compaction)',
   'chat.compactIdle': 'Compaction needs an idle session with a few messages',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'Compact context',
 
   // F6-5: unknown pricing

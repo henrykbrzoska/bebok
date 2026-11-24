@@ -182,6 +182,13 @@ export class ExplorerView implements OnInit {
       },
       { allowSignalWrites: true },
     );
+    // Minimap: re-render when content changes
+    effect(() => {
+      const text = this.editing() ? this.draftContent() : this.fileContent();
+      // track dependency
+      void text;
+      requestAnimationFrame(() => this.renderMinimap());
+    });
   }
 
   readonly directory = signal<string | null>(null);
@@ -342,6 +349,17 @@ export class ExplorerView implements OnInit {
     const { html } = this.codeHighlight.highlight(text, { filename: this.selectedPath() });
     return text.endsWith('\n') || text === '' ? `${html} ` : html;
   });
+
+  readonly draftLineNumbers = computed(() => lineNumbersFor(this.draftContent()));
+  readonly fileLineNumbers = computed(() => lineNumbersFor(this.fileContent()));
+  readonly gutterEl = viewChild<ElementRef<HTMLElement>>('gutterEl');
+
+  // Minimap (Sublime-style)
+  readonly minimapCanvas = viewChild<ElementRef<HTMLCanvasElement>>('minimapCanvas');
+  readonly minimapCanvasRO = viewChild<ElementRef<HTMLCanvasElement>>('minimapCanvasRO');
+  readonly minimapViewportTop = signal(0);
+  readonly minimapViewportHeight = signal(20);
+  private minimapDragging = false;
 
   async ngOnInit(): Promise<void> {
     this.directory.set(
@@ -981,6 +999,10 @@ export class ExplorerView implements OnInit {
       const target = code ?? layer;
       target.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
     }
+    const gutter = this.gutterEl()?.nativeElement;
+    if (gutter) {
+      gutter.scrollTop = area.scrollTop;
+    }
   }
 
   /** The find bar scrolls the layer to a match: follow it with the textarea. */
@@ -991,6 +1013,124 @@ export class ExplorerView implements OnInit {
       area.scrollLeft = layer.scrollLeft;
       this.syncLayer(area);
     }
+  }
+
+  // --- Minimap (Sublime-style) -------------------------------------------
+
+  renderMinimap(): void {
+    const text = this.editing() ? this.draftContent() : this.fileContent();
+    const canvas = (this.editing() ? this.minimapCanvas() : this.minimapCanvasRO())?.nativeElement
+      ?? this.minimapCanvas()?.nativeElement
+      ?? this.minimapCanvasRO()?.nativeElement;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = 64 * dpr;
+    const h = Math.max(100, rect.height * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    const cssW = 64;
+    const cssH = h / dpr;
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface-1').trim() || '#1c1e24';
+    ctx.fillRect(0, 0, cssW, cssH);
+    const lines = text.split('\n');
+    const totalLines = lines.length || 1;
+    const lineH = cssH / totalLines;
+    // Draw each line as a thin bar proportional to its length
+    for (let i = 0; i < lines.length; i++) {
+      const len = lines[i].length;
+      if (len === 0) continue;
+      const barW = Math.min(cssW - 4, Math.max(2, (len / 120) * (cssW - 4)));
+      // Color by content type
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('/*') || trimmed.startsWith('*')) {
+        ctx.fillStyle = 'rgba(107,114,128,0.6)';
+      } else if (trimmed.startsWith('import') || trimmed.startsWith('export') || trimmed.startsWith('from')) {
+        ctx.fillStyle = 'rgba(232,147,90,0.5)';
+      } else if (trimmed === '' || trimmed === '{' || trimmed === '}') {
+        ctx.fillStyle = 'rgba(107,114,128,0.25)';
+      } else {
+        ctx.fillStyle = 'rgba(199,203,211,0.55)';
+      }
+      const y = i * lineH;
+      const bh = Math.max(1, lineH * 0.7);
+      ctx.fillRect(2, y, barW, bh);
+    }
+    this.updateMinimapViewport();
+  }
+
+  updateMinimapViewport(): void {
+    const area = this.editing() ? this.editorArea()?.nativeElement : null;
+    const wrap = !this.editing() ? document.querySelector('.file-content-wrap') as HTMLElement | null : null;
+    const scrollEl = area ?? wrap;
+    if (!scrollEl) return;
+    const canvas = (this.editing() ? this.minimapCanvas() : this.minimapCanvasRO())?.nativeElement
+      ?? this.minimapCanvas()?.nativeElement
+      ?? this.minimapCanvasRO()?.nativeElement;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const cssH = rect.height || 400;
+    const text = this.editing() ? this.draftContent() : this.fileContent();
+    const totalLines = (text.split('\n').length) || 1;
+    const scrollHeight = scrollEl.scrollHeight;
+    const clientHeight = scrollEl.clientHeight;
+    const scrollTop = scrollEl.scrollTop;
+    if (scrollHeight <= clientHeight) {
+      this.minimapViewportTop.set(0);
+      this.minimapViewportHeight.set(cssH);
+      return;
+    }
+    const ratio = cssH / scrollHeight;
+    // Approximate: map scroll position to minimap
+    const top = (scrollTop / scrollHeight) * cssH;
+    const height = (clientHeight / scrollHeight) * cssH;
+    this.minimapViewportTop.set(top);
+    this.minimapViewportHeight.set(Math.max(12, height));
+    void totalLines;
+  }
+
+  onMinimapClick(event: MouseEvent): void {
+    const canvas = (event.currentTarget as HTMLElement).querySelector('canvas') ?? event.currentTarget as HTMLElement;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    const ratio = y / rect.height;
+    const area = this.editing() ? this.editorArea()?.nativeElement : null;
+    const wrap = !this.editing() ? document.querySelector('.file-content-wrap') as HTMLElement | null : null;
+    const scrollEl = area ?? wrap;
+    if (!scrollEl) return;
+    scrollEl.scrollTop = ratio * scrollEl.scrollHeight - scrollEl.clientHeight / 2;
+    if (area) this.syncLayer(area);
+    this.updateMinimapViewport();
+  }
+
+  onMinimapDragStart(event: MouseEvent): void {
+    this.minimapDragging = true;
+    const onMove = (e: MouseEvent) => {
+      if (!this.minimapDragging) return;
+      const target = event.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const ratio = Math.max(0, Math.min(1, y / rect.height));
+      const area = this.editing() ? this.editorArea()?.nativeElement : null;
+      const wrap = !this.editing() ? document.querySelector('.file-content-wrap') as HTMLElement | null : null;
+      const scrollEl = area ?? wrap;
+      if (!scrollEl) return;
+      scrollEl.scrollTop = ratio * scrollEl.scrollHeight - scrollEl.clientHeight / 2;
+      if (area) this.syncLayer(area);
+      this.updateMinimapViewport();
+    };
+    const onUp = () => {
+      this.minimapDragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    event.preventDefault();
   }
 
   /** Tab inserts two spaces instead of leaving the editor; the completion
@@ -1504,4 +1644,16 @@ function parentOf(path: string): string {
 function baseName(path: string): string {
   const idx = path.lastIndexOf('/');
   return idx < 0 ? path : path.slice(idx + 1);
+}
+
+function lineNumbersFor(text: string): string {
+  if (!text) {
+    return '1';
+  }
+  const n = text.split('\n').length;
+  let out = '';
+  for (let i = 1; i <= n; i++) {
+    out += i + (i < n ? '\n' : '');
+  }
+  return out;
 }

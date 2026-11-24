@@ -182,6 +182,12 @@ export class ChatSessionStore {
     }
   }
 
+  readonly autoCompactEnabled = computed(() => this.autoCompactPercent() > 0);
+
+  setAutoCompactEnabled(enabled: boolean): void {
+    this.setAutoCompactPercent(enabled ? DEFAULT_AUTO_COMPACT_PERCENT : 0);
+  }
+
   /** `42k / 200k · 21%` for the toolbar and the drawer; empty before a turn. */
   readonly contextLabel = computed<string>(() => {
     const used = this.contextUsed();

@@ -534,6 +534,8 @@ export const uk: Record<MessageKey, string> = {
   'chat.compacting': 'Стискання…',
   'chat.compactTitle': 'Підсумувати старіші повідомлення в новій сесії (стискання контексту)',
   'chat.compactIdle': 'Стискання потребує неактивної сесії з кількома повідомленнями',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'Стиснути контекст',
 
   // F6-5: unknown pricing

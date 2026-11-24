@@ -9,12 +9,14 @@ use serde_json::Value;
 
 /// Parse JSONC text into an ordered `Value`.
 pub fn parse(text: &str) -> Result<Value, String> {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let stripped = strip_comments(text);
     serde_json::from_str(&stripped).map_err(|e| e.to_string())
 }
 
 /// Remove `//` and `/* */` comments, respecting string literals.
 pub fn strip_comments(text: &str) -> String {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut i = 0usize;
@@ -76,6 +78,7 @@ pub struct JsoncDocument {
 
 impl JsoncDocument {
     pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
         let value = parse(text)?;
         Ok(Self {
             raw: text.to_string(),
@@ -368,6 +371,15 @@ mod tests {
         let v = parse(src).unwrap();
         assert_eq!(v["a"], 1);
         assert_eq!(v["b"], "x//y");
+    }
+
+    #[test]
+    fn parses_leading_bom() {
+        let src = "\u{FEFF}{\n  \"projects\": [],\n  \"model\": \"zai/glm-5.3-flash\"\n}\n";
+        let v = parse(src).unwrap();
+        assert_eq!(v["model"], "zai/glm-5.3-flash");
+        let doc = JsoncDocument::parse(src).unwrap();
+        assert_eq!(doc.value()["model"], "zai/glm-5.3-flash");
     }
 
     #[test]

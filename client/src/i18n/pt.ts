@@ -534,6 +534,8 @@ export const pt: Record<MessageKey, string> = {
   'chat.compacting': 'A compactar…',
   'chat.compactTitle': 'Resumir as mensagens antigas numa nova sessão (compactar contexto)',
   'chat.compactIdle': 'Compactar requer uma sessão inativa com algumas mensagens',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'Compactar contexto',
 
   // F6-5: unknown pricing

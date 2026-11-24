@@ -533,6 +533,8 @@ export const ja: Record<MessageKey, string> = {
   'chat.compacting': '圧縮中…',
   'chat.compactTitle': '古いメッセージを要約して新しいセッションにまとめる（コンテキスト圧縮）',
   'chat.compactIdle': '圧縮にはメッセージが数件ある待機中のセッションが必要です',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'コンテキストを圧縮',
 
   // F6-5: unknown pricing

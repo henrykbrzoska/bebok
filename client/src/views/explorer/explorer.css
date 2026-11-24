@@ -255,7 +255,7 @@
 .file-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding: 22px 28px;
   font-family: var(--font-mono);
   font-size: var(--fs-12-5);
@@ -270,6 +270,45 @@
   tab-size: 4;
 }
 
+/* Line numbers gutter (read-only view + editor). */
+.line-gutter {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 22px 8px 22px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  line-height: 1.75;
+  color: var(--text-faint);
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--surface-1);
+  min-width: 36px;
+}
+
+.file-content-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  position: relative;
+}
+
+.file-content-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.file-content-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.file-content-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Editor: a highlighted <pre> under a transparent <textarea> (same
    metrics on both layers, scroll kept in sync by the view). */
 .code-editor {
@@ -278,6 +317,42 @@
   min-height: 0;
   background: var(--bg);
   overflow: hidden;
+  display: flex;
+}
+
+.minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 64px;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.minimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.minimap-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(120, 160, 255, 0.18);
+  border: 1px solid rgba(120, 160, 255, 0.35);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.file-content-wrap .minimap {
+  position: relative;
+  flex: 0 0 64px;
+  width: 64px;
 }
 
 .editor-layer,
@@ -297,6 +372,13 @@
   box-sizing: border-box;
 }
 
+.code-editor .editor-layer,
+.code-editor .file-editor {
+  left: 44px;
+  right: 64px;
+  width: auto;
+}
+
 /* Only the textarea scrolls (it owns the single scrollbar); the highlight
    layer just follows it programmatically via scrollTop/Left (overflow:hidden
    still allows that) so the wheel never fights two nested scrollers. */
@@ -308,6 +390,19 @@
 
 .file-editor {
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.file-editor::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.file-editor::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.file-editor::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .editor-layer code.hljs {
