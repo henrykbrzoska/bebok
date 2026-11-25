@@ -31,9 +31,9 @@ pub mod plugins;
 pub mod processes;
 pub mod projects;
 pub mod providers;
-pub mod question;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
+pub mod question;
 pub mod schedules;
 pub mod session;
 pub mod ssh;

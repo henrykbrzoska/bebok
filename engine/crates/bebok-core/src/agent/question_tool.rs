@@ -129,7 +129,9 @@ pub fn parse_answers(value: &Value) -> Result<Map<String, Value>, String> {
             _ => false,
         };
         if !ok {
-            return Err(format!("answer for '{id}' must be a string or an array of strings"));
+            return Err(format!(
+                "answer for '{id}' must be a string or an array of strings"
+            ));
         }
     }
     Ok(obj.clone())
@@ -200,7 +202,9 @@ pub fn answer_question(
         })
         .unwrap_or_default();
     if let Some(unknown) = answers.keys().find(|k| !known.contains(&k.as_str())) {
-        return Err(AnswerError::Invalid(format!("unknown question id '{unknown}'")));
+        return Err(AnswerError::Invalid(format!(
+            "unknown question id '{unknown}'"
+        )));
     }
     let Some(entry) = pending.remove(request_id) else {
         return Err(AnswerError::NotFound);
@@ -428,13 +432,16 @@ mod tests {
     #[test]
     fn rejects_out_of_range_shapes() {
         assert!(parse_questions(json!({"questions": []})).is_err());
-        let five: Vec<Value> = (0..5).map(|i| two_option_question(&format!("q{i}"))).collect();
+        let five: Vec<Value> = (0..5)
+            .map(|i| two_option_question(&format!("q{i}")))
+            .collect();
         assert!(parse_questions(json!({"questions": five})).is_err());
         let one_opt = json!({"id": "x", "question": "?", "options": [{"label": "only"}]});
         assert!(parse_questions(json!({"questions": [one_opt]})).is_err());
         let dup = vec![two_option_question("same"), two_option_question("same")];
         assert!(parse_questions(json!({"questions": dup})).is_err());
-        let blank = json!({"id": " ", "question": "?", "options": [{"label": "a"}, {"label": "b"}]});
+        let blank =
+            json!({"id": " ", "question": "?", "options": [{"label": "a"}, {"label": "b"}]});
         assert!(parse_questions(json!({"questions": [blank]})).is_err());
     }
 
@@ -486,8 +493,10 @@ mod tests {
         );
         let got = rx.await.unwrap();
         assert_eq!(got.get("db"), Some(&json!("postgres")));
-        assert!(pending_questions("session-a")
-            .iter()
-            .all(|p| p["requestID"] != json!(request_id)));
+        assert!(
+            pending_questions("session-a")
+                .iter()
+                .all(|p| p["requestID"] != json!(request_id))
+        );
     }
 }

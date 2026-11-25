@@ -40,8 +40,6 @@ pub async fn answer_question_route(
             "no pending question {request_id} in session {id}"
         ))
         .into_response()),
-        Err(AnswerError::Invalid(message)) => {
-            Err(ApiError::bad_request(message).into_response())
-        }
+        Err(AnswerError::Invalid(message)) => Err(ApiError::bad_request(message).into_response()),
     }
 }
