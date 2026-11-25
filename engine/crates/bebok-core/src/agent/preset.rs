@@ -460,6 +460,45 @@ impl Agent {
         ]
     }
 
+    /// Whether a CLI provider running this preset may modify files.
+    ///
+    /// A CLI's edits bypass Bebok's permission engine and change tracking, so
+    /// this is opt-in per preset, not per provider: presets whose own rules
+    /// do not deny `write_file(*)`/`edit_file(*)` return `Some(true)`,
+    /// read-only presets (`ask`/`plan`/`hub`) return `Some(false)`.
+    /// File-based presets are judged by their own `permissions` frontmatter
+    /// the same way. Without this a `code` turn would run the CLI in `plan`
+    /// mode, and an `ask` turn could mutate the tree.
+    pub fn cli_allow_write(&self) -> Option<bool> {
+        if !self.builtin {
+            return Some(Self::preset_allows_write(&self.permissions));
+        }
+        match self.name.as_str() {
+            "code" | "debug" | "orchestrator" => Some(true),
+            "ask" | "plan" | "hub" => Some(false),
+            _ => Some(Self::preset_allows_write(&self.permissions)),
+        }
+    }
+
+    /// Whether a preset's own permission rules leave file writes allowed.
+    /// Any `deny` rule matching `write_file(*)` or `edit_file(*)` means
+    /// read-only; anything else (allow/ask/no rule) means the CLI may run in
+    /// write mode — the managed profile's hooks still gate every tool call
+    /// through the agent's rules at turn time.
+    fn preset_allows_write(rules: &[Rule]) -> bool {
+        for rule in rules {
+            if rule.action != Action::Deny {
+                continue;
+            }
+            for call in ["write_file(*)", "edit_file(*)"] {
+                if crate::permission::PermissionEngine::rule_matches(&rule.pattern, call) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Parse an agent preset from a markdown file with frontmatter.
     ///
     /// Frontmatter fields: `name`, `prompt`, `description`, `tools`,
@@ -663,5 +702,48 @@ mod tests {
                 ))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn cli_allow_write_follows_preset_permissions() {
+        for agent in [Agent::code(), Agent::debug(), Agent::orchestrator()] {
+            assert_eq!(
+                agent.cli_allow_write(),
+                Some(true),
+                "{} must run the CLI in write mode",
+                agent.name
+            );
+        }
+        for agent in [Agent::ask(), Agent::plan(), Agent::hub()] {
+            assert_eq!(
+                agent.cli_allow_write(),
+                Some(false),
+                "{} must keep the CLI in plan mode",
+                agent.name
+            );
+        }
+    }
+
+    #[test]
+    fn cli_allow_write_judges_file_presets_by_their_rules() {
+        let mut writable = Agent::code();
+        writable.builtin = false;
+        assert_eq!(writable.cli_allow_write(), Some(true));
+
+        let mut read_only = Agent::code();
+        read_only.builtin = false;
+        read_only.permissions = vec![Rule {
+            pattern: "write_file(*)".to_string(),
+            action: Action::Deny,
+        }];
+        assert_eq!(read_only.cli_allow_write(), Some(false));
+
+        let mut edit_denied = Agent::code();
+        edit_denied.builtin = false;
+        edit_denied.permissions = vec![Rule {
+            pattern: "edit_file(*)".to_string(),
+            action: Action::Deny,
+        }];
+        assert_eq!(edit_denied.cli_allow_write(), Some(false));
     }
 }

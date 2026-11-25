@@ -284,6 +284,7 @@ pub async fn prompt_turn(
         provider_ctx
             .with_session_sink(cli_sink.clone())
             .with_input_slot(session.cli_input_slot())
+            .with_cli_allow_write(agent.cli_allow_write())
     } else {
         provider_ctx
     };
@@ -619,7 +620,8 @@ mod tests {
             | ApiError::Gone(m)
             | ApiError::BadGateway(m)
             | ApiError::ServiceUnavailable(m)
-            | ApiError::Internal(m) => m,
+            | ApiError::Internal(m)
+            | ApiError::Unauthorized(m) => m,
         }
     }
 

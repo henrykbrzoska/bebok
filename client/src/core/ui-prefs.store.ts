@@ -64,6 +64,8 @@ export interface RightDrawerPanels {
   browser: boolean;
   /** Batch (OpenRouter Batch API): async bulk jobs, closed by default. */
   batch: boolean;
+  /** Git panel (read-only): status, branches and log of the session's project. */
+  git: boolean;
 }
 
 const DEFAULT_PANELS: RightDrawerPanels = {
@@ -75,6 +77,7 @@ const DEFAULT_PANELS: RightDrawerPanels = {
   preview: false,
   browser: false,
   batch: false,
+  git: false,
 };
 
 export type RightDrawerPanelId = keyof RightDrawerPanels;
@@ -88,6 +91,7 @@ export const RIGHT_DRAWER_PANEL_IDS: readonly RightDrawerPanelId[] = [
   'preview',
   'browser',
   'batch',
+  'git',
 ];
 
 /** F9-2: collapsed (body hidden, header kept) state per stacked panel. */
@@ -102,6 +106,7 @@ const DEFAULT_COLLAPSED: RightDrawerCollapsed = {
   preview: false,
   browser: false,
   batch: false,
+  git: false,
 };
 
 /**
@@ -175,6 +180,7 @@ function readPanels(): RightDrawerPanels {
       browser:
         typeof parsed['browser'] === 'boolean' ? parsed['browser'] : DEFAULT_PANELS.browser,
       batch: typeof parsed['batch'] === 'boolean' ? parsed['batch'] : DEFAULT_PANELS.batch,
+      git: typeof parsed['git'] === 'boolean' ? parsed['git'] : DEFAULT_PANELS.git,
     };
   } catch {
     return { ...DEFAULT_PANELS };

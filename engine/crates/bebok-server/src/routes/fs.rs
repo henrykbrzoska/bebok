@@ -322,6 +322,7 @@ pub async fn fs_rename(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routes::common::remove_test_dir;
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -371,7 +372,7 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 400"), "{response}");
         assert!(!response.contains("[fonts]"));
         server.abort();
-        std::fs::remove_dir_all(base).unwrap();
+        remove_test_dir(&base);
     }
 
     #[tokio::test]
@@ -441,7 +442,7 @@ mod tests {
             "the retired config file must not be recreated"
         );
         server.abort();
-        std::fs::remove_dir_all(base).unwrap();
+        remove_test_dir(&base);
     }
 }
 

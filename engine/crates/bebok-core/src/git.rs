@@ -67,6 +67,8 @@ pub enum GitError {
     InvalidInput(String),
     /// `git` ran and reported a failure (`stderr` attached).
     Failed(String),
+    /// Credential / authentication failure on a remote operation.
+    AuthFailed(String),
     /// Filesystem failure around the git call.
     Io(String),
 }
@@ -78,6 +80,7 @@ impl std::fmt::Display for GitError {
             Self::NotRepo(p) => write!(f, "not a git repository: {p}"),
             Self::InvalidInput(m) => write!(f, "{m}"),
             Self::Failed(m) => write!(f, "git failed: {m}"),
+            Self::AuthFailed(m) => write!(f, "git authentication failed: {m}"),
             Self::Io(m) => write!(f, "{m}"),
         }
     }
@@ -89,6 +92,7 @@ impl From<GitError> for crate::error::CoreError {
     fn from(e: GitError) -> Self {
         match e {
             GitError::InvalidInput(m) | GitError::NotRepo(m) => Self::BadRequest(m),
+            GitError::AuthFailed(m) => Self::BadRequest(m),
             other => Self::Other(other.to_string()),
         }
     }
@@ -98,26 +102,32 @@ impl From<GitError> for crate::error::CoreError {
 // runner
 // ---------------------------------------------------------------------------
 
-/// Run `git <args>` in `cwd`. `None` when the executable is missing, fails to
-/// spawn, or exceeds [`GIT_TIMEOUT`] (the child is killed). A non-zero exit
-/// is *not* `None` - inspect [`GitOutput::success`].
+/// Run `git <args>` in `cwd` with the standard short timeout. `None` when the
+/// executable is missing, fails to spawn, or exceeds [`GIT_TIMEOUT`] (the
+/// child is killed). A non-zero exit is *not* `None` — inspect
+/// [`GitOutput::success`].
 pub async fn run(cwd: &Path, args: &[&str]) -> Option<GitOutput> {
+    run_timeout(cwd, args, GIT_TIMEOUT).await
+}
+
+/// Run `git <args>` in `cwd` with an explicit timeout. The public [`run`]
+/// delegates to this with [`GIT_TIMEOUT`]; network-heavy ops (clone/fetch/pull/
+/// push) use a longer timeout via [`exec_net`].
+pub(crate) async fn run_timeout(cwd: &Path, args: &[&str], timeout: Duration) -> Option<GitOutput> {
     let mut cmd = tokio::process::Command::new("git");
     cmd.args(args)
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        // Never block on a credential/editor prompt from a headless engine.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true")
         .kill_on_drop(true);
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW: never flash a console when the engine runs headless.
         cmd.creation_flags(0x0800_0000);
     }
-    let output = tokio::time::timeout(GIT_TIMEOUT, cmd.output())
+    let output = tokio::time::timeout(timeout, cmd.output())
         .await
         .ok()?
         .ok()?;
@@ -126,6 +136,18 @@ pub async fn run(cwd: &Path, args: &[&str]) -> Option<GitOutput> {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
+}
+
+/// Longer-running network operation: clone/fetch/pull/push. Uses a 300 s
+/// timeout and maps credential / auth failures to [`GitError::AuthFailed`].
+pub async fn exec_net(dir: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
+    let out = run_timeout(dir, args, Duration::from_secs(300))
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if out.success {
+        return Ok(out);
+    }
+    Err(map_git_auth(&out.stderr))
 }
 
 /// True when a `git` executable answers `--version` on this host (tests skip
@@ -194,6 +216,728 @@ pub async fn inspect(dir: &Path) -> GitInfo {
         is_github,
         dirty_count,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Git panel (read ops): status / log / branches / show
+// ---------------------------------------------------------------------------
+
+/// One file row of `git status --porcelain=v1`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitFileStatus {
+    pub path: String,
+    pub x: char,
+    pub y: char,
+    pub staged: bool,
+    pub unstaged: bool,
+    pub untracked: bool,
+    pub renamed_from: Option<String>,
+}
+
+/// Full working-tree status: branch, ahead/behind vs upstream, per-file rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct GitStatus {
+    pub branch: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
+    pub files: Vec<GitFileStatus>,
+}
+
+/// Parse `git status --porcelain=v1 -b` output (without `-z`).
+fn parse_status_porcelain(text: &str) -> GitStatus {
+    let mut status = GitStatus::default();
+    let mut pending_rename: Option<String> = None;
+    for line in text.lines() {
+        if let Some(header) = line.strip_prefix("## ") {
+            // `## main...origin/main [ahead 1, behind 2]`,
+            // `## HEAD (no branch)`, `## No commits yet on main`.
+            if let Some(rest) = header.strip_prefix("No commits yet on ") {
+                status.branch = Some(rest.split_whitespace().next().unwrap_or(rest).to_string());
+            } else if header.starts_with("HEAD (no branch)") {
+                status.branch = None;
+            } else {
+                let branch = header
+                    .split("...")
+                    .next()
+                    .unwrap_or(header)
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(header);
+                status.branch = Some(branch.to_string());
+                for part in header.split([',', '[', ']']) {
+                    let part = part.trim();
+                    if let Some(n) = part.strip_prefix("ahead ") {
+                        status.ahead = n.parse().unwrap_or(0);
+                    } else if let Some(n) = part.strip_prefix("behind ") {
+                        status.behind = n.parse().unwrap_or(0);
+                    }
+                }
+            }
+            continue;
+        }
+        let mut chars = line.chars();
+        let (Some(x), Some(y)) = (chars.next(), chars.next()) else {
+            continue;
+        };
+        let path = line.get(3..).unwrap_or("").to_string();
+        if path.is_empty() {
+            continue;
+        }
+        // Renames: `R  new <- old` in non-`-z` porcelain.
+        if x == 'R' || y == 'R' {
+            if let Some((new, old)) = path.split_once(" <- ") {
+                status.files.push(GitFileStatus {
+                    path: new.to_string(),
+                    x,
+                    y,
+                    staged: true,
+                    unstaged: y != ' ' && y != '?',
+                    untracked: false,
+                    renamed_from: Some(old.to_string()),
+                });
+                continue;
+            }
+            pending_rename = Some(path);
+            continue;
+        }
+        if let Some(old) = pending_rename.take() {
+            let _ = old;
+        }
+        status.files.push(GitFileStatus {
+            path,
+            x,
+            y,
+            staged: x != ' ' && x != '?',
+            unstaged: y != ' ' && y != '?',
+            untracked: x == '?' && y == '?',
+            renamed_from: None,
+        });
+    }
+    status
+}
+
+/// `git status` for `dir`: branch, ahead/behind, per-file rows.
+/// No upstream -> ahead/behind 0. Non-repo -> `NotRepo`.
+pub async fn status(dir: &Path) -> Result<GitStatus, GitError> {
+    if !dir.is_dir() {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    let out = run(
+        dir,
+        &["status", "--porcelain=v1", "-b", "--untracked-files=all"],
+    )
+    .await
+    .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    let mut status = parse_status_porcelain(&out.stdout);
+    // Fall back to rev-list when the header carried no ahead/behind info
+    // (older git, or unusual upstream configs).
+    if status.ahead == 0
+        && status.behind == 0
+        && let Some(counts) = run(dir, &["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+            .await
+            .filter(|o| o.success)
+            .and_then(|o| {
+                let mut it = o.stdout.split_whitespace();
+                let (a, b) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?);
+                Some((a, b))
+            })
+    {
+        // rev-list prints `behind ahead` for `@{u}...HEAD` order.
+        status.behind = counts.0;
+        status.ahead = counts.1;
+    }
+    Ok(status)
+}
+
+/// One commit row for the history view (graph lanes are computed client-side
+/// from `parents`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitLogEntry {
+    pub hash: String,
+    pub parents: Vec<String>,
+    pub author: String,
+    pub email: String,
+    pub ts: i64,
+    pub subject: String,
+    pub body: String,
+    pub refs: Vec<String>,
+}
+
+/// Reject anything that is not a safe relative path for `git log -- <path>`.
+fn validate_rel_path(path: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid path: {m}")));
+    if path.is_empty() || path.len() > 1024 {
+        return bad("empty or too long");
+    }
+    if path.starts_with('-') || path.starts_with('/') || path.contains('\0') {
+        return bad("must be a relative path");
+    }
+    if path.contains("..") || path.chars().any(char::is_whitespace) {
+        return bad("must not contain '..' or whitespace");
+    }
+    // Windows drive / UNC prefixes.
+    if path.len() >= 2 && path.as_bytes()[1] == b':' {
+        return bad("absolute paths are not allowed");
+    }
+    if path.starts_with("\\\\") {
+        return bad("absolute paths are not allowed");
+    }
+    Ok(())
+}
+
+/// `git log` for `dir` (topo order, newest first). Empty repo -> empty vec.
+pub async fn log(
+    dir: &Path,
+    limit: usize,
+    skip: usize,
+    path: Option<&str>,
+) -> Result<Vec<GitLogEntry>, GitError> {
+    if !dir.is_dir() {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    if let Some(p) = path {
+        validate_rel_path(p)?;
+    }
+    let limit = limit.clamp(1, 200).to_string();
+    let skip = skip.to_string();
+    let format = "--format=%H\x1f%P\x1f%an\x1f%ae\x1f%ct\x1f%D\x1f%s\x1f%b\x1e".to_string();
+    let mut args = vec![
+        "log",
+        "--topo-order",
+        "--parents",
+        "--no-color",
+        "--max-count",
+        &limit,
+        "--skip",
+        &skip,
+        &format,
+    ];
+    let owned;
+    if let Some(p) = path {
+        owned = p.to_string();
+        args.push("--");
+        args.push(&owned);
+    }
+    let out = run(dir, &args).await.ok_or(GitError::Unavailable)?;
+    if !out.success {
+        // `your current branch does not have any commits yet` -> empty.
+        if out.stderr.contains("does not have any commits yet")
+            || out.stderr.contains("unknown revision")
+        {
+            return Ok(Vec::new());
+        }
+        return Err(GitError::Failed(stderr_summary(&out)));
+    }
+    let mut entries = Vec::new();
+    for record in out.stdout.split('\x1e') {
+        let record = record.trim_start_matches('\n');
+        if record.trim().is_empty() {
+            continue;
+        }
+        let mut f = record.splitn(8, '\x1f');
+        let (
+            Some(hash),
+            Some(parents),
+            Some(author),
+            Some(email),
+            Some(ts),
+            Some(deco),
+            Some(subject),
+            body,
+        ) = (
+            f.next(),
+            f.next(),
+            f.next(),
+            f.next(),
+            f.next(),
+            f.next(),
+            f.next(),
+            f.next(),
+        )
+        else {
+            continue;
+        };
+        entries.push(GitLogEntry {
+            hash: hash.trim().to_string(),
+            parents: parents.split_whitespace().map(str::to_string).collect(),
+            author: author.to_string(),
+            email: email.to_string(),
+            ts: ts.trim().parse().unwrap_or(0),
+            subject: subject.to_string(),
+            body: body.unwrap_or("").trim().to_string(),
+            refs: deco
+                .split(", ")
+                .filter_map(|r| {
+                    let r = r.trim().trim_start_matches("HEAD -> ").trim();
+                    (!r.is_empty()).then(|| r.to_string())
+                })
+                .collect(),
+        });
+    }
+    Ok(entries)
+}
+
+/// One local branch row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitBranch {
+    pub name: String,
+    pub current: bool,
+    pub upstream: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
+    pub last_commit: String,
+    pub last_ts: i64,
+}
+
+/// Local branches with upstream tracking info.
+pub async fn branches(dir: &Path) -> Result<Vec<GitBranch>, GitError> {
+    if !dir.is_dir() {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    let current = run(dir, &["branch", "--show-current"])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if !current.success {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    let current = current.stdout.trim().to_string();
+    let out = run(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(objectname:short)%1f%(committerdate:unix)",
+            "refs/heads",
+        ],
+    )
+    .await
+    .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(GitError::Failed(stderr_summary(&out)));
+    }
+    let mut list = Vec::new();
+    for line in out.stdout.lines() {
+        let mut f = line.split('\x1f');
+        let (Some(name), upstream, track, Some(last_commit), Some(last_ts)) =
+            (f.next(), f.next(), f.next(), f.next(), f.next())
+        else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let (mut ahead, mut behind) = (0usize, 0usize);
+        if let Some(t) = track {
+            for part in t.split(", ") {
+                let part = part.trim();
+                if let Some(n) = part.strip_prefix("ahead ") {
+                    ahead = n.parse().unwrap_or(0);
+                } else if let Some(n) = part.strip_prefix("behind ") {
+                    behind = n.parse().unwrap_or(0);
+                }
+            }
+        }
+        list.push(GitBranch {
+            name: name.to_string(),
+            current: name == current,
+            upstream: upstream.filter(|u| !u.is_empty()).map(str::to_string),
+            ahead,
+            behind,
+            last_commit: last_commit.to_string(),
+            last_ts: last_ts.trim().parse().unwrap_or(0),
+        });
+    }
+    Ok(list)
+}
+
+/// One file touched by a commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitShowFile {
+    pub status: String,
+    pub path: String,
+}
+
+/// Full `git show` payload: subject, unified diff, touched files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitShow {
+    pub hash: String,
+    pub subject: String,
+    pub diff: String,
+    pub files: Vec<GitShowFile>,
+}
+
+/// `git show <rev>` after [`validate_ref`]-style checks. Diff capped at 2 MB.
+pub async fn show(dir: &Path, rev: &str) -> Result<GitShow, GitError> {
+    if !dir.is_dir() {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    validate_ref_public(rev)?;
+    let out = run(
+        dir,
+        &["show", "--patch", "--no-color", "--no-ext-diff", rev, "--"],
+    )
+    .await
+    .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(GitError::Failed(stderr_summary(&out)));
+    }
+    let mut diff = out.stdout;
+    if diff.len() > 2_000_000 {
+        diff.truncate(2_000_000);
+    }
+    let names = run(dir, &["show", "--name-status", "--format=", rev, "--"])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    let mut files = Vec::new();
+    if names.success {
+        for line in names.stdout.lines() {
+            let mut f = line.splitn(2, '\t');
+            if let (Some(s), Some(p)) = (f.next(), f.next()) {
+                files.push(GitShowFile {
+                    status: s.to_string(),
+                    path: p.to_string(),
+                });
+            }
+        }
+    }
+    let hash = run(dir, &["rev-parse", rev])
+        .await
+        .and_then(|o| o.ok_line())
+        .unwrap_or_default();
+    let subject = run(dir, &["show", "--no-patch", "--format=%s", rev, "--"])
+        .await
+        .and_then(|o| o.ok_line())
+        .unwrap_or_default();
+    Ok(GitShow {
+        hash,
+        subject,
+        diff,
+        files,
+    })
+}
+
+/// Public ref validation shared by `show` and later write ops: no options,
+/// no whitespace, no parent traversal.
+pub fn validate_ref_public(rev: &str) -> Result<(), GitError> {
+    let trimmed = rev.trim();
+    if trimmed.is_empty() {
+        return Err(GitError::InvalidInput("ref is empty".to_string()));
+    }
+    if trimmed.starts_with('-')
+        || trimmed.contains("..")
+        || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(GitError::InvalidInput(format!("invalid ref: {trimmed}")));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Git panel (write ops): stage / commit / reset / stash / checkout /
+// branch / cherry-pick / conflicts
+// ---------------------------------------------------------------------------
+
+/// Shared prelude for every mutating op: the directory exists and is a git
+/// work tree. Returns `NotRepo` otherwise (never `Failed`).
+async fn ensure_repo(dir: &Path) -> Result<(), GitError> {
+    if !dir.is_dir() {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    let is_repo = run(dir, &["rev-parse", "--is-inside-work-tree"])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if !(is_repo.success && is_repo.stdout.trim() == "true") {
+        return Err(GitError::NotRepo(dir.display().to_string()));
+    }
+    Ok(())
+}
+
+/// Run `git <args>` in `dir`; `None` (missing binary) -> `Unavailable`,
+/// non-zero exit -> `Failed` with git's message.
+async fn exec(dir: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
+    let out = run(dir, args).await.ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(GitError::Failed(stderr_summary(&out)));
+    }
+    Ok(out)
+}
+
+/// A caller-supplied path for stage/unstage: a relative path, never an
+/// option, absolute path or parent traversal. Whitespace is allowed (file
+/// names may contain spaces); the value is always passed after `--`.
+pub fn validate_pathspec(path: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid path: {m}")));
+    if path.is_empty() || path.len() > 1024 || path.contains('\0') {
+        return bad("empty, too long, or NUL");
+    }
+    if path.starts_with('-') || path.starts_with('/') || path.starts_with('\\') {
+        return bad("must be a relative path");
+    }
+    if path.len() >= 2 && path.as_bytes()[1] == b':' {
+        return bad("absolute paths are not allowed");
+    }
+    if path.split(['/', '\\']).any(|seg| seg == "..") {
+        return bad("must not contain '..'");
+    }
+    Ok(())
+}
+
+fn validate_paths(paths: &[String]) -> Result<(), GitError> {
+    if paths.is_empty() {
+        return Err(GitError::InvalidInput("no paths given".to_string()));
+    }
+    if paths.len() > 500 {
+        return Err(GitError::InvalidInput("too many paths".to_string()));
+    }
+    for p in paths {
+        validate_pathspec(p)?;
+    }
+    Ok(())
+}
+
+/// `git add -- <paths>`.
+pub async fn stage(dir: &Path, paths: &[String]) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_paths(paths)?;
+    let mut args = vec!["add", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    exec(dir, &args).await.map(|_| ())
+}
+
+/// `git reset -q -- <paths>` (unstage). On an unborn HEAD the reset fails,
+/// so fall back to `git rm --cached -- <paths>`.
+pub async fn unstage(dir: &Path, paths: &[String]) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_paths(paths)?;
+    let mut args = vec!["reset", "-q", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    if run(dir, &args).await.ok_or(GitError::Unavailable)?.success {
+        return Ok(());
+    }
+    let mut rm = vec!["rm", "--cached", "-r", "-q", "--"];
+    rm.extend(paths.iter().map(String::as_str));
+    exec(dir, &rm).await.map(|_| ())
+}
+
+/// `git commit [-q --amend] -m <message>`; returns the new `HEAD` hash.
+/// Empty messages are rejected before git runs.
+pub async fn commit(dir: &Path, message: &str, amend: bool) -> Result<String, GitError> {
+    ensure_repo(dir).await?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err(GitError::InvalidInput(
+            "commit message is empty".to_string(),
+        ));
+    }
+    if message.len() > 100_000 {
+        return Err(GitError::InvalidInput(
+            "commit message is too long".to_string(),
+        ));
+    }
+    if amend {
+        exec(dir, &["commit", "-q", "--amend", "-m", message]).await?;
+    } else {
+        exec(dir, &["commit", "-q", "-m", message]).await?;
+    }
+    let out = exec(dir, &["rev-parse", "HEAD"]).await?;
+    Ok(out.stdout.trim().to_string())
+}
+
+/// Reset mode for [`reset`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+/// `git reset --<mode> <rev> --`. `Hard` discards work-tree changes; the
+/// route layer requires an explicit `confirm: true` for it.
+pub async fn reset(dir: &Path, mode: ResetMode, rev: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_ref_public(rev)?;
+    let flag = match mode {
+        ResetMode::Soft => "--soft",
+        ResetMode::Mixed => "--mixed",
+        ResetMode::Hard => "--hard",
+    };
+    exec(dir, &["reset", flag, rev.trim(), "--"])
+        .await
+        .map(|_| ())
+}
+
+/// One stash entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitStash {
+    pub index: usize,
+    pub name: String,
+    pub message: String,
+}
+
+/// `git stash list`.
+pub async fn stash_list(dir: &Path) -> Result<Vec<GitStash>, GitError> {
+    ensure_repo(dir).await?;
+    let out = exec(dir, &["stash", "list", "--format=%gd%x1f%s"]).await?;
+    let mut stashes = Vec::new();
+    for line in out.stdout.lines() {
+        let Some((name, message)) = line.split_once('\x1f') else {
+            continue;
+        };
+        let index = name
+            .trim()
+            .strip_prefix("stash@{")
+            .and_then(|n| n.strip_suffix('}'))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(stashes.len());
+        stashes.push(GitStash {
+            index,
+            name: name.trim().to_string(),
+            message: message.to_string(),
+        });
+    }
+    Ok(stashes)
+}
+
+/// `git stash push -u [-m <message>]`.
+pub async fn stash_push(dir: &Path, message: Option<&str>) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    if let Some(m) = message {
+        let m = m.trim();
+        if m.len() > 1024 {
+            return Err(GitError::InvalidInput(
+                "stash message is too long".to_string(),
+            ));
+        }
+        if !m.is_empty() {
+            return exec(dir, &["stash", "push", "-u", "-m", m])
+                .await
+                .map(|_| ());
+        }
+    }
+    exec(dir, &["stash", "push", "-u"]).await.map(|_| ())
+}
+
+fn stash_ref(index: usize) -> String {
+    format!("stash@{{{index}}}")
+}
+
+/// `git stash pop stash@{n}`.
+pub async fn stash_pop(dir: &Path, index: usize) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    exec(dir, &["stash", "pop", &stash_ref(index)])
+        .await
+        .map(|_| ())
+}
+
+/// `git stash apply stash@{n}`.
+pub async fn stash_apply(dir: &Path, index: usize) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    exec(dir, &["stash", "apply", &stash_ref(index)])
+        .await
+        .map(|_| ())
+}
+
+/// `git stash drop stash@{n}`. The route layer requires `confirm: true`.
+pub async fn stash_drop(dir: &Path, index: usize) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    exec(dir, &["stash", "drop", &stash_ref(index)])
+        .await
+        .map(|_| ())
+}
+
+/// `git checkout [-f] <target> --`. `force` discards local changes; the
+/// route layer requires an explicit `confirm: true` for it.
+pub async fn checkout(dir: &Path, target: &str, force: bool) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_ref_public(target)?;
+    if force {
+        exec(dir, &["checkout", "-f", target.trim(), "--"])
+            .await
+            .map(|_| ())
+    } else {
+        exec(dir, &["checkout", target.trim(), "--"])
+            .await
+            .map(|_| ())
+    }
+}
+
+/// `git branch <name> [base]`. Does not switch to the new branch.
+pub async fn branch_create(dir: &Path, name: &str, base: Option<&str>) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_branch(name)?;
+    if let Some(base) = base {
+        validate_ref_public(base)?;
+        exec(dir, &["branch", name.trim(), base.trim()])
+            .await
+            .map(|_| ())
+    } else {
+        exec(dir, &["branch", name.trim()]).await.map(|_| ())
+    }
+}
+
+/// `git branch -d|-D <name>`. `force` (`-D`) needs `confirm: true` at the
+/// route layer: it can orphan commits.
+pub async fn branch_delete(dir: &Path, name: &str, force: bool) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_branch(name)?;
+    let flag = if force { "-D" } else { "-d" };
+    exec(dir, &["branch", flag, name.trim()]).await.map(|_| ())
+}
+
+/// `git branch -m <from> <to>`.
+pub async fn branch_rename(dir: &Path, from: &str, to: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_branch(from)?;
+    validate_branch(to)?;
+    exec(dir, &["branch", "-m", from.trim(), to.trim()])
+        .await
+        .map(|_| ())
+}
+
+/// `git cherry-pick <rev>`. A conflict surfaces as `Failed` with git's
+/// message; resolve with [`cherry_pick_abort`] / [`cherry_pick_continue`].
+pub async fn cherry_pick(dir: &Path, rev: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_ref_public(rev)?;
+    exec(dir, &["cherry-pick", rev.trim()]).await.map(|_| ())
+}
+
+/// `git cherry-pick --abort`.
+pub async fn cherry_pick_abort(dir: &Path) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    exec(dir, &["cherry-pick", "--abort"]).await.map(|_| ())
+}
+
+/// `git cherry-pick --continue` (`GIT_EDITOR=true` keeps it non-interactive).
+pub async fn cherry_pick_continue(dir: &Path) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    exec(dir, &["cherry-pick", "--continue"]).await.map(|_| ())
+}
+
+/// One path with unresolved merge conflicts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GitConflict {
+    pub path: String,
+    pub stages: usize,
+}
+
+/// Paths with unresolved conflicts (`git ls-files -u`, de-duplicated).
+pub async fn conflicts(dir: &Path) -> Result<Vec<GitConflict>, GitError> {
+    ensure_repo(dir).await?;
+    let out = exec(dir, &["ls-files", "-u"]).await?;
+    let mut seen = std::collections::BTreeMap::new();
+    for line in out.stdout.lines() {
+        if let Some(path) = line.split('\t').nth(1) {
+            *seen.entry(path.to_string()).or_insert(0usize) += 1;
+        }
+    }
+    Ok(seen
+        .into_iter()
+        .map(|(path, stages)| GitConflict { path, stages })
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +1286,40 @@ fn copy_missing(source: &Path, target: &Path, top: bool) -> std::io::Result<()> 
     Ok(())
 }
 
+/// True when `stderr` (or stdout, as a fallback) reads like a credential /
+/// authentication failure from a remote operation.
+pub fn is_auth_error(stderr: &str) -> bool {
+    let text = stderr.trim().to_ascii_lowercase();
+    let keys = [
+        "authentication failed",
+        "could not read username",
+        "password",
+        "host key verification failed",
+        "permission denied (publickey)",
+        "fatal: could not read from remote repository",
+    ];
+    keys.iter().any(|k| text.contains(k))
+}
+
+/// Map a failing network output to [`GitError::AuthFailed`] when it looks like
+/// an auth problem, otherwise [`GitError::Failed`].
+pub fn map_git_auth(stderr: &str) -> GitError {
+    if is_auth_error(stderr) {
+        let text = stderr.trim();
+        GitError::AuthFailed(if text.is_empty() {
+            "authentication failed".to_string()
+        } else {
+            text.to_string()
+        })
+    } else {
+        GitError::Failed(stderr_summary(&GitOutput {
+            success: false,
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+        }))
+    }
+}
+
 /// Path equality for owner checks: byte-exact on Unix, case-insensitive on
 /// Windows (both sides normally come from `normalize_path`, but a client may
 /// echo a differently-cased drive letter).
@@ -555,6 +1333,444 @@ fn same_path(a: &Path, b: &Path) -> bool {
     {
         a == b
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: remotes / sync / config / clone / tools / forge
+// ---------------------------------------------------------------------------
+
+/// One remote with its fetch URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub url: String,
+}
+
+/// Scope for `git config set`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigScope {
+    Local,
+    Global,
+}
+
+// -- validators -------------------------------------------------------------
+
+pub fn validate_remote_name(name: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid remote name: {m}")));
+    if name.is_empty() || name.len() > 100 || name.contains('\0') {
+        return bad("empty, too long, or NUL");
+    }
+    if name.chars().any(char::is_whitespace) || name.starts_with('-') || name.contains("..") {
+        return bad("must be a simple name");
+    }
+    Ok(())
+}
+
+pub fn validate_remote_url(url: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid remote url: {m}")));
+    if url.is_empty() || url.len() > 2048 || url.contains('\0') {
+        return bad("empty, too long, or NUL");
+    }
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("file://") || lower.starts_with("http://") || lower.starts_with("ftp://") {
+        return bad("only https:// and ssh:// / git@ URLs are allowed");
+    }
+    if lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("::1") {
+        return bad("local URLs are not allowed as remotes");
+    }
+    if let Some(at) = url.find('@') {
+        // Only the authority carries credentials: for `ssh://git@host` the
+        // scheme's own `:` sits before the `@` and must not count as a
+        // password separator.
+        let start = url.find("://").map(|i| i + 3).unwrap_or(0).min(at);
+        let authority = &url[start..at];
+        if authority.contains(':') {
+            return bad("URLs with credentials are not allowed");
+        }
+    }
+    if lower.starts_with("https://") {
+        let host = url[8..].split('/').next().unwrap_or("");
+        if host.is_empty() || host.starts_with('-') || host.contains('\0') || host.contains(' ') {
+            return bad("invalid host");
+        }
+    } else if lower.starts_with("ssh://") {
+        let host = url[6..].split('/').next().unwrap_or("");
+        if host.is_empty() || host.starts_with('-') || host.contains('\0') || host.contains(' ') {
+            return bad("invalid host");
+        }
+    } else if url.starts_with("git@") || url.contains(':') {
+        let colon = url.find(':').unwrap_or(url.len());
+        let host = &url[..colon];
+        if host.is_empty() || host.starts_with('-') || host.contains('\0') || host.contains(' ') {
+            return bad("invalid host");
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_config_key(key: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid config key: {m}")));
+    if key.is_empty() || key.len() > 256 || key.contains('\0') || key.contains(char::is_whitespace)
+    {
+        return bad("empty, too long, NUL, or whitespace");
+    }
+    let fixed = [
+        "user.name",
+        "user.email",
+        "core.editor",
+        "core.autocrlf",
+        "core.safecrlf",
+        "commit.gpgsign",
+        "pull.rebase",
+        "push.default",
+        "color.ui",
+        "init.defaultBranch",
+    ];
+    if fixed.contains(&key) {
+        return Ok(());
+    }
+    let branch_key_ok = key
+        .strip_prefix("branch.")
+        .and_then(|rest| rest.rsplit_once('.'))
+        .is_some_and(|(name, field)| {
+            (field == "remote" || field == "merge") && validate_branch(name).is_ok()
+        });
+    if branch_key_ok {
+        return Ok(());
+    }
+    bad(&format!("key {key} is not in the allowed set"))
+}
+
+pub fn validate_clone_dest(path: &str) -> Result<(), GitError> {
+    let bad = |m: &str| {
+        Err(GitError::InvalidInput(format!(
+            "invalid clone destination: {m}"
+        )))
+    };
+    if path.is_empty() || path.len() > 1024 || path.contains('\0') {
+        return bad("empty, too long, or NUL");
+    }
+    if path.starts_with('-') || path.contains(char::is_whitespace) {
+        return bad("must not start with '-' or contain whitespace");
+    }
+    if path.split('/').any(|seg| seg == "..") || path.split('\\').any(|seg| seg == "..") {
+        return bad("must not contain '..'");
+    }
+    Ok(())
+}
+
+pub fn validate_refspec(s: &str) -> Result<(), GitError> {
+    let bad = |m: &str| Err(GitError::InvalidInput(format!("invalid refspec: {m}")));
+    if s.is_empty() || s.len() > 1024 || s.contains('\0') {
+        return bad("empty, too long, or NUL");
+    }
+    if s.starts_with('-') || s.contains("..") || s.chars().any(char::is_whitespace) {
+        return bad("must be a simple refspec");
+    }
+    Ok(())
+}
+
+// -- remotes ---------------------------------------------------------------
+
+pub async fn remotes_list(dir: &Path) -> Result<Vec<RemoteInfo>, GitError> {
+    ensure_repo(dir).await?;
+    let out = exec(dir, &["remote", "-v"]).await?;
+    let mut seen: std::collections::BTreeMap<String, RemoteInfo> =
+        std::collections::BTreeMap::new();
+    for line in out.stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let name = parts.next().unwrap_or("");
+        let url = parts.next().unwrap_or("");
+        let kind = parts.next().unwrap_or("");
+        if name.is_empty() || url.is_empty() {
+            continue;
+        }
+        let entry = seen.entry(name.to_string()).or_insert_with(|| RemoteInfo {
+            name: name.to_string(),
+            url: url.to_string(),
+        });
+        if kind == "(fetch)" {
+            entry.url = url.to_string();
+        }
+    }
+    Ok(seen.into_values().collect())
+}
+
+pub async fn remotes_set_remote_url(dir: &Path, remote: &str, url: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_remote_name(remote)?;
+    validate_remote_url(url)?;
+    exec(dir, &["remote", "set-url", remote, url]).await?;
+    Ok(())
+}
+
+pub async fn remotes_fetch(dir: &Path, remote: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_remote_name(remote)?;
+    exec_net(dir, &["fetch", remote]).await?;
+    Ok(())
+}
+
+pub async fn remotes_pull(dir: &Path, remote: &str, refspec: Option<&str>) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_remote_name(remote)?;
+    let mut args = vec!["pull", remote];
+    if let Some(rs) = refspec {
+        validate_refspec(rs)?;
+        args.push(rs);
+    }
+    exec_net(dir, &args).await?;
+    Ok(())
+}
+
+pub async fn remotes_push(dir: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_remote_name(remote)?;
+    validate_refspec(refspec)?;
+    exec_net(dir, &["push", remote, refspec]).await?;
+    Ok(())
+}
+
+// -- config -----------------------------------------------------------------
+
+pub async fn config_get(dir: &Path, key: &str) -> Result<String, GitError> {
+    ensure_repo(dir).await?;
+    validate_config_key(key)?;
+    let out = run(dir, &["config", "--get", key])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if out.success {
+        let line = out.stdout.trim().to_string();
+        if line.is_empty() {
+            return Err(GitError::InvalidInput("key not set".to_string()));
+        }
+        return Ok(line);
+    }
+    if out.stderr.trim().is_empty() {
+        return Err(GitError::InvalidInput("key not set".to_string()));
+    }
+    Err(map_git_auth(&out.stderr))
+}
+
+pub async fn config_set(
+    dir: &Path,
+    key: &str,
+    value: &str,
+    scope: ConfigScope,
+) -> Result<(), GitError> {
+    ensure_repo(dir).await?;
+    validate_config_key(key)?;
+    if value.is_empty() || value.len() > 100_000 || value.contains('\0') {
+        return Err(GitError::InvalidInput("invalid config value".to_string()));
+    }
+    let flag = match scope {
+        ConfigScope::Local => "--local",
+        ConfigScope::Global => "--global",
+    };
+    exec(dir, &["config", flag, key, value]).await?;
+    Ok(())
+}
+
+// -- clone -----------------------------------------------------------------
+
+pub async fn clone(source: &str, dest: &str, branch: Option<&str>) -> Result<String, GitError> {
+    validate_remote_url(source)?;
+    validate_clone_dest(dest)?;
+    let mut args = vec!["clone"];
+    if let Some(b) = branch {
+        validate_ref(b)?;
+        args.push("--branch");
+        args.push(b);
+    }
+    args.push("--");
+    args.push(source);
+    args.push(dest);
+    let out = run_timeout(&std::env::temp_dir(), &args, Duration::from_secs(300))
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(map_git_auth(&out.stderr));
+    }
+    Ok(dest.trim().to_string())
+}
+
+// -- tools ------------------------------------------------------------------
+
+pub fn git_available_tools() -> Vec<String> {
+    vec!["git".to_string()]
+}
+
+// -- forge -----------------------------------------------------------------
+
+/// One allowlist row: `<group> <action> <flag hints> <allowed --json fields>`.
+type ForgeAllow = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    Option<&'static [&'static str]>,
+);
+
+fn validate_forge_args(
+    tool: &str,
+    args: &[String],
+    allowed: &[ForgeAllow],
+) -> Result<Vec<String>, GitError> {
+    if args.is_empty() {
+        return Err(GitError::InvalidInput(format!(
+            "{tool} command not allowed: (no arguments)"
+        )));
+    }
+    let group = args[0].as_str();
+    let action = args.get(1).map(|s| s.as_str()).unwrap_or("");
+    for &(g, a, _flags, json_set) in allowed {
+        if group == g && action == a {
+            let mut out = Vec::new();
+            let mut i = 2usize;
+            let mut saw_json = false;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--json" {
+                    if saw_json {
+                        return Err(GitError::InvalidInput(format!("{tool} duplicate --json")));
+                    }
+                    saw_json = true;
+                    i += 1;
+                    let fields = if i < args.len() {
+                        let raw = &args[i];
+                        let fields: Vec<&str> = raw.split(',').map(|s| s.trim()).collect();
+                        i += 1;
+                        fields
+                    } else {
+                        return Err(GitError::InvalidInput(format!(
+                            "{tool} --json requires a field list"
+                        )));
+                    };
+                    if let Some(allowed_fields) = json_set {
+                        for f in &fields {
+                            if !allowed_fields.contains(f) {
+                                return Err(GitError::InvalidInput(format!(
+                                    "{tool} unknown --json field: {f}"
+                                )));
+                            }
+                        }
+                    }
+                    out.push("--json".to_string());
+                    out.push(fields.join(",").to_string());
+                    continue;
+                }
+                if arg.starts_with("--") {
+                    return Err(GitError::InvalidInput(format!(
+                        "{tool} unexpected flag: {arg}"
+                    )));
+                }
+                out.push(arg.clone());
+                i += 1;
+            }
+            return Ok(out);
+        }
+    }
+    Err(GitError::InvalidInput(format!(
+        "{tool} command not allowed: {group} {action}"
+    )))
+}
+
+fn allowlist_gh() -> &'static [ForgeAllow] {
+    &[
+        (
+            "repo",
+            "view",
+            &["--json"],
+            Some(&[
+                "name",
+                "owner",
+                "private",
+                "url",
+                "sshUrl",
+                "httpUrl",
+                "description",
+            ]),
+        ),
+        ("issue", "list", &["--state", "--limit"], None),
+        ("pr", "list", &["--state", "--limit"], None),
+        (
+            "pr",
+            "view",
+            &["--json"],
+            Some(&["number", "title", "state", "url"]),
+        ),
+    ]
+}
+
+fn allowlist_glab() -> &'static [ForgeAllow] {
+    &[
+        (
+            "repo",
+            "view",
+            &["--json"],
+            Some(&[
+                "name",
+                "owner",
+                "private",
+                "url",
+                "sshUrl",
+                "httpUrl",
+                "description",
+            ]),
+        ),
+        ("issue", "list", &["--state", "--limit"], None),
+        ("pr", "list", &["--state", "--limit"], None),
+        (
+            "pr",
+            "view",
+            &["--json"],
+            Some(&["number", "title", "state", "url"]),
+        ),
+    ]
+}
+
+pub async fn forge_gh(dir: &Path, args: &[String]) -> Result<String, GitError> {
+    ensure_repo(dir).await?;
+    let cleaned = validate_forge_args("gh", args, allowlist_gh())?;
+    let out = run_timeout(
+        dir,
+        &cleaned.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        Duration::from_secs(30),
+    )
+    .await
+    .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(map_git_auth(&out.stderr));
+    }
+    let text = out.stdout.trim().to_string();
+    if text.len() > 500_000 {
+        return Ok(text[..500_000].to_string());
+    }
+    Ok(text)
+}
+
+pub async fn forge_glab(dir: &Path, args: &[String]) -> Result<String, GitError> {
+    ensure_repo(dir).await?;
+    let cleaned = validate_forge_args("glab", args, allowlist_glab())?;
+    let out = run_timeout(
+        dir,
+        &cleaned.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        Duration::from_secs(30),
+    )
+    .await
+    .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        return Err(map_git_auth(&out.stderr));
+    }
+    let text = out.stdout.trim().to_string();
+    if text.len() > 500_000 {
+        return Ok(text[..500_000].to_string());
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -815,6 +2031,189 @@ mod tests {
         assert_eq!(detached.branch, None);
     }
 
+    #[test]
+    fn parse_status_porcelain_covers_header_files_and_rename() {
+        let text = "## main...origin/main [ahead 2, behind 1]\nM  staged.txt\n M unstaged.txt\n?? new.txt\nR  new-name.txt <- old-name.txt\n";
+        let status = parse_status_porcelain(text);
+        assert_eq!(status.branch.as_deref(), Some("main"));
+        assert_eq!((status.ahead, status.behind), (2, 1));
+        assert_eq!(status.files.len(), 4);
+        assert!(status.files[0].staged && !status.files[0].untracked);
+        assert!(status.files[1].unstaged);
+        assert!(status.files[2].untracked);
+        assert!(status.files[3].staged);
+
+        let detached = parse_status_porcelain("## HEAD (no branch)\n M a.txt\n");
+        assert_eq!(detached.branch, None);
+        assert_eq!(detached.files.len(), 1);
+
+        let fresh = parse_status_porcelain("## No commits yet on main\nA  a.txt\n");
+        assert_eq!(fresh.branch.as_deref(), Some("main"));
+    }
+
+    #[tokio::test]
+    async fn status_log_branches_show_round_trip() {
+        require_git!();
+        let fx = Fixture::new("panel-read");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        let clean = status(&repo).await.unwrap();
+        assert_eq!(clean.branch.as_deref(), Some("main"));
+        assert!(clean.files.is_empty());
+
+        std::fs::write(repo.join("README.md"), "changed\n").unwrap();
+        std::fs::write(repo.join("new.txt"), "untracked\n").unwrap();
+        let dirty = status(&repo).await.unwrap();
+        assert_eq!(dirty.files.len(), 2);
+        assert!(dirty.files.iter().any(|f| f.untracked));
+
+        git_ok(&repo, &["add", "README.md"]).await;
+        let staged = status(&repo).await.unwrap();
+        assert!(
+            staged
+                .files
+                .iter()
+                .any(|f| f.staged && f.path == "README.md")
+        );
+
+        let entries = log(&repo, 50, 0, None).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].subject, "init");
+        assert!(entries[0].parents.is_empty());
+        let limited = log(&repo, 50, 5, None).await.unwrap();
+        assert!(limited.is_empty());
+        assert!(log(&repo, 50, 0, Some("../escape")).await.is_err());
+
+        let branches = branches(&repo).await.unwrap();
+        assert_eq!(branches.len(), 1);
+        assert!(branches[0].current);
+        assert_eq!(branches[0].name, "main");
+
+        let shown = show(&repo, "HEAD").await.unwrap();
+        assert_eq!(shown.subject, "init");
+        assert!(!shown.diff.is_empty());
+        assert!(shown.files.iter().any(|f| f.path == "README.md"));
+        assert!(show(&repo, "--bad").await.is_err());
+        assert!(status(&fx.dir("plain")).await.is_err());
+    }
+
+    #[test]
+    fn validate_pathspec_accepts_names_and_rejects_escape() {
+        for ok in ["a.txt", "dir/b.txt", "sp ace.txt", "żółć.txt"] {
+            assert!(validate_pathspec(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "-x",
+            "/abs",
+            "\\abs",
+            "C:/win",
+            "../up",
+            "a/../../b",
+            "a\0b",
+        ] {
+            assert!(validate_pathspec(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn write_ops_round_trip() {
+        require_git!();
+        let fx = Fixture::new("panel-write");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        // stage / unstage
+        std::fs::write(repo.join("w.txt"), "v1\n").unwrap();
+        assert!(stage(&repo, &["w.txt".to_string()]).await.is_ok());
+        assert!(stage(&repo, &[]).await.is_err());
+        assert!(stage(&repo, &["../escape".to_string()]).await.is_err());
+        let st = status(&repo).await.unwrap();
+        assert!(st.files.iter().any(|f| f.staged && f.path == "w.txt"));
+        unstage(&repo, &["w.txt".to_string()]).await.unwrap();
+        let st = status(&repo).await.unwrap();
+        assert!(!st.files.iter().any(|f| f.staged && f.path == "w.txt"));
+
+        // commit + amend
+        assert!(commit(&repo, "   ", false).await.is_err());
+        git_ok(&repo, &["add", "w.txt"]).await;
+        let hash = commit(&repo, "add w", false).await.unwrap();
+        assert_eq!(hash.len(), 40);
+        let entries = log(&repo, 5, 0, None).await.unwrap();
+        assert_eq!(entries[0].subject, "add w");
+        std::fs::write(repo.join("w.txt"), "v2\n").unwrap();
+        git_ok(&repo, &["add", "w.txt"]).await;
+        commit(&repo, "amended", true).await.unwrap();
+        let entries = log(&repo, 5, 0, None).await.unwrap();
+        assert_eq!(entries[0].subject, "amended");
+
+        // reset soft keeps changes staged, hard drops them
+        std::fs::write(repo.join("r.txt"), "r\n").unwrap();
+        git_ok(&repo, &["add", "r.txt"]).await;
+        commit(&repo, "add r", false).await.unwrap();
+        reset(&repo, ResetMode::Soft, "HEAD~1").await.unwrap();
+        let st = status(&repo).await.unwrap();
+        assert!(st.files.iter().any(|f| f.staged && f.path == "r.txt"));
+        reset(&repo, ResetMode::Hard, "HEAD").await.unwrap();
+        let st = status(&repo).await.unwrap();
+        assert!(!st.files.iter().any(|f| f.path == "r.txt"));
+
+        // stash push / list / pop
+        std::fs::write(repo.join("s.txt"), "s\n").unwrap();
+        stash_push(&repo, Some("wip s")).await.unwrap();
+        assert!(!repo.join("s.txt").exists());
+        let list = stash_list(&repo).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].message.contains("wip s"));
+        stash_pop(&repo, 0).await.unwrap();
+        assert!(repo.join("s.txt").exists());
+        assert!(stash_list(&repo).await.unwrap().is_empty());
+        stash_push(&repo, None).await.unwrap();
+        stash_apply(&repo, 0).await.unwrap();
+        stash_drop(&repo, 0).await.unwrap();
+        assert!(stash_list(&repo).await.unwrap().is_empty());
+
+        // branch create / rename / delete + checkout
+        branch_create(&repo, "feat/x", None).await.unwrap();
+        assert!(branch_create(&repo, "../bad", None).await.is_err());
+        checkout(&repo, "feat/x", false).await.unwrap();
+        assert_eq!(
+            status(&repo).await.unwrap().branch.as_deref(),
+            Some("feat/x")
+        );
+        branch_rename(&repo, "feat/x", "feat/y").await.unwrap();
+        checkout(&repo, "main", false).await.unwrap();
+        branch_delete(&repo, "feat/y", false).await.unwrap();
+        assert!(
+            branches(&repo)
+                .await
+                .unwrap()
+                .iter()
+                .all(|b| b.name != "feat/y")
+        );
+
+        // cherry-pick conflict -> conflicts() -> abort
+        git_ok(&repo, &["checkout", "-q", "-b", "side"]).await;
+        std::fs::write(repo.join("README.md"), "side\n").unwrap();
+        git_ok(&repo, &["add", "README.md"]).await;
+        git_ok(&repo, &["commit", "-q", "-m", "side change"]).await;
+        git_ok(&repo, &["checkout", "-q", "main"]).await;
+        std::fs::write(repo.join("README.md"), "main\n").unwrap();
+        git_ok(&repo, &["add", "README.md"]).await;
+        git_ok(&repo, &["commit", "-q", "-m", "main change"]).await;
+        let side = git_ok(&repo, &["rev-parse", "side"])
+            .await
+            .stdout
+            .trim()
+            .to_string();
+        assert!(cherry_pick(&repo, &side).await.is_err());
+        let cf = conflicts(&repo).await.unwrap();
+        assert!(cf.iter().any(|c| c.path == "README.md"));
+        cherry_pick_abort(&repo).await.unwrap();
+        assert!(conflicts(&repo).await.unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn add_and_remove_worktree_round_trip() {
         require_git!();
@@ -898,6 +2297,252 @@ mod tests {
         assert!(matches!(
             add_worktree(&fx.base.join("missing"), "bebok/x", None).await,
             Err(GitError::NotRepo(_))
+        ));
+    }
+
+    // -- Phase 3: validators (pure, no git needed) -------------------------
+
+    #[test]
+    fn validate_remote_name_accepts_simple_names_and_rejects_odd_ones() {
+        for ok in ["origin", "upstream", "my-remote_1"] {
+            assert!(validate_remote_name(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "-x", "a b", "a..b", "a\0b"] {
+            assert!(validate_remote_name(bad).is_err(), "{bad:?}");
+        }
+        let long = "a".repeat(101);
+        assert!(validate_remote_name(&long).is_err());
+    }
+
+    #[test]
+    fn validate_remote_url_accepts_network_urls_and_rejects_local_or_credentialed() {
+        for ok in [
+            "https://github.com/acme/widgets.git",
+            "ssh://git@github.com/acme/widgets.git",
+            "git@github.com:acme/widgets.git",
+            "https://gitlab.com/group/sub/project.git",
+        ] {
+            assert!(validate_remote_url(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "file:///tmp/x",
+            "http://github.com/acme/x.git",
+            "ftp://example.com/x.git",
+            "https://localhost/acme/x.git",
+            "https://127.0.0.1/acme/x.git",
+            "https://user:secret@github.com/acme/x.git",
+        ] {
+            assert!(validate_remote_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn validate_config_key_allows_the_fixed_set_and_branch_keys_only() {
+        for ok in [
+            "user.name",
+            "user.email",
+            "core.editor",
+            "pull.rebase",
+            "branch.main.remote",
+            "branch.feature/x.merge",
+        ] {
+            assert!(validate_config_key(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "user.name ",
+            "alias.co",
+            "core.sshCommand",
+            "branch.main.pushRemote",
+            "branch..remote",
+            "a\0b",
+        ] {
+            assert!(validate_config_key(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn validate_clone_dest_rejects_traversal_and_options() {
+        for ok in ["repo", "dir/repo", "a\\b"] {
+            assert!(validate_clone_dest(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "-rf", "a b", "../up", "a/../../b", "a\0b"] {
+            assert!(validate_clone_dest(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn validate_refspec_rejects_options_and_whitespace() {
+        for ok in ["main", "refs/heads/main", "main:main", "feature/x"] {
+            assert!(validate_refspec(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "-f", "a b", "a..b", "a\0b"] {
+            assert!(validate_refspec(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn is_auth_error_matches_credential_messages_only() {
+        for hit in [
+            "fatal: Authentication failed for 'https://example.com/x'",
+            "fatal: could not read Username for 'https://example.com'",
+            "remote: Invalid password",
+            "Host key verification failed.",
+            "git@example.com: Permission denied (publickey).",
+            "fatal: could not read from remote repository",
+        ] {
+            assert!(is_auth_error(hit), "{hit}");
+        }
+        for miss in [
+            "",
+            "fatal: repository 'https://example.com/x' not found",
+            "error: failed to push some refs",
+        ] {
+            assert!(!is_auth_error(miss), "{miss}");
+        }
+    }
+
+    // -- Phase 3: forge argument validation --------------------------------
+
+    /// gh/glab are not installed in CI, so the *validation* layer is tested
+    /// directly: a disallowed subcommand is rejected before any spawn.
+    #[tokio::test]
+    async fn forge_rejects_commands_outside_the_allowlist() {
+        require_git!();
+        let fx = Fixture::new("forge-validate");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for bad in [
+            args(&["repo", "delete"]),
+            args(&["auth", "token"]),
+            args(&["pr", "create"]),
+            args(&[]),
+            args(&["repo", "view", "--web"]),
+            args(&["repo", "view", "--json", "secrets"]),
+            args(&["repo", "view", "--json"]),
+        ] {
+            assert!(
+                matches!(forge_gh(&repo, &bad).await, Err(GitError::InvalidInput(_))),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(
+                    forge_glab(&repo, &bad).await,
+                    Err(GitError::InvalidInput(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        // A non-repository is still refused as a repository error.
+        assert!(matches!(
+            forge_gh(&fx.dir("plain"), &args(&["repo", "view"])).await,
+            Err(GitError::NotRepo(_))
+        ));
+    }
+
+    // -- Phase 3: against a real temp repository ---------------------------
+
+    #[tokio::test]
+    async fn remotes_round_trip() {
+        require_git!();
+        let fx = Fixture::new("remotes");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        assert!(remotes_list(&repo).await.unwrap().is_empty());
+        git_ok(
+            &repo,
+            &["remote", "add", "origin", "https://github.com/acme/x.git"],
+        )
+        .await;
+        let listed = remotes_list(&repo).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "origin");
+        assert_eq!(listed[0].url, "https://github.com/acme/x.git");
+
+        // set-url rewrites the fetch URL; validation rejects junk.
+        assert!(
+            remotes_set_remote_url(&repo, "origin", "file:///tmp/x")
+                .await
+                .is_err()
+        );
+        assert!(
+            remotes_set_remote_url(&repo, "-x", "https://github.com/acme/y.git")
+                .await
+                .is_err()
+        );
+        remotes_set_remote_url(&repo, "origin", "https://github.com/acme/y.git")
+            .await
+            .unwrap();
+        let listed = remotes_list(&repo).await.unwrap();
+        assert_eq!(listed[0].url, "https://github.com/acme/y.git");
+    }
+
+    #[tokio::test]
+    async fn config_round_trip_and_unset_key_is_invalid_input() {
+        require_git!();
+        let fx = Fixture::new("config");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        config_set(&repo, "user.name", "Bebok Config", ConfigScope::Local)
+            .await
+            .unwrap();
+        assert_eq!(
+            config_get(&repo, "user.name").await.unwrap(),
+            "Bebok Config"
+        );
+        // A key never written reads as InvalidInput("key not set").
+        match config_get(&repo, "core.editor").await {
+            Err(GitError::InvalidInput(m)) => assert_eq!(m, "key not set"),
+            other => panic!("expected key not set, got {other:?}"),
+        }
+        // A key outside the allowed set never reaches git.
+        assert!(matches!(
+            config_set(&repo, "alias.co", "checkout", ConfigScope::Local).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            config_get(&repo, "alias.co").await,
+            Err(GitError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn fetch_against_a_bogus_remote_fails_without_hanging() {
+        require_git!();
+        let fx = Fixture::new("fetch");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+        git_ok(
+            &repo,
+            &["remote", "add", "origin", "https://git.invalid/acme/x.git"],
+        )
+        .await;
+        // Unknown host: never a success answer (no network clone/fetch test).
+        assert!(remotes_fetch(&repo, "origin").await.is_err());
+        assert!(remotes_fetch(&repo, "-bad").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn clone_rejects_bad_urls_before_spawning() {
+        let fx = Fixture::new("clone-validate");
+        let dest = fx.base.join("target");
+        let dest_str = dest.to_string_lossy().to_string();
+        assert!(matches!(
+            clone("file:///tmp/repo", &dest_str, None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            clone("https://localhost/x.git", &dest_str, None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            clone("https://github.com/acme/x.git", "../escape", None).await,
+            Err(GitError::InvalidInput(_))
         ));
     }
 }

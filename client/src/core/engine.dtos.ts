@@ -370,6 +370,69 @@ export interface QuestionAsked {
   questions: QuestionItem[];
 }
 
+/** Normalise `question.asked` properties (SSE event or `GET /session/{id}/question`); `null` when unusable. */
+export function parseQuestionAsked(
+  properties: Record<string, unknown> | undefined,
+): QuestionAsked | null {
+  if (!properties) {
+    return null;
+  }
+  const requestID = properties['requestID'];
+  const rawQuestions = properties['questions'];
+  if (typeof requestID !== 'string' || requestID.length === 0 || !Array.isArray(rawQuestions)) {
+    return null;
+  }
+  const questions = rawQuestions
+    .map(parseQuestion)
+    .filter((item): item is QuestionItem => item !== null);
+  if (questions.length === 0) {
+    return null;
+  }
+  return {
+    requestID,
+    messageIndex: Number(properties['messageIndex'] ?? 0),
+    questions,
+  };
+}
+
+function parseQuestion(raw: unknown): QuestionItem | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' ? record['id'] : '';
+  const question = typeof record['question'] === 'string' ? record['question'] : '';
+  if (!id.trim() || !question.trim()) {
+    return null;
+  }
+  const rawOptions = Array.isArray(record['options']) ? record['options'] : [];
+  const options = rawOptions
+    .map(parseOption)
+    .filter((option): option is QuestionOption => option !== null);
+  return {
+    id,
+    header: typeof record['header'] === 'string' ? record['header'] : '',
+    question,
+    options,
+    // Wire format is `multiSelect` (serde rename); accept legacy `multiple`.
+    multiple: record['multiSelect'] === true || record['multiple'] === true,
+    allowFreeText: record['allowFreeText'] !== false || options.length === 0,
+  };
+}
+
+function parseOption(raw: unknown): QuestionOption | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const label = typeof record['label'] === 'string' ? record['label'] : '';
+  if (!label.trim()) {
+    return null;
+  }
+  const description = typeof record['description'] === 'string' ? record['description'] : undefined;
+  return description === undefined ? { label } : { label, description };
+}
+
 /** Shape of `question.resolved` properties (answered or skipped, possibly by another client). */
 export interface QuestionResolved {
   requestID: string;
@@ -1200,6 +1263,169 @@ export interface CreateWorktreeSessionResponse extends CreateSessionResponse {
 /** `POST /projects/{id}/git/worktree/remove` answer. */
 export interface RemoveWorktreeResponse {
   removed: boolean;
+  path: string;
+}
+
+// ---------------------------------------------------------------------------
+// Git panel (read ops): status / log / branches / show
+// ---------------------------------------------------------------------------
+
+/** One file row of `git status --porcelain=v1` (`bebok_core::git::GitFileStatus`). */
+export interface GitFileStatus {
+  path: string;
+  /** Index (staged) status code, `' '` when nothing staged for this file. */
+  x: string;
+  /** Worktree (unstaged) status code, `' '` when nothing unstaged. */
+  y: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  /** Previous path of a rename, `null` otherwise. */
+  renamed_from: string | null;
+}
+
+/** `GET /projects/{id}/git/status` (`bebok_core::git::GitStatus`). */
+export interface GitStatus {
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFileStatus[];
+}
+
+/** One commit row of `GET /projects/{id}/git/log` (`bebok_core::git::GitLogEntry`). */
+export interface GitLogEntry {
+  hash: string;
+  parents: string[];
+  author: string;
+  email: string;
+  /** Commit time, seconds since epoch. */
+  ts: number;
+  subject: string;
+  body: string;
+  /** Decorations (`git log --decorate`), e.g. `HEAD -> main`, `tag: v1.0`. */
+  refs: string[];
+}
+
+/** `GET /projects/{id}/git/log?limit&skip&path` answer. */
+export interface GitLogResponse {
+  entries: GitLogEntry[];
+  /** The engine returned a full page - asking for the next `skip` may yield more. */
+  has_more: boolean;
+}
+
+/** One local branch row (`bebok_core::git::GitBranch`). */
+export interface GitBranch {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  last_commit: string;
+  last_ts: number;
+}
+
+/** `GET /projects/{id}/git/branches` answer. */
+export interface GitBranchesResponse {
+  current: string | null;
+  branches: GitBranch[];
+}
+
+/** One file touched by a commit (`bebok_core::git::GitShowFile`). */
+export interface GitShowFile {
+  /** Name-status code: `A`, `M`, `D`, `R100`, … */
+  status: string;
+  path: string;
+}
+
+/** `GET /projects/{id}/git/show?rev=` answer (`bebok_core::git::GitShow`). */
+export interface GitShow {
+  hash: string;
+  subject: string;
+  /** Unified diff of the commit, capped by the engine at 2 MB. */
+  diff: string;
+  files: GitShowFile[];
+}
+
+// ---------------------------------------------------------------------------
+// Git panel (write ops): stage / commit / stash / branch / sync / config / …
+// ---------------------------------------------------------------------------
+
+/** `git reset --<mode>`; `hard` discards work-tree changes and needs `confirm`. */
+export type GitResetMode = 'soft' | 'mixed' | 'hard';
+
+/** Scope of a `git config` write; `global` needs `confirm`. */
+export type GitConfigScope = 'local' | 'global';
+
+/** `POST /projects/{id}/git/commit` answer: the new (or amended) commit hash. */
+export interface GitCommitResponse {
+  hash: string;
+}
+
+/** One remote with its fetch URL (`GET /projects/{id}/git/remotes`). */
+export interface GitRemote {
+  name: string;
+  url: string;
+}
+
+/** `GET /projects/{id}/git/remotes` answer. */
+export interface GitRemotesResponse {
+  remotes: GitRemote[];
+}
+
+/** One `git stash list` entry. */
+export interface GitStashEntry {
+  /** Position in the stash stack (0 = most recent). */
+  index: number;
+  /** `stash@{0}` style selector. */
+  name: string;
+  message: string;
+}
+
+/** `GET /projects/{id}/git/stash` answer. */
+export interface GitStashListResponse {
+  stashes: GitStashEntry[];
+}
+
+/** One path with unresolved merge conflicts. */
+export interface GitConflict {
+  path: string;
+  /** Number of unresolved index stages (1..3). */
+  stages: number;
+}
+
+/** `GET /projects/{id}/git/conflicts` answer. */
+export interface GitConflictsResponse {
+  conflicts: GitConflict[];
+}
+
+/** `GET /projects/{id}/git/config?key=` answer; `value` is null when unset. */
+export interface GitConfigResponse {
+  key: string;
+  value: string | null;
+}
+
+/** Which VCS/forge CLIs the engine host has on `PATH`. */
+export interface GitTools {
+  git: boolean;
+  gh: boolean;
+  glab: boolean;
+}
+
+/** `GET /projects/{id}/git/tools` answer. */
+export interface GitToolsResponse {
+  tools: GitTools;
+}
+
+/** `POST /projects/{id}/git/forge` answer: the forge CLI's combined output. */
+export interface GitForgeResponse {
+  ok: boolean;
+  output: string;
+}
+
+/** `POST /git/clone` answer: the freshly registered project. */
+export interface GitCloneResponse {
+  ok: boolean;
+  project_id: string;
   path: string;
 }
 

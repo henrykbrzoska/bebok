@@ -222,7 +222,8 @@ pub fn spawn_scheduler(state: AppState) {
                             | crate::error::ApiError::Gone(m)
                             | crate::error::ApiError::BadGateway(m)
                             | crate::error::ApiError::ServiceUnavailable(m)
-                            | crate::error::ApiError::Internal(m) => m.clone(),
+                            | crate::error::ApiError::Internal(m)
+                            | crate::error::ApiError::Unauthorized(m) => m.clone(),
                         };
                         tracing::error!(
                             schedule = %updated.name,

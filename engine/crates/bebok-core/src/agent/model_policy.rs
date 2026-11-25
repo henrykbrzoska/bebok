@@ -38,12 +38,20 @@ pub fn resolve_subagent_model(
     };
     let fallback = || {
         if fleet_enabled {
-            // Sub-agents must come from the fleet roster.
-            if let Some(first) = cfg
+            // Sub-agents must come from the fleet roster. Prefer a member
+            // whose agent matches the child (an `ask` task must not inherit
+            // a `code` member's model); otherwise take the first usable one.
+            let by_agent = cfg
                 .fleet_members()
                 .iter()
-                .find(|m| !m.model.trim().is_empty())
-            {
+                .filter(|m| m.agent.trim().eq_ignore_ascii_case(child_agent))
+                .find(|m| !m.model.trim().is_empty());
+            let first = by_agent.or_else(|| {
+                cfg.fleet_members()
+                    .iter()
+                    .find(|m| !m.model.trim().is_empty())
+            });
+            if let Some(first) = first {
                 let fm = first.model.trim().to_string();
                 if is_available(&fm) {
                     return fm;
@@ -369,6 +377,44 @@ mod tests {
         // models.<agent> outside fleet -> ignored, falls back to fleet.
         assert_eq!(
             resolve_subagent_model(&cfg, "x/parent", "code", |_| "openai/o4".into(), None),
+            "openai/o3"
+        );
+    }
+
+    #[test]
+    fn fleet_fallback_prefers_matching_agent() {
+        // models.ask points at a model that is not in providers, so the
+        // fallback must pick the ask member's model, not the first member.
+        let mut cfg = test_cfg(
+            providers_with(&[
+                ("openai", &["o3"]),
+                ("askprov", &["ask-model"]),
+                ("x", &["parent"]),
+            ]),
+            serde_json::json!({}),
+            "x/parent",
+        );
+        cfg.fleet.enabled = true;
+        cfg.fleet.members = vec![
+            crate::config::FleetMember {
+                name: "code-1".into(),
+                agent: "code".into(),
+                model: "openai/o3".into(),
+            },
+            crate::config::FleetMember {
+                name: "ask-1".into(),
+                agent: "ask".into(),
+                model: "askprov/ask-model".into(),
+            },
+        ];
+        assert_eq!(
+            resolve_subagent_model(&cfg, "x/parent", "ask", |_| "missing/gone".into(), None),
+            "askprov/ask-model"
+        );
+        // No ask member at all -> first usable member (documented fallback).
+        cfg.fleet.members.remove(1);
+        assert_eq!(
+            resolve_subagent_model(&cfg, "x/parent", "ask", |_| "missing/gone".into(), None),
             "openai/o3"
         );
     }

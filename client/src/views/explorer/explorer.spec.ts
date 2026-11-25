@@ -58,7 +58,7 @@ describe('ExplorerView "Open in preview" (F6-11)', () => {
 
   it('points the Preview panel at the selected file and opens the panel', () => {
     view.directory.set('/proj');
-    view.selectedPath.set('docs/a.md');
+    view.activePath.set('docs/a.md');
 
     expect(shell.rightDrawerPanels().preview).toBeFalse();
 
@@ -72,11 +72,11 @@ describe('ExplorerView "Open in preview" (F6-11)', () => {
 
   it('does not re-close the panel on a second open (toggle-off guard)', () => {
     view.directory.set('/proj');
-    view.selectedPath.set('docs/a.md');
+    view.activePath.set('docs/a.md');
     view.openInPreview();
     expect(shell.rightDrawerPanels().preview).toBeTrue();
 
-    view.selectedPath.set('docs/b.md');
+    view.activePath.set('docs/b.md');
     view.openInPreview();
 
     expect(shell.rightDrawerPanels().preview).toBeTrue();
@@ -115,7 +115,7 @@ describe('ExplorerView content-pane syntax highlighting (F7-4)', () => {
 
   it('highlights the selected file by its extension', async () => {
     await preloadLanguage('rust');
-    view.selectedPath.set('src/main.rs');
+    view.activePath.set('src/main.rs');
     view.fileContent.set('fn main() {}');
 
     const { html, language } = view.highlightedFileContent();
@@ -125,7 +125,7 @@ describe('ExplorerView content-pane syntax highlighting (F7-4)', () => {
   });
 
   it('falls back to escaped, unhighlighted text for an unrecognized extension', () => {
-    view.selectedPath.set('notes.txt');
+    view.activePath.set('notes.txt');
     view.fileContent.set('<no-lang-for-this>');
 
     const { html, language } = view.highlightedFileContent();

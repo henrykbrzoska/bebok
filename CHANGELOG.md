@@ -4,6 +4,43 @@
 
 ### Features
 
+- New read-only **Git** panel in the right drawer: the working tree status
+  grouped into staged / unstaged / untracked files, the local branches with
+  their upstream and ahead/behind counts, and the recent commit log. Clicking
+  a commit opens its unified diff in an overlay. Nothing in the panel changes
+  the repository yet — staging and committing come later.
+- The **Git** panel is now fully interactive: stage / unstage (per file and
+  bulk), commit (with amend), soft / mixed / hard reset, stash push / pop /
+  apply / drop, checkout, branch create / rename / delete, cherry-pick with
+  conflict banner, remotes with fetch / pull / push, config get / set,
+  clone with project registration, tool detection (`git` / `gh` / `glab`)
+  and a guarded `gh` / `glab` forge runner, plus a hand-rolled branch graph
+  and live refresh on every change.
+
+### Fixes
+
+- CLI providers now follow the session agent's write access: `code` / `debug` /
+  `orchestrator` (and file-based agents without a `write_file` / `edit_file`
+  deny rule) run the CLI with `--permission-mode acceptEdits`, while `ask` /
+  `plan` / `hub` keep `--permission-mode plan`. Previously every CLI turn
+  started in plan mode unless `extra.allow_write` was set in config.
+- The `ask_user` dialog no longer gets stuck when the model sends `questions`
+  as a JSON-encoded string: the engine parses it instead of failing the turn.
+- The question dialog recovers a missed `question.asked` event: it asks the
+  engine for pending prompts (`GET /session/{id}/question`) whenever the
+  active session changes, so a blocked turn always shows its dialog.
+- Sub-agent model fallback prefers a fleet member whose agent matches the
+  child (an `ask` task no longer inherits a `code` member's model when
+  `models.ask` is not configured).
+- Heterogeneous `fleet` tasks with `agent` but no `member` are dealt
+  round-robin from the configured members of that agent (three `ask` tasks
+  run as ask-1, ask-2, ask-1), so sibling tasks spread across the roster.
+  The model always comes from the orchestrator's fleet config.
+
+## 1.13.0 — 2026-11-25
+
+### Features
+
 - Bebok now has an embedded SQLite database (`bebok.db` in the data folder)
   with WAL mode, foreign keys and versioned schema migrations. Schedules and
   batch jobs are the first data stored in it.

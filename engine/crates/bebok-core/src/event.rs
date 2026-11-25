@@ -17,6 +17,7 @@
 //! `batch.completed` (`properties`: `{ batchID, ok, failed }`),
 //! `batch.failed` (`properties`: `{ batchID, error }`), and
 //! `batch.progress` (`properties`: `{ batchID, done, total }`), and
+//! `git.changed` (`properties`: `{ op, branch, dirty_count }`), and
 //! `ssh.prompt` (a persistent SSH session needs a password:
 //! `properties`: `{ requestID, sessionID, directory, host, prompt }`, where
 //! `prompt` is `password` (SSH login) or `sudo`).
@@ -81,6 +82,23 @@ impl Event {
             "name": name,
             "stage": stage,
             "detail": detail,
+        }))
+    }
+
+    /// Git state changed: `git.changed` for an instance directory, with
+    /// `properties = { op, branch, dirty_count }`. Emitted by every mutating
+    /// git route (stage/commit/reset/stash/checkout/branch/cherry-pick/sync)
+    /// so the client panel can refresh.
+    pub fn git_changed(
+        directory: &str,
+        op: &str,
+        branch: Option<&str>,
+        dirty_count: Option<usize>,
+    ) -> Self {
+        Self::new("git.changed", directory, "").with_properties(serde_json::json!({
+            "op": op,
+            "branch": branch,
+            "dirty_count": dirty_count,
         }))
     }
 

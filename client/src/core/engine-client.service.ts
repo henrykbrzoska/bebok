@@ -45,6 +45,20 @@ import {
   FsSymbolsResponse,
   FsFileResponse,
   FsTreeResponse,
+  GitBranchesResponse,
+  GitCloneResponse,
+  GitCommitResponse,
+  GitConfigResponse,
+  GitConfigScope,
+  GitConflictsResponse,
+  GitForgeResponse,
+  GitLogResponse,
+  GitRemotesResponse,
+  GitResetMode,
+  GitShow,
+  GitStashListResponse,
+  GitStatus,
+  GitToolsResponse,
   McpListResponse,
   McpStatus,
   Message,
@@ -86,6 +100,8 @@ import {
   ScheduleTask,
   SshSessionInfo,
   QuestionAnswerBody,
+  QuestionItem,
+  parseQuestionAsked,
 } from './engine.dtos';
 import {
   BOOTSTRAP_ENGINE_PARAM,
@@ -650,6 +666,27 @@ export class EngineClient {
     );
   }
 
+  /**
+   * Pending `ask_user` prompts of a session (missed `question.asked` events,
+   * e.g. after a reconnect): `GET /session/{id}/question`.
+   */
+  async pendingQuestions(sessionID: string): Promise<
+    { requestID: string; messageIndex: number; questions: QuestionItem[] }[]
+  > {
+    const data = await this.request<{ questions: unknown[] }>(
+      'GET',
+      `/session/${encodeURIComponent(sessionID)}/question`,
+    );
+    const list: { requestID: string; messageIndex: number; questions: QuestionItem[] }[] = [];
+    for (const raw of data.questions ?? []) {
+      const parsed = parseQuestionAsked(raw as Record<string, unknown>);
+      if (parsed) {
+        list.push(parsed);
+      }
+    }
+    return list;
+  }
+
   /** Close an open SSH session. */
   async closeSshSession(id: string): Promise<void> {
     await this.request<unknown>('POST', `/ssh/${encodeURIComponent(id)}/close`);
@@ -1133,6 +1170,354 @@ export class EngineClient {
       'POST',
       `/projects/${encodeURIComponent(id)}/git/worktree/remove`,
       { path },
+    );
+  }
+
+  /** `GET /projects/{id}/git/status` - branch, ahead/behind, per-file rows. */
+  gitStatus(projectId: string): Promise<GitStatus> {
+    return this.request<GitStatus>('GET', `/projects/${encodeURIComponent(projectId)}/git/status`);
+  }
+
+  /**
+   * `GET /projects/{id}/git/log` - commit history, newest first. `limit` is
+   * clamped by the engine to 1..200 (default 50); `path` is a project-relative
+   * file filter.
+   */
+  gitLog(
+    projectId: string,
+    limit?: number,
+    skip?: number,
+    path?: string | null,
+  ): Promise<GitLogResponse> {
+    const params: string[] = [];
+    if (limit !== undefined && limit !== null) {
+      params.push(`limit=${limit}`);
+    }
+    if (skip !== undefined && skip !== null && skip > 0) {
+      params.push(`skip=${skip}`);
+    }
+    if (path) {
+      params.push(`path=${encodeURIComponent(path)}`);
+    }
+    const query = params.length ? `?${params.join('&')}` : '';
+    return this.request<GitLogResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/log${query}`,
+    );
+  }
+
+  /** `GET /projects/{id}/git/branches` - local branches with tracking info. */
+  gitBranches(projectId: string): Promise<GitBranchesResponse> {
+    return this.request<GitBranchesResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/branches`,
+    );
+  }
+
+  /** `GET /projects/{id}/git/show?rev=` - one commit with its unified diff. */
+  gitShow(projectId: string, rev: string): Promise<GitShow> {
+    return this.request<GitShow>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/show?rev=${encodeURIComponent(rev)}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Git panel (write ops): every call answers `{ok:true}` unless stated and
+  // makes the engine publish `git.changed`, which the panel listens to.
+  // ---------------------------------------------------------------------------
+
+  /** `POST /projects/{id}/git/stage` `{paths}` -> `git add`. */
+  gitStage(projectId: string, paths: readonly string[]): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/stage`,
+      { paths },
+    );
+  }
+
+  /** `POST /projects/{id}/git/unstage` `{paths}` -> `git reset -- <paths>`. */
+  gitUnstage(projectId: string, paths: readonly string[]): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/unstage`,
+      { paths },
+    );
+  }
+
+  /** `POST /projects/{id}/git/commit` `{message, amend?}` -> `{hash}`. */
+  gitCommit(projectId: string, message: string, amend = false): Promise<GitCommitResponse> {
+    return this.request<GitCommitResponse>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/commit`,
+      amend ? { message, amend: true } : { message },
+    );
+  }
+
+  /** `POST /projects/{id}/git/reset` `{mode, rev, confirm?}`; `hard` needs `confirm`. */
+  gitReset(
+    projectId: string,
+    mode: GitResetMode,
+    rev: string,
+    confirm = false,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/reset`,
+      confirm ? { mode, rev, confirm: true } : { mode, rev },
+    );
+  }
+
+  /** `GET /projects/{id}/git/stash` -> stash entries, newest first. */
+  gitStashList(projectId: string): Promise<GitStashListResponse> {
+    return this.request<GitStashListResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/stash`,
+    );
+  }
+
+  /** `POST /projects/{id}/git/stash/push` `{message?}`. */
+  gitStashPush(projectId: string, message?: string): Promise<{ ok: boolean }> {
+    const body = message ? { message } : {};
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/stash/push`,
+      body,
+    );
+  }
+
+  /** `POST /projects/{id}/git/stash/{pop|apply|drop}` `{index}`. */
+  gitStashAction(
+    projectId: string,
+    action: 'pop' | 'apply' | 'drop',
+    index: number,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/stash/${action}`,
+      { index },
+    );
+  }
+
+  /** `POST /projects/{id}/git/checkout` `{target, force?, confirm?}`. */
+  gitCheckout(
+    projectId: string,
+    target: string,
+    force = false,
+    confirm = false,
+  ): Promise<{ ok: boolean }> {
+    const body: Record<string, unknown> = { target };
+    if (force) {
+      body['force'] = true;
+      if (confirm) {
+        body['confirm'] = true;
+      }
+    }
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/checkout`,
+      body,
+    );
+  }
+
+  /** `POST /projects/{id}/git/branch` `{name, base?}`. */
+  gitBranchCreate(
+    projectId: string,
+    name: string,
+    base?: string | null,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/branch`,
+      base ? { name, base } : { name },
+    );
+  }
+
+  /** `DELETE /projects/{id}/git/branch?name=&force=&confirm=`; `force` needs `confirm`. */
+  gitBranchDelete(
+    projectId: string,
+    name: string,
+    force = false,
+    confirm = false,
+  ): Promise<{ ok: boolean }> {
+    const params = [`name=${encodeURIComponent(name)}`];
+    if (force) {
+      params.push('force=true');
+      if (confirm) {
+        params.push('confirm=true');
+      }
+    }
+    return this.request<{ ok: boolean }>(
+      'DELETE',
+      `/projects/${encodeURIComponent(projectId)}/git/branch?${params.join('&')}`,
+    );
+  }
+
+  /** `POST /projects/{id}/git/branch/rename` `{from, to}`. */
+  gitBranchRename(
+    projectId: string,
+    from: string,
+    to: string,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/branch/rename`,
+      { from, to },
+    );
+  }
+
+  /** `POST /projects/{id}/git/cherry-pick` `{rev}`. */
+  gitCherryPick(projectId: string, rev: string): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/cherry-pick`,
+      { rev },
+    );
+  }
+
+  /** `POST /projects/{id}/git/cherry-pick/abort` `{}`. */
+  gitCherryPickAbort(projectId: string): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/cherry-pick/abort`,
+      {},
+    );
+  }
+
+  /** `POST /projects/{id}/git/cherry-pick/continue` `{}`. */
+  gitCherryPickContinue(projectId: string): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/cherry-pick/continue`,
+      {},
+    );
+  }
+
+  /** `GET /projects/{id}/git/conflicts` -> unresolved merge paths. */
+  gitConflicts(projectId: string): Promise<GitConflictsResponse> {
+    return this.request<GitConflictsResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/conflicts`,
+    );
+  }
+
+  /** `GET /projects/{id}/git/remotes` -> remotes with their fetch URL. */
+  gitRemotes(projectId: string): Promise<GitRemotesResponse> {
+    return this.request<GitRemotesResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/remotes`,
+    );
+  }
+
+  /** `POST /projects/{id}/git/remotes/set-url` `{remote, url}`. */
+  gitSetRemoteUrl(
+    projectId: string,
+    remote: string,
+    url: string,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/remotes/set-url`,
+      { remote, url },
+    );
+  }
+
+  /** `POST /projects/{id}/git/sync/fetch` `{remote}`. */
+  gitSyncFetch(projectId: string, remote: string): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/sync/fetch`,
+      { remote },
+    );
+  }
+
+  /** `POST /projects/{id}/git/sync/pull` `{remote, refspec?}`. */
+  gitSyncPull(
+    projectId: string,
+    remote: string,
+    refspec?: string | null,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/sync/pull`,
+      refspec ? { remote, refspec } : { remote },
+    );
+  }
+
+  /** `POST /projects/{id}/git/sync/push` `{remote, refspec}`. */
+  gitSyncPush(
+    projectId: string,
+    remote: string,
+    refspec: string,
+  ): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/sync/push`,
+      { remote, refspec },
+    );
+  }
+
+  /** `GET /projects/{id}/git/config?key=` -> the value, `null` when unset. */
+  gitConfigGet(projectId: string, key: string): Promise<GitConfigResponse> {
+    return this.request<GitConfigResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/config?key=${encodeURIComponent(key)}`,
+    );
+  }
+
+  /**
+   * `POST /projects/{id}/git/config` `{key, value, scope, confirm?}`. A
+   * `global` write needs `confirm: true` (the engine rejects it otherwise).
+   */
+  gitConfigSet(
+    projectId: string,
+    key: string,
+    value: string,
+    scope: GitConfigScope,
+    confirm = false,
+  ): Promise<{ ok: boolean }> {
+    const body: Record<string, unknown> = { key, value, scope };
+    if (scope === 'global' && confirm) {
+      body['confirm'] = true;
+    }
+    return this.request<{ ok: boolean }>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/config`,
+      body,
+    );
+  }
+
+  /**
+   * `POST /git/clone` `{source, dest, branch?}` - clones into `dest` and
+   * registers it as a project. Not project-scoped: the new project does not
+   * exist yet when the call is made.
+   */
+  gitClone(source: string, dest: string, branch?: string | null): Promise<GitCloneResponse> {
+    return this.request<GitCloneResponse>(
+      'POST',
+      '/git/clone',
+      branch ? { source, dest, branch } : { source, dest },
+    );
+  }
+
+  /** `GET /projects/{id}/git/tools` -> which of git / gh / glab exist on the host. */
+  gitTools(projectId: string): Promise<GitToolsResponse> {
+    return this.request<GitToolsResponse>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/tools`,
+    );
+  }
+
+  /** `POST /projects/{id}/git/forge` `{tool, args}` -> the CLI's output. */
+  gitForge(
+    projectId: string,
+    tool: 'gh' | 'glab',
+    args: readonly string[],
+  ): Promise<GitForgeResponse> {
+    return this.request<GitForgeResponse>(
+      'POST',
+      `/projects/${encodeURIComponent(projectId)}/git/forge`,
+      { tool, args },
     );
   }
 

@@ -480,6 +480,7 @@ fn skills_diff_notes(old: &serde_json::Value, new: &serde_json::Value) -> Vec<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routes::common::remove_test_dir;
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -565,6 +566,6 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 403"), "{response}");
         assert!(!response.contains("root-secret-443"));
         server.abort();
-        std::fs::remove_dir_all(base).unwrap();
+        remove_test_dir(&base);
     }
 }

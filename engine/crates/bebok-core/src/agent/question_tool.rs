@@ -79,10 +79,22 @@ struct QuestionArgs {
 /// Validate and parse the tool arguments. Rejects anything the UI could not
 /// render: empty ids/text, duplicate ids, too many questions, or an option
 /// count outside `MIN_OPTIONS..=MAX_OPTIONS`.
+///
+/// Tolerates `questions` arriving as a JSON-encoded string (some models
+/// serialise the array instead of passing it directly): the string is parsed
+/// first, so the call still reaches the user instead of failing the turn.
 pub fn parse_questions(args: Value) -> Result<Vec<Question>, String> {
-    let parsed: QuestionArgs =
-        serde_json::from_value(args).map_err(|e| format!("invalid ask_user arguments: {e}"))?;
-    let questions = parsed.questions;
+    let questions_value = match args.get("questions") {
+        Some(Value::String(s)) => serde_json::from_str::<Vec<Question>>(s).map_err(|e| {
+            format!("invalid ask_user arguments: `questions` is not a valid question array: {e}")
+        })?,
+        _ => {
+            let parsed: QuestionArgs = serde_json::from_value(args)
+                .map_err(|e| format!("invalid ask_user arguments: {e}"))?;
+            parsed.questions
+        }
+    };
+    let questions = questions_value;
     if questions.is_empty() {
         return Err("ask_user needs at least one question".into());
     }
@@ -427,6 +439,21 @@ mod tests {
         assert_eq!(qs.len(), 2);
         assert!(qs[1].multi_select);
         assert_eq!(qs[1].options[0].description.as_deref(), Some("server only"));
+    }
+
+    #[test]
+    fn accepts_questions_as_json_string() {
+        // Some models serialise the array instead of passing it directly.
+        let inner = serde_json::to_string(&vec![
+            two_option_question("db"),
+            two_option_question("scope"),
+        ])
+        .unwrap();
+        let qs = parse_questions(json!({ "questions": inner })).unwrap();
+        assert_eq!(qs.len(), 2);
+        assert_eq!(qs[0].id, "db");
+        assert!(parse_questions(json!({ "questions": "not json" })).is_err());
+        assert!(parse_questions(json!({ "questions": "[1,2]" })).is_err());
     }
 
     #[test]
