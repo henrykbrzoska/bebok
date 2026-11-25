@@ -12,8 +12,8 @@
 //! * Heterogeneous mode: `tasks` carries per-task prompts
 //!   (`[{"prompt": "research auth", "agent": "ask"},
 //!     {"prompt": "research db", "agent": "ask"}]`). Each task gets its own
-//!   isolated child session via the same `run_member` path (synthetic
-//!   `FleetMember { name, agent, model: "" }`) and all tasks run
+//!   isolated child session via the same `run_member` path (dealt from the
+//!   configured roster of that agent, round-robin) and all tasks run
 //!   concurrently. Use this when there is more than one task AND the tasks
 //!   do not affect each other, and fleet members are available.
 //!
@@ -153,11 +153,19 @@ fn clean_tasks(raw: Option<Vec<FleetTask>>) -> Vec<CleanTask> {
 /// `task.member` (when matched) else `task.name` else the agent name.
 /// A `task.member` matching no configured member is an error listing the
 /// valid members (same style as the unknown-`names` error).
+///
+/// A task with an agent but no `task.member` is dealt round-robin from the
+/// configured members of that agent (1st ask task -> ask-1, 2nd -> ask-2,
+/// 3rd -> ask-1, …), so sibling tasks spread across the roster instead of
+/// all landing on one model. The model always comes from the orchestrator's
+/// fleet config — never from the user's own models.
 fn resolve_hetero_members(
     configured: &[crate::config::FleetMember],
     tasks: &[CleanTask],
 ) -> Result<Vec<(crate::config::FleetMember, String, Vec<AgentImageInput>)>, String> {
     let mut out = Vec::with_capacity(tasks.len());
+    // Per-agent round-robin cursor for member-less tasks.
+    let mut cursor: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for t in tasks {
         let matched = t
             .member
@@ -182,12 +190,31 @@ fn resolve_hetero_members(
                     .filter(|a| !a.is_empty())
             })
             .unwrap_or_else(|| "code".to_string());
+        // Member-less task: deal the next roster member of this agent.
+        let dealt = if matched.is_none() {
+            let pool: Vec<&crate::config::FleetMember> = configured
+                .iter()
+                .filter(|c| c.agent.trim().eq_ignore_ascii_case(&agent))
+                .collect();
+            if pool.is_empty() {
+                None
+            } else {
+                let next = cursor.entry(agent.to_lowercase()).or_insert(0);
+                let pick = pool[*next % pool.len()];
+                *next += 1;
+                Some(pick)
+            }
+        } else {
+            None
+        };
+        let member_ref = matched.or(dealt);
         let display = t
             .member
             .clone()
             .or_else(|| t.name.clone())
+            .or_else(|| member_ref.map(|m| m.name.clone()))
             .unwrap_or_else(|| agent.clone());
-        let model = matched.map(|m| m.model.clone()).unwrap_or_default();
+        let model = member_ref.map(|m| m.model.clone()).unwrap_or_default();
         out.push((
             crate::config::FleetMember {
                 name: display,
@@ -336,7 +363,9 @@ impl Tool for FleetTool {
          prompts for independent tasks, e.g. {\"tasks\": [{\"prompt\": \"research auth\", \
          \"agent\": \"ask\"}, {\"prompt\": \"research db\", \"agent\": \"ask\"}]} — each entry \
          is {prompt (required), agent?, name?, member?, images?} and runs concurrently in its own \
-         isolated session; `task.member` must match a configured member name. Use fleet whenever \
+         isolated session; `task.member` must match a configured member name. A task \
+         with `agent` but no `member` is dealt the next roster member of that agent \
+         (round-robin: three `ask` tasks run as ask-1, ask-2, ask-1). Use fleet whenever \
          the fleet is configured as \
          described above; otherwise prefer `task` calls. Returns member names; report which ran."
     }
@@ -632,9 +661,10 @@ async fn run_member(
     };
     let mut agent = instance.resolve_agent(agent_name);
 
-    // Effective model for fleet: member.model wins over models.<agent>
-    // (fleet is the roster). Only models listed in providers[].models are
-    // allowed — anything else falls back to models.<agent> / parent / global.
+    // Effective model for fleet: member.model wins (the roster is the only
+    // source — never the user's own models). Only models listed in
+    // providers[].models are allowed; anything else falls back to the first
+    // usable fleet member of the same agent.
     let parent_model =
         crate::store::parent_model_for_delegation(&parent.meta_snapshot().await, instance, cfg);
     let requested = member.model.trim();
@@ -643,7 +673,7 @@ async fn run_member(
             cfg,
             &parent_model,
             agent_name,
-            |a| cfg.model_for(a),
+            |_| String::new(),
             None,
         )
     } else if requested.eq_ignore_ascii_case(crate::agent::model_policy::HEAVY) {
@@ -652,14 +682,14 @@ async fn run_member(
             cfg,
             &parent_model,
             agent_name,
-            |a| cfg.model_for(a),
+            |_| String::new(),
             Some(requested),
         )
     } else if cfg.is_model_available(requested) {
         requested.to_string()
     } else {
         tracing::warn!(
-            "fleet member '{}' model '{}' not in providers[].models; falling back to models.{}/parent",
+            "fleet member '{}' model '{}' not in providers[].models; falling back to fleet member of '{}'",
             member.name,
             requested,
             agent_name
@@ -668,7 +698,7 @@ async fn run_member(
             cfg,
             &parent_model,
             agent_name,
-            |a| cfg.model_for(a),
+            |_| String::new(),
             None,
         )
     };
@@ -967,8 +997,9 @@ mod tests {
         assert_eq!(cleaned.len(), 2);
         let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
         assert_eq!(resolved.len(), 2);
+        // Round-robin over the ask roster: 1st -> ask member "1", 2nd -> "2".
         assert_eq!(resolved[0].0.agent, "ask");
-        assert_eq!(resolved[0].0.name, "ask");
+        assert_eq!(resolved[0].0.name, "1");
         assert_eq!(resolved[0].1, "research auth");
         assert_eq!(resolved[1].0.agent, "ask");
         assert_eq!(resolved[1].0.name, "db-task");
@@ -1082,8 +1113,103 @@ mod tests {
         }]);
         let cleaned = clean_tasks(raw);
         let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
+        // No agent -> "code", dealt from the code roster (member "3").
         assert_eq!(resolved[0].0.agent, "code");
-        assert_eq!(resolved[0].0.name, "code");
+        assert_eq!(resolved[0].0.name, "3");
+    }
+
+    #[test]
+    fn hetero_round_robin_spreads_tasks_across_agent_roster() {
+        // 3 ask tasks -> ask-1, ask-2, ask-1 (wrap); 3 code tasks -> 3, 4, 3.
+        let raw = Some(vec![
+            FleetTask {
+                prompt: "a1".into(),
+                agent: Some("ask".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+            FleetTask {
+                prompt: "a2".into(),
+                agent: Some("ask".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+            FleetTask {
+                prompt: "a3".into(),
+                agent: Some("ask".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+            FleetTask {
+                prompt: "c1".into(),
+                agent: Some("code".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+            FleetTask {
+                prompt: "c2".into(),
+                agent: Some("code".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+            FleetTask {
+                prompt: "c3".into(),
+                agent: Some("code".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+        ]);
+        let cleaned = clean_tasks(raw);
+        let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
+        let names: Vec<&str> = resolved.iter().map(|(m, _, _)| m.name.as_str()).collect();
+        assert_eq!(names, vec!["1", "2", "1", "3", "4", "3"]);
+        // Models come from the dealt roster members.
+        assert_eq!(resolved[0].0.model, String::new()); // member "1" has no model in fixture
+        // Explicit member still wins over the round-robin cursor.
+        let raw = Some(vec![
+            FleetTask {
+                prompt: "x".into(),
+                agent: Some("ask".into()),
+                name: None,
+                member: Some("2".into()),
+                images: None,
+            },
+            FleetTask {
+                prompt: "y".into(),
+                agent: Some("ask".into()),
+                name: None,
+                member: None,
+                images: None,
+            },
+        ]);
+        let cleaned = clean_tasks(raw);
+        let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
+        assert_eq!(resolved[0].0.name, "2");
+        assert_eq!(resolved[1].0.name, "1");
+    }
+
+    #[test]
+    fn hetero_unknown_agent_has_no_roster_member() {
+        // No configured member of this agent -> synthetic member, empty model
+        // (run_member then falls back to the fleet roster of that agent).
+        let raw = Some(vec![FleetTask {
+            prompt: "x".into(),
+            agent: Some("plan".into()),
+            name: None,
+            member: None,
+            images: None,
+        }]);
+        let cleaned = clean_tasks(raw);
+        let resolved = resolve_hetero_members(&members(), &cleaned).unwrap();
+        assert_eq!(resolved[0].0.agent, "plan");
+        assert_eq!(resolved[0].0.name, "plan");
+        assert!(resolved[0].0.model.is_empty());
     }
 
     #[test]

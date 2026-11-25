@@ -12,6 +12,10 @@
 - Sub-agent model fallback prefers a fleet member whose agent matches the
   child (an `ask` task no longer inherits a `code` member's model when
   `models.ask` is not configured).
+- Heterogeneous `fleet` tasks with `agent` but no `member` are dealt
+  round-robin from the configured members of that agent (three `ask` tasks
+  run as ask-1, ask-2, ask-1), so sibling tasks spread across the roster.
+  The model always comes from the orchestrator's fleet config.
 
 ## 1.13.0 — 2026-11-25
 
