@@ -533,6 +533,8 @@ export const ko: Record<MessageKey, string> = {
   'chat.compacting': '압축 중…',
   'chat.compactTitle': '이전 메시지를 요약해 새 세션으로 만듭니다 (컨텍스트 압축)',
   'chat.compactIdle': '압축하려면 메시지가 몇 개 있는 유휴 세션이 필요합니다',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': '컨텍스트 압축',
 
   // F6-5: unknown pricing

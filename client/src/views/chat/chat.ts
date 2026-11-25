@@ -302,6 +302,13 @@ export class ChatView implements OnInit, OnDestroy {
   /** Sessions already auto-compacted once (never loop on a stubborn gauge). */
   private readonly autoCompacted = new Set<string>();
 
+  readonly autoCompactEnabled = this.sessionStore.autoCompactEnabled;
+
+  onAutoCompactToggle(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.sessionStore.setAutoCompactEnabled(checked);
+  }
+
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
 
@@ -978,10 +985,19 @@ export class ChatView implements OnInit, OnDestroy {
   }
 
   async sendPrompt(): Promise<void> {
-    const text = this.draft().trim();
+    let text = this.draft().trim();
     const staged = this.attachments();
     if ((!text && staged.length === 0) || this.loading()) {
       return;
+    }
+    // /btw <prompt> — ask about current task status without interrupting the turn.
+    // When a turn is running, inject as a side question; otherwise send normally
+    // with a status-context prefix so the model answers about the current work.
+    if (text.startsWith('/btw ')) {
+      const btwPrompt = text.slice(5).trim();
+      if (!btwPrompt) return;
+      // Build a prompt that asks the model to answer about current status
+      text = `[BTW — side question about current task, answer concisely without interrupting main work]: ${btwPrompt}`;
     }
     // A pending permission prompt blocks turn progress (F2-8).
     if (this.permissionBlocked()) {

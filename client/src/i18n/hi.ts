@@ -533,6 +533,8 @@ export const hi: Record<MessageKey, string> = {
   'chat.compacting': 'संक्षिप्त हो रहा है…',
   'chat.compactTitle': 'पुराने संदेशों का सारांश बनाकर नया सत्र खोलें (संदर्भ संक्षेपण)',
   'chat.compactIdle': 'संक्षेपण के लिए कुछ संदेशों वाला निष्क्रिय सत्र चाहिए',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': 'संदर्भ संक्षिप्त करें',
 
   // F6-5: unknown pricing

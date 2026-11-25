@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12.0 — 2026-11-24
+
+### Features
+- scrollbar, minimap and /btw command (c41f5e6)
+
+### Other
+- 1.11.0 (#47) (396a64a)
+
 ## 1.11.0 — 2026-11-18
 
 ### Features

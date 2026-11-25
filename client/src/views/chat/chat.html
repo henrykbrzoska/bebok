@@ -54,6 +54,15 @@
       </span>
     }
 
+    <label class="tb-field tb-compact-toggle" [title]="t('chat.autoCompactHint')">
+      <input
+        type="checkbox"
+        data-testid="auto-compact-toggle"
+        [checked]="autoCompactEnabled()"
+        (change)="onAutoCompactToggle($event)"
+      />
+      <span class="tb-label">{{ t('chat.autoCompact') }}</span>
+    </label>
     <button
       class="tb-compact"
       type="button"
@@ -252,7 +261,7 @@
           rows="1"
           class="composer-input"
           autofocus
-          [placeholder]="t('chat.composerPlaceholder')"
+          [placeholder]="t('chat.composerPlaceholder') + '  (/btw <pytanie> — dopytaj o status zadania)'"
           [attr.aria-label]="t('chat.composerPlaceholder')"
           (input)="onComposerInput($event, composerInput)"
           (keydown)="onComposerKeydown($event)"

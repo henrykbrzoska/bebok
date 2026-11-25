@@ -533,6 +533,8 @@ export const zh: Record<MessageKey, string> = {
   'chat.compacting': '压缩中…',
   'chat.compactTitle': '将较早的消息摘要到新会话（压缩上下文）',
   'chat.compactIdle': '压缩需要空闲且已有若干消息的会话',
+  'chat.autoCompact': 'Auto-compact',
+  'chat.autoCompactHint': 'Automatically compact context when the meter is high',
   'palette.compactSession': '压缩上下文',
 
   // F6-5: unknown pricing

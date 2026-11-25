@@ -226,6 +226,7 @@
             <app-find-bar scope="explorer" [text]="draftContent()" [container]="findContainer()" />
           }
           <div class="code-editor" [class.goto-armed]="gotoArmed() && canGoto()">
+            <pre #gutterEl class="line-gutter" aria-hidden="true">{{ draftLineNumbers() }}</pre>
             <pre
               #editorLayer
               class="editor-layer"
@@ -242,7 +243,7 @@
               data-testid="explorer-editor"
               [ngModel]="draftContent()"
               (ngModelChange)="onDraftChange($event)"
-              (scroll)="syncLayer(editorArea); closeCompletion()"
+              (scroll)="syncLayer(editorArea); closeCompletion(); updateMinimapViewport()"
               (click)="onEditorClick($event, editorArea); closeCompletion()"
               (keydown)="onEditorKeydown($event, editorArea)"
               (input)="onEditorInput(editorArea)"
@@ -251,6 +252,10 @@
               [appContextMenuData]="editorMenuData(editorArea)"
               [attr.aria-label]="t('explorer.editorLabel')"
             ></textarea>
+            <div class="minimap" (click)="onMinimapClick($event)" (mousedown)="onMinimapDragStart($event)">
+              <canvas #minimapCanvas width="64" height="400"></canvas>
+              <div class="minimap-viewport" [style.top.px]="minimapViewportTop()" [style.height.px]="minimapViewportHeight()"></div>
+            </div>
             @if (completePos(); as pos) {
               <ul
                 class="complete-popup"
@@ -329,7 +334,14 @@
           @if (find.open()) {
             <app-find-bar scope="explorer" [text]="fileContent()" [container]="findContainer()" />
           }
-          <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
+          <div class="file-content-wrap" #readOnlyWrap (scroll)="updateMinimapViewport()">
+            <pre class="line-gutter" aria-hidden="true">{{ fileLineNumbers() }}</pre>
+            <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
+            <div class="minimap" (click)="onMinimapClick($event)" (mousedown)="onMinimapDragStart($event)">
+              <canvas #minimapCanvasRO width="64" height="400"></canvas>
+              <div class="minimap-viewport" [style.top.px]="minimapViewportTop()" [style.height.px]="minimapViewportHeight()"></div>
+            </div>
+          </div>
         }
       }
     </main>
