@@ -455,40 +455,48 @@ mod tests {
         names
     }
 
+    /// Parameters plus the bindings declared *before* the caret in the same
+    /// function, for every supported language in one table - the per-language
+    /// syntax is the only thing that differs, so one case each is enough.
     #[test]
-    fn rust_params_and_earlier_lets_only() {
-        let src = "fn main(arg: i32) {\n    let total = 1;\n    let later = 2;\n    XX\n}\nfn other() { let hidden = 3; }\n";
-        assert_eq!(locals(Lang::Rust, src, "XX"), vec!["arg", "later", "total"]);
+    fn params_and_earlier_bindings_are_visible_in_every_language() {
+        for (lang, src, want) in [
+            (
+                Lang::Rust,
+                "fn main(arg: i32) {\n    let total = 1;\n    let later = 2;\n    XX\n}\nfn other() { let hidden = 3; }\n",
+                vec!["arg", "later", "total"],
+            ),
+            (
+                Lang::Ts,
+                "function run(input: string) {\n  const local = 1;\n  let other = 2;\n  XX\n}\nconst outside = 4;\n",
+                vec!["input", "local", "other"],
+            ),
+            (
+                Lang::Python,
+                "def f(a, b=2):\n    total = 1\n    XX\n\ndef g():\n    hidden = 0\n",
+                vec!["a", "b", "total"],
+            ),
+            (
+                Lang::Go,
+                "package main\n\nfunc f(p int) {\n\tv := 1\n\tXX\n}\n",
+                vec!["p", "v"],
+            ),
+            (
+                Lang::Php,
+                "<?php\nfunction f($req, $n) {\n  $tmp = 1;\n  XX\n}\n",
+                vec!["n", "req", "tmp"],
+            ),
+        ] {
+            assert_eq!(locals(lang, src, "XX"), want, "{lang:?}");
+        }
     }
 
+    /// The scope rule the completion list depends on: a binding declared
+    /// after the caret is not in scope yet.
     #[test]
-    fn rust_declaration_after_caret_is_not_visible() {
+    fn declarations_after_the_caret_are_not_visible() {
         let src = "fn main() {\n    XX\n    let after = 1;\n}\n";
         assert!(locals(Lang::Rust, src, "XX").is_empty());
-    }
-
-    #[test]
-    fn ts_params_and_const_in_same_function() {
-        let src = "function run(input: string) {\n  const local = 1;\n  let other = 2;\n  XX\n}\nconst outside = 4;\n";
-        assert_eq!(locals(Lang::Ts, src, "XX"), vec!["input", "local", "other"]);
-    }
-
-    #[test]
-    fn python_params_defaults_and_assignments() {
-        let src = "def f(a, b=2):\n    total = 1\n    XX\n\ndef g():\n    hidden = 0\n";
-        assert_eq!(locals(Lang::Python, src, "XX"), vec!["a", "b", "total"]);
-    }
-
-    #[test]
-    fn go_params_and_short_var_decl() {
-        let src = "package main\n\nfunc f(p int) {\n\tv := 1\n\tXX\n}\n";
-        assert_eq!(locals(Lang::Go, src, "XX"), vec!["p", "v"]);
-    }
-
-    #[test]
-    fn php_params_and_assigned_variables() {
-        let src = "<?php\nfunction f($req, $n) {\n  $tmp = 1;\n  XX\n}\n";
-        assert_eq!(locals(Lang::Php, src, "XX"), vec!["n", "req", "tmp"]);
     }
 
     #[test]

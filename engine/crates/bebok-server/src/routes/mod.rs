@@ -31,6 +31,7 @@ pub mod plugins;
 pub mod processes;
 pub mod projects;
 pub mod providers;
+pub mod question;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod schedules;
@@ -56,6 +57,12 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/permission", get(session::pending_permissions))
         .route("/session/{id}/prompt", post(session::prompt))
         .route("/session/{id}/abort", post(session::abort))
+        // `ask_user`: questions a turn is blocked on, and the user's answers.
+        .route("/session/{id}/question", get(question::list_questions))
+        .route(
+            "/session/{id}/question/{requestID}",
+            post(question::answer_question_route),
+        )
         .route(
             "/session/{id}/task/{taskID}/abort",
             post(session::abort_task),

@@ -34,6 +34,8 @@ import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
 import { ModelSelect } from '../../ui/model-select/model-select';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
+import { QuestionDialog, type AnsweredQuestion } from '../../ui/question-dialog/question-dialog';
+import { QuestionRecord } from '../../ui/question-dialog/question-record';
 import { SshPromptPopup } from '../../ui/ssh-prompt/ssh-prompt';
 import { TaskProgressLine } from '../../ui/task-progress-line/task-progress-line';
 import { ToastHost } from '../../ui/toast/toast-host';
@@ -201,6 +203,8 @@ function persistDrafts(drafts: Record<string, string>): void {
     RouterLink,
     ModelSelect,
     PermissionPopup,
+    QuestionDialog,
+    QuestionRecord,
     SshPromptPopup,
     MessageRowComponent,
     ToolRunRowComponent,
@@ -393,6 +397,19 @@ export class ChatView implements OnInit, OnDestroy {
     () => (this.permission()?.asks().length ?? 0) > 0,
   );
 
+  /** Modal question prompt (client question tool) - blocks sending while open. */
+  readonly question = viewChild(QuestionDialog);
+
+  /** True while the agent waits for an answer to a question (same send lock as permissions). */
+  readonly questionBlocked = computed(() => this.question()?.blocking() ?? false);
+
+  /** Answered/skipped questions, rendered back into the transcript (in-memory, per page load). */
+  readonly questionRecords = signal<AnsweredQuestion[]>([]);
+  /** Records of the session on screen only. */
+  readonly visibleQuestionRecords = computed(() =>
+    this.questionRecords().filter((record) => record.sessionID === this.sessionID()),
+  );
+
   /** Per-session drafts (sessionID -> text), persisted to localStorage. */
   private readonly drafts: Record<string, string> = loadDrafts();
   /** Per-session queued prompts + optimistic echoes (survive tab switches). */
@@ -419,6 +436,7 @@ export class ChatView implements OnInit, OnDestroy {
     effect(() => this.sessionStore.meta.set(this.meta()));
     effect(() => this.sessionStore.messages.set(this.messages()));
     effect(() => this.sessionStore.running.set(this.running()));
+    effect(() => this.sessionStore.awaitingAnswer.set(this.questionBlocked()));
 
     // Full transcript sync whenever the SSE stream (re)connects: events that
     // fell into the reconnect gap are recovered from the engine, not guessed.
@@ -984,6 +1002,11 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
+  /** Answer callback from the question dialog: keep the Q&A in the transcript. */
+  onQuestionAnswered(record: AnsweredQuestion): void {
+    this.questionRecords.update((list) => [...list, record]);
+  }
+
   async sendPrompt(): Promise<void> {
     let text = this.draft().trim();
     const staged = this.attachments();
@@ -999,8 +1022,8 @@ export class ChatView implements OnInit, OnDestroy {
       // Build a prompt that asks the model to answer about current status
       text = `[BTW — side question about current task, answer concisely without interrupting main work]: ${btwPrompt}`;
     }
-    // A pending permission prompt blocks turn progress (F2-8).
-    if (this.permissionBlocked()) {
+    // A pending permission prompt blocks turn progress (F2-8); so does an open question.
+    if (this.permissionBlocked() || this.questionBlocked()) {
       return;
     }
     this.setComposerText('');

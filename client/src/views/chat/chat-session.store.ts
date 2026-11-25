@@ -125,6 +125,8 @@ export class ChatSessionStore {
   readonly meta = signal<SessionMeta | null>(null);
   readonly messages = signal<Message[]>([]);
   readonly running = signal(false);
+  /** A question prompt is open and the agent waits for the user's answer (set by `ChatView`). */
+  readonly awaitingAnswer = signal(false);
 
   /** Transcript model filter (null = every model), driven from the panel. */
   readonly filterModel = signal<string | null>(null);
@@ -290,6 +292,7 @@ export class ChatSessionStore {
     this.meta.set(null);
     this.messages.set([]);
     this.running.set(false);
+    this.awaitingAnswer.set(false);
     this.filterModel.set(null);
   }
 }

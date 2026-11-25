@@ -521,277 +521,204 @@ fn is_valid_ident(s: &str) -> bool {
 mod tests {
     use super::*;
 
-    // --- mod declarations ---
-
+    /// Every declaration form the parser understands, in one table: `mod`
+    /// (file and inline), `use` (plain, braced, nested, aliased,
+    /// crate-relative, external, `pub use`), and the comment / `cfg(test)`
+    /// cases that must produce no edge at all.
     #[test]
-    fn mod_decl_simple() {
-        let (node, edges) = parse_file_content("mod foo;", "src/lib.rs", "my_crate");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::ModDecl);
-        assert_eq!(edges[0].to.path, "src/foo.rs");
-        assert_eq!(node.lines, 1);
+    fn declarations_become_edges() {
+        for (text, rel, krate, want) in [
+            // `mod foo;` -> the sibling file, whatever the visibility.
+            (
+                "mod foo;",
+                "src/lib.rs",
+                "my_crate",
+                vec![(DepKind::ModDecl, "src/foo.rs")],
+            ),
+            (
+                "pub mod bar;",
+                "src/lib.rs",
+                "c",
+                vec![(DepKind::ModDecl, "src/bar.rs")],
+            ),
+            (
+                "pub(crate) mod inner;",
+                "src/foo.rs",
+                "c",
+                vec![(DepKind::ModDecl, "src/inner.rs")],
+            ),
+            // An inline `mod` is a node inside the file, not a sibling file.
+            (
+                "mod utils {\n    pub fn helper() {}\n}",
+                "src/lib.rs",
+                "my_crate",
+                vec![(DepKind::ModInline, "src/lib::utils")],
+            ),
+            // `use`: crate-relative paths resolve to module paths.
+            (
+                "use crate::foo;",
+                "src/main.rs",
+                "my_crate",
+                vec![(DepKind::Use, "foo")],
+            ),
+            (
+                "pub use crate::thing;",
+                "src/lib.rs",
+                "c",
+                vec![(DepKind::Use, "thing")],
+            ),
+            (
+                "use crate::foo::Bar as Baz;",
+                "src/main.rs",
+                "c",
+                vec![(DepKind::Use, "foo/Bar")],
+            ),
+            (
+                "use crate::config::loader;",
+                "src/agent/mod.rs",
+                "bebok_core",
+                vec![(DepKind::Use, "config/loader")],
+            ),
+            (
+                "use crate::{Foo, Bar};",
+                "src/main.rs",
+                "c",
+                vec![(DepKind::Use, "Bar"), (DepKind::Use, "Foo")],
+            ),
+            // Anything not under `crate::` is an external dependency.
+            (
+                "use serde::{Serialize, Deserialize};",
+                "src/main.rs",
+                "my_crate",
+                vec![
+                    (DepKind::UseExternal, "serde/Deserialize"),
+                    (DepKind::UseExternal, "serde/Serialize"),
+                ],
+            ),
+            (
+                "use std::collections::{HashMap, HashSet};",
+                "src/main.rs",
+                "my_crate",
+                vec![
+                    (DepKind::UseExternal, "std/collections/HashMap"),
+                    (DepKind::UseExternal, "std/collections/HashSet"),
+                ],
+            ),
+            // Several lines, and the two kinds side by side.
+            (
+                "use crate::a;\nuse crate::b;\nuse crate::c;",
+                "src/main.rs",
+                "c",
+                vec![
+                    (DepKind::Use, "a"),
+                    (DepKind::Use, "b"),
+                    (DepKind::Use, "c"),
+                ],
+            ),
+            (
+                "mod foo;\nuse crate::bar;",
+                "src/lib.rs",
+                "c",
+                vec![(DepKind::Use, "bar"), (DepKind::ModDecl, "src/foo.rs")],
+            ),
+            // Commented-out and `cfg(test)` code must not become an edge.
+            (
+                "// use crate::foo;\nuse crate::bar;",
+                "src/main.rs",
+                "c",
+                vec![(DepKind::Use, "bar")],
+            ),
+            (
+                "/* use crate::foo; */\nuse crate::bar;",
+                "src/main.rs",
+                "c",
+                vec![(DepKind::Use, "bar")],
+            ),
+            (
+                "/* /* inner */ use crate::foo; */\nuse crate::bar;",
+                "src/main.rs",
+                "c",
+                vec![(DepKind::Use, "bar")],
+            ),
+            (
+                "#[cfg(test)]\nmod tests {\n    use crate::foo;\n}",
+                "src/main.rs",
+                "c",
+                vec![],
+            ),
+            ("#[cfg(test)] mod tests;", "src/main.rs", "c", vec![]),
+            // A `//` inside a string literal is not a comment.
+            (
+                r#"let s = "http://example.com";"#,
+                "src/main.rs",
+                "c",
+                vec![],
+            ),
+        ] {
+            let (_node, edges) = parse_file_content(text, rel, krate);
+            let mut got: Vec<(DepKind, &str)> =
+                edges.iter().map(|e| (e.kind, e.to.path.as_str())).collect();
+            got.sort_by_key(|(_, path)| *path);
+            let mut want = want;
+            want.sort_by_key(|(_, path)| *path);
+            assert_eq!(got, want, "{text:?}");
+        }
     }
 
+    /// `pub` items (incl. `pub(crate)`) are the module's exports; private
+    /// ones are not. Line counts come from `str::lines()`.
     #[test]
-    fn pub_mod_decl() {
-        let (_node, edges) = parse_file_content("pub mod bar;", "src/lib.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::ModDecl);
-        assert_eq!(edges[0].to.path, "src/bar.rs");
+    fn exports_and_line_counts() {
+        for (text, want_exports, want_lines) in [
+            (
+                "pub fn do_stuff() {}\npub fn also_this() {}",
+                vec!["do_stuff", "also_this"],
+                2,
+            ),
+            (
+                "pub struct Foo;\npub enum Bar {}\npub trait Baz {}",
+                vec!["Foo", "Bar", "Baz"],
+                3,
+            ),
+            ("pub(crate) fn helper() {}", vec!["helper"], 1),
+            ("fn private() {}\nstruct Internal;", vec![], 2),
+            // str::lines() ignores the trailing newline.
+            ("line1\nline2\nline3\n", vec![], 3),
+            ("", vec![], 0),
+        ] {
+            let (node, _edges) = parse_file_content(text, "src/lib.rs", "c");
+            assert_eq!(node.exports, want_exports, "{text:?}");
+            assert_eq!(node.lines, want_lines, "{text:?}");
+        }
     }
 
+    /// The string helpers the two passes above are built from.
     #[test]
-    fn pub_crate_mod_decl() {
-        let (_node, edges) = parse_file_content("pub(crate) mod inner;", "src/foo.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::ModDecl);
-        assert_eq!(edges[0].to.path, "src/inner.rs");
-    }
-
-    #[test]
-    fn inline_mod() {
-        let (_node, edges) = parse_file_content(
-            "mod utils {\n    pub fn helper() {}\n}",
-            "src/lib.rs",
-            "my_crate",
-        );
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::ModInline);
-        assert_eq!(edges[0].to.path, "src/lib::utils");
-    }
-
-    // --- use declarations ---
-
-    #[test]
-    fn use_simple() {
-        let (_node, edges) = parse_file_content("use crate::foo;", "src/main.rs", "my_crate");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::Use);
-        assert_eq!(edges[0].to.path, "foo");
-    }
-
-    #[test]
-    fn use_braced() {
-        let (_node, edges) = parse_file_content("use crate::{Foo, Bar};", "src/main.rs", "c");
-        assert_eq!(edges.len(), 2);
-        let mut paths: Vec<&str> = edges.iter().map(|e| e.to.path.as_str()).collect();
-        paths.sort();
-        assert_eq!(paths, vec!["Bar", "Foo"]);
-    }
-
-    #[test]
-    fn use_braced_nested() {
-        let (_node, edges) = parse_file_content(
-            "use std::collections::{HashMap, HashSet};",
-            "src/main.rs",
-            "my_crate",
-        );
-        assert_eq!(edges.len(), 2);
-        assert!(edges.iter().all(|e| e.kind == DepKind::UseExternal));
-    }
-
-    #[test]
-    fn use_alias() {
-        let (_node, edges) = parse_file_content("use crate::foo::Bar as Baz;", "src/main.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].to.path, "foo/Bar");
-        assert_eq!(edges[0].kind, DepKind::Use);
-    }
-
-    #[test]
-    fn use_crate_path() {
-        let (_node, edges) = parse_file_content(
-            "use crate::config::loader;",
-            "src/agent/mod.rs",
-            "bebok_core",
-        );
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].to.path, "config/loader");
-        assert_eq!(edges[0].kind, DepKind::Use);
-    }
-
-    #[test]
-    fn use_external() {
-        let (_node, edges) = parse_file_content(
-            "use serde::{Serialize, Deserialize};",
-            "src/main.rs",
-            "my_crate",
-        );
-        assert_eq!(edges.len(), 2);
-        assert!(edges.iter().all(|e| e.kind == DepKind::UseExternal));
-    }
-
-    #[test]
-    fn pub_use() {
-        let (_node, edges) = parse_file_content("pub use crate::thing;", "src/lib.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].kind, DepKind::Use);
-    }
-
-    // --- comments ---
-
-    #[test]
-    fn line_comment_ignored() {
-        let (_node, edges) =
-            parse_file_content("// use crate::foo;\nuse crate::bar;", "src/main.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].to.path, "bar");
-    }
-
-    #[test]
-    fn block_comment_ignored() {
-        let (_node, edges) =
-            parse_file_content("/* use crate::foo; */\nuse crate::bar;", "src/main.rs", "c");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].to.path, "bar");
-    }
-
-    #[test]
-    fn nested_block_comment() {
-        let (_node, edges) = parse_file_content(
-            "/* /* inner */ use crate::foo; */\nuse crate::bar;",
-            "src/main.rs",
-            "c",
-        );
-        assert_eq!(edges.len(), 1);
-    }
-
-    #[test]
-    fn comment_inside_string_not_stripped() {
-        let (node, _edges) =
-            parse_file_content(r#"let s = "http://example.com";"#, "src/main.rs", "c");
-        // No edges, just checking it doesn't panic and preserves lines.
-        assert_eq!(node.lines, 1);
-    }
-
-    // --- cfg(test) ---
-
-    #[test]
-    fn cfg_test_inline_mod_ignored() {
-        let (_node, edges) = parse_file_content(
-            "#[cfg(test)]\nmod tests {\n    use crate::foo;\n}",
-            "src/main.rs",
-            "c",
-        );
-        assert!(
-            edges.is_empty(),
-            "cfg(test) mod block should not produce edges, got {edges:?}"
-        );
-    }
-
-    #[test]
-    fn cfg_test_file_mod_ignored() {
-        let (_node, edges) = parse_file_content("#[cfg(test)] mod tests;", "src/main.rs", "c");
-        assert!(edges.is_empty(), "cfg(test) mod; should not produce edges");
-    }
-
-    // --- exports ---
-
-    #[test]
-    fn collect_pub_fn() {
-        let (node, _edges) = parse_file_content(
-            "pub fn do_stuff() {}\npub fn also_this() {}",
-            "src/lib.rs",
-            "c",
-        );
-        assert_eq!(node.exports, vec!["do_stuff", "also_this"]);
-    }
-
-    #[test]
-    fn collect_pub_struct_enum_trait() {
-        let (node, _edges) = parse_file_content(
-            "pub struct Foo;\npub enum Bar {}\npub trait Baz {}",
-            "src/lib.rs",
-            "c",
-        );
-        assert_eq!(node.exports, vec!["Foo", "Bar", "Baz"]);
-    }
-
-    #[test]
-    fn private_not_collected() {
-        let (node, _edges) =
-            parse_file_content("fn private() {}\nstruct Internal;", "src/lib.rs", "c");
-        assert!(node.exports.is_empty());
-    }
-
-    #[test]
-    fn pub_crate_export_collected() {
-        let (node, _edges) = parse_file_content("pub(crate) fn helper() {}", "src/lib.rs", "c");
-        assert_eq!(node.exports, vec!["helper"]);
-    }
-
-    // --- line counting ---
-
-    #[test]
-    fn line_count_matches() {
-        let (node, _) = parse_file_content("line1\nline2\nline3\n", "x.rs", "c");
-        assert_eq!(node.lines, 3); // str::lines() ignores trailing newline
-    }
-
-    // --- helpers ---
-
-    #[test]
-    fn expand_braced_simple() {
-        let r = expand_braced_use("a::{B, C}");
-        assert_eq!(r, vec!["a::B", "a::C"]);
-    }
-
-    #[test]
-    fn expand_braced_with_alias() {
-        let r = expand_braced_use("a::{B as X, C}");
-        assert_eq!(r, vec!["a::B", "a::C"]);
-    }
-
-    #[test]
-    fn expand_no_braces() {
-        let r = expand_braced_use("a::b::c");
-        assert_eq!(r, vec!["a::b::c"]);
-    }
-
-    #[test]
-    fn expand_nested_braces() {
-        let r = expand_braced_use("std::{collections::{HashMap, HashSet}, io}");
-        let mut sorted = r;
-        sorted.sort();
+    fn path_helpers() {
+        assert_eq!(expand_braced_use("a::{B, C}"), vec!["a::B", "a::C"]);
+        assert_eq!(expand_braced_use("a::{B as X, C}"), vec!["a::B", "a::C"]);
+        assert_eq!(expand_braced_use("a::b::c"), vec!["a::b::c"]);
+        let mut nested = expand_braced_use("std::{collections::{HashMap, HashSet}, io}");
+        nested.sort();
         assert_eq!(
-            sorted,
+            nested,
             vec![
                 "std::collections::HashMap",
                 "std::collections::HashSet",
                 "std::io"
             ]
         );
-    }
 
-    #[test]
-    fn strip_alias() {
         assert_eq!(strip_use_alias("Foo as Bar"), "Foo");
         assert_eq!(strip_use_alias("Foo"), "Foo");
-    }
 
-    #[test]
-    fn resolve_use_path_crate() {
         assert_eq!(resolve_use_path("crate::foo::bar"), "foo/bar");
-    }
-
-    #[test]
-    fn resolve_use_path_plain() {
         assert_eq!(resolve_use_path("serde::Serialize"), "serde/Serialize");
-    }
 
-    #[test]
-    fn strip_mod_prefix_pub() {
-        assert_eq!(strip_mod_prefix("pub mod foo;"), Some("foo;"));
-    }
-
-    #[test]
-    fn strip_mod_prefix_plain() {
         assert_eq!(strip_mod_prefix("mod bar;"), Some("bar;"));
-    }
-
-    #[test]
-    fn strip_mod_prefix_pub_crate() {
+        assert_eq!(strip_mod_prefix("pub mod foo;"), Some("foo;"));
         assert_eq!(strip_mod_prefix("pub(crate) mod x;"), Some("x;"));
+        assert_eq!(strip_mod_prefix("fn not_a_mod() {}"), None);
     }
 
     // --- parse_file (disk) ---
@@ -817,35 +744,5 @@ mod tests {
     fn parse_file_missing_returns_error() {
         let result = parse_file(Path::new("/nonexistent"), "nope.rs", "c");
         assert!(result.is_err());
-    }
-
-    // --- edge cases ---
-
-    #[test]
-    fn empty_content() {
-        let (node, edges) = parse_file_content("", "empty.rs", "c");
-        assert_eq!(node.lines, 0);
-        assert!(node.exports.is_empty());
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn multiple_use_lines() {
-        let text = "use crate::a;\nuse crate::b;\nuse crate::c;";
-        let (_node, edges) = parse_file_content(text, "src/main.rs", "c");
-        assert_eq!(edges.len(), 3);
-        let mut paths: Vec<&str> = edges.iter().map(|e| e.to.path.as_str()).collect();
-        paths.sort();
-        assert_eq!(paths, vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn mod_and_use_together() {
-        let text = "mod foo;\nuse crate::bar;";
-        let (_node, edges) = parse_file_content(text, "src/lib.rs", "c");
-        assert_eq!(edges.len(), 2);
-        let kinds: Vec<DepKind> = edges.iter().map(|e| e.kind).collect();
-        assert!(kinds.contains(&DepKind::ModDecl));
-        assert!(kinds.contains(&DepKind::Use));
     }
 }

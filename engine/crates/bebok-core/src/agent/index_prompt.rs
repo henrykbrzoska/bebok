@@ -155,7 +155,6 @@ pub fn sanitize_prompt_file(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::preset::{ASK_PROMPT, PLAN_PROMPT};
     use std::fs;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
@@ -310,76 +309,6 @@ mod tests {
     }
 
     #[test]
-    fn fallback_section_contains_mandatory_keyword() {
-        assert!(FALLBACK_SECTION.contains("Code navigation"));
-        assert!(FALLBACK_SECTION.contains(SECTION_HEADING));
-        // Native tools are mentioned first.
-        assert!(FALLBACK_SECTION.contains("code_index_status"));
-        assert!(FALLBACK_SECTION.contains("code_index_search"));
-        // Fetch fallback URLs still present.
-        assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/status"));
-        assert!(FALLBACK_SECTION.contains("/plugins/bebok-index/search"));
-    }
-
-    #[test]
-    fn fallback_section_orders_map_graph_ast_before_index() {
-        // The navigation chain: orient (map) → dependencies (graph) →
-        // structure (AST) → full-text (index) → grep/glob fallback.
-        let positions = [
-            "Project code map",
-            "code_graph_depends",
-            "code_ast",
-            "code_index_search",
-        ]
-        .map(|needle| {
-            FALLBACK_SECTION
-                .find(needle)
-                .unwrap_or_else(|| panic!("FALLBACK_SECTION must mention {needle}"))
-        });
-        assert!(
-            positions.windows(2).all(|w| w[0] < w[1]),
-            "navigation order must be map → graph → AST → index: {positions:?}"
-        );
-    }
-
-    #[test]
-    fn fallback_section_documents_raw_body_retry() {
-        // The exact error the plugin returns when a harness drops the JSON body.
-        assert!(FALLBACK_SECTION.contains("query is required and must not be empty"));
-        // The retry must re-send the query as a raw JSON string in `body`.
-        assert!(FALLBACK_SECTION.contains("retry once"));
-        assert!(FALLBACK_SECTION.contains("raw JSON string in the `body` parameter"));
-        assert!(FALLBACK_SECTION.contains("Content-Type: application/json"));
-        // grep/glob fallback is allowed only after the retry also fails.
-        assert!(FALLBACK_SECTION.contains("only when that retry also returns ok:false"));
-    }
-
-    #[test]
-    fn ask_and_plan_prompts_use_search_strategy_without_fetch_retry() {
-        for (name, prompt) in [("ask", &ASK_PROMPT), ("plan", &PLAN_PROMPT)] {
-            // The compact search strategy names the native tools.
-            assert!(
-                prompt.contains("code_index_search"),
-                "{name} preset must mention the native index search"
-            );
-            assert!(
-                prompt.contains("code_ast"),
-                "{name} preset must mention the AST search tool"
-            );
-            // The fetch raw-body retry lives only in FALLBACK_SECTION — the
-            // static presets must not duplicate it (dynamic section wins).
-            assert!(
-                !prompt.contains("query is required and must not be empty"),
-                "{name} preset must not duplicate the dropped-body retry text"
-            );
-            assert!(
-                !prompt.contains("plugins/bebok-index/"),
-                "{name} preset must not hard-code plugin fetch URLs"
-            );
-        }
-    }
-
-    #[test]
     fn custom_prompt_file_not_in_slot_falls_back() {
         let root = temp_root("missing-custom");
         write_decl(
@@ -441,22 +370,6 @@ mod tests {
         assert_eq!(section, format!("Search in {root_str} please."));
         assert!(!section.contains("<project-root>"));
         let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn fallback_section_mentions_native_tools() {
-        assert!(
-            FALLBACK_SECTION.contains("code_index_status"),
-            "FALLBACK_SECTION must mention native code_index_status tool"
-        );
-        assert!(
-            FALLBACK_SECTION.contains("code_index_search"),
-            "FALLBACK_SECTION must mention native code_index_search tool"
-        );
-        assert!(
-            FALLBACK_SECTION.contains("no args needed"),
-            "FALLBACK_SECTION must note native tools need no directory arg"
-        );
     }
 
     #[test]

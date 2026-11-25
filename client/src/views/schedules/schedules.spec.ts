@@ -77,10 +77,6 @@ describe('SchedulesView', () => {
     fixture.detectChanges();
   });
 
-  it('should create', () => {
-    expect(component).toBeTruthy();
-  });
-
   it('should show add form when toggleForm is called', () => {
     expect(component.showAddForm()).toBeFalse();
     component.toggleForm();

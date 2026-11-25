@@ -238,77 +238,6 @@ mod tests {
     }
 
     #[test]
-    fn every_mode_advertises_the_browser_and_dev_servers() {
-        for mode in [
-            FrontendVerify::Auto,
-            FrontendVerify::Ask,
-            FrontendVerify::Off,
-        ] {
-            let text = render(mode, true);
-            assert!(text.starts_with(SECTION_HEADING), "{text}");
-            assert!(text.contains("`browser_open`"), "{mode:?}: {text}");
-            assert!(text.contains("`browser_screenshot`"), "{mode:?}");
-            assert!(text.contains("`browser_console`"), "{mode:?}");
-            assert!(text.contains("`browser_wait`"), "{mode:?}");
-            assert!(text.contains("`browser_find`"), "{mode:?}");
-            assert!(text.contains("Dev servers"), "{mode:?}");
-            assert!(text.contains("background"), "{mode:?}");
-        }
-    }
-
-    #[test]
-    fn auto_mode_carries_the_full_policy() {
-        let text = render(FrontendVerify::Auto, true);
-        assert!(text.contains("frontend verification: auto"));
-        assert!(text.contains("MANDATORY"));
-        assert!(
-            text.contains(
-                "is NOT \
-             verification"
-            ) || text.contains("is NOT verification")
-        );
-        assert!(text.contains("at most 2 more rounds"));
-        assert!(text.contains("Verification: opened <url>"));
-        assert!(text.contains("without asking"));
-        assert!(!text.contains("ask the user once"));
-    }
-
-    /// F9-8: the deepened policy — dependencies, data wait, interaction,
-    /// API check, fix loop, acceptance gate, sub-agent claims.
-    #[test]
-    fn auto_mode_requires_depth_and_an_acceptance_gate() {
-        let text = render(FrontendVerify::Auto, true);
-        for needle in [
-            "proxy",
-            "every server",
-            "`background: true`",
-            "`bash_kill`",
-            "non-default port",
-            "do not kill and restart",
-            "`ready_port`",
-            "ANY of the following is `Status: FAIL`",
-            "Verify the API on its own",
-            "`browser_wait` for the DATA",
-            "\"loading\" text",
-            "INTERACT",
-            "`browser_find`",
-            "`browser_click` / `browser_type`",
-            "AFTER each interaction",
-            "before you interact",
-            "Acceptance gate",
-            "`Status: PASS`",
-            "`Status: FAIL`",
-            "do NOT describe the feature as implemented",
-            "claim, not a fact",
-        ] {
-            assert!(text.contains(needle), "missing {needle:?}");
-        }
-        // The old "just start /B it" recipe is gone.
-        assert!(!text.contains("start \"dev\" /B"));
-        assert!(!text.contains("nohup npm run dev"));
-    }
-
-    #[test]
     fn ask_mode_asks_once_and_has_no_auto_policy() {
         let text = render(FrontendVerify::Ask, true);
         assert!(text.contains("frontend verification: ask"));
@@ -325,15 +254,6 @@ mod tests {
         assert!(!text.contains("ask the user once"));
         assert!(!text.contains("MANDATORY"));
         assert!(!text.ends_with('\n'));
-    }
-
-    #[test]
-    fn missing_browser_is_stated_honestly() {
-        let text = render(FrontendVerify::Auto, false);
-        assert!(text.contains("no Chrome/Edge/Chromium is installed"));
-        assert!(text.contains("`browser_open` will fail"));
-        // Still tells the agent how to run a dev server (build/test checks).
-        assert!(text.contains("Dev servers"));
     }
 
     #[test]

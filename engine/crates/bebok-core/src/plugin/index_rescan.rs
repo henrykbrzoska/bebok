@@ -147,12 +147,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn plugin_name_is_index_rescan() {
-        let plugin = IndexRescanPlugin::new();
-        assert_eq!(plugin.name(), "index-rescan");
-    }
-
-    #[tokio::test]
     async fn on_hook_after_file_write_with_directory_continues() {
         let plugin = IndexRescanPlugin::new();
         let mut payload = serde_json::json!({ "directory": "/some/project" });

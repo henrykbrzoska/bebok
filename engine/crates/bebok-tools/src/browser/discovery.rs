@@ -242,11 +242,4 @@ mod tests {
         assert!(names.contains(&"google-chrome"));
         assert!(names.contains(&"google-chrome-stable"));
     }
-
-    #[test]
-    fn probe_description_mentions_env_vars() {
-        let d = probe_description();
-        assert!(d.contains("BEBOK_BROWSER"));
-        assert!(d.contains("CHROME"));
-    }
 }

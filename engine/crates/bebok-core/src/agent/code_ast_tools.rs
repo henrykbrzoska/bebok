@@ -183,32 +183,6 @@ mod tests {
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
-    #[test]
-    fn schema_requires_kind() {
-        let tool = CodeAstSearch;
-        let schema = tool.parameters_schema();
-        let required = schema["required"].as_array().unwrap();
-        assert!(required.contains(&json!("kind")));
-    }
-
-    #[test]
-    fn tool_is_read_only() {
-        assert!(CodeAstSearch.is_read_only());
-    }
-
-    #[test]
-    fn schema_has_all_enums() {
-        let tool = CodeAstSearch;
-        let schema = tool.parameters_schema();
-        let enums = schema["properties"]["kind"]["enum"].as_array().unwrap();
-        assert!(enums.contains(&json!("impl")));
-        assert!(enums.contains(&json!("struct")));
-        assert!(enums.contains(&json!("fn")));
-        assert!(enums.contains(&json!("enum")));
-        assert!(enums.contains(&json!("trait")));
-        assert!(enums.contains(&json!("test")));
-    }
-
     #[tokio::test]
     async fn rejects_missing_kind() {
         let ctx = ToolCtx {

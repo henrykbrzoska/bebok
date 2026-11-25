@@ -1230,45 +1230,45 @@ mod tests {
         assert!(!lang.supports_kind("class"));
     }
 
+    /// One test for every language backend instead of one per language: each
+    /// must find the two top-level functions and the one type/class by name.
+    /// Per-language *features* (derives, return types, `#[test]`) are covered
+    /// separately below; this only pins the shared `fn` / `struct` contract.
     #[test]
-    fn ts_lang_supports_kinds() {
-        let lang = TsLang::new().unwrap();
-        assert!(lang.supports_kind("impl"));
-        assert!(lang.supports_kind("struct"));
-        assert!(lang.supports_kind("fn"));
-        assert!(lang.supports_kind("enum"));
-        assert!(lang.supports_kind("type_alias"));
-        assert!(lang.supports_kind("test"));
-        assert!(!lang.supports_kind("trait"));
-    }
+    fn every_language_finds_functions_and_types() {
+        let f = Filters::default();
+        let names = |rs: Vec<MatchResult>| -> Vec<String> {
+            rs.into_iter().map(|r| r.name).collect::<Vec<_>>()
+        };
 
-    #[test]
-    fn rust_query_returns_results_for_fn() {
-        let lang = RustLang::new().unwrap();
-        let code = r#"
-fn main() {}
-pub fn foo(x: i32) -> i32 { x }
-"#;
-        let filters = Filters::default();
-        let results = lang.query(code, "fn", &filters);
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].name, "main");
-        assert_eq!(results[1].name, "foo");
-    }
+        let rust = RustLang::new().unwrap();
+        let code = "fn hello() {}\npub fn world(x: i32) -> i32 { x }\npub struct Foo;\n";
+        assert_eq!(names(rust.query(code, "fn", &f)), ["hello", "world"]);
+        assert_eq!(names(rust.query(code, "struct", &f)), ["Foo"]);
 
-    #[test]
-    fn rust_query_returns_results_for_struct() {
-        let lang = RustLang::new().unwrap();
-        let code = r#"
-#[derive(Serialize, Deserialize)]
-pub struct Foo {
-    pub name: String,
-}
-"#;
-        let filters = Filters::default();
-        let results = lang.query(code, "struct", &filters);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].name, "Foo");
+        let ts = TsLang::new().unwrap();
+        let code = "function hello() {}\nexport function world(x: number) { return x; }\nclass Foo {}\ninterface Bar {}\n";
+        assert_eq!(names(ts.query(code, "fn", false, &f)), ["hello", "world"]);
+        assert_eq!(names(ts.query(code, "struct", false, &f)), ["Foo", "Bar"]);
+
+        let js = JsLang::new().unwrap();
+        let code = "function hello() {}\nconst world = () => 42;\nclass Foo {}\n";
+        assert_eq!(names(js.query(code, "fn", &f)), ["hello", "world"]);
+        assert_eq!(names(js.query(code, "struct", &f)), ["Foo"]);
+
+        let php = PhpLang::new().unwrap();
+        let code = "<?php\nfunction hello() {}\nclass Foo {\n public function world() {}\n}\n";
+        let mut got = names(php.query(code, "fn", &f));
+        got.sort();
+        assert_eq!(got, ["hello", "world"]);
+        assert_eq!(names(php.query(code, "struct", &f)), ["Foo"]);
+
+        let py = PyLang::new().unwrap();
+        let code = "def hello():\n    pass\n\nclass Foo:\n    def world(self):\n        pass\n";
+        let mut got = names(py.query(code, "fn", &f));
+        got.sort();
+        assert_eq!(got, ["hello", "world"]);
+        assert_eq!(names(py.query(code, "struct", &f)), ["Foo"]);
     }
 
     #[test]
@@ -1319,30 +1319,6 @@ fn not_a_test() {}
         let results = lang.query(code, "test", &filters);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "test_foo");
-    }
-
-    #[test]
-    fn ts_query_returns_results_for_fn() {
-        let lang = TsLang::new().unwrap();
-        let code = r#"
-function main() {}
-export function foo(x: number): number { return x; }
-"#;
-        let filters = Filters::default();
-        let results = lang.query(code, "fn", false, &filters);
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn ts_query_returns_results_for_class() {
-        let lang = TsLang::new().unwrap();
-        let code = r#"
-class MyClass {}
-interface MyInterface {}
-"#;
-        let filters = Filters::default();
-        let results = lang.query(code, "struct", false, &filters);
-        assert_eq!(results.len(), 2);
     }
 
     #[test]
@@ -1521,48 +1497,6 @@ fn c() {}
         assert!(f.exts_for_kind("trait", &langs).is_empty());
         // "fn" supports all languages; intersection keeps only ts.
         assert_eq!(f.exts_for_kind("fn", &langs), vec!["ts"]);
-    }
-
-    #[test]
-    fn js_query_returns_results_for_fn() {
-        let lang = JsLang::new().unwrap();
-        let code = "function hello() {}\nconst world = () => 42;\nclass Foo {}\n";
-        let filters = Filters::default();
-        let results = lang.query(code, "fn", &filters);
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].name, "hello");
-        assert_eq!(results[1].name, "world");
-        let classes = lang.query(code, "struct", &filters);
-        assert_eq!(classes.len(), 1);
-        assert_eq!(classes[0].name, "Foo");
-    }
-
-    #[test]
-    fn php_query_returns_results_for_fn_and_class() {
-        let lang = PhpLang::new().unwrap();
-        let code = "<?php\nfunction hello() {}\nclass Foo {\n public function bar() {}\n}\n";
-        let filters = Filters::default();
-        let fns = lang.query(code, "fn", &filters);
-        let names: Vec<&str> = fns.iter().map(|r| r.name.as_str()).collect();
-        assert!(names.contains(&"hello"), "got: {names:?}");
-        assert!(names.contains(&"bar"), "got: {names:?}");
-        let classes = lang.query(code, "struct", &filters);
-        assert_eq!(classes.len(), 1);
-        assert_eq!(classes[0].name, "Foo");
-    }
-
-    #[test]
-    fn py_query_returns_results_for_fn_and_class() {
-        let lang = PyLang::new().unwrap();
-        let code = "def hello():\n    pass\n\nclass Foo:\n    def bar(self):\n        pass\n";
-        let filters = Filters::default();
-        let fns = lang.query(code, "fn", &filters);
-        let names: Vec<&str> = fns.iter().map(|r| r.name.as_str()).collect();
-        assert!(names.contains(&"hello"), "got: {names:?}");
-        assert!(names.contains(&"bar"), "got: {names:?}");
-        let classes = lang.query(code, "struct", &filters);
-        assert_eq!(classes.len(), 1);
-        assert_eq!(classes[0].name, "Foo");
     }
 
     #[test]

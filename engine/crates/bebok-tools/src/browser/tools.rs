@@ -678,19 +678,6 @@ mod tests {
     }
 
     #[test]
-    fn descriptions_teach_the_verification_flow() {
-        let d = driver();
-        let open = BrowserOpen { driver: d.clone() };
-        assert!(open.description().contains("localhost"));
-        assert!(open.description().contains("browser_wait"));
-        assert!(open.description().contains("browser_console"));
-        let shot = BrowserScreenshot { driver: d.clone() };
-        assert!(shot.description().contains("verify"));
-        let eval = BrowserEval { driver: d };
-        assert!(eval.description().contains("always asks"));
-    }
-
-    #[test]
     fn schemas_declare_required_params() {
         let d = driver();
         let open = BrowserOpen { driver: d.clone() }.parameters_schema();

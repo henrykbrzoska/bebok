@@ -230,6 +230,69 @@
   flex: 1 1 auto;
 }
 
+/* Editor tab strip above the pane header (same border / text tokens as pane-head). */
+.tab-strip {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+.tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6, 6px);
+  max-width: 220px;
+  height: 34px;
+  padding: 0 var(--space-10);
+  font-size: var(--fs-12, 12px);
+  color: var(--text-faint);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab:hover {
+  background: var(--surface-2);
+}
+
+.tab.active {
+  color: inherit;
+  background: var(--surface-3);
+  box-shadow: inset 0 -2px 0 var(--border-strong);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: -2px;
+}
+
+.tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.tab-close:hover {
+  opacity: 1;
+}
+
 .pane-btn {
   flex: none;
   background: var(--surface-2);

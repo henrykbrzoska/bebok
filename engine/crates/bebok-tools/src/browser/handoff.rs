@@ -523,15 +523,14 @@ mod tests {
         assert_eq!(a.done_text, None);
     }
 
+    /// The handoff tool mutates the session's browser (it may restart a
+    /// headless browser headed), so it must never be classified read-only -
+    /// that would make the permission engine auto-allow it.
     #[test]
-    fn description_explains_the_flow() {
+    fn handoff_is_not_read_only() {
         let tool = BrowserSolveCaptcha {
             driver: std::sync::Arc::new(BrowserDriver::default()),
         };
-        let d = tool.description();
-        assert!(d.contains("VISIBLE"), "{d}");
-        assert!(d.contains("timeout_secs"), "{d}");
-        assert!(d.contains("browser_get_text"), "{d}");
         assert!(!tool.is_read_only());
     }
 

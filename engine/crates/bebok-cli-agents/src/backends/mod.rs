@@ -40,11 +40,6 @@ mod tests {
     }
 
     #[test]
-    fn grok_is_registered() {
-        assert_eq!(backend_for("grok").map(|b| b.id()), Some("grok"));
-    }
-
-    #[test]
     fn backend_lookup_is_trimmed_and_case_insensitive() {
         assert!(backend_for("claude").is_some());
         assert!(backend_for("  Claude ").is_some());

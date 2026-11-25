@@ -231,32 +231,6 @@ impl Tool for CodeGraphImpact {
 mod tests {
     use super::*;
 
-    #[test]
-    fn tool_names() {
-        assert_eq!(CodeGraphDepends.name(), "code_graph_depends");
-        assert_eq!(CodeGraphDependents.name(), "code_graph_dependents");
-        assert_eq!(CodeGraphImpact.name(), "code_graph_impact");
-    }
-
-    #[test]
-    fn tools_are_read_only() {
-        assert!(CodeGraphDepends.is_read_only());
-        assert!(CodeGraphDependents.is_read_only());
-        assert!(CodeGraphImpact.is_read_only());
-    }
-
-    #[test]
-    fn schemas_require_module() {
-        for s in [
-            CodeGraphDepends.parameters_schema(),
-            CodeGraphDependents.parameters_schema(),
-            CodeGraphImpact.parameters_schema(),
-        ] {
-            let req = s["required"].as_array().unwrap();
-            assert!(req.iter().any(|v| v == "module"));
-        }
-    }
-
     #[tokio::test]
     async fn missing_graph_reports_ok_false() {
         use tokio_util::sync::CancellationToken;

@@ -252,6 +252,14 @@ impl<'a> RequestBuilder<'a> {
                 if t.name() == "fleet" && self.agent.name != super::delegation_policy::FLEET_AGENT {
                     return false;
                 }
+                // `ask_user` blocks on a human: only the main-thread session
+                // advertises it. A sub-agent has nobody to answer, and its
+                // answers would land in the parent's transcript, not the user's.
+                if t.name() == super::question_tool::QUESTION_TOOL
+                    && super::question_tool::withheld_from(is_subagent)
+                {
+                    return false;
+                }
                 if !delegation_owner && (t.name() == "task" || DELEGATION_TOOLS.contains(&t.name()))
                 {
                     return false;
@@ -279,7 +287,19 @@ impl<'a> RequestBuilder<'a> {
         // prune old tool outputs down to a compact digest (non-destructive: the
         // full history stays on disk).
         let budget = self.state.config_snapshot().context_budget;
-        let mut chat = prune_for_budget(chat, &self.agent.prompt, budget);
+
+        // `ask_user` guidance: appended only when the tool survived the filter
+        // above, so the prompt never describes a tool the request lacks.
+        let mut system = self.agent.prompt.clone();
+        let has_question_tool = tool_defs
+            .iter()
+            .any(|t| t.name == super::question_tool::QUESTION_TOOL);
+        if let Some(section) = super::question_prompt::question_section(has_question_tool) {
+            system.push_str("\n\n");
+            system.push_str(section);
+        }
+
+        let mut chat = prune_for_budget(chat, &system, budget);
 
         // Secret scrub (second layer): the persisted transcript of older
         // sessions may already contain API keys (written before exec-time
@@ -289,7 +309,7 @@ impl<'a> RequestBuilder<'a> {
 
         Ok(ChatRequest {
             model: self.model.to_string(),
-            system: self.agent.prompt.clone(),
+            system,
             messages: chat,
             tools: tool_defs,
             max_tokens: self.max_tokens,
@@ -817,7 +837,12 @@ mod image_tests {
 
         // NB: keep the assembled `agent` above — `test_state` would shadow it
         // with a fresh `Agent::code()` and drop every appended section.
-        let (_s, _fresh, tools) = test_state(&store, &session);
+        // Register `ask_user` so the question section is advertised for this
+        // main-thread request (the section follows the tool, not the preset).
+        let ask_user: std::sync::Arc<dyn bebok_tools::Tool> = std::sync::Arc::new(
+            crate::agent::question_tool::AskUserTool::new(std::sync::Weak::new()),
+        );
+        let tools = ToolRegistry::new(vec![ask_user]);
         let builder = RequestBuilder::new(&session, &agent, &tools, "m", 128, Thinking::Off);
         let mut req = builder.build().await.unwrap();
         builder.apply_request_hook(&mut req).await;
@@ -827,6 +852,7 @@ mod image_tests {
             "Host OS: ",
             "Verification capabilities",
             "Build & test policy",
+            "Asking the user",
             "Code navigation",
         ] {
             assert_eq!(
@@ -851,8 +877,16 @@ mod image_tests {
         let host = system.find("Host OS: ").unwrap();
         let verification = system.find("Verification capabilities").unwrap();
         let build_test = system.find("Build & test policy").unwrap();
+        let question = system.find("Asking the user").unwrap();
         let index = system.find("Code navigation").unwrap();
-        assert!(host < verification && verification < build_test && build_test < index);
+        assert!(
+            host < verification && verification < build_test && build_test < question,
+            "question section follows the build & test policy: {system}"
+        );
+        assert!(
+            question < index,
+            "question section precedes the index section: {system}"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

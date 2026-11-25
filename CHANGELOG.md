@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- When the agent needs a decision, it can now ask you a question in a dialog
+  (single or multiple choice, with an optional free-text answer). Submit sends
+  your answers back and the Q&A stays in the transcript; Skip or Esc lets the
+  agent continue without an answer. Sending messages is paused while a question
+  is open.
+- The Explorer editor now has tabs. Each opened file gets its own tab with a
+  dirty dot for unsaved edits; switching tabs keeps your unsaved text. Close a
+  tab with its ×, a middle-click or Ctrl/Cmd+W, and cycle with Ctrl/Cmd+Tab.
+  Closing a tab with unsaved edits asks you to save first. Open tabs are
+  remembered per project and come back when you return to it (up to 20).
+
+### Other
+
+- Go to definition in PHP no longer guesses file paths from Magento 1 / PEAR
+  class names (`Vendor_Module_Class` → `vendor/module/class.php`). Namespaced
+  classes, `use` statements and `extends` clauses still resolve as before.
 ## 1.12.0 — 2026-11-24
 
 ### Features

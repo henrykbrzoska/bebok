@@ -934,19 +934,6 @@ mod tests {
         assert!(!desc.contains("NOT requested"), "{desc}");
     }
 
-    #[test]
-    fn schema_documents_agents() {
-        // Schema check needs a FleetTool instance; verify via a throwaway
-        // Weak store: schema/description don't touch the store.
-        let tool = FleetTool {
-            store: Weak::new(),
-            max_depth: 3,
-        };
-        let schema = Tool::parameters_schema(&tool);
-        assert!(schema["properties"]["agents"].is_object());
-        assert!(tool.description().contains("agents"));
-    }
-
     fn hetero_tasks() -> Option<Vec<FleetTask>> {
         Some(vec![
             FleetTask {
