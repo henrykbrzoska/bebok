@@ -34,7 +34,16 @@ pub fn bebok_db_path() -> PathBuf {
 pub const GLOBAL_SCOPE: &str = "global";
 
 /// DB scope key of a project config layer: `project:<directory>`.
+///
+/// The directory is canonicalized first: on Windows `temp_dir()` (and other
+/// callers) may hand out 8.3 short names (`RUNNER~1`) while the instance
+/// store works with the canonical root (`runneradmin`). Without this, writes
+/// and reads land in different scopes and config toggles silently stop
+/// working (ssh/code_graph gates, always-allow rules).
 pub fn project_scope(directory: &Path) -> String {
+    if let Ok(canon) = std::fs::canonicalize(directory) {
+        return format!("project:{}", canon.to_string_lossy());
+    }
     format!("project:{}", directory.to_string_lossy())
 }
 
