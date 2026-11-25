@@ -29,6 +29,7 @@ pub enum ApiError {
     BadGateway(String),
     ServiceUnavailable(String),
     Internal(String),
+    Unauthorized(String),
 }
 
 impl ApiError {
@@ -65,6 +66,10 @@ impl ApiError {
         Self::Internal(msg.into())
     }
 
+    pub fn unauthorized(msg: impl Into<String>) -> Self {
+        Self::Unauthorized(msg.into())
+    }
+
     /// Map a borrowed `CoreError` to the historical status code + text body.
     pub fn from_core(e: &CoreError) -> Self {
         match e {
@@ -89,6 +94,7 @@ impl IntoResponse for ApiError {
             Self::BadGateway(m) => (StatusCode::BAD_GATEWAY, m),
             Self::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
+            Self::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m),
         };
         body.push('\n');
         (status, body).into_response()

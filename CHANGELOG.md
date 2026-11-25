@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Features
+
+- New read-only **Git** panel in the right drawer: the working tree status
+  grouped into staged / unstaged / untracked files, the local branches with
+  their upstream and ahead/behind counts, and the recent commit log. Clicking
+  a commit opens its unified diff in an overlay. Nothing in the panel changes
+  the repository yet — staging and committing come later.
+- The **Git** panel is now fully interactive: stage / unstage (per file and
+  bulk), commit (with amend), soft / mixed / hard reset, stash push / pop /
+  apply / drop, checkout, branch create / rename / delete, cherry-pick with
+  conflict banner, remotes with fetch / pull / push, config get / set,
+  clone with project registration, tool detection (`git` / `gh` / `glab`)
+  and a guarded `gh` / `glab` forge runner, plus a hand-rolled branch graph
+  and live refresh on every change.
+
 ### Fixes
 
 - The `ask_user` dialog no longer gets stuck when the model sends `questions`

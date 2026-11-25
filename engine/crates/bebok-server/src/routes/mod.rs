@@ -165,6 +165,55 @@ pub fn build_api_router() -> Router<AppState> {
         )
         .route("/projects/{id}/open", post(projects::open_project))
         .route("/projects/{id}/git", get(git::project_git))
+        .route("/projects/{id}/git/status", get(git::git_status))
+        .route("/projects/{id}/git/log", get(git::git_log))
+        .route("/projects/{id}/git/branches", get(git::git_branches))
+        .route("/projects/{id}/git/show", get(git::git_show))
+        .route("/projects/{id}/git/stage", post(git::git_stage))
+        .route("/projects/{id}/git/unstage", post(git::git_unstage))
+        .route("/projects/{id}/git/commit", post(git::git_commit))
+        .route("/projects/{id}/git/reset", post(git::git_reset))
+        .route("/projects/{id}/git/stash", get(git::git_stash_list))
+        .route("/projects/{id}/git/stash/push", post(git::git_stash_push))
+        .route(
+            "/projects/{id}/git/stash/{action}",
+            post(git::git_stash_action),
+        )
+        .route("/projects/{id}/git/checkout", post(git::git_checkout))
+        .route(
+            "/projects/{id}/git/branch",
+            post(git::git_branch_create).delete(git::git_branch_delete),
+        )
+        .route(
+            "/projects/{id}/git/branch/rename",
+            post(git::git_branch_rename),
+        )
+        .route("/projects/{id}/git/cherry-pick", post(git::git_cherry_pick))
+        .route(
+            "/projects/{id}/git/cherry-pick/abort",
+            post(git::git_cherry_pick_abort),
+        )
+        .route(
+            "/projects/{id}/git/cherry-pick/continue",
+            post(git::git_cherry_pick_continue),
+        )
+        .route("/projects/{id}/git/conflicts", get(git::git_conflicts))
+        // Phase 3: remotes, network sync, config, clone, forge CLIs.
+        .route("/projects/{id}/git/remotes", get(git::git_remotes))
+        .route(
+            "/projects/{id}/git/remotes/set-url",
+            post(git::git_remote_set_url),
+        )
+        .route("/projects/{id}/git/sync/fetch", post(git::git_sync_fetch))
+        .route("/projects/{id}/git/sync/pull", post(git::git_sync_pull))
+        .route("/projects/{id}/git/sync/push", post(git::git_sync_push))
+        .route(
+            "/projects/{id}/git/config",
+            get(git::git_config_get).post(git::git_config_set),
+        )
+        .route("/projects/{id}/git/clone", post(git::git_clone))
+        .route("/projects/{id}/git/tools", get(git::git_tools))
+        .route("/projects/{id}/git/forge", post(git::git_forge))
         .route(
             "/projects/{id}/git/worktree/remove",
             post(git::remove_worktree),

@@ -56,6 +56,13 @@ pub struct ProviderCtx {
     pub session_sink: Option<CliSessionSink>,
     /// Where a CLI provider publishes its live stdin (mid-turn prompts).
     pub input_slot: Option<bebok_cli_agents::CliInputSlot>,
+    /// Override for `extra.allow_write` for this turn. `None` (default) keeps
+    /// the config value; `Some` forces it. Set from the agent preset: a preset
+    /// with full tool access (`code`/`debug`/`orchestrator`, i.e. an empty
+    /// tool whitelist) forces write on, a read-only preset (`ask`/`plan`/`hub`)
+    /// forces it off — otherwise a `code` turn would run the CLI in `plan`
+    /// mode, and an `ask` turn could mutate the tree. Ignored by HTTP providers.
+    pub cli_allow_write: Option<bool>,
 }
 
 impl ProviderCtx {
@@ -93,6 +100,12 @@ impl ProviderCtx {
     /// Let the CLI provider accept prompts while it works (see `input_slot`).
     pub fn with_input_slot(mut self, slot: bebok_cli_agents::CliInputSlot) -> Self {
         self.input_slot = Some(slot);
+        self
+    }
+
+    /// Force the CLI write flag for this turn (see `cli_allow_write`).
+    pub fn with_cli_allow_write(mut self, allow: Option<bool>) -> Self {
+        self.cli_allow_write = allow;
         self
     }
 
@@ -144,6 +157,7 @@ pub fn build_provider_for(
             resume,
             ctx.session_sink.clone(),
             ctx.input_slot.clone(),
+            ctx.cli_allow_write,
         )
         .map_err(CoreError::ProviderConfig);
     }
@@ -197,10 +211,15 @@ impl ChildProvider {
 /// [`ChildProvider::resolve`] so that the hook environment handed to the CLI
 /// child is scoped to the child's own session — a child is a separate session,
 /// and a token of the parent would be refused by the hook route.
+///
+/// `agent_name` selects the CLI write flag for the child's preset (see
+/// [`Agent::cli_allow_write`]): a `code` child gets `acceptEdits`, an `ask`
+/// child stays in `plan` mode. `None` keeps the provider's `extra.allow_write`.
 pub fn child_provider(
     config: &ResolvedConfig,
     model: &str,
     root: &Path,
+    agent_name: Option<&str>,
 ) -> Result<ChildProvider, CoreError> {
     let name = provider_from_model(model);
     let spec = config
@@ -217,6 +236,17 @@ pub fn child_provider(
     let config = config.clone();
     let model = model.to_string();
     let root = root.to_path_buf();
+    // Resolve the preset's CLI write flag now: the closure only sees the
+    // child session id, not the agent. Only built-in presets map (see
+    // `Agent::cli_allow_write`); a file-based preset keeps the provider's
+    // `extra.allow_write`.
+    let cli_allow_write = agent_name
+        .and_then(|name| {
+            crate::agent::Agent::builtins()
+                .into_iter()
+                .find(|a| a.name == name)
+        })
+        .and_then(|agent| agent.cli_allow_write());
     Ok(ChildProvider::PerSession(Box::new(move |child_session| {
         let (token, env) = match crate::cli_turn_token::issue_hook_env(child_session) {
             Some((token, env)) => (Some(token), env),
@@ -234,7 +264,9 @@ pub fn child_provider(
         build_provider_for(
             &config,
             &model,
-            &ProviderCtx::root(&root).with_hook_env(env),
+            &ProviderCtx::root(&root)
+                .with_hook_env(env)
+                .with_cli_allow_write(cli_allow_write),
         )
         .map(|provider| (provider, token))
         .map_err(|e| e.to_string())
@@ -454,7 +486,7 @@ mod tests {
         let cfg = ResolvedConfig::builder()
             .providers(vec![spec("openai", ProviderKind::Openai, None)])
             .build();
-        let ready = child_provider(&cfg, "openai/opus", Path::new("/tmp/proj")).unwrap();
+        let ready = child_provider(&cfg, "openai/opus", Path::new("/tmp/proj"), None).unwrap();
         assert!(matches!(ready, ChildProvider::Ready(_)));
         let (_, token) = ready.resolve("child-1").unwrap();
         assert!(token.is_none(), "HTTP providers have no hooks");
@@ -470,7 +502,13 @@ mod tests {
         let cfg = ResolvedConfig::builder()
             .providers(vec![spec("claude-cli", ProviderKind::Cli, Some("claude"))])
             .build();
-        let deferred = child_provider(&cfg, "claude-cli/opus", Path::new("/tmp/proj")).unwrap();
+        let deferred = child_provider(
+            &cfg,
+            "claude-cli/opus",
+            Path::new("/tmp/proj"),
+            Some("code"),
+        )
+        .unwrap();
         assert!(matches!(deferred, ChildProvider::PerSession(_)));
 
         let (_, token) = deferred.resolve("child-42").unwrap();

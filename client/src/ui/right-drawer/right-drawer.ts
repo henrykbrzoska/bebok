@@ -41,6 +41,7 @@ import { BatchPanel } from './panels/batch-panel';
 import { BrowserPanel } from './panels/browser-panel';
 import { ChangesPanel } from './panels/changes-panel';
 import { ExplorerPanel } from './panels/explorer-panel';
+import { GitPanel } from './panels/git-panel';
 import { PreviewPanel } from './panels/preview-panel';
 import { SessionPanel } from './panels/session-panel';
 import { TerminalPanel } from './panels/terminal-panel';
@@ -64,6 +65,7 @@ const REVEAL_SETTLE_MS = 2000;
     PreviewPanel,
     BrowserPanel,
     BatchPanel,
+    GitPanel,
   ],
   templateUrl: './right-drawer.html',
   styleUrl: './right-drawer.css',
@@ -88,7 +90,8 @@ export class RightDrawer {
       | 'drawer.changes'
       | 'drawer.preview'
       | 'drawer.browser'
-      | 'drawer.batch';
+      | 'drawer.batch'
+      | 'drawer.git';
   }[] = [
     { id: 'session', labelKey: 'drawer.session' },
     { id: 'explorer', labelKey: 'drawer.explorer' },
@@ -98,6 +101,7 @@ export class RightDrawer {
     { id: 'preview', labelKey: 'drawer.preview' },
     { id: 'browser', labelKey: 'drawer.browser' },
     { id: 'batch', labelKey: 'drawer.batch' },
+    { id: 'git', labelKey: 'drawer.git' },
   ];
 
   /** True while a drag is in flight (highlight + no text selection). */

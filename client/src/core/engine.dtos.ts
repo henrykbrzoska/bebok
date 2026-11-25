@@ -1267,6 +1267,169 @@ export interface RemoveWorktreeResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Git panel (read ops): status / log / branches / show
+// ---------------------------------------------------------------------------
+
+/** One file row of `git status --porcelain=v1` (`bebok_core::git::GitFileStatus`). */
+export interface GitFileStatus {
+  path: string;
+  /** Index (staged) status code, `' '` when nothing staged for this file. */
+  x: string;
+  /** Worktree (unstaged) status code, `' '` when nothing unstaged. */
+  y: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  /** Previous path of a rename, `null` otherwise. */
+  renamed_from: string | null;
+}
+
+/** `GET /projects/{id}/git/status` (`bebok_core::git::GitStatus`). */
+export interface GitStatus {
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFileStatus[];
+}
+
+/** One commit row of `GET /projects/{id}/git/log` (`bebok_core::git::GitLogEntry`). */
+export interface GitLogEntry {
+  hash: string;
+  parents: string[];
+  author: string;
+  email: string;
+  /** Commit time, seconds since epoch. */
+  ts: number;
+  subject: string;
+  body: string;
+  /** Decorations (`git log --decorate`), e.g. `HEAD -> main`, `tag: v1.0`. */
+  refs: string[];
+}
+
+/** `GET /projects/{id}/git/log?limit&skip&path` answer. */
+export interface GitLogResponse {
+  entries: GitLogEntry[];
+  /** The engine returned a full page - asking for the next `skip` may yield more. */
+  has_more: boolean;
+}
+
+/** One local branch row (`bebok_core::git::GitBranch`). */
+export interface GitBranch {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  last_commit: string;
+  last_ts: number;
+}
+
+/** `GET /projects/{id}/git/branches` answer. */
+export interface GitBranchesResponse {
+  current: string | null;
+  branches: GitBranch[];
+}
+
+/** One file touched by a commit (`bebok_core::git::GitShowFile`). */
+export interface GitShowFile {
+  /** Name-status code: `A`, `M`, `D`, `R100`, … */
+  status: string;
+  path: string;
+}
+
+/** `GET /projects/{id}/git/show?rev=` answer (`bebok_core::git::GitShow`). */
+export interface GitShow {
+  hash: string;
+  subject: string;
+  /** Unified diff of the commit, capped by the engine at 2 MB. */
+  diff: string;
+  files: GitShowFile[];
+}
+
+// ---------------------------------------------------------------------------
+// Git panel (write ops): stage / commit / stash / branch / sync / config / …
+// ---------------------------------------------------------------------------
+
+/** `git reset --<mode>`; `hard` discards work-tree changes and needs `confirm`. */
+export type GitResetMode = 'soft' | 'mixed' | 'hard';
+
+/** Scope of a `git config` write; `global` needs `confirm`. */
+export type GitConfigScope = 'local' | 'global';
+
+/** `POST /projects/{id}/git/commit` answer: the new (or amended) commit hash. */
+export interface GitCommitResponse {
+  hash: string;
+}
+
+/** One remote with its fetch URL (`GET /projects/{id}/git/remotes`). */
+export interface GitRemote {
+  name: string;
+  url: string;
+}
+
+/** `GET /projects/{id}/git/remotes` answer. */
+export interface GitRemotesResponse {
+  remotes: GitRemote[];
+}
+
+/** One `git stash list` entry. */
+export interface GitStashEntry {
+  /** Position in the stash stack (0 = most recent). */
+  index: number;
+  /** `stash@{0}` style selector. */
+  name: string;
+  message: string;
+}
+
+/** `GET /projects/{id}/git/stash` answer. */
+export interface GitStashListResponse {
+  stashes: GitStashEntry[];
+}
+
+/** One path with unresolved merge conflicts. */
+export interface GitConflict {
+  path: string;
+  /** Number of unresolved index stages (1..3). */
+  stages: number;
+}
+
+/** `GET /projects/{id}/git/conflicts` answer. */
+export interface GitConflictsResponse {
+  conflicts: GitConflict[];
+}
+
+/** `GET /projects/{id}/git/config?key=` answer; `value` is null when unset. */
+export interface GitConfigResponse {
+  key: string;
+  value: string | null;
+}
+
+/** Which VCS/forge CLIs the engine host has on `PATH`. */
+export interface GitTools {
+  git: boolean;
+  gh: boolean;
+  glab: boolean;
+}
+
+/** `GET /projects/{id}/git/tools` answer. */
+export interface GitToolsResponse {
+  tools: GitTools;
+}
+
+/** `POST /projects/{id}/git/forge` answer: the forge CLI's combined output. */
+export interface GitForgeResponse {
+  ok: boolean;
+  output: string;
+}
+
+/** `POST /git/clone` answer: the freshly registered project. */
+export interface GitCloneResponse {
+  ok: boolean;
+  project_id: string;
+  path: string;
+}
+
+// ---------------------------------------------------------------------------
 // M6: debug log
 // ---------------------------------------------------------------------------
 

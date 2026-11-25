@@ -707,7 +707,7 @@ async fn run_member(
 
     // A CLI provider is built later, once the child session exists, so its hook
     // environment carries a token scoped to that session.
-    let provider = match child_provider(cfg, &model, &instance.root) {
+    let provider = match child_provider(cfg, &model, &instance.root, Some(&agent.name)) {
         Ok(p) => p,
         Err(e) => {
             return MemberResult {

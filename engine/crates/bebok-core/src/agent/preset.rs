@@ -460,6 +460,26 @@ impl Agent {
         ]
     }
 
+    /// Whether a CLI provider running this preset may modify files.
+    ///
+    /// A CLI's edits bypass Bebok's permission engine and change tracking, so
+    /// this is opt-in per preset, not per provider: presets with full tool
+    /// access (`code`/`debug`/`orchestrator`, i.e. an empty tool whitelist)
+    /// return `Some(true)`, read-only presets (`ask`/`plan`/`hub`) return
+    /// `Some(false)`. File-based presets return `None` and keep the provider's
+    /// `extra.allow_write`. Without this a `code` turn would run the CLI in
+    /// `plan` mode, and an `ask` turn could mutate the tree.
+    pub fn cli_allow_write(&self) -> Option<bool> {
+        if !self.builtin {
+            return None;
+        }
+        match self.name.as_str() {
+            "code" | "debug" | "orchestrator" => Some(true),
+            "ask" | "plan" | "hub" => Some(false),
+            _ => None,
+        }
+    }
+
     /// Parse an agent preset from a markdown file with frontmatter.
     ///
     /// Frontmatter fields: `name`, `prompt`, `description`, `tools`,

@@ -526,7 +526,7 @@ pub fn build_provider_with_env(
     project_root: Option<PathBuf>,
     extra_env: Vec<(String, String)>,
 ) -> Result<Arc<dyn Provider>, String> {
-    build_provider_for_turn(spec, project_root, extra_env, None, None, None)
+    build_provider_for_turn(spec, project_root, extra_env, None, None, None, None)
 }
 
 /// [`build_provider_with_env`] plus the conversation to continue (if any) and
@@ -538,8 +538,15 @@ pub fn build_provider_for_turn(
     resume: Option<CliResume>,
     sink: Option<CliSessionSink>,
     input_slot: Option<CliInputSlot>,
+    allow_write: Option<bool>,
 ) -> Result<Arc<dyn Provider>, String> {
-    let cli_spec = CliSpec::from_extra(&spec.extra).map_err(|e| e.to_string())?;
+    let mut cli_spec = CliSpec::from_extra(&spec.extra).map_err(|e| e.to_string())?;
+    // A per-turn override from the agent preset (see `ProviderCtx`): a preset
+    // with full tool access forces write on, a read-only preset forces it off.
+    // `None` keeps the config value.
+    if let Some(allow) = allow_write {
+        cli_spec.allow_write = allow;
+    }
 
     let backend = crate::backends::backend_for(&cli_spec.backend).ok_or_else(|| {
         let known: Vec<&str> = crate::backends::all_backends()
@@ -637,6 +644,46 @@ mod tests {
         )
         .expect("builds");
         assert_eq!(provider.name(), "claude");
+    }
+
+    #[test]
+    fn per_turn_allow_write_override_wins_over_config() {
+        // The override is applied to the spec before the backend is resolved:
+        // `None` keeps the config value, `Some` forces it either way.
+        let base = CliSpec::from_extra(
+            serde_json::json!({ "backend": "claude" })
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!base.allow_write, "writing stays opt-in by default");
+        let mut forced_on = base.clone();
+        forced_on.allow_write = true;
+        assert!(forced_on.allow_write);
+        let writing = CliSpec::from_extra(
+            serde_json::json!({ "backend": "claude", "allow_write": true })
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(writing.allow_write);
+        let mut forced_off = writing.clone();
+        forced_off.allow_write = false;
+        assert!(!forced_off.allow_write);
+        // And the builder accepts the extra argument in every position.
+        let spec = spec_with(serde_json::json!({ "backend": "claude" }));
+        for allow in [None, Some(true), Some(false)] {
+            build_provider_for_turn(
+                &spec,
+                Some("/tmp/project".into()),
+                Vec::new(),
+                None,
+                None,
+                None,
+                allow,
+            )
+            .expect("builds");
+        }
     }
 
     #[test]
