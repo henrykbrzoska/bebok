@@ -215,11 +215,24 @@ impl ChildProvider {
 /// `agent_name` selects the CLI write flag for the child's preset (see
 /// [`Agent::cli_allow_write`]): a `code` child gets `acceptEdits`, an `ask`
 /// child stays in `plan` mode. `None` keeps the provider's `extra.allow_write`.
+/// `catalog` resolves file-based presets too; without it only built-ins map.
 pub fn child_provider(
     config: &ResolvedConfig,
     model: &str,
     root: &Path,
     agent_name: Option<&str>,
+) -> Result<ChildProvider, CoreError> {
+    child_provider_with_catalog(config, model, root, agent_name, None)
+}
+
+/// [`child_provider`] with an explicit agent catalog for resolving
+/// file-based presets. `None` keeps the old behaviour (built-ins only).
+pub fn child_provider_with_catalog(
+    config: &ResolvedConfig,
+    model: &str,
+    root: &Path,
+    agent_name: Option<&str>,
+    catalog: Option<&crate::agent::AgentCatalog>,
 ) -> Result<ChildProvider, CoreError> {
     let name = provider_from_model(model);
     let spec = config
@@ -237,16 +250,17 @@ pub fn child_provider(
     let model = model.to_string();
     let root = root.to_path_buf();
     // Resolve the preset's CLI write flag now: the closure only sees the
-    // child session id, not the agent. Only built-in presets map (see
-    // `Agent::cli_allow_write`); a file-based preset keeps the provider's
-    // `extra.allow_write`.
-    let cli_allow_write = agent_name
-        .and_then(|name| {
-            crate::agent::Agent::builtins()
+    // child session id, not the agent. File-based presets resolve through
+    // the catalog when given, otherwise through built-ins.
+    let cli_allow_write = agent_name.and_then(|name| {
+        let agent = match catalog {
+            Some(catalog) => catalog.resolve(name),
+            None => crate::agent::Agent::builtins()
                 .into_iter()
-                .find(|a| a.name == name)
-        })
-        .and_then(|agent| agent.cli_allow_write());
+                .find(|a| a.name == name)?,
+        };
+        agent.cli_allow_write()
+    });
     Ok(ChildProvider::PerSession(Box::new(move |child_session| {
         let (token, env) = match crate::cli_turn_token::issue_hook_env(child_session) {
             Some((token, env)) => (Some(token), env),

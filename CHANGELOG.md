@@ -19,6 +19,11 @@
 
 ### Fixes
 
+- CLI providers now follow the session agent's write access: `code` / `debug` /
+  `orchestrator` (and file-based agents without a `write_file` / `edit_file`
+  deny rule) run the CLI with `--permission-mode acceptEdits`, while `ask` /
+  `plan` / `hub` keep `--permission-mode plan`. Previously every CLI turn
+  started in plan mode unless `extra.allow_write` was set in config.
 - The `ask_user` dialog no longer gets stuck when the model sends `questions`
   as a JSON-encoded string: the engine parses it instead of failing the turn.
 - The question dialog recovers a missed `question.asked` event: it asks the

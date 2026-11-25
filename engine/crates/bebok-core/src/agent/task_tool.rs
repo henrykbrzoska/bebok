@@ -43,7 +43,7 @@ use bebok_tools::{Tool, ToolCtx, ToolOutput};
 use super::delegation::{ChildSpec, delegation_depth, prepare_child, run_child};
 use super::images::{AgentImageInput, validate_agent_images};
 use crate::config::ResolvedConfig;
-use crate::provider::child_provider;
+use crate::provider::child_provider_with_catalog;
 use crate::store::InstanceStore;
 
 /// Maximum sub-agent nesting depth (a sub-agent delegating further counts as
@@ -369,7 +369,13 @@ impl Tool for TaskTool {
 
         // A CLI provider is built later, once the child session exists, so its
         // hook environment carries a token scoped to that session.
-        let provider = match child_provider(&cfg, &model, &instance.root, Some(&agent_name)) {
+        let provider = match child_provider_with_catalog(
+            &cfg,
+            &model,
+            &instance.root,
+            Some(&agent_name),
+            Some(&instance.agents.read().unwrap()),
+        ) {
             Ok(p) => p,
             Err(e) => {
                 return ToolOutput::new(
