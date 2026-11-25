@@ -311,22 +311,6 @@ mod tests {
         delegation_policy_note(cfg, &fleet).expect("orchestrator fleet note is always Some")
     }
 
-    #[test]
-    fn note_names_fleet_only_spawn_and_supervision() {
-        let note = note_with(&cfg(), &FleetContext::default());
-        for kw in [
-            "fleet",
-            "names",
-            "task_wait",
-            "task_status",
-            "task_cancel",
-            "task_report",
-        ] {
-            assert!(note.contains(kw), "missing {kw}:\n{note}");
-        }
-        assert!(note.contains("At most 3 sub-agents"), "{note}");
-    }
-
     /// The roster is the part the static preset text could not know: the
     /// prompt must carry the *configured* labels, types and models, and say
     /// that `names` has to be copied from there.

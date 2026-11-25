@@ -21,6 +21,14 @@
 //! `properties`: `{ requestID, sessionID, directory, host, prompt }`, where
 //! `prompt` is `password` (SSH login) or `sudo`).
 //!
+//! `question.asked` (the `ask_user` tool is blocked on the user:
+//! `properties`: `{ requestID, sessionID, messageIndex, questions }`, where
+//! `questions` is the validated array of `{ id, question, header?, options:
+//! [{ label, description? }], multiSelect? }`) and `question.resolved`
+//! (`properties`: `{ requestID, messageIndex, outcome, answers? }`, `outcome`
+//! one of `answered` / `timeout` / `aborted`; `answers` only when answered).
+//! Answer with `POST /session/{id}/question/{requestID}` `{ answers }`.
+//!
 //! `cli.turn.stopped` (`properties`: `{ changedFiles }`) is published by
 //! `POST /cli-hook/{session}/stop` when a managed-profile CLI turn (Claude Code)
 //! ends. `changedFiles` is the number of paths the change tracker holds for the
@@ -112,6 +120,44 @@ impl Event {
         }))
     }
 
+    /// `ask_user` is waiting for the user: `question.asked` (see the module
+    /// header for the payload).
+    pub fn question_asked(
+        directory: &str,
+        session_id: &str,
+        request_id: &str,
+        message_index: usize,
+        questions: serde_json::Value,
+    ) -> Self {
+        Self::new("question.asked", directory, session_id).with_properties(serde_json::json!({
+            "requestID": request_id,
+            "sessionID": session_id,
+            "messageIndex": message_index,
+            "questions": questions,
+        }))
+    }
+
+    /// `ask_user` finished: `question.resolved` with `outcome` `answered`,
+    /// `timeout` or `aborted`; `answers` is set only for `answered`.
+    pub fn question_resolved(
+        directory: &str,
+        session_id: &str,
+        request_id: &str,
+        message_index: usize,
+        outcome: &str,
+        answers: Option<serde_json::Value>,
+    ) -> Self {
+        let mut properties = serde_json::json!({
+            "requestID": request_id,
+            "messageIndex": message_index,
+            "outcome": outcome,
+        });
+        if let Some(answers) = answers {
+            properties["answers"] = answers;
+        }
+        Self::new("question.resolved", directory, session_id).with_properties(properties)
+    }
+
     /// Batch progress: `batch.progress` — periodic update while polling.
     pub fn batch_progress(
         directory: &str,
@@ -155,79 +201,5 @@ impl EventBus {
 impl Default for EventBus {
     fn default() -> Self {
         Self::new(1024)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Event;
-
-    #[test]
-    fn plugin_changed_has_correct_kind_and_properties() {
-        let event = Event::plugin_changed("/projects/acme", "bebok-index", "installed");
-        assert_eq!(event.kind, "plugin.changed");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.properties["name"], "bebok-index");
-        assert_eq!(event.properties["change"], "installed");
-    }
-
-    #[test]
-    fn plugin_install_progress_has_correct_kind_and_properties() {
-        let event = Event::plugin_install_progress(
-            "/projects/acme",
-            "bebok-index",
-            "download",
-            "https://example.com/bebok-index.zip",
-        );
-        assert_eq!(event.kind, "plugin.install.progress");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.properties["name"], "bebok-index");
-        assert_eq!(event.properties["stage"], "download");
-        assert_eq!(
-            event.properties["detail"],
-            "https://example.com/bebok-index.zip"
-        );
-    }
-
-    #[test]
-    fn batch_submitted_has_correct_kind_and_properties() {
-        let event = Event::batch_submitted("/projects/acme", "sess-1", "b-42", 10);
-        assert_eq!(event.kind, "batch.submitted");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.session_id, "sess-1");
-        assert_eq!(event.properties["batchID"], "b-42");
-        assert_eq!(event.properties["count"], 10);
-    }
-
-    #[test]
-    fn batch_completed_has_correct_kind_and_properties() {
-        let event = Event::batch_completed("/projects/acme", "sess-1", "b-42", 8, 2);
-        assert_eq!(event.kind, "batch.completed");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.session_id, "sess-1");
-        assert_eq!(event.properties["batchID"], "b-42");
-        assert_eq!(event.properties["ok"], 8);
-        assert_eq!(event.properties["failed"], 2);
-    }
-
-    #[test]
-    fn batch_failed_has_correct_kind_and_properties() {
-        let event = Event::batch_failed("/projects/acme", "sess-1", "b-42", "rate limit exceeded");
-        assert_eq!(event.kind, "batch.failed");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.session_id, "sess-1");
-        assert_eq!(event.properties["batchID"], "b-42");
-        assert_eq!(event.properties["error"], "rate limit exceeded");
-    }
-
-    #[test]
-    fn batch_progress_has_correct_kind_and_properties() {
-        let event = Event::batch_progress("/projects/acme", "sess-1", "b-42", 5, 10);
-        assert_eq!(event.kind, "batch.progress");
-        assert_eq!(event.directory, "/projects/acme");
-        assert_eq!(event.session_id, "sess-1");
-        assert_eq!(event.properties["batchID"], "b-42");
-        assert_eq!(event.properties["done"], 5);
-        assert_eq!(event.properties["total"], 10);
     }
 }

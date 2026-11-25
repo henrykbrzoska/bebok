@@ -292,3 +292,90 @@ describe('ExplorerView "open in Explorer" request (F7-3)', () => {
     expect(second.componentInstance.selectedPath()).toBeNull();
   });
 });
+
+describe('ExplorerView editor tabs', () => {
+  let view: ExplorerView;
+  let engine: EngineClient;
+  const storageKey = 'bebok.explorer.tabs:/proj';
+
+  const node = (path: string) => ({ name: '', path, is_dir: false, depth: 0, expanded: false });
+  const flush = () => (view as unknown as { flushTabs(): void }).flushTabs();
+  const restore = () =>
+    (view as unknown as { restoreTabs(dir: string): void }).restoreTabs('/proj');
+
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [ExplorerView],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: {
+              firstChild: null,
+              data: {},
+              paramMap: convertToParamMap({}),
+              queryParamMap: convertToParamMap({}),
+            },
+          },
+        },
+      ],
+    });
+    const fixture: ComponentFixture<ExplorerView> = TestBed.createComponent(ExplorerView);
+    view = fixture.componentInstance;
+    engine = TestBed.inject(EngineClient);
+    spyOn(engine, 'fsFile').and.callFake(
+      async (_dir: string, path: string) => ({ content: `text of ${path}` }) as never,
+    );
+    spyOn(engine, 'fsTree').and.callFake(async () => ({ entries: [] }) as never);
+    view.directory.set('/proj');
+  });
+
+  it('opens each file in its own tab', async () => {
+    await view.openFile(node('a.ts'));
+    await view.openFile(node('b.ts'));
+    expect(view.openTabs().map((t) => t.path)).toEqual(['a.ts', 'b.ts']);
+    expect(view.selectedPath()).toBe('b.ts');
+  });
+
+  it('keeps unsaved text when switching tabs', async () => {
+    await view.openFile(node('a.ts'));
+    view.onDraftChange('edited');
+    await view.openFile(node('b.ts'));
+    expect(view.isTabDirty('a.ts')).toBeTrue();
+
+    view.activateTab('a.ts');
+    expect(view.selectedPath()).toBe('a.ts');
+    expect(view.draftContent()).toBe('edited');
+    expect(view.dirty()).toBeTrue();
+  });
+
+  it('restores the saved tabs and active file on load', async () => {
+    localStorage.setItem(storageKey, JSON.stringify({ tabs: ['a.ts', 'b.ts'], active: 'a.ts' }));
+    restore();
+    expect(view.openTabs().map((t) => t.path)).toEqual(['a.ts', 'b.ts']);
+    expect(view.selectedPath()).toBe('a.ts');
+    await Promise.resolve();
+    expect(engine.fsFile).toHaveBeenCalledWith('/proj', 'a.ts');
+  });
+
+  it('persists the tab list when a tab is closed', async () => {
+    await view.openFile(node('a.ts'));
+    await view.openFile(node('b.ts'));
+    view.closeTab('b.ts');
+    flush();
+    const saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as { tabs: string[] };
+    expect(saved.tabs).toEqual(['a.ts']);
+  });
+
+  it('asks before closing a tab with unsaved edits', async () => {
+    await view.openFile(node('a.ts'));
+    view.onDraftChange('edited');
+    view.closeTab('a.ts');
+    expect(view.pendingClose()).toBe('a.ts');
+    expect(view.openTabs().length).toBe(1);
+  });
+});

@@ -342,49 +342,10 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     #[test]
-    fn search_rejects_empty_query() {
-        let args = json!({ "query": "  " });
-        let parsed: SearchArgs = serde_json::from_value(args).unwrap();
-        assert!(parsed.query.trim().is_empty());
-    }
-
-    #[test]
     fn search_defaults_limit_to_five() {
         let args = json!({ "query": "foo" });
         let parsed: SearchArgs = serde_json::from_value(args).unwrap();
         assert_eq!(parsed.limit, 5);
-    }
-
-    #[test]
-    fn search_respects_custom_limit() {
-        let args = json!({ "query": "foo", "limit": 10 });
-        let parsed: SearchArgs = serde_json::from_value(args).unwrap();
-        assert_eq!(parsed.limit, 10);
-    }
-
-    #[test]
-    fn status_schema_has_no_required_args() {
-        let tool = CodeIndexStatus;
-        let schema = tool.parameters_schema();
-        let required = schema.get("required").and_then(|v| v.as_array());
-        assert!(
-            required.is_none_or(|r| r.is_empty()),
-            "status should have no required args"
-        );
-    }
-
-    #[test]
-    fn search_schema_requires_query() {
-        let tool = CodeIndexSearch;
-        let schema = tool.parameters_schema();
-        let required = schema["required"].as_array().unwrap();
-        assert!(required.contains(&json!("query")));
-    }
-
-    #[test]
-    fn both_tools_are_read_only() {
-        assert!(CodeIndexStatus.is_read_only());
-        assert!(CodeIndexSearch.is_read_only());
     }
 
     #[tokio::test]

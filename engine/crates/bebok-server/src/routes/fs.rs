@@ -507,7 +507,13 @@ pub async fn fs_definition_buffer(
     let root = instance.root.clone();
     let symbol = body.symbol.trim_start_matches('$').to_string();
     let priority =
-        bebok_core::agent::code_index_tools::index_ranked_paths(&root, &symbol, 200).await;
+        // Only a ranking hint: never let the index plugin's warm-up stall a click.
+        tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            bebok_core::agent::code_index_tools::index_ranked_paths(&root, &symbol, 200),
+        )
+        .await
+        .unwrap_or_default();
     let resp = tokio::task::spawn_blocking(move || {
         let ctx = bebok_core::agent::goto_definition::DefinitionContext {
             text: Some(&body.text),

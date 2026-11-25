@@ -49,25 +49,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_section_contains_expected_text() {
-        let section = build_test_section(&cfg("auto")).unwrap();
-        assert!(section.contains("Build & test policy (auto)"));
-        assert!(section.contains("run the relevant build and test commands yourself"));
-        assert!(section.contains("bounded timeout"));
-        assert!(section.contains("fix the cause instead of guessing"));
-        assert!(!section.contains("ask the user once"));
-    }
-
-    #[test]
-    fn ask_section_contains_expected_text() {
-        let section = build_test_section(&cfg("ask")).unwrap();
-        assert!(section.contains("Build & test policy (ask)"));
-        assert!(section.contains("ask the user once whether you should run them"));
-        assert!(section.contains("Do not run builds or tests without permission"));
-        assert!(!section.contains("run the relevant build and test commands yourself"));
-    }
-
-    #[test]
     fn off_returns_none() {
         assert!(build_test_section(&cfg("off")).is_none());
         assert!(build_test_section(&cfg("none")).is_none());

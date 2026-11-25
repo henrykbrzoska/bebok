@@ -117,6 +117,43 @@
 
     <!-- F2-17: content pane - 44px header + body/editor. -->
     <main class="pane">
+      @if (openTabs().length > 0) {
+        <div
+          class="tab-strip"
+          role="tablist"
+          data-testid="explorer-tabs"
+          [attr.aria-label]="t('explorer.tabsLabel')"
+        >
+          @for (tab of openTabs(); track tab.path) {
+            <div
+              class="tab"
+              role="tab"
+              tabindex="0"
+              data-testid="explorer-tab"
+              [class.active]="tab.path === selectedPath()"
+              [attr.aria-selected]="tab.path === selectedPath()"
+              [title]="tab.path"
+              (click)="activateTab(tab.path)"
+              (keydown.enter)="activateTab(tab.path)"
+              (auxclick)="onTabAux($event, tab.path)"
+            >
+              <span class="tab-name">{{ tabName(tab.path) }}</span>
+              @if (isTabDirty(tab.path)) {
+                <span class="dirty-dot" aria-hidden="true" [title]="t('explorer.unsavedHint')">•</span>
+              }
+              <button
+                type="button"
+                class="tab-close"
+                data-testid="explorer-tab-close"
+                [attr.aria-label]="t('explorer.closeTab')"
+                (click)="$event.stopPropagation(); closeTab(tab.path)"
+              >
+                ×
+              </button>
+            </div>
+          }
+        </div>
+      }
       @if (!selectedPath()) {
         <div class="placeholder">{{ t('explorer.selectHint') }}</div>
       } @else {
@@ -412,7 +449,7 @@
       </div>
     </div>
   }
-  @if (pendingNav()) {
+  @if (pendingNav() || pendingClose()) {
     <div class="delete-overlay" (click)="cancelNav()">
       <div
         class="delete-modal"
@@ -421,7 +458,7 @@
         (click)="$event.stopPropagation()"
       >
         <p class="delete-text">{{ t('explorer.unsavedConfirm') }}</p>
-        <p class="delete-path">{{ selectedPath() }}</p>
+        <p class="delete-path">{{ pendingClose() ?? selectedPath() }}</p>
         <div class="delete-actions">
           <button class="pane-btn" data-testid="explorer-nav-cancel" (click)="cancelNav()">
             {{ t('explorer.cancel') }}

@@ -56,11 +56,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn label_is_not_empty() {
-        assert!(!host_os_label().is_empty());
-    }
-
-    #[test]
     fn note_names_the_host_os() {
         let note = host_os_note();
         assert!(note.starts_with("Host OS: "), "{note}");

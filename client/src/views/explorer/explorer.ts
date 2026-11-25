@@ -70,6 +70,17 @@ const DOUBLE_SHIFT_MS = 400;
 /** Recently opened files kept per project (Go to File, empty query). */
 const RECENT_MAX = 30;
 const RECENT_KEY = 'bebok.explorer.recent:';
+/** Open editor tabs kept per project as `{tabs, active}` JSON. */
+const TABS_KEY = 'bebok.explorer.tabs:';
+const TABS_MAX = 20;
+const TABS_SAVE_DELAY_MS = 300;
+
+/** One open editor tab. `scrollTop` / `cursor` are reserved for restoring the view. */
+export interface OpenTab {
+  path: string;
+  scrollTop?: number;
+  cursor?: { line: number; column: number };
+}
 import { toMarkdownRows, type MarkdownRow } from './explorer-markdown';
 
 interface FsNode {
@@ -194,7 +205,19 @@ export class ExplorerView implements OnInit {
   readonly directory = signal<string | null>(null);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
-  readonly selectedPath = signal<string | null>(null);
+  /** Open editor tabs, in tab-strip order. */
+  readonly openTabs = signal<OpenTab[]>([]);
+  /** Path shown in the editor (source of truth; `selectedPath` derives from it). */
+  readonly activePath = signal<string | null>(null);
+  readonly selectedPath = computed(() => this.activePath());
+  /** Saved text + draft of tabs that are not on screen, keyed by path. */
+  private readonly buffers = new Map<string, { saved: string; draft: string }>();
+  /** Tab waiting on the unsaved-changes dialog before it closes. */
+  readonly pendingClose = signal<string | null>(null);
+  private tabsSave: { key: string; value: string } | null = null;
+  private tabsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Directory whose saved tabs were already restored (cleared on project switch). */
+  private restoredDir: string | null = null;
   readonly fileContent = signal<string>('');
   readonly fileLoading = signal(false);
   /** Edit mode (the default for every text file): textarea bound to `draftContent`. */
@@ -265,9 +288,14 @@ export class ExplorerView implements OnInit {
 
   /** Drop the tree + file state of the previous project on a switch. */
   private resetState(): void {
+    this.flushTabs();
+    this.restoredDir = null;
+    this.openTabs.set([]);
+    this.buffers.clear();
+    this.pendingClose.set(null);
     this.dirs.set({});
     this.version.update((v) => v + 1);
-    this.selectedPath.set(null);
+    this.activePath.set(null);
     this.fileContent.set('');
     this.draftContent.set('');
     this.editing.set(false);
@@ -385,6 +413,10 @@ export class ExplorerView implements OnInit {
     this.loading.set(true);
     this.error.set(null);
     this.recentFiles.set(readRecent(dir));
+    if (this.restoredDir !== dir) {
+      this.restoredDir = dir;
+      this.restoreTabs(dir);
+    }
     try {
       const res = await this.engine.fsTree(dir);
       this.dirs.update((d) => ({
@@ -470,15 +502,28 @@ export class ExplorerView implements OnInit {
     if (!dir) {
       return;
     }
-    this.selectedPath.set(node.path);
+    this.stashActive();
+    this.addTab(node.path);
     this.find.closeFind();
-    this.editing.set(false);
-    this.dirty.set(false);
     this.htmlPreview.set(null);
     this.mdPreview.set(false);
     this.gotoChoices.set(null);
-    this.fileLoading.set(true);
     this.error.set(null);
+    const kept = this.buffers.get(node.path);
+    this.buffers.delete(node.path);
+    if (kept && kept.draft !== kept.saved && !isImagePath(node.path)) {
+      // Unsaved edits from an earlier visit: bring them back without re-reading disk.
+      this.fileContent.set(kept.saved);
+      this.draftContent.set(kept.draft);
+      this.imageData.set(null);
+      this.imageMime.set(null);
+      this.editing.set(true);
+      this.dirty.set(true);
+      return;
+    }
+    this.editing.set(false);
+    this.dirty.set(false);
+    this.fileLoading.set(true);
     try {
       if (isImagePath(node.path)) {
         const res = await this.engine.fsFileBinary(dir, node.path);
@@ -817,14 +862,17 @@ export class ExplorerView implements OnInit {
    * has unsaved edits. Same-file targets never need the guard.
    */
   async requestOpen(loc: EditorLocation): Promise<void> {
-    if (this.dirty() && loc.path !== this.selectedPath()) {
-      this.pendingNav.set(loc);
-      return;
-    }
+    // Each tab keeps its own unsaved draft, so moving to another file never
+    // loses edits; the unsaved-changes dialog is only for closing a tab.
     await this.navigate(loc);
   }
 
   async saveAndContinue(): Promise<void> {
+    const closing = this.pendingClose();
+    if (closing) {
+      await this.saveAndClose(closing);
+      return;
+    }
     const loc = this.pendingNav();
     await this.saveEdit();
     if (this.dirty()) {
@@ -837,6 +885,12 @@ export class ExplorerView implements OnInit {
   }
 
   async discardAndContinue(): Promise<void> {
+    const closing = this.pendingClose();
+    if (closing) {
+      this.pendingClose.set(null);
+      this.dropTabs((p) => p === closing);
+      return;
+    }
     const loc = this.pendingNav();
     this.pendingNav.set(null);
     this.cancelEdit();
@@ -847,6 +901,263 @@ export class ExplorerView implements OnInit {
 
   cancelNav(): void {
     this.pendingNav.set(null);
+    this.pendingClose.set(null);
+  }
+
+  // --- Editor tabs -------------------------------------------------------------
+
+  private fileNode(path: string): FsNode {
+    return { name: '', path, is_dir: false, depth: 0, expanded: false };
+  }
+
+  tabName(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1);
+  }
+
+  isTabDirty(path: string): boolean {
+    if (path === this.activePath()) {
+      return this.dirty();
+    }
+    const buf = this.buffers.get(path);
+    return !!buf && buf.draft !== buf.saved;
+  }
+
+  /** Keep the text of the tab being left, so switching back does not lose edits. */
+  private stashActive(): void {
+    const path = this.activePath();
+    if (!path || this.fileLoading() || this.imageData() !== null) {
+      return;
+    }
+    this.buffers.set(path, { saved: this.fileContent(), draft: this.draftContent() });
+  }
+
+  private addTab(path: string): void {
+    let tabs = this.openTabs();
+    if (!tabs.some((t) => t.path === path)) {
+      if (tabs.length >= TABS_MAX) {
+        // Over the cap: evict the oldest tab that holds no unsaved edits.
+        const victim = tabs.find((t) => !this.isTabDirty(t.path));
+        if (victim) {
+          tabs = tabs.filter((t) => t !== victim);
+          this.buffers.delete(victim.path);
+        }
+      }
+      this.openTabs.set([...tabs, { path }]);
+    }
+    this.activePath.set(path);
+    this.persistTabs();
+  }
+
+  /** Show the tab for `path`; its unsaved edits, if any, come back with it. */
+  activateTab(path: string): void {
+    if (path !== this.activePath()) {
+      void this.openFile(this.fileNode(path));
+    }
+  }
+
+  /** Tab "x", middle-click and Ctrl/Cmd+W. Asks first when the tab has unsaved edits. */
+  closeTab(path: string): void {
+    if (this.isTabDirty(path)) {
+      this.pendingClose.set(path);
+      return;
+    }
+    this.dropTabs((p) => p === path);
+  }
+
+  onTabAux(event: MouseEvent, path: string): void {
+    if (event.button === 1) {
+      event.preventDefault();
+      this.closeTab(path);
+    }
+  }
+
+  /** Remove every tab matching `match`; if the active one goes, show a neighbour. */
+  private dropTabs(match: (path: string) => boolean): void {
+    const tabs = this.openTabs();
+    if (!tabs.some((t) => match(t.path))) {
+      return;
+    }
+    const idx = tabs.findIndex((t) => t.path === this.activePath());
+    const activeGone = idx >= 0 && match(tabs[idx].path);
+    const remaining = tabs.filter((t) => !match(t.path));
+    this.openTabs.set(remaining);
+    for (const t of tabs) {
+      if (match(t.path)) {
+        this.buffers.delete(t.path);
+      }
+    }
+    if (activeGone) {
+      this.clearViewer();
+      const next = remaining[Math.min(idx, remaining.length - 1)];
+      if (next) {
+        void this.openFile(this.fileNode(next.path));
+      }
+    }
+    this.persistTabs();
+  }
+
+  private clearViewer(): void {
+    this.activePath.set(null);
+    this.fileContent.set('');
+    this.draftContent.set('');
+    this.editing.set(false);
+    this.dirty.set(false);
+    this.htmlPreview.set(null);
+    this.mdPreview.set(false);
+    this.gotoChoices.set(null);
+    this.imageData.set(null);
+    this.imageMime.set(null);
+  }
+
+  /** Follow a rename/move in the tree for open tabs, buffers and the active file. */
+  private renameTabs(from: string, to: string): void {
+    const map = (p: string): string =>
+      p === from ? to : p.startsWith(from + '/') ? to + p.slice(from.length) : p;
+    this.openTabs.update((tabs) => tabs.map((t) => ({ ...t, path: map(t.path) })));
+    for (const [p, buf] of [...this.buffers]) {
+      if (map(p) !== p) {
+        this.buffers.delete(p);
+        this.buffers.set(map(p), buf);
+      }
+    }
+    const active = this.activePath();
+    if (active) {
+      this.activePath.set(map(active));
+    }
+    this.persistTabs();
+  }
+
+  /** Save the tab's draft (active or background), then close it. */
+  private async saveAndClose(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    if (path === this.activePath()) {
+      await this.saveEdit();
+      if (this.dirty()) {
+        return; // save failed: the error banner shows why and the dialog stays open
+      }
+    } else {
+      const buf = this.buffers.get(path);
+      if (buf && buf.draft !== buf.saved) {
+        try {
+          await this.engine.fsFileWrite(dir, path, buf.draft);
+        } catch (err) {
+          this.error.set(this.describe(err));
+          return;
+        }
+      }
+    }
+    this.pendingClose.set(null);
+    this.dropTabs((p) => p === path);
+  }
+
+  /** Ctrl/Cmd+W closes the active tab; Ctrl/Cmd+Tab (+Shift) cycles through tabs. */
+  private handleTabKeys(event: KeyboardEvent, mod: boolean): boolean {
+    if (!mod || this.pendingClose() || this.pendingNav() || this.openTabs().length === 0) {
+      return false;
+    }
+    if (event.key.toLowerCase() === 'w' && !event.shiftKey && !event.altKey) {
+      const active = this.activePath();
+      if (!active) {
+        return false;
+      }
+      event.preventDefault();
+      this.closeTab(active);
+      return true;
+    }
+    if (event.key === 'Tab') {
+      const tabs = this.openTabs();
+      if (tabs.length < 2) {
+        return false;
+      }
+      event.preventDefault();
+      const idx = tabs.findIndex((t) => t.path === this.activePath());
+      const step = event.shiftKey ? -1 : 1;
+      this.activateTab(tabs[(idx + step + tabs.length) % tabs.length].path);
+      return true;
+    }
+    return false;
+  }
+
+  /** Debounced write of the tab list for the project it belongs to. */
+  private persistTabs(): void {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const key = TABS_KEY + dir;
+    if (this.tabsSave && this.tabsSave.key !== key) {
+      this.flushTabs();
+    }
+    this.tabsSave = {
+      key,
+      value: JSON.stringify({
+        tabs: this.openTabs().map((t) => t.path),
+        active: this.activePath(),
+      }),
+    };
+    if (this.tabsSaveTimer) {
+      clearTimeout(this.tabsSaveTimer);
+    }
+    this.tabsSaveTimer = setTimeout(() => this.flushTabs(), TABS_SAVE_DELAY_MS);
+  }
+
+  private flushTabs(): void {
+    if (this.tabsSaveTimer) {
+      clearTimeout(this.tabsSaveTimer);
+      this.tabsSaveTimer = null;
+    }
+    const pending = this.tabsSave;
+    this.tabsSave = null;
+    if (!pending) {
+      return;
+    }
+    try {
+      localStorage.setItem(pending.key, pending.value);
+    } catch {
+      /* storage full / disabled: tabs are just not remembered */
+    }
+  }
+
+  /** Re-open the tabs saved for `dir`; the active one is loaded, the rest on demand. */
+  private restoreTabs(dir: string): void {
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(TABS_KEY + dir);
+    } catch {
+      return;
+    }
+    if (!raw) {
+      return;
+    }
+    let saved: { tabs?: unknown; active?: unknown } | null = null;
+    try {
+      saved = JSON.parse(raw) as { tabs?: unknown; active?: unknown } | null;
+    } catch {
+      return;
+    }
+    const stored = Array.isArray(saved?.tabs)
+      ? (saved?.tabs as unknown[]).filter((p): p is string => typeof p === 'string')
+      : [];
+    const paths = stored.slice(0, TABS_MAX);
+    if (paths.length === 0) {
+      return;
+    }
+    // Files already opened before the restore (e.g. from the Preview panel) keep their tab.
+    const merged = [...new Set([...paths, ...this.openTabs().map((t) => t.path)])];
+    this.openTabs.set(merged.map((path) => ({ path })));
+    if (this.activePath()) {
+      this.persistTabs();
+      return;
+    }
+    const active =
+      typeof saved?.active === 'string' && paths.includes(saved.active)
+        ? saved.active
+        : paths[paths.length - 1];
+    void this.openFile(this.fileNode(active));
+    void this.revealPath(active);
   }
 
   private async navigate(loc: EditorLocation): Promise<void> {
@@ -1393,9 +1704,7 @@ export class ExplorerView implements OnInit {
           return;
         }
         await this.engine.fsRename(dir, from, to);
-        if (this.selectedPath() === from) {
-          this.selectedPath.set(to);
-        }
+        this.renameTabs(from, to);
         await this.refreshDir(this.inlineParent());
       } else {
         const rel = this.inlineParent() ? `${this.inlineParent()}/${name}` : name;
@@ -1437,13 +1746,7 @@ export class ExplorerView implements OnInit {
     }
     try {
       await this.engine.fsPathDelete(dir, path, this.deleteRecursive());
-      if (this.selectedPath() === path) {
-        this.selectedPath.set(null);
-        this.fileContent.set('');
-        this.draftContent.set('');
-        this.editing.set(false);
-        this.dirty.set(false);
-      }
+      this.dropTabs((p) => p === path || p.startsWith(path + '/'));
       await this.refreshDir(parentOf(path));
       this.cancelDelete();
     } catch (err) {
@@ -1532,6 +1835,9 @@ export class ExplorerView implements OnInit {
     const mod = event.ctrlKey || event.metaKey;
     if (this.findInFilesOpen() || this.gotoOpen()) {
       return; // the dialog owns the keyboard
+    }
+    if (this.handleTabKeys(event, mod)) {
+      return;
     }
     if (event.altKey && !mod && event.key === 'Home') {
       event.preventDefault();

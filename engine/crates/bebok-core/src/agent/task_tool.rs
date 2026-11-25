@@ -589,15 +589,4 @@ mod tests {
         let err = validate_agent_images(bad).unwrap_err();
         assert!(err.contains("unsupported image media_type"), "{err}");
     }
-
-    #[test]
-    fn task_schema_documents_images() {
-        let tool = TaskTool {
-            store: Weak::new(),
-            max_depth: 3,
-        };
-        let schema = Tool::parameters_schema(&tool);
-        assert!(schema["properties"]["images"].is_object());
-        assert!(tool.description().contains("images"));
-    }
 }

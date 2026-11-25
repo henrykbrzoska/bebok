@@ -310,6 +310,77 @@ fn shared_dirs(a: &str, b: &str) -> usize {
         .count()
 }
 
+/// Child directories scanned per ancestor by [`resolve_hints_near`].
+const NEAR_CHILD_CAP: usize = 200;
+
+/// `dir/segs…` matched case-insensitively (`bss/return` → `Bss/Return`).
+fn resolve_ci(dir: &Path, segs: &[&str]) -> Option<PathBuf> {
+    let mut cur = dir.to_path_buf();
+    for seg in segs {
+        let exact = cur.join(seg);
+        if exact.exists() {
+            cur = exact;
+            continue;
+        }
+        let found = std::fs::read_dir(&cur).ok()?.flatten().find(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(seg))
+        })?;
+        cur = found.path();
+    }
+    cur.is_file().then_some(cur)
+}
+
+/// Existing files matching the file `hints`, looked up in the ancestors of
+/// `from` and their direct children (source roots such as `src/`, `lib/`),
+/// nearest ancestor first; stops at the first ancestor with a match.
+fn resolve_hints_near(root: &Path, from: &str, hints: &[String]) -> Vec<String> {
+    let files: Vec<Vec<&str>> = hints
+        .iter()
+        .filter(|h| !h.ends_with('/'))
+        .map(|h| h.split('/').filter(|s| !s.is_empty()).collect())
+        .collect();
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let mut parts: Vec<&str> = from.split('/').collect();
+    parts.pop();
+    let mut out: Vec<String> = Vec::new();
+    loop {
+        let dir = parts.iter().fold(root.to_path_buf(), |d, p| d.join(p));
+        let mut bases = vec![dir.clone()];
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            bases.extend(
+                rd.flatten()
+                    .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                    .filter(|e| {
+                        !e.file_name()
+                            .to_str()
+                            .is_some_and(|n| n.starts_with('.') || n == "node_modules")
+                    })
+                    .take(NEAR_CHILD_CAP)
+                    .map(|e| e.path()),
+            );
+        }
+        for base in &bases {
+            for segs in &files {
+                if let Some(p) = resolve_ci(base, segs)
+                    && let Ok(rel) = p.strip_prefix(root)
+                {
+                    let rel = rel.to_string_lossy().replace('\\', "/");
+                    if !out.contains(&rel) {
+                        out.push(rel);
+                    }
+                }
+            }
+        }
+        if !out.is_empty() || parts.pop().is_none() {
+            return out;
+        }
+    }
+}
+
 /// Extra input for [`find_definitions_in`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefinitionContext<'a> {
@@ -391,6 +462,7 @@ pub fn find_definitions_in(
     let mut lookup = symbol.to_string();
     let mut hints: Vec<String> = Vec::new();
     let mut buffer_done = false;
+    let mut self_member = false;
     if let (Some(text), Some(lang), Some(rel)) = (ctx.text, from_lang, from.as_deref()) {
         let mut offset = ctx.offset.unwrap_or(0).min(text.len());
         while !text.is_char_boundary(offset) {
@@ -437,13 +509,84 @@ pub fn find_definitions_in(
         if !resp.results.is_empty() && (!info.member || info.self_member) {
             return resp;
         }
+        self_member = info.self_member;
         buffer_done = true;
     } else if from_lang == Some(Lang::Php) || from_lang.is_none() {
         hints = super::goto_local::analyse(Lang::Php, "", "", 0, symbol).path_hints;
     }
     let lookup = lookup.as_str();
 
-    // 2. The project.
+    // 2. Fast path: resolve file hints next to the clicked file (no walk).
+    if let Some(from) = from.as_deref() {
+        let near = resolve_hints_near(root, from, &hints);
+        for rel in &near {
+            if buffer_done && rel == from {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(root.join(rel)) else {
+                continue;
+            };
+            let Some(lang) = Path::new(rel)
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(|e| Lang::from_ext(&e.to_ascii_lowercase()))
+            else {
+                continue;
+            };
+            resp.parsed_files += 1;
+            for (line, column, kind, snippet) in definitions_in(lang, &content, lookup) {
+                resp.results.push(DefinitionHit {
+                    path: rel.clone(),
+                    line,
+                    column,
+                    kind,
+                    snippet,
+                });
+            }
+        }
+        if !resp.results.is_empty() {
+            return resp;
+        }
+        // `$this->foo()` not defined here: walk up the `extends` chain.
+        if self_member
+            && from_lang == Some(Lang::Php)
+            && let Some(text) = ctx.text
+        {
+            let mut text = text.to_string();
+            let mut at = from.to_string();
+            for _ in 0..12 {
+                let Some((_, parent_hints)) = super::goto_local::php_parent_hints(&text) else {
+                    break;
+                };
+                let Some(parent) = resolve_hints_near(root, &at, &parent_hints)
+                    .into_iter()
+                    .next()
+                else {
+                    break;
+                };
+                let Ok(content) = std::fs::read_to_string(root.join(&parent)) else {
+                    break;
+                };
+                resp.parsed_files += 1;
+                for (line, column, kind, snippet) in definitions_in(Lang::Php, &content, lookup) {
+                    resp.results.push(DefinitionHit {
+                        path: parent.clone(),
+                        line,
+                        column,
+                        kind,
+                        snippet,
+                    });
+                }
+                if !resp.results.is_empty() {
+                    return resp;
+                }
+                text = content;
+                at = parent;
+            }
+        }
+    }
+
+    // 3. The project.
     let (mut files, walk_truncated) = source_files(root, &exts, WALK_CAP);
     resp.truncated = walk_truncated;
     let priority: std::collections::HashSet<&str> =
@@ -526,6 +669,26 @@ pub fn find_definitions_in(
                 break 'files;
             }
         }
+    }
+    // The hinted class exists in several copies (deploy snapshots, backups):
+    // keep the copy closest to the clicked file instead of a picker.
+    if best_tier == Some(1)
+        && let Some(from) = from.as_deref()
+    {
+        let hinted = |rel: &str| {
+            hints
+                .iter()
+                .any(|h| super::goto_local::hint_matches(rel, h))
+        };
+        let best = resp
+            .results
+            .iter()
+            .filter(|h| hinted(&h.path))
+            .map(|h| shared_dirs(from, &h.path))
+            .max()
+            .unwrap_or(0);
+        resp.results
+            .retain(|h| hinted(&h.path) && shared_dirs(from, &h.path) == best);
     }
     // Nothing defines it, but an import pointed at an existing module file
     // (`import * as m`, default export under another name): open that file.
@@ -749,8 +912,10 @@ mod tests {
         }
     }
 
+    /// Two rules that hold for every language, pinned on Rust: the clicked
+    /// file is searched first, and a call site is not a definition.
     #[test]
-    fn rust_fn_struct_and_same_file_first() {
+    fn same_file_wins_and_call_sites_are_not_definitions() {
         let dir = TempDir::new();
         write(
             dir.path(),
@@ -769,12 +934,15 @@ mod tests {
             hits(dir.path(), "src/a.rs", "Widget"),
             vec![("src/b.rs".into(), 2)]
         );
-        // A call site is not a definition.
-        assert!(hits(dir.path(), "src/a.rs", "main").len() == 1);
+        assert_eq!(hits(dir.path(), "src/a.rs", "main").len(), 1);
     }
 
+    /// One mixed-language project instead of one project per language: each
+    /// language's query must find its own definition kinds (PHP class +
+    /// method, TS interface + const across the TS/JS family, Go type + func
+    /// + method). `every_language_query_compiles` covers the rest.
     #[test]
-    fn php_class_method_and_file_named_after_class() {
+    fn finds_definitions_in_every_language() {
         let dir = TempDir::new();
         write(
             dir.path(),
@@ -786,19 +954,6 @@ mod tests {
             "src/Controller.php",
             "<?php\n$s = new UserService();\n$s->find(1);\n",
         );
-        assert_eq!(
-            hits(dir.path(), "src/Controller.php", "UserService"),
-            vec![("src/Service/UserService.php".into(), 3)]
-        );
-        assert_eq!(
-            hits(dir.path(), "src/Controller.php", "find"),
-            vec![("src/Service/UserService.php".into(), 4)]
-        );
-    }
-
-    #[test]
-    fn ts_and_js_share_a_family() {
-        let dir = TempDir::new();
         write(
             dir.path(),
             "lib/util.js",
@@ -809,23 +964,6 @@ mod tests {
             "app/main.ts",
             "import { slugify } from '../lib/util';\ninterface Opts { x: number }\nexport const LIMIT = 3;\n",
         );
-        assert_eq!(
-            hits(dir.path(), "app/main.ts", "slugify"),
-            vec![("lib/util.js".into(), 1)]
-        );
-        assert_eq!(
-            hits(dir.path(), "app/main.ts", "Opts"),
-            vec![("app/main.ts".into(), 2)]
-        );
-        assert_eq!(
-            hits(dir.path(), "app/main.ts", "LIMIT"),
-            vec![("app/main.ts".into(), 3)]
-        );
-    }
-
-    #[test]
-    fn go_func_type_and_method() {
-        let dir = TempDir::new();
         write(
             dir.path(),
             "pkg/store/store.go",
@@ -836,18 +974,33 @@ mod tests {
             "cmd/main.go",
             "package main\nfunc main() { store.New().Get() }\n",
         );
-        assert_eq!(
-            hits(dir.path(), "cmd/main.go", "Store"),
-            vec![("pkg/store/store.go".into(), 3)]
-        );
-        assert_eq!(
-            hits(dir.path(), "cmd/main.go", "Get"),
-            vec![("pkg/store/store.go".into(), 5)]
-        );
-        assert_eq!(
-            hits(dir.path(), "cmd/main.go", "New"),
-            vec![("pkg/store/store.go".into(), 7)]
-        );
+        for (from, symbol, want) in [
+            // PHP: the class and one of its methods.
+            (
+                "src/Controller.php",
+                "UserService",
+                ("src/Service/UserService.php", 3),
+            ),
+            (
+                "src/Controller.php",
+                "find",
+                ("src/Service/UserService.php", 4),
+            ),
+            // TS/JS are one family: a `.ts` file resolves into a `.js` one.
+            ("app/main.ts", "slugify", ("lib/util.js", 1)),
+            ("app/main.ts", "Opts", ("app/main.ts", 2)),
+            ("app/main.ts", "LIMIT", ("app/main.ts", 3)),
+            // Go: type, method, constructor.
+            ("cmd/main.go", "Store", ("pkg/store/store.go", 3)),
+            ("cmd/main.go", "Get", ("pkg/store/store.go", 5)),
+            ("cmd/main.go", "New", ("pkg/store/store.go", 7)),
+        ] {
+            assert_eq!(
+                hits(dir.path(), from, symbol),
+                vec![(want.0.to_string(), want.1)],
+                "{from} -> {symbol}"
+            );
+        }
     }
 
     #[test]

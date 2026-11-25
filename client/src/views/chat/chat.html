@@ -124,6 +124,9 @@
                 }
               }
             </div>
+            @for (rec of visibleQuestionRecords(); track rec.requestID) {
+              <app-question-record [record]="rec" />
+            }
             @for (p of pending(); track p.id) {
               <div class="pending user-bubble">
                 <div class="parts">
@@ -181,9 +184,9 @@
           }
 
           @if (running() && !loading()) {
-            <div class="typing" role="status" [attr.aria-label]="t('chat.typing')">
+            <div class="typing" role="status" [attr.aria-label]="questionBlocked() ? t('question.waiting') : t('chat.typing')">
               <img class="typing-logo" src="/logo.svg" alt="" aria-hidden="true" />
-              <span class="typing-text">{{ t('chat.typing') }}</span>
+              <span class="typing-text">{{ questionBlocked() ? t('question.waiting') : t('chat.typing') }}</span>
               <span class="ellipsis" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
             </div>
           }
@@ -192,6 +195,12 @@
             #permission
             [activeSessionID]="sessionID()"
             [directory]="meta()?.directory"
+          />
+          <app-question-dialog
+            #question
+            [activeSessionID]="sessionID()"
+            [directory]="meta()?.directory"
+            (answered)="onQuestionAnswered($event)"
           />
           <app-ssh-prompt
             [activeSessionID]="sessionID()"
@@ -255,6 +264,9 @@
         }
         @if (permissionBlocked()) {
           <div class="perm-blocked" role="status">{{ t('perm.blocksSend') }}</div>
+        }
+        @if (questionBlocked()) {
+          <div class="perm-blocked" role="status">{{ t('question.blocksSend') }}</div>
         }
         <textarea
           #composerInput
@@ -342,8 +354,8 @@
           <button
             class="primary send"
             (click)="sendPrompt()"
-            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading() || permissionBlocked()"
-            [title]="permissionBlocked() ? t('perm.blocksSend') : t('chat.send')"
+            [disabled]="(!draft().trim() && attachments().length === 0) || sending() || loading() || permissionBlocked() || questionBlocked()"
+            [title]="permissionBlocked() ? t('perm.blocksSend') : questionBlocked() ? t('question.blocksSend') : t('chat.send')"
           >
             {{ sending() ? t('chat.sending') : t('chat.send') }}
           </button>

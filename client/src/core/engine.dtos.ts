@@ -343,6 +343,57 @@ export interface PermissionResolved {
   scope?: string;
 }
 
+/** One selectable answer of a question (`question.asked`). */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** One question inside a `question.asked` prompt. */
+export interface QuestionItem {
+  /** Short heading shown above the question (may be empty). */
+  header: string;
+  question: string;
+  options: QuestionOption[];
+  /** `true` = checkboxes (several answers), `false` = radio buttons (one answer). */
+  multiple: boolean;
+  /** Offer a free-text answer besides the options (always true when there are no options). */
+  allowFreeText: boolean;
+}
+
+/** Shape of `question.asked` properties: the agent is waiting for the user's answers. */
+export interface QuestionAsked {
+  requestID: string;
+  messageIndex: number;
+  questions: QuestionItem[];
+}
+
+/** Shape of `question.resolved` properties (answered or skipped, possibly by another client). */
+export interface QuestionResolved {
+  requestID: string;
+  skipped?: boolean;
+}
+
+/** One answer to one question: `selected` holds option labels, `text` a free-text answer. */
+export interface QuestionAnswer {
+  /** Index into `QuestionAsked.questions`. */
+  questionIndex: number;
+  selected: string[];
+  text?: string;
+}
+
+/** `POST /session/{id}/question/{requestID}` body. `skipped: true` means no answers were given. */
+export interface QuestionAnswerBody {
+  answers: QuestionAnswer[];
+  skipped?: boolean;
+}
+
+/** Event types that carry a question prompt lifecycle. */
+export type QuestionEventType = 'question.asked' | 'question.resolved';
+
+/** An `EngineEvent` narrowed to the question lifecycle. */
+export type QuestionEvent = EngineEvent & { type: QuestionEventType };
+
 /** Properties of an `ssh.prompt` event: the engine needs a password to open a persistent SSH session. */
 export interface SshPrompt {
   /** Single-use id answered with `POST /ssh/prompt/{requestID}`. */

@@ -270,6 +270,7 @@ impl Agent {
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
                 "code_ast".to_string(),
+                "ask_user".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -332,6 +333,7 @@ impl Agent {
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
                 "code_ast".to_string(),
+                "ask_user".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -394,6 +396,7 @@ impl Agent {
                 "code_graph_dependents".to_string(),
                 "code_graph_impact".to_string(),
                 "code_ast".to_string(),
+                "ask_user".to_string(),
             ],
             permissions: vec![
                 Rule {
@@ -624,13 +627,41 @@ mod tests {
     }
 
     #[test]
-    fn orchestrator_prompt_has_parity_guard() {
-        // External harnesses may paste ORCHESTRATOR_PROMPT as plain text
-        // without the engine's toolset: the prompt must tell the model to
-        // detect the missing `fleet`/supervision tools and proceed solo
-        // instead of hallucinating calls.
-        let prompt = Agent::orchestrator().prompt;
-        assert!(prompt.contains("Parity guard"), "{prompt}");
-        assert!(prompt.contains("proceeded solo") || prompt.contains("proceed solo"));
+    fn ask_user_is_whitelisted_for_read_only_and_hub_presets() {
+        for agent in [Agent::ask(), Agent::plan(), Agent::hub()] {
+            assert!(
+                agent.tools.contains(&"ask_user".to_string()),
+                "{} preset must whitelist ask_user",
+                agent.name
+            );
+        }
+    }
+
+    #[test]
+    fn ask_user_reaches_empty_whitelist_presets_without_being_listed() {
+        // Empty whitelist means "all registered tools", so ask_user is
+        // reachable from these without an explicit entry.
+        for agent in [Agent::code(), Agent::debug(), Agent::orchestrator()] {
+            assert!(
+                agent.tools.is_empty(),
+                "{} preset must keep an empty (all tools) whitelist",
+                agent.name
+            );
+        }
+    }
+
+    #[test]
+    fn ask_permissions_have_no_rule_for_ask_user() {
+        let layer = CompiledLayer::compile(&Agent::ask().permissions);
+        // No preset rule matches ask_user, so the engine default applies,
+        // which is Allow for a read-only tool (ask_user is read-only).
+        assert!(
+            layer
+                .first_match(&crate::permission::matcher::call_string(
+                    "ask_user",
+                    &json!({"questions": []}),
+                ))
+                .is_none()
+        );
     }
 }

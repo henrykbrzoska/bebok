@@ -42,157 +42,81 @@ fn run_cli(request: Value) -> Value {
     serde_json::from_str(&stdout).unwrap()
 }
 
+/// Every item kind the legacy `bebok-ast` binary answers for, against the
+/// `tests/fixtures` tree, in one pass over the stdio contract. One case per
+/// kind is the point - the query logic itself lives in `bebok-core`'s
+/// embedded `ast_search`, which the `code_ast` tool uses instead.
 #[test]
-fn query_impl_display_finds_foo() {
-    let resp = run_cli(json!({
-        "kind": "impl",
-        "filters": { "trait": "Display" },
-        "limit": 10
-    }));
+fn every_kind_is_answered() {
+    for (kind, expect_name) in [
+        ("impl", Some("impl")),
+        ("struct", None),
+        ("fn", None),
+        ("test", Some("test_something")),
+        ("const", Some("MAX_SIZE")),
+        ("static", Some("COUNTER")),
+    ] {
+        let resp = run_cli(json!({ "kind": kind, "limit": 10 }));
+        assert!(resp["ok"].as_bool().unwrap(), "{kind}");
+        let results = resp["results"].as_array().unwrap();
+        assert!(!results.is_empty(), "{kind}: no results");
+        if let Some(needle) = expect_name {
+            let names: Vec<&str> = results
+                .iter()
+                .map(|r| r["name"].as_str().unwrap())
+                .collect();
+            assert!(
+                names.iter().any(|n| n.contains(needle)),
+                "{kind}: {needle} not in {names:?}"
+            );
+        }
+    }
+    // The fixture tree has no enums: an empty answer is still `ok`.
+    let resp = run_cli(json!({ "kind": "enum", "limit": 10 }));
     assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find impl Display for Foo");
-    assert!(
-        results[0]["name"].as_str().unwrap().contains("impl"),
-        "name should mention impl"
-    );
+    assert!(resp["results"].as_array().unwrap().is_empty());
 }
 
+/// The filters the request carries: `trait`, `derive`, `return_type`, `ext`
+/// and `name_regex` (the last one matching nothing).
 #[test]
-fn query_struct_derive_serialize() {
-    let resp = run_cli(json!({
-        "kind": "struct",
-        "filters": { "derive": "Serialize" },
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(
-        !results.is_empty(),
-        "should find struct Bar with #[derive(Serialize)]"
-    );
-}
-
-#[test]
-fn query_fn_return_result() {
-    let resp = run_cli(json!({
-        "kind": "fn",
-        "filters": { "return_type": "Result" },
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find fn baz() -> Result<()>");
-}
-
-#[test]
-fn query_test_annotations() {
-    let resp = run_cli(json!({
-        "kind": "test",
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find #[test] fn");
-    // The test function name should contain "test".
-    let names: Vec<String> = results
-        .iter()
-        .map(|r| r["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(
-        names.iter().any(|n| n.contains("test_something")),
-        "should find test_something, got: {names:?}"
-    );
-}
-
-#[test]
-fn query_type_filter_ext_rs_only() {
-    let resp = run_cli(json!({
-        "kind": "fn",
-        "filters": { "ext": "rs" },
-        "limit": 100
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    // All results should be .rs files.
-    let results = resp["results"].as_array().unwrap();
-    for r in results {
-        let path = r["path"].as_str().unwrap();
+fn filters_narrow_the_results() {
+    for (kind, filters) in [
+        ("impl", json!({ "trait": "Display" })),
+        ("struct", json!({ "derive": "Serialize" })),
+        ("fn", json!({ "return_type": "Result" })),
+    ] {
+        let resp = run_cli(json!({ "kind": kind, "filters": filters, "limit": 10 }));
+        assert!(resp["ok"].as_bool().unwrap(), "{kind}");
         assert!(
-            path.ends_with(".rs"),
-            "result path should end with .rs, got: {path}"
+            !resp["results"].as_array().unwrap().is_empty(),
+            "{kind}: filter matched nothing"
         );
     }
-}
 
-#[test]
-fn query_limit_one() {
-    let resp = run_cli(json!({
-        "kind": "fn",
-        "limit": 1
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1, "should return exactly 1 result");
-}
+    // `ext` restricts the walk to one language.
+    let resp = run_cli(json!({ "kind": "fn", "filters": { "ext": "rs" }, "limit": 100 }));
+    for r in resp["results"].as_array().unwrap() {
+        let path = r["path"].as_str().unwrap();
+        assert!(path.ends_with(".rs"), "got: {path}");
+    }
 
-#[test]
-fn query_empty_results() {
+    // A regex that matches nothing is an empty answer, not an error.
     let resp = run_cli(json!({
         "kind": "trait",
         "filters": { "name_regex": "^NonexistentStruct$//" },
         "limit": 10
     }));
     assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(results.is_empty(), "should return empty results");
-}
-
-#[test]
-fn query_returns_parsed_files_count() {
-    let resp = run_cli(json!({
-        "kind": "fn",
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    assert!(
-        resp["parsed_files"].as_u64().unwrap() > 0,
-        "should have parsed at least 1 file"
-    );
-}
-
-#[test]
-fn query_enum() {
-    let resp = run_cli(json!({
-        "kind": "enum",
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    // sample.rs has no enums, so results may be empty.
     assert!(resp["results"].as_array().unwrap().is_empty());
 }
 
+/// `limit` caps the result list, and the response reports how many files the
+/// walk actually read.
 #[test]
-fn query_const() {
-    let resp = run_cli(json!({
-        "kind": "const",
-        "limit": 10
-    }));
+fn limit_and_parsed_files_are_reported() {
+    let resp = run_cli(json!({ "kind": "fn", "limit": 1 }));
     assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find const MAX_SIZE");
-    assert!(
-        results[0]["name"].as_str().unwrap().contains("MAX_SIZE"),
-        "should find MAX_SIZE"
-    );
-}
-
-#[test]
-fn query_static() {
-    let resp = run_cli(json!({
-        "kind": "static",
-        "limit": 10
-    }));
-    assert!(resp["ok"].as_bool().unwrap());
-    let results = resp["results"].as_array().unwrap();
-    assert!(!results.is_empty(), "should find static COUNTER");
+    assert_eq!(resp["results"].as_array().unwrap().len(), 1);
+    assert!(resp["parsed_files"].as_u64().unwrap() > 0);
 }

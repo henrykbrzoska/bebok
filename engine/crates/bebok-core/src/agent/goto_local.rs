@@ -8,7 +8,7 @@
 //! - the caret on a declaration's own name (the client shows usages then);
 //! - imports of the clicked name, turned into path hints for the project
 //!   search (TS/JS relative modules, PHP `use`, Python `from … import`,
-//!   Rust `use`, Go package selectors) plus Magento-style `Vendor_Module_Class`.
+//!   Rust `use`, Go package selectors).
 //!
 //! Purely syntactic, like the rest of `goto_definition`.
 
@@ -58,9 +58,6 @@ pub(crate) fn analyse(
     symbol: &str,
 ) -> BufferInfo {
     let mut info = BufferInfo::default();
-    if lang == Lang::Php {
-        info.path_hints.extend(magento_hints(symbol));
-    }
     let mut parser = Parser::new();
     if parser.set_language(&lang.language()).is_err() {
         return info;
@@ -86,6 +83,20 @@ pub(crate) fn analyse(
             && let Ok(qn) = q.utf8_text(src)
         {
             info.path_hints.extend(namespace_hints(qn));
+        }
+        // `Bar::method()` / `\\App\\Bar::X`: the class operand says which
+        // file defines the member.
+        if lang == Lang::Php
+            && let Some(op) = operand.as_deref()
+            && !op.starts_with('$')
+            && !matches!(op, "self" | "static" | "parent")
+        {
+            let class = op.trim_start_matches('\\');
+            if class.contains('\\') {
+                info.path_hints.extend(namespace_hints(class));
+            } else if let Some((_, hints)) = php_use(tree.root_node(), src, class) {
+                info.path_hints.extend(hints);
+            }
         }
         if lang == Lang::Go
             && let Some(op) = operand
@@ -660,6 +671,33 @@ fn ts_module_hints(from_rel: &str, module: &str) -> Vec<String> {
     out
 }
 
+/// PHP: path hints of the class `text` extends (`class A extends B`), for
+/// `$this->method()` defined in a parent class. `None` without `extends`.
+pub(crate) fn php_parent_hints(text: &str) -> Option<(String, Vec<String>)> {
+    let mut parser = Parser::new();
+    parser.set_language(&Lang::Php.language()).ok()?;
+    let tree = parser.parse(text, None)?;
+    let src = text.as_bytes();
+    let base = descendants(tree.root_node())
+        .into_iter()
+        .find(|n| n.kind() == "base_clause")?;
+    let name = base.named_child(0)?;
+    let class = text_of(name, src).trim_start_matches('\\').to_string();
+    let mut hints: Vec<String> = Vec::new();
+    if class.contains('\\') {
+        hints.extend(namespace_hints(&class));
+    } else if let Some((_, h)) = php_use(tree.root_node(), src, &class) {
+        hints.extend(h);
+    }
+    let short = class.rsplit('\\').next().unwrap_or(&class).to_string();
+    hints.push(format!("{}.php", short.to_ascii_lowercase()));
+    Some((short, hints))
+}
+
+fn text_of<'a>(node: Node<'_>, src: &'a [u8]) -> &'a str {
+    node.utf8_text(src).unwrap_or("")
+}
+
 /// `use App\Foo\Bar;` / `use App\Foo\Bar as Baz;`.
 fn php_use(root: Node<'_>, src: &[u8], symbol: &str) -> Option<(String, Vec<String>)> {
     for n in descendants(root) {
@@ -694,32 +732,6 @@ fn namespace_hints(qualified: &str) -> Vec<String> {
     (0..segs.len().saturating_sub(1))
         .map(|i| format!("{}.php", segs[i..].join("/")))
         .collect()
-}
-
-/// Magento 1 / PEAR class names: `Mage_Catalog_Model_Product` →
-/// `mage/catalog/model/product.php`; controllers live in `controllers/`.
-fn magento_hints(symbol: &str) -> Vec<String> {
-    if !symbol.contains('_') || !symbol.starts_with(|c: char| c.is_ascii_uppercase()) {
-        return Vec::new();
-    }
-    let segs: Vec<String> = symbol
-        .split('_')
-        .filter(|s| !s.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect();
-    if segs.len() < 2 {
-        return Vec::new();
-    }
-    let mut out = vec![format!("{}.php", segs.join("/"))];
-    if segs.len() >= 3 && symbol.ends_with("Controller") {
-        out.push(format!(
-            "{}/{}/controllers/{}.php",
-            segs[0],
-            segs[1],
-            segs[2..].join("/")
-        ));
-    }
-    out
 }
 
 /// `from pkg.mod import x` / `from .mod import x as y` / `import pkg.mod as m`.
@@ -878,187 +890,124 @@ mod tests {
         text.find(marker).unwrap()
     }
 
+    /// Locals in every supported language in one table: the caret sits on a
+    /// use of `symbol` and must resolve to the binding on `line`. One case
+    /// per language-specific binding form is the whole point - the scope
+    /// walk itself is shared, so more cases per language buy nothing.
     #[test]
-    fn ts_local_const_in_function_and_shadowing() {
-        let src = "const x = 1;\nfunction f() {\n  const x = 2;\n  return x + 1;\n}\n";
-        let off = at(src, "x + 1");
-        let info = analyse(Lang::Ts, "a.ts", src, off, "x");
-        assert_eq!(info.local.unwrap().line, 3);
-    }
-
-    #[test]
-    fn ts_destructured_param_and_for_of() {
-        let src =
+    fn locals_resolve_per_language() {
+        let ts = "const x = 1;\nfunction f() {\n  const x = 2;\n  return x + 1;\n}\n";
+        let ts_destructured =
             "function f({ a, b: c }, [d]) {\n  for (const item of a) { use(item, c, d); }\n}\n";
-        assert_eq!(
-            analyse(Lang::Ts, "a.ts", src, at(src, "item, c"), "item")
-                .local
-                .unwrap()
-                .line,
-            2
-        );
-        assert_eq!(
-            analyse(Lang::Ts, "a.ts", src, at(src, "c, d)"), "c")
-                .local
-                .unwrap()
-                .line,
-            1
-        );
-        assert_eq!(
-            analyse(Lang::Ts, "a.ts", src, at(src, "d);"), "d")
-                .local
-                .unwrap()
-                .line,
-            1
-        );
-        assert_eq!(
-            analyse(Lang::Ts, "a.ts", src, at(src, "a) {"), "a")
-                .local
-                .unwrap()
-                .line,
-            1
-        );
-    }
-
-    #[test]
-    fn ts_member_is_not_local_and_declaration_is_detected() {
-        let src = "const mode = 1;\nthis.mode = mode;\n";
-        let member = analyse(Lang::Ts, "a.ts", src, at(src, "mode = mode"), "mode");
-        assert!(member.member && member.local.is_none());
-        let decl = analyse(Lang::Ts, "a.ts", src, at(src, "mode = 1"), "mode");
-        assert!(decl.on_declaration);
-    }
-
-    #[test]
-    fn ts_import_alias_and_relative_hints() {
-        let src = "import { slugify as slug } from '../lib/util';\nslug('x');\n";
-        let info = analyse(Lang::Ts, "app/main.ts", src, at(src, "slug('x"), "slug");
-        assert_eq!(info.lookup.as_deref(), Some("slugify"));
-        assert!(info.path_hints.contains(&"lib/util.ts".to_string()));
-        assert!(hint_matches("lib/util.js", "lib/util.js"));
-    }
-
-    #[test]
-    fn php_var_first_assignment_and_foreach() {
-        let src = "<?php\nfunction f($items) {\n  $total = 0;\n  foreach ($items as $item) {\n    $total = $total + $item;\n  }\n  return $total;\n}\n";
-        let t = analyse(Lang::Php, "a.php", src, at(src, "total;\n}"), "total");
-        assert_eq!(t.local.unwrap().line, 3);
-        let i = analyse(Lang::Php, "a.php", src, at(src, "item;"), "item");
-        assert_eq!(i.local.unwrap().line, 4);
-        let p = analyse(Lang::Php, "a.php", src, at(src, "items as"), "items");
-        assert_eq!(p.local.unwrap().line, 2);
-    }
-
-    #[test]
-    fn php_reassignment_jumps_to_first_and_dollar_caret() {
-        let src = "<?php\nfunction f() {\n  $n = 1;\n  $n = 2;\n  return $n;\n}\n";
-        let re = analyse(Lang::Php, "a.php", src, at(src, "n = 2"), "n");
-        assert_eq!(re.local.unwrap().line, 3);
-        let first = analyse(Lang::Php, "a.php", src, at(src, "n = 1"), "n");
-        assert!(first.on_declaration);
-        let dollar = analyse(Lang::Php, "a.php", src, at(src, "$n;"), "n");
-        assert_eq!(dollar.local.unwrap().line, 3);
-    }
-
-    #[test]
-    fn self_member_is_flagged() {
-        let src = "class A { x = 1; f() { return this.x; } }\n";
-        let info = analyse(Lang::Ts, "a.ts", src, at(src, "x; }"), "x");
-        assert!(info.member && info.self_member);
-    }
-
-    #[test]
-    fn php_member_and_use_and_magento_hints() {
-        let src =
-            "<?php\nuse App\\Service\\UserService as Users;\n$u = new Users();\n$u->find();\n";
-        let use_ = analyse(Lang::Php, "a.php", src, at(src, "Users()"), "Users");
-        assert_eq!(use_.lookup.as_deref(), Some("UserService"));
-        assert!(
-            use_.path_hints
-                .contains(&"service/userservice.php".to_string())
-        );
-        let m = analyse(Lang::Php, "a.php", src, at(src, "find()"), "find");
-        assert!(m.member && m.local.is_none());
-        let mage = analyse(
-            Lang::Php,
-            "a.php",
-            "<?php\nMage_Catalog_Model_Product::x();\n",
-            7,
-            "Mage_Catalog_Model_Product",
-        );
-        assert!(
-            mage.path_hints
-                .contains(&"mage/catalog/model/product.php".to_string())
-        );
-        assert!(hint_matches(
-            "htdocs/app/code/core/Mage/Catalog/Model/Product.php",
-            "mage/catalog/model/product.php"
-        ));
-    }
-
-    #[test]
-    fn rust_let_and_match_binding() {
-        let src =
+        let php = "<?php\nfunction f($items) {\n  $total = 0;\n  foreach ($items as $item) {\n    $total = $total + $item;\n  }\n  return $total;\n}\n";
+        let rust =
             "fn f(o: Option<u8>) {\n  let n = 1;\n  match o { Some(v) => v + n, None => n };\n}\n";
-        assert_eq!(
-            analyse(Lang::Rust, "a.rs", src, at(src, "v + n"), "v")
-                .local
-                .unwrap()
-                .line,
-            3
-        );
-        assert_eq!(
-            analyse(Lang::Rust, "a.rs", src, at(src, "n, None"), "n")
-                .local
-                .unwrap()
-                .line,
-            2
-        );
-        assert_eq!(
-            analyse(Lang::Rust, "a.rs", src, at(src, "o {"), "o")
-                .local
-                .unwrap()
-                .line,
-            1
-        );
+        let py = "def f(a, b=1):\n    for i in a:\n        x = i + b\n    return x\n";
+        let go = "package m\nfunc f(n int) int {\n  s := n\n  for i := range n { s += i }\n  return s\n}\n";
+        for (lang, rel, src, marker, symbol, line) in [
+            // Shadowing: the inner `const` wins over the file-level one.
+            (Lang::Ts, "a.ts", ts, "x + 1", "x", 3),
+            // Destructured params (object, renamed, array) and `for...of`.
+            (Lang::Ts, "a.ts", ts_destructured, "item, c", "item", 2),
+            (Lang::Ts, "a.ts", ts_destructured, "c, d)", "c", 1),
+            (Lang::Ts, "a.ts", ts_destructured, "d);", "d", 1),
+            (Lang::Ts, "a.ts", ts_destructured, "a) {", "a", 1),
+            // PHP: first assignment wins, `foreach` value, parameter.
+            (Lang::Php, "a.php", php, "total;\n}", "total", 3),
+            (Lang::Php, "a.php", php, "item;", "item", 4),
+            (Lang::Php, "a.php", php, "items as", "items", 2),
+            // Rust: `match` arm binding, `let`, parameter.
+            (Lang::Rust, "a.rs", rust, "v + n", "v", 3),
+            (Lang::Rust, "a.rs", rust, "n, None", "n", 2),
+            (Lang::Rust, "a.rs", rust, "o {", "o", 1),
+            // Python: assignment inside `for`, parameter default.
+            (Lang::Python, "a.py", py, "x\n", "x", 3),
+            (Lang::Python, "a.py", py, "b\n", "b", 1),
+            // Go: `:=` and the range variable.
+            (Lang::Go, "a.go", go, "s\n}", "s", 3),
+            (Lang::Go, "a.go", go, "i }", "i", 4),
+        ] {
+            let info = analyse(lang, rel, src, at(src, marker), symbol);
+            assert_eq!(
+                info.local.map(|l| l.line),
+                Some(line),
+                "{lang:?} {symbol} at {marker:?}"
+            );
+        }
+        // A path segment of a pattern is not a local binding.
         assert!(
-            analyse(Lang::Rust, "a.rs", src, at(src, "Some(v)"), "Some")
+            analyse(Lang::Rust, "a.rs", rust, at(rust, "Some(v)"), "Some")
                 .local
                 .is_none()
         );
     }
 
+    /// The three flags the client needs besides `local`: a member access is
+    /// not a local, `this.x` is flagged as the receiver's own member, and the
+    /// caret on a declaration's own name is reported as such.
     #[test]
-    fn python_and_go_locals() {
-        let py = "def f(a, b=1):\n    for i in a:\n        x = i + b\n    return x\n";
-        assert_eq!(
-            analyse(Lang::Python, "a.py", py, at(py, "x\n"), "x")
-                .local
-                .unwrap()
-                .line,
-            3
+    fn member_access_and_declaration_flags() {
+        let src = "const mode = 1;\nthis.mode = mode;\n";
+        let member = analyse(Lang::Ts, "a.ts", src, at(src, "mode = mode"), "mode");
+        assert!(member.member && member.local.is_none());
+        let decl = analyse(Lang::Ts, "a.ts", src, at(src, "mode = 1"), "mode");
+        assert!(decl.on_declaration);
+
+        let cls = "class A { x = 1; f() { return this.x; } }\n";
+        let own = analyse(Lang::Ts, "a.ts", cls, at(cls, "x; }"), "x");
+        assert!(own.member && own.self_member);
+
+        let php = "<?php\nfunction f() {\n  $n = 1;\n  $n = 2;\n}\n";
+        assert!(
+            analyse(Lang::Php, "a.php", php, at(php, "n = 1"), "n").on_declaration,
+            "PHP: the first assignment is the declaration"
         );
-        assert_eq!(
-            analyse(Lang::Python, "a.py", py, at(py, "b\n"), "b")
-                .local
-                .unwrap()
-                .line,
-            1
+    }
+
+    /// Imports turned into path hints for the project search: TS relative
+    /// modules and PHP `use` / namespaced class operands (PSR-4).
+    #[test]
+    fn imports_become_path_hints() {
+        let ts = "import { slugify as slug } from '../lib/util';\nslug('x');\n";
+        let info = analyse(Lang::Ts, "app/main.ts", ts, at(ts, "slug('x"), "slug");
+        assert_eq!(info.lookup.as_deref(), Some("slugify"));
+        assert!(info.path_hints.contains(&"lib/util.ts".to_string()));
+        assert!(hint_matches("lib/util.js", "lib/util.js"));
+
+        let php =
+            "<?php\nuse App\\Service\\UserService as Users;\n$u = new Users();\n$u->find();\n";
+        let use_ = analyse(Lang::Php, "a.php", php, at(php, "Users()"), "Users");
+        assert_eq!(use_.lookup.as_deref(), Some("UserService"));
+        assert!(
+            use_.path_hints
+                .contains(&"service/userservice.php".to_string())
         );
-        let go = "package m\nfunc f(n int) int {\n  s := n\n  for i := range n { s += i }\n  return s\n}\n";
-        assert_eq!(
-            analyse(Lang::Go, "a.go", go, at(go, "s\n}"), "s")
-                .local
-                .unwrap()
-                .line,
-            3
+        let m = analyse(Lang::Php, "a.php", php, at(php, "find()"), "find");
+        assert!(m.member && m.local.is_none());
+
+        // `\App\Model\Order::STATUSES`: the class operand says which file
+        // defines the constant.
+        let cons = "<?php\n$a = \\App\\Model\\Order::STATUSES;\n";
+        let info = analyse(Lang::Php, "a.php", cons, at(cons, "STATUSES"), "STATUSES");
+        assert!(info.member && !info.self_member);
+        assert!(
+            info.path_hints.contains(&"app/model/order.php".to_string()),
+            "{:?}",
+            info.path_hints
         );
-        assert_eq!(
-            analyse(Lang::Go, "a.go", go, at(go, "i }"), "i")
-                .local
-                .unwrap()
-                .line,
-            4
+    }
+
+    /// `class A extends B` gives the parent's file as a hint, for a
+    /// `$this->method()` that is defined up the chain.
+    #[test]
+    fn php_parent_class_hints() {
+        let (name, hints) =
+            php_parent_hints("<?php\nclass Child extends \\App\\Model\\Base {}\n").unwrap();
+        assert_eq!(name, "Base");
+        assert!(
+            hints.contains(&"app/model/base.php".to_string()),
+            "{hints:?}"
         );
+        assert!(php_parent_hints("<?php\nclass A {}\n").is_none());
     }
 }

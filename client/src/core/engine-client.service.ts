@@ -83,6 +83,8 @@ import {
   CodeGraphResponse,
   ScheduleTask,
   SshSessionInfo,
+  QuestionAnswer,
+  QuestionAnswerBody,
 } from './engine.dtos';
 import {
   BOOTSTRAP_ENGINE_PARAM,
@@ -613,6 +615,25 @@ export class EngineClient {
       'POST',
       `/ssh/prompt/${encodeURIComponent(requestID)}`,
       body.cancel ? { cancel: true } : { answer: body.answer ?? '' },
+    );
+  }
+
+  /**
+   * Answer a `question.asked` prompt (or skip it with `skipped: true`):
+   * `POST /session/{id}/question/{requestID}`. The engine, not the GUI,
+   * decides what the blocked agent turn does with the answers.
+   */
+  async answerQuestion(
+    sessionID: string,
+    requestID: string,
+    answers: QuestionAnswer[],
+    skipped = false,
+  ): Promise<void> {
+    const body: QuestionAnswerBody = skipped ? { answers: [], skipped: true } : { answers };
+    await this.request<unknown>(
+      'POST',
+      `/session/${encodeURIComponent(sessionID)}/question/${encodeURIComponent(requestID)}`,
+      body,
     );
   }
 
