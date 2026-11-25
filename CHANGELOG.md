@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The `ask_user` dialog no longer gets stuck when the model sends `questions`
+  as a JSON-encoded string: the engine parses it instead of failing the turn.
+- The question dialog recovers a missed `question.asked` event: it asks the
+  engine for pending prompts (`GET /session/{id}/question`) whenever the
+  active session changes, so a blocked turn always shows its dialog.
+- Sub-agent model fallback prefers a fleet member whose agent matches the
+  child (an `ask` task no longer inherits a `code` member's model when
+  `models.ask` is not configured).
+
 ## 1.13.0 — 2026-11-25
 
 ### Features

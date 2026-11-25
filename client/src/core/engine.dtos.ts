@@ -370,6 +370,69 @@ export interface QuestionAsked {
   questions: QuestionItem[];
 }
 
+/** Normalise `question.asked` properties (SSE event or `GET /session/{id}/question`); `null` when unusable. */
+export function parseQuestionAsked(
+  properties: Record<string, unknown> | undefined,
+): QuestionAsked | null {
+  if (!properties) {
+    return null;
+  }
+  const requestID = properties['requestID'];
+  const rawQuestions = properties['questions'];
+  if (typeof requestID !== 'string' || requestID.length === 0 || !Array.isArray(rawQuestions)) {
+    return null;
+  }
+  const questions = rawQuestions
+    .map(parseQuestion)
+    .filter((item): item is QuestionItem => item !== null);
+  if (questions.length === 0) {
+    return null;
+  }
+  return {
+    requestID,
+    messageIndex: Number(properties['messageIndex'] ?? 0),
+    questions,
+  };
+}
+
+function parseQuestion(raw: unknown): QuestionItem | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' ? record['id'] : '';
+  const question = typeof record['question'] === 'string' ? record['question'] : '';
+  if (!id.trim() || !question.trim()) {
+    return null;
+  }
+  const rawOptions = Array.isArray(record['options']) ? record['options'] : [];
+  const options = rawOptions
+    .map(parseOption)
+    .filter((option): option is QuestionOption => option !== null);
+  return {
+    id,
+    header: typeof record['header'] === 'string' ? record['header'] : '',
+    question,
+    options,
+    // Wire format is `multiSelect` (serde rename); accept legacy `multiple`.
+    multiple: record['multiSelect'] === true || record['multiple'] === true,
+    allowFreeText: record['allowFreeText'] !== false || options.length === 0,
+  };
+}
+
+function parseOption(raw: unknown): QuestionOption | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const label = typeof record['label'] === 'string' ? record['label'] : '';
+  if (!label.trim()) {
+    return null;
+  }
+  const description = typeof record['description'] === 'string' ? record['description'] : undefined;
+  return description === undefined ? { label } : { label, description };
+}
+
 /** Shape of `question.resolved` properties (answered or skipped, possibly by another client). */
 export interface QuestionResolved {
   requestID: string;

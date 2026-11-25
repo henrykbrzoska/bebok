@@ -15,11 +15,16 @@ import {
 import { EngineClient } from '../../core/engine-client.service';
 import {
   EngineEvent,
+  QuestionAsked,
   QuestionItem,
-  QuestionOption,
+  parseQuestionAsked,
 } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
 import { I18nService } from '../../i18n/i18n.service';
+
+/** Re-exported for existing imports (specs, chat view). */
+export { parseQuestionAsked };
+export type { QuestionAsked };
 
 /** A question prompt the agent is waiting on, as shown in the dialog. */
 export interface PendingQuestion {
@@ -46,73 +51,6 @@ export interface AnsweredQuestion {
 export interface QuestionDraft {
   selected: string[][];
   text: string[];
-}
-
-function parseOption(raw: unknown): QuestionOption | null {
-  if (typeof raw === 'string') {
-    return raw.length > 0 ? { label: raw } : null;
-  }
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  const label = record['label'];
-  if (typeof label !== 'string' || label.length === 0) {
-    return null;
-  }
-  const description = record['description'];
-  return typeof description === 'string' && description.length > 0
-    ? { label, description }
-    : { label };
-}
-
-function parseQuestion(raw: unknown): QuestionItem | null {
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  const id = typeof record['id'] === 'string' ? record['id'] : '';
-  const question = typeof record['question'] === 'string' ? record['question'] : '';
-  if (!id.trim() || !question.trim()) {
-    return null;
-  }
-  const rawOptions = Array.isArray(record['options']) ? record['options'] : [];
-  const options = rawOptions
-    .map(parseOption)
-    .filter((option): option is QuestionOption => option !== null);
-  return {
-    id,
-    header: typeof record['header'] === 'string' ? record['header'] : '',
-    question,
-    options,
-    multiple: record['multiple'] === true,
-    allowFreeText: record['allowFreeText'] === true || options.length === 0,
-  };
-}
-
-/** Normalise `question.asked` properties; `null` when unusable. */
-export function parseQuestionAsked(
-  properties: Record<string, unknown> | undefined,
-): { requestID: string; messageIndex: number; questions: QuestionItem[] } | null {
-  if (!properties) {
-    return null;
-  }
-  const requestID = properties['requestID'];
-  const rawQuestions = properties['questions'];
-  if (typeof requestID !== 'string' || requestID.length === 0 || !Array.isArray(rawQuestions)) {
-    return null;
-  }
-  const questions = rawQuestions
-    .map(parseQuestion)
-    .filter((item): item is QuestionItem => item !== null);
-  if (questions.length === 0) {
-    return null;
-  }
-  return {
-    requestID,
-    messageIndex: Number(properties['messageIndex'] ?? 0),
-    questions,
-  };
 }
 
 function emptyDraft(count: number): QuestionDraft {
@@ -470,6 +408,16 @@ export class QuestionDialog implements OnDestroy {
       this.asks.set([]);
       this.resolvedIds.clear();
     });
+    // Resync: if a `question.asked` event was missed (reconnect, late mount),
+    // the turn would block forever with no dialog. Ask the engine for pending
+    // prompts whenever the active session changes.
+    effect(() => {
+      const sessionID = this.activeSessionID();
+      if (!sessionID) {
+        return;
+      }
+      void this.resync(sessionID);
+    });
     // Focus the first answer control of a new prompt so keyboard users can start at once.
     effect(() => {
       const id = this.current()?.requestID;
@@ -632,6 +580,29 @@ export class QuestionDialog implements OnDestroy {
         ),
       );
     }
+  }
+
+  private async resync(sessionID: string): Promise<void> {
+    let pending: QuestionAsked[];
+    try {
+      pending = await this.engine.pendingQuestions(sessionID);
+    } catch {
+      return;
+    }
+    this.asks.update((list) => {
+      const known = new Set(list.map((a) => a.requestID));
+      const fresh = pending
+        .filter((p) => !this.resolvedIds.has(p.requestID) && !known.has(p.requestID))
+        .map((p) => ({
+          requestID: p.requestID,
+          sessionID,
+          messageIndex: p.messageIndex,
+          questions: p.questions,
+          askedAt: Date.now(),
+          busy: false,
+        }));
+      return fresh.length > 0 ? [...list, ...fresh] : list;
+    });
   }
 
   private handle(event: EngineEvent): void {

@@ -18,6 +18,7 @@ describe('QuestionDialog', () => {
   let fixture: ComponentFixture<QuestionDialog>;
   let listener: ((event: EngineEvent) => void) | undefined;
   let answerQuestion: jasmine.Spy;
+  let pendingQuestions: jasmine.Spy;
 
   const questions = [
     {
@@ -54,11 +55,12 @@ describe('QuestionDialog', () => {
   beforeEach(async () => {
     listener = undefined;
     answerQuestion = jasmine.createSpy('answerQuestion').and.resolveTo(undefined);
+    pendingQuestions = jasmine.createSpy('pendingQuestions').and.resolveTo([]);
     await TestBed.configureTestingModule({
       imports: [QuestionDialog],
       providers: [
         provideZonelessChangeDetection(),
-        { provide: EngineClient, useValue: { answerQuestion } },
+        { provide: EngineClient, useValue: { answerQuestion, pendingQuestions } },
         {
           provide: EventsStore,
           useValue: {
@@ -197,6 +199,28 @@ describe('QuestionDialog', () => {
     });
     fixture.detectChanges();
     expect(fixture.componentInstance.blocking()).toBeFalse();
+  });
+
+  it('recovers a missed question.asked via pendingQuestions resync', async () => {
+    pendingQuestions.and.resolveTo([{ requestID: 'r9', messageIndex: 1, questions }]);
+    fixture.componentRef.setInput('activeSessionID', 's2');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(pendingQuestions).toHaveBeenCalledWith('s2');
+    expect(fixture.componentInstance.blocking()).toBeTrue();
+    expect(root().textContent ?? '').toContain('Pick a colour');
+  });
+
+  it('does not duplicate a question already shown via SSE', async () => {
+    pendingQuestions.and.resolveTo([{ requestID: 'r1', messageIndex: 2, questions }]);
+    ask();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.queue()).toBe(1);
   });
 });
 

@@ -86,6 +86,8 @@ import {
   ScheduleTask,
   SshSessionInfo,
   QuestionAnswerBody,
+  QuestionItem,
+  parseQuestionAsked,
 } from './engine.dtos';
 import {
   BOOTSTRAP_ENGINE_PARAM,
@@ -648,6 +650,27 @@ export class EngineClient {
       `/session/${encodeURIComponent(sessionID)}/question/${encodeURIComponent(requestID)}`,
       body,
     );
+  }
+
+  /**
+   * Pending `ask_user` prompts of a session (missed `question.asked` events,
+   * e.g. after a reconnect): `GET /session/{id}/question`.
+   */
+  async pendingQuestions(sessionID: string): Promise<
+    { requestID: string; messageIndex: number; questions: QuestionItem[] }[]
+  > {
+    const data = await this.request<{ questions: unknown[] }>(
+      'GET',
+      `/session/${encodeURIComponent(sessionID)}/question`,
+    );
+    const list: { requestID: string; messageIndex: number; questions: QuestionItem[] }[] = [];
+    for (const raw of data.questions ?? []) {
+      const parsed = parseQuestionAsked(raw as Record<string, unknown>);
+      if (parsed) {
+        list.push(parsed);
+      }
+    }
+    return list;
   }
 
   /** Close an open SSH session. */
