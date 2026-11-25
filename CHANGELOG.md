@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.1 — 2026-11-25
 
 ### Features
 
@@ -20,6 +20,7 @@
 - Go to definition in PHP no longer guesses file paths from Magento 1 / PEAR
   class names (`Vendor_Module_Class` → `vendor/module/class.php`). Namespaced
   classes, `use` statements and `extends` clauses still resolve as before.
+
 ## 1.12.0 — 2026-11-24
 
 ### Features
