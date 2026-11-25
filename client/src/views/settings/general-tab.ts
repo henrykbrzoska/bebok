@@ -15,13 +15,14 @@
 import { Component, OnDestroy, effect, inject, signal, computed } from '@angular/core';
 import { Router } from '@angular/router';
 
-import { DeclaredPlugin, IndexStatusResponse, RegistryPlugin } from '../../core/engine.dtos';
+import { DeclaredPlugin, ImportToDbResponse, IndexStatusResponse, RegistryPlugin } from '../../core/engine.dtos';
 import { EngineClient } from '../../core/engine-client.service';
 import { MessageKey } from '../../i18n';
 import { I18nService } from '../../i18n/i18n.service';
 import { ToastStore } from '../../ui/toast/toast.store';
 import { SettingsStore } from './settings.store';
 import { CodeFeaturesCard } from './code-features-card';
+import { ChatSessionStore } from '../chat/chat-session.store';
 
 /** One plugin row: registry catalogue entry + per-project declared state. */
 export interface PluginRow {
@@ -49,6 +50,7 @@ export class GeneralTab implements OnDestroy {
   private readonly router = inject(Router);
 
   readonly store = inject(SettingsStore);
+  readonly chatStore = inject(ChatSessionStore);
   readonly t = this.i18n.t.bind(this.i18n);
 
   /** Registry catalogue (`GET /plugins/registry`). */
@@ -69,6 +71,10 @@ export class GeneralTab implements OnDestroy {
   /** When the last rebuild was triggered in this session (null = never). */
   readonly indexLastRebuild = signal<Date | null>(null);
   private indexPoll: ReturnType<typeof setInterval> | null = null;
+
+  readonly importLoading = signal(false);
+  /** Last import report, rendered under the button. */
+  readonly importReport = signal<ImportToDbResponse | null>(null);
   /**
    * Consecutive quiet-poll failures (`refreshIndexStatus(true)`); after 3 the
    * card falls back to `unknown` instead of showing a stale `ready`.
@@ -402,6 +408,47 @@ export class GeneralTab implements OnDestroy {
       });
     } finally {
       this.busyName.set(null);
+    }
+  }
+
+  async importToDb(): Promise<void> {
+    if (this.importLoading()) return;
+    const dir = this.store.directory();
+    if (!dir) {
+      this.toasts.show(this.t('settings.importDbNoDirectory'), { kind: 'warning' });
+      return;
+    }
+    this.importLoading.set(true);
+    this.importReport.set(null);
+    try {
+      await this.engine.connect();
+      const res = await this.engine.importToDb(dir);
+      if (res && (Array.isArray(res.steps) || Array.isArray(res.projects))) {
+        this.importReport.set(res);
+      }
+      if (!res || res.ok === false) {
+        const errs = Array.isArray(res?.errors) ? res.errors : [];
+        const msg = errs[0]
+          || (res as unknown as Record<string, unknown>)?.['error'] as string
+          || (res as unknown as Record<string, unknown>)?.['message'] as string
+          || describeError(res) || 'unknown error';
+        this.toasts.show(this.t('settings.importDbError', { msg }), { kind: 'danger' });
+        if (res?.steps) await this.store.reload();
+        return;
+      }
+      const scopes = res.imported?.scopes ?? 0;
+      const keys = res.imported?.keys ?? 0;
+      const files = Array.isArray(res.deleted_files) ? res.deleted_files.length : 0;
+      const mcp = res.mcp_mode ?? 'global-only';
+      this.toasts.show(
+        this.t('settings.importDbSuccess', { scopes: String(scopes), keys: String(keys), files: String(files), mcp }),
+        { kind: 'success' },
+      );
+      await this.store.reload();
+    } catch (err) {
+      this.toasts.show(this.t('settings.importDbError', { msg: describeError(err) }), { kind: 'danger' });
+    } finally {
+      this.importLoading.set(false);
     }
   }
 }

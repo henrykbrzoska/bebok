@@ -175,7 +175,13 @@ export class QuestionRecord {
   readonly record = input.required<AnsweredQuestion>();
 
   isPicked(questionIndex: number, label: string): boolean {
-    return this.record().answers?.find((a) => a.questionIndex === questionIndex)?.selected.includes(label) ?? false;
+    const id = this.record().questions[questionIndex]?.id;
+    if (!id) {
+      return false;
+    }
+    const answer = this.record().answers?.[id];
+    const values = Array.isArray(answer) ? answer : answer !== undefined ? [answer] : [];
+    return values.includes(label);
   }
 
   mark(questionIndex: number, label: string, multiple: boolean): string {
@@ -187,6 +193,18 @@ export class QuestionRecord {
   }
 
   freeText(questionIndex: number): string {
-    return this.record().answers?.find((a) => a.questionIndex === questionIndex)?.text ?? '';
+    const question = this.record().questions[questionIndex];
+    if (!question) {
+      return '';
+    }
+    const answer = this.record().answers?.[question.id];
+    if (typeof answer !== 'string') {
+      return '';
+    }
+    // A single-select answer equal to an option label is a pick, not free text.
+    if (!question.multiple && question.options.some((opt) => opt.label === answer)) {
+      return '';
+    }
+    return answer;
   }
 }

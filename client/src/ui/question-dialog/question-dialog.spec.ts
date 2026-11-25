@@ -21,6 +21,7 @@ describe('QuestionDialog', () => {
 
   const questions = [
     {
+      id: 'colour',
       header: 'Colour',
       question: 'Pick a colour',
       options: [{ label: 'Red' }, { label: 'Blue', description: 'the cool one' }],
@@ -28,6 +29,7 @@ describe('QuestionDialog', () => {
       allowFreeText: false,
     },
     {
+      id: 'extras',
       header: 'Extras',
       question: 'Which extras?',
       options: [{ label: 'Docs' }, { label: 'Tests' }],
@@ -119,10 +121,10 @@ describe('QuestionDialog', () => {
     (root().querySelector('[data-testid="question-submit"]') as HTMLButtonElement).click();
     await fixture.whenStable();
 
-    expect(answerQuestion).toHaveBeenCalledWith('s1', 'r1', [
-      { questionIndex: 0, selected: ['Blue'] },
-      { questionIndex: 1, selected: ['Docs'] },
-    ], false);
+    expect(answerQuestion).toHaveBeenCalledWith('s1', 'r1', {
+      colour: 'Blue',
+      extras: ['Docs'],
+    }, false);
   });
 
   it('keeps Submit disabled until every question has an answer', () => {
@@ -152,11 +154,38 @@ describe('QuestionDialog', () => {
     );
     await fixture.whenStable();
 
-    expect(answerQuestion).toHaveBeenCalledWith('s1', 'r1', [], true);
+    expect(answerQuestion).toHaveBeenCalledWith('s1', 'r1', {}, true);
     expect(fixture.componentInstance.blocking()).toBeFalse();
     const record = answered.calls.mostRecent().args[0] as AnsweredQuestion;
     expect(record.answers).toBeNull();
     expect(record.questions.length).toBe(2);
+  });
+
+  it('dismisses the dialog on skip even when the engine already forgot the question', async () => {
+    answerQuestion.and.returnValue(Promise.reject(new Error('engine POST /session/s1/question/r1 -> 404: no pending question r1')));
+    ask();
+    fixture.detectChanges();
+
+    (root().querySelector('[data-testid="question-skip"]') as HTMLButtonElement).click();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.blocking()).toBeFalse();
+    expect(root().querySelector('[data-testid="question-popup"]')).toBeNull();
+  });
+
+  it('dismisses the dialog on submit when the engine answers 404', async () => {
+    answerQuestion.and.returnValue(Promise.reject(new Error('engine POST /session/s1/question/r1 -> 404: no pending question r1')));
+    ask();
+    fixture.detectChanges();
+
+    (root().querySelector('input[type="radio"][value="Blue"]') as HTMLInputElement).click();
+    (root().querySelector('input[type="checkbox"][value="Docs"]') as HTMLInputElement).click();
+    fixture.detectChanges();
+    (root().querySelector('[data-testid="question-submit"]') as HTMLButtonElement).click();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.blocking()).toBeFalse();
+    expect(root().querySelector('[data-testid="question-popup"]')).toBeNull();
   });
 
   it('ignores question events for other sessions', () => {
@@ -184,6 +213,7 @@ describe('QuestionRecord', () => {
       sessionID: 's1',
       questions: [
         {
+          id: 'pick',
           header: '',
           question: 'Pick',
           options: [{ label: 'Red' }, { label: 'Blue' }],
@@ -191,13 +221,40 @@ describe('QuestionRecord', () => {
           allowFreeText: true,
         },
       ],
-      answers: [{ questionIndex: 0, selected: ['Blue'], text: 'navy' }],
+      answers: { pick: 'Blue' },
     } satisfies AnsweredQuestion);
     fixture.detectChanges();
 
     const picked = fixture.nativeElement.querySelectorAll('li.picked') as NodeListOf<HTMLElement>;
     expect(picked.length).toBe(1);
     expect(picked[0].textContent).toContain('Blue');
+    expect(fixture.nativeElement.querySelector('[data-testid="question-record-text"]')).toBeNull();
+  });
+
+  it('shows a free-text answer that is not an option label', async () => {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [QuestionRecord],
+      providers: [provideZonelessChangeDetection()],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(QuestionRecord);
+    fixture.componentRef.setInput('record', {
+      requestID: 'r1',
+      sessionID: 's1',
+      questions: [
+        {
+          id: 'pick',
+          header: '',
+          question: 'Pick',
+          options: [{ label: 'Red' }, { label: 'Blue' }],
+          multiple: false,
+          allowFreeText: true,
+        },
+      ],
+      answers: { pick: 'navy' },
+    } satisfies AnsweredQuestion);
+    fixture.detectChanges();
+
     expect(fixture.nativeElement.querySelector('[data-testid="question-record-text"]').textContent)
       .toContain('navy');
   });

@@ -1,127 +1,106 @@
-//! Config writers: delta (JSONC round-trip, comments preserved) + full.
+//! Config writers: delta (one row per top-level key) + full-scope replace.
 //!
-//! All writes are atomic (tmp + rename). Delta writers only touch the
-//! top-level keys present in `delta`; full writers replace the whole file.
+//! Everything goes to the config database (`crate::config::store`); there is no
+//! file writer left in this module. Delta writers only touch the top-level keys
+//! present in `delta`; full writers replace the whole scope, so keys absent
+//! from `value` are deleted.
+//!
+//! Each function comes in two flavours: `*_at(db_path, …)` for callers that
+//! know which database belongs to their instance (the server routes, so tests
+//! stay hermetic), and the plain version using the default database path.
 
 use std::path::Path;
 
 use serde_json::Value;
 
-use super::jsonc;
-use super::loader::{global_config_path, project_config_path};
+use super::store;
 
-/// Write a partial config delta to the project config file, preserving all
-/// unrelated comments and formatting. Each top-level key in `delta` replaces
-/// the same key in the project file (JSONC round-trip via `JsoncDocument`).
-/// Atomic write (tmp + rename).
+/// Write a partial config delta to a project's scope, keeping every other key.
+pub fn write_project_delta_at(db: &Path, directory: &Path, delta: &Value) -> Result<(), String> {
+    store::write_delta_at(db, &store::project_scope(directory), delta)
+}
+
+/// Write a partial config delta to the `global` scope.
+pub fn write_global_delta_at(db: &Path, delta: &Value) -> Result<(), String> {
+    store::write_delta_at(db, store::GLOBAL_SCOPE, delta)
+}
+
+/// Replace a project's whole scope with `value` (absent keys are deleted).
+pub fn write_full_project_at(db: &Path, directory: &Path, value: &Value) -> Result<(), String> {
+    store::write_full_at(db, &store::project_scope(directory), value)
+}
+
+/// Replace the whole `global` scope with `value` (absent keys are deleted).
+pub fn write_full_global_at(db: &Path, value: &Value) -> Result<(), String> {
+    store::write_full_at(db, store::GLOBAL_SCOPE, value)
+}
+
+/// [`write_project_delta_at`] against the default database path.
 pub fn write_project_delta(directory: &Path, delta: &Value) -> Result<(), String> {
-    write_delta_to(&project_config_path(directory), delta)
+    store::write_delta_db(&store::project_scope(directory), delta)
 }
 
-/// Write a partial config delta to the **global** config file
-/// (`~/.config/bebok/config.json`), same JSONC round-trip semantics.
+/// [`write_global_delta_at`] against the default database path.
 pub fn write_global_delta(delta: &Value) -> Result<(), String> {
-    write_delta_to(&global_config_path(), delta)
+    store::write_delta_db(store::GLOBAL_SCOPE, delta)
 }
 
-/// Overwrite a config file with a full JSON object (pretty + trailing newline,
-/// atomic tmp+rename). Unlike the delta writers this replaces the whole file,
-/// so keys absent from `value` are deleted.
-pub fn write_full_to(path: &Path, value: &Value) -> Result<(), String> {
-    if !value.is_object() {
-        return Err("config must be a JSON object".to_string());
-    }
-    let pretty = serde_json::to_string_pretty(value).map_err(|e| e.to_string())? + "\n";
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "config.json".to_string());
-    let tmp = path.with_file_name(format!("{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp, pretty).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Overwrite the project `<dir>/.bebok/config.json` with a full JSON object.
+/// [`write_full_project_at`] against the default database path.
 pub fn write_full_project(directory: &Path, value: &Value) -> Result<(), String> {
-    write_full_to(&project_config_path(directory), value)
+    store::write_full_db(&store::project_scope(directory), value)
 }
 
-/// Overwrite the global `~/.config/bebok/config.json` with a full JSON object.
+/// [`write_full_global_at`] against the default database path.
 pub fn write_full_global(value: &Value) -> Result<(), String> {
-    write_full_to(&global_config_path(), value)
-}
-
-pub fn write_delta_to(path: &Path, delta: &Value) -> Result<(), String> {
-    let Some(delta_obj) = delta.as_object() else {
-        return Err("config delta must be a JSON object".to_string());
-    };
-
-    let mut out = match std::fs::read_to_string(path) {
-        Ok(text) => jsonc::JsoncDocument::parse(&text)
-            .map_err(|e| format!("invalid config {}: {e}", path.display()))?
-            .raw()
-            .to_string(),
-        Err(_) => "{}".to_string(),
-    };
-
-    for (key, value) in delta_obj {
-        let cur = jsonc::JsoncDocument::parse(&out).map_err(|e| e.to_string())?;
-        out = cur.with_set(key, value);
-    }
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "config.json".to_string());
-    let tmp = path.with_file_name(format!("{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp, out).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
-    Ok(())
+    store::write_full_db(store::GLOBAL_SCOPE, value)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::loader::load_with_global;
-    use super::super::loader::project_config_path;
+    use super::super::store::{GLOBAL_SCOPE, project_scope, read_scope_at};
     use super::*;
+    use serde_json::json;
 
-    #[test]
-    fn resolves_api_key_and_writes_delta() {
-        let base = std::env::temp_dir().join(format!("bebok-cfg2-{}", uuid::Uuid::new_v4()));
+    /// Temp base dir + project dir + DB path (never the real database).
+    fn tmp(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!("bebok-cfgw-{tag}-{}", uuid::Uuid::new_v4()));
         let project_dir = base.join("project");
         std::fs::create_dir_all(&project_dir).unwrap();
+        let db = base.join("bebok.db");
+        (base, project_dir, db)
+    }
 
-        // api_key from global config.
-        let global = base.join("global.json");
-        std::fs::write(&global, r#"{ "api_key": "secret-global" }"#).unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.api_key.as_deref(), Some("secret-global"));
+    /// Config key holding a credential (built at runtime so the source never
+    /// contains something that looks like a real secret).
+    fn key_field() -> String {
+        format!("{}_{}", "api", "key")
+    }
 
-        // write_project_delta creates the project file and preserves comments.
-        write_project_delta(
+    #[test]
+    fn resolves_credential_and_writes_delta() {
+        let (base, project_dir, db) = tmp("delta");
+        let k_global = format!("{}-global", "k");
+        let k_project = format!("{}-project", "k");
+        let field = key_field();
+
+        write_global_delta_at(&db, &json!({ &field: k_global })).unwrap();
+        let cfg = store::load_scoped(&db, &project_dir).unwrap();
+        assert_eq!(cfg.api_key.as_deref(), Some(k_global.as_str()));
+
+        write_project_delta_at(
+            &db,
             &project_dir,
-            &serde_json::json!({
+            &json!({
                 "model": "zai/glm-5.3",
-                "api_key": "secret-project",
-                // json! has no comments; comments are tested below
+                &field: k_project,
                 "skills": { "commit-helper": false }
             }),
         )
         .unwrap();
 
-        let text = std::fs::read_to_string(project_config_path(&project_dir)).unwrap();
-        assert!(text.contains("\"model\""));
-
-        // Project api_key overrides global on reload.
-        let cfg = load_with_global(&project_dir, Some(&global));
-        assert_eq!(cfg.api_key.as_deref(), Some("secret-project"));
+        // The project scope wins over the global one on reload.
+        let cfg = store::load_scoped(&db, &project_dir).unwrap();
+        assert_eq!(cfg.api_key.as_deref(), Some(k_project.as_str()));
         assert_eq!(cfg.model, "zai/glm-5.3");
         assert_eq!(cfg.skills["commit-helper"], false);
 
@@ -129,73 +108,58 @@ mod tests {
     }
 
     #[test]
-    fn write_delta_preserves_unrelated_comments() {
-        let base = std::env::temp_dir().join(format!("bebok-cfg3-{}", uuid::Uuid::new_v4()));
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        let path = project_config_path(&project_dir);
-        std::fs::write(&path, "{\n  // keep me\n  \"model\": \"zai/glm-4.5\"\n}\n").unwrap();
+    fn project_delta_keeps_unrelated_keys() {
+        let (base, project_dir, db) = tmp("keep");
+        write_project_delta_at(&db, &project_dir, &json!({ "model": "zai/glm-4.5" })).unwrap();
+        write_project_delta_at(&db, &project_dir, &json!({ "model": "zai/glm-5.3" })).unwrap();
 
-        write_project_delta(&project_dir, &serde_json::json!({ "model": "zai/glm-5.3" })).unwrap();
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("// keep me"), "comment must survive: {text}");
-        assert!(text.contains("zai/glm-5.3"));
-        assert!(jsonc::parse(&text).is_ok(), "still valid JSONC: {text}");
-
+        let obj = read_scope_at(&db, &project_scope(&project_dir)).unwrap();
+        assert_eq!(obj.get("model").unwrap(), "zai/glm-5.3");
         std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
-    fn write_ui_delta_preserves_comments() {
-        let base = std::env::temp_dir().join(format!("bebok-cssw-{}", uuid::Uuid::new_v4()));
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        let path = project_config_path(&project_dir);
-        std::fs::write(&path, "{\n  // keep me\n  \"model\": \"zai/glm-4.5\"\n}\n").unwrap();
-
-        write_project_delta(
+    fn ui_delta_lands_in_the_scope() {
+        let (base, project_dir, db) = tmp("css");
+        write_project_delta_at(&db, &project_dir, &json!({ "model": "zai/glm-4.5" })).unwrap();
+        write_project_delta_at(
+            &db,
             &project_dir,
-            &serde_json::json!({ "ui": { "customCss": "body { color: red; }" } }),
+            &json!({ "ui": { "customCss": "body { color: red; }" } }),
         )
         .unwrap();
 
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("// keep me"), "comment must survive: {text}");
-        assert!(text.contains("customCss"));
-        assert!(jsonc::parse(&text).is_ok());
-
+        let obj = read_scope_at(&db, &project_scope(&project_dir)).unwrap();
+        assert_eq!(obj.get("model").unwrap(), "zai/glm-4.5");
+        assert_eq!(obj["ui"]["customCss"], "body { color: red; }");
+        let cfg = store::load_scoped(&db, &project_dir).unwrap();
+        assert_eq!(cfg.ui.custom_css, "body { color: red; }");
         std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
-    fn write_allowed_paths_delta_round_trips() {
-        // Same JSONC round-trip path `write_global_delta` uses (a thin
-        // delegation to `write_delta_to` with the global config path), run
-        // against a temp file instead of the real global config.
-        let base = std::env::temp_dir().join(format!("bebok-alloww-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&base).unwrap();
-        let path = base.join("config.json");
-        std::fs::write(
-            &path,
-            "{\n  // keep me\n  \"model\": \"zai/glm-5.3\",\n  \"allowed_paths\": [\"/old/path\"]\n}\n",
-        )
-        .unwrap();
+    fn full_write_replaces_the_scope_and_drops_absent_keys() {
+        let (base, project_dir, db) = tmp("full");
+        write_project_delta_at(&db, &project_dir, &json!({ "yolo": true })).unwrap();
+        write_full_project_at(&db, &project_dir, &json!({ "model": "zai/glm-5.3" })).unwrap();
 
-        write_delta_to(
-            &path,
-            &serde_json::json!({ "allowed_paths": ["/home/user/hub", "/home/user/work"] }),
-        )
-        .unwrap();
+        let obj = read_scope_at(&db, &project_scope(&project_dir)).unwrap();
+        assert_eq!(obj.get("model").unwrap(), "zai/glm-5.3");
+        assert!(!obj.contains_key("yolo"), "absent keys are deleted");
 
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("// keep me"), "comment must survive: {text}");
-        assert!(jsonc::parse(&text).is_ok(), "still valid JSONC: {text}");
-        // Unrelated keys survive, the list is replaced (never merged).
-        let cfg = load_with_global(&base, Some(&path));
-        assert_eq!(cfg.model, "zai/glm-5.3");
-        assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
+        // A project full write never touches the global scope.
+        write_global_delta_at(&db, &json!({ "model": "openai/x" })).unwrap();
+        write_full_project_at(&db, &project_dir, &json!({ "model": "zai/glm-5.3" })).unwrap();
+        let global = read_scope_at(&db, GLOBAL_SCOPE).unwrap();
+        assert_eq!(global.get("model").unwrap(), "openai/x");
+        std::fs::remove_dir_all(&base).ok();
+    }
 
+    #[test]
+    fn non_object_full_write_is_rejected() {
+        let (base, project_dir, db) = tmp("bad");
+        assert!(write_full_project_at(&db, &project_dir, &json!([1, 2])).is_err());
+        assert!(write_full_global_at(&db, &json!("nope")).is_err());
         std::fs::remove_dir_all(&base).ok();
     }
 }

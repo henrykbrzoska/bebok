@@ -1,0 +1,53 @@
+@if (preview(); as p) {
+  <div class="c-backdrop" data-testid="compact-confirm">
+    <div
+      class="c"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="compact-confirm-title"
+      (keydown)="onKeydown($event)"
+      #dialog
+    >
+      <h2 class="c-title" id="compact-confirm-title" data-testid="compact-confirm-title">
+        {{ titleText() }}
+      </h2>
+
+      <p class="c-summary" data-testid="compact-confirm-summary">{{ summaryText() }}.</p>
+      <p class="c-fork">{{ t('compact.forkNote') }}</p>
+
+      <ol class="c-list" [attr.aria-label]="t('compact.listLabel')" data-testid="compact-confirm-list">
+        @for (m of p.messages; track m.index) {
+          <li class="c-msg" [class.summarized]="isSummarized(m.index)" data-testid="compact-confirm-message">
+            <span class="c-role">{{ m.role }}</span>
+            <span class="c-excerpt">{{ m.excerpt }}</span>
+            <span class="c-tokens">{{ formatTokens(m.tokens) }}</span>
+            <span class="c-badge">{{ isSummarized(m.index) ? t('compact.summarized') : t('compact.kept') }}</span>
+          </li>
+        }
+      </ol>
+
+      <div class="c-actions">
+        <button
+          type="button"
+          class="primary"
+          data-testid="compact-confirm-compact"
+          (click)="choose('compact')"
+        >{{ t('compact.confirm') }}</button>
+        <button
+          type="button"
+          class="secondary"
+          data-testid="compact-confirm-cancel"
+          (click)="choose('cancel')"
+        >{{ t('compact.cancel') }}</button>
+        @if (mode() === 'suggest') {
+          <button
+            type="button"
+            class="ghost"
+            data-testid="compact-confirm-send-without"
+            (click)="choose('send-without')"
+          >{{ t('compact.sendWithout') }}</button>
+        }
+      </div>
+    </div>
+  </div>
+}

@@ -15,7 +15,6 @@ import {
 import { EngineClient } from '../../core/engine-client.service';
 import {
   EngineEvent,
-  QuestionAnswer,
   QuestionItem,
   QuestionOption,
 } from '../../core/engine.dtos';
@@ -40,7 +39,7 @@ export interface AnsweredQuestion {
   sessionID: string;
   questions: QuestionItem[];
   /** `null` when the user skipped the prompt. */
-  answers: QuestionAnswer[] | null;
+  answers: Record<string, string | string[]> | null;
 }
 
 /** Per-question form state: selected option labels and free-text answer, by index. */
@@ -72,8 +71,9 @@ function parseQuestion(raw: unknown): QuestionItem | null {
     return null;
   }
   const record = raw as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' ? record['id'] : '';
   const question = typeof record['question'] === 'string' ? record['question'] : '';
-  if (!question.trim()) {
+  if (!id.trim() || !question.trim()) {
     return null;
   }
   const rawOptions = Array.isArray(record['options']) ? record['options'] : [];
@@ -81,6 +81,7 @@ function parseQuestion(raw: unknown): QuestionItem | null {
     .map(parseOption)
     .filter((option): option is QuestionOption => option !== null);
   return {
+    id,
     header: typeof record['header'] === 'string' ? record['header'] : '',
     question,
     options,
@@ -565,16 +566,23 @@ export class QuestionDialog implements OnDestroy {
     void this.resolve(true);
   }
 
-  private buildAnswers(item: PendingQuestion): QuestionAnswer[] {
+  private buildAnswers(item: PendingQuestion): Record<string, string | string[]> {
     const draft = this.draft();
-    return item.questions.map((_, index) => {
+    const answers: Record<string, string | string[]> = {};
+    item.questions.forEach((q, index) => {
+      const selected = [...(draft.selected[index] ?? [])];
       const text = (draft.text[index] ?? '').trim();
-      return {
-        questionIndex: index,
-        selected: [...(draft.selected[index] ?? [])],
-        ...(text ? { text } : {}),
-      };
+      // Engine contract: `{ <id>: string | string[] }`. A free-text answer
+      // replaces the selection; a multi-select stays an array.
+      if (text) {
+        answers[q.id] = text;
+      } else if (q.multiple) {
+        answers[q.id] = selected;
+      } else {
+        answers[q.id] = selected[0] ?? '';
+      }
     });
+    return answers;
   }
 
   private async resolve(skipped: boolean): Promise<void> {
@@ -587,7 +595,7 @@ export class QuestionDialog implements OnDestroy {
       list.map((a) => (a.requestID === item.requestID ? { ...a, busy: true, error: undefined } : a)),
     );
     try {
-      await this.engine.answerQuestion(item.sessionID, item.requestID, answers ?? [], skipped);
+      await this.engine.answerQuestion(item.sessionID, item.requestID, answers ?? {}, skipped);
       this.resolvedIds.add(item.requestID);
       this.asks.update((list) => list.filter((a) => a.requestID !== item.requestID));
       this.answered.emit({
@@ -598,6 +606,24 @@ export class QuestionDialog implements OnDestroy {
       });
     } catch (err) {
       console.error('question answer failed', err);
+      // Skip is a local dismissal: the user explicitly asked to move on, so
+      // the dialog must close even when the POST failed (e.g. the engine
+      // restarted and the pending question is gone — the turn is dead anyway
+      // and keeping the dialog would block the composer forever). The same
+      // applies to a submit that hits a question the engine no longer knows.
+      const message = err instanceof Error ? err.message : String(err);
+      const gone = message.includes('-> 404') || message.includes('no pending question');
+      if (skipped || gone) {
+        this.resolvedIds.add(item.requestID);
+        this.asks.update((list) => list.filter((a) => a.requestID !== item.requestID));
+        this.answered.emit({
+          requestID: item.requestID,
+          sessionID: item.sessionID,
+          questions: item.questions,
+          answers,
+        });
+        return;
+      }
       this.asks.update((list) =>
         list.map((a) =>
           a.requestID === item.requestID

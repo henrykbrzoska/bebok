@@ -15,7 +15,8 @@ use serde_json::Value;
 
 use super::matcher::{build_glob, call_string};
 use super::rule::{Action, Rule};
-use super::store::persist_project_rule;
+use super::store::{persist_project_rule_at, read_rules_at};
+use crate::config::store::{self as config_store, GLOBAL_SCOPE, project_scope};
 use crate::error::Result;
 
 /// The verdict of evaluating a call before any user interaction.
@@ -153,8 +154,8 @@ impl Layer {
 /// future `config.changed` flow calls).
 pub struct PermissionEngine {
     root: PathBuf,
-    project_path: PathBuf,
-    global_path: Option<PathBuf>,
+    /// Config database holding both rule scopes (`global`, `project:<dir>`).
+    db: PathBuf,
     project: RwLock<Layer>,
     global: RwLock<Layer>,
     /// YOLO mode: when set, every tool call is auto-allowed without asking.
@@ -170,31 +171,31 @@ pub struct PermissionEngine {
 }
 
 impl PermissionEngine {
-    /// Build the engine for a project directory using the platform global
-    /// config file.
+    /// Build the engine for a project directory from the default config
+    /// database.
     pub fn load(root: &Path) -> Self {
-        let global = dirs::config_dir().map(|d| d.join("bebok").join("config.json"));
-        Self::load_with_global(root, global.as_deref())
+        Self::load_at(&config_store::bebok_db_path(), root)
     }
 
-    /// Build the engine with an explicit global config file (`None` disables
-    /// the global layer; used by tests for hermetic behaviour).
-    pub fn load_with_global(root: &Path, global_path: Option<&Path>) -> Self {
-        let project_path = root.join(".bebok").join("config.json");
-        let project_rules = super::store::read_rules_from(&project_path);
-        let global_rules = global_path
-            .map(super::store::read_rules_from)
-            .unwrap_or_default();
+    /// Build the engine from an explicit config database (tests, and the
+    /// instance store, which knows its own data dir).
+    pub fn load_at(db_path: &Path, root: &Path) -> Self {
+        let project_rules = read_rules_at(db_path, &project_scope(root));
+        let global_rules = read_rules_at(db_path, GLOBAL_SCOPE);
         Self {
             root: root.to_path_buf(),
-            project_path,
-            global_path: global_path.map(Path::to_path_buf),
+            db: db_path.to_path_buf(),
             project: RwLock::new(Layer::new(project_rules)),
             global: RwLock::new(Layer::new(global_rules)),
             yolo: AtomicBool::new(false),
             browser_auto: AtomicBool::new(false),
             root_is_global: AtomicBool::new(false),
         }
+    }
+
+    /// Path of the config database this engine reads its rules from.
+    pub fn config_db_path(&self) -> &Path {
+        &self.db
     }
 
     /// Project root the engine is bound to.
@@ -232,14 +233,10 @@ impl PermissionEngine {
         self.browser_auto.load(Ordering::Relaxed)
     }
 
-    /// Recompile rules from the current config files (`config.changed` hook).
+    /// Recompile rules from the config database (`config.changed` hook).
     pub fn reload(&self) {
-        let project_rules = super::store::read_rules_from(&self.project_path);
-        let global_rules = self
-            .global_path
-            .as_deref()
-            .map(super::store::read_rules_from)
-            .unwrap_or_default();
+        let project_rules = read_rules_at(&self.db, &project_scope(&self.root));
+        let global_rules = read_rules_at(&self.db, GLOBAL_SCOPE);
         *self.project.write().unwrap() = Layer::new(project_rules);
         *self.global.write().unwrap() = Layer::new(global_rules);
     }
@@ -328,7 +325,7 @@ impl PermissionEngine {
             .unwrap_or(false)
     }
 
-    /// Persist `ask → allow` for `pattern` to the project config and update the
+    /// Persist `ask → allow` for `pattern` to the project config scope and update the
     /// in-memory project layer (no restart needed). The engine is shared by
     /// every session of the directory (parent and sub-agent sessions alike),
     /// so the rule applies to all of them at once.
@@ -337,7 +334,7 @@ impl PermissionEngine {
             pattern: pattern.to_string(),
             action: Action::Allow,
         };
-        persist_project_rule(&self.project_path, &rule)?;
+        persist_project_rule_at(&self.db, &self.root, &rule)?;
         self.project.write().unwrap().upsert(rule);
         Ok(())
     }
@@ -375,151 +372,148 @@ fn verdict(action: Action) -> Verdict {
 
 #[cfg(test)]
 mod tests {
-    use super::super::store::persist_project_rule;
+    use super::super::store::persist_project_rule_at;
     use super::*;
     use serde_json::json;
 
+    /// Fresh temp **project directory** (its parent holds the temp DB).
     fn tmp_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("bebok-perm-{name}-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        let project = std::env::temp_dir()
+            .join(format!("bebok-perm-{name}-{}", uuid::Uuid::new_v4()))
+            .join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        project
+    }
+
+    /// Config DB path that belongs to a `tmp_dir` project directory.
+    fn db_for(dir: &Path) -> PathBuf {
+        dir.parent().unwrap().join("bebok.db")
+    }
+
+    /// Write `permission.rules` into one config scope.
+    fn rules(db: &Path, scope: &str, rules: serde_json::Value) {
+        config_store::write_delta_at(db, scope, &json!({ "permission": { "rules": rules } }))
+            .unwrap();
+    }
+
+    /// Rules persisted in the project scope of the test DB.
+    fn project_rules(db: &Path, dir: &Path) -> Vec<Rule> {
+        super::super::store::read_rules_at(db, &project_scope(dir))
+    }
+
+    fn bash(command: &str) -> Value {
+        json!({ "command": command })
     }
 
     #[test]
     fn project_overrides_global() {
         let dir = tmp_dir("precedence");
-        let project_cfg = dir.join(".bebok").join("config.json");
-        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project_cfg,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "allow" } ] } }"#,
-        )
-        .unwrap();
-        let global = dir.join("global.json");
-        std::fs::write(
-            &global,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
-        )
-        .unwrap();
-
-        let engine = PermissionEngine::load_with_global(&dir, Some(&global));
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "rm -rf x" }),
-            false,
+        let db = db_for(&dir);
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([{ "pattern": "bash(rm *)", "action": "allow" }]),
         );
+        rules(
+            &db,
+            GLOBAL_SCOPE,
+            json!([{ "pattern": "bash(rm *)", "action": "deny" }]),
+        );
+
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let eval = engine.evaluate(None, "bash", &bash("rm -rf x"), false);
         assert_eq!(
             eval.verdict,
             Verdict::Allow,
             "project rule must override global"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn global_rule_applies_when_no_project_rule() {
         let dir = tmp_dir("global-only");
-        let global = dir.join("global.json");
-        std::fs::write(
-            &global,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
-        )
-        .unwrap();
-        let engine = PermissionEngine::load_with_global(&dir, Some(&global));
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "rm -rf x" }),
-            false,
+        let db = db_for(&dir);
+        rules(
+            &db,
+            GLOBAL_SCOPE,
+            json!([{ "pattern": "bash(rm *)", "action": "deny" }]),
         );
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let eval = engine.evaluate(None, "bash", &bash("rm -rf x"), false);
         assert_eq!(eval.verdict, Verdict::Deny);
         // An unrelated call falls through to the default.
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "git status" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "bash", &bash("git status"), false);
         assert_eq!(eval.verdict, Verdict::Ask);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn defaults_read_only_allow_mutating_ask() {
         let dir = tmp_dir("defaults");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
         // read-only default: Allow
-        let eval = engine.evaluate(
-            None,
-            "read_file",
-            &serde_json::json!({ "path": "a.txt" }),
-            true,
-        );
+        let eval = engine.evaluate(None, "read_file", &json!({ "path": "a.txt" }), true);
         assert_eq!(eval.verdict, Verdict::Allow);
         // mutating default: Ask with the canonical call as its pattern
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "git status" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "bash", &bash("git status"), false);
         assert_eq!(eval.verdict, Verdict::Ask);
         assert_eq!(eval.pattern, "bash(git status)");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn configured_deny_wins_over_agent_allow() {
         let dir = tmp_dir("agent-deny-precedence");
+        let db = db_for(&dir);
         let agent = CompiledLayer::compile(&[Rule {
             pattern: "bash(rm *)".into(),
             action: Action::Allow,
         }]);
-        let global = dir.join("global.json");
-        std::fs::write(
-            &global,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
-        )
-        .unwrap();
-        let engine = PermissionEngine::load_with_global(&dir, Some(&global));
-        let call = serde_json::json!({ "command": "rm -rf x" });
+        rules(
+            &db,
+            GLOBAL_SCOPE,
+            json!([{ "pattern": "bash(rm *)", "action": "deny" }]),
+        );
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let call = bash("rm -rf x");
         assert_eq!(
             engine.evaluate(Some(&agent), "bash", &call, false).verdict,
             Verdict::Deny
         );
 
-        std::fs::write(&global, "{}").unwrap();
-        let project = dir.join(".bebok/config.json");
-        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
-        )
-        .unwrap();
+        // Move the rule from the global scope to the project scope: still Deny.
+        config_store::write_delta_at(&db, GLOBAL_SCOPE, &json!({ "permission": null })).unwrap();
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([{ "pattern": "bash(rm *)", "action": "deny" }]),
+        );
         engine.reload();
         assert_eq!(
             engine.evaluate(Some(&agent), "bash", &call, false).verdict,
             Verdict::Deny
         );
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn fetch_defaults_to_ask_even_for_get_and_head() {
         let dir = tmp_dir("fetch-default");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
         for method in ["GET", "HEAD"] {
             let eval = engine.evaluate(
                 None,
                 "fetch",
-                &serde_json::json!({"url": "http://127.0.0.1:8787/config", "method": method}),
+                &json!({"url": "http://127.0.0.1:8787/config", "method": method}),
                 true,
             );
             assert_eq!(eval.verdict, Verdict::Ask, "{method}");
         }
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// WP-BROWSER (F6-18): every `browser_*` tool is `Ask` in a fresh config,
@@ -527,39 +521,39 @@ mod tests {
     #[test]
     fn browser_tools_default_to_ask_even_when_read_only() {
         let dir = tmp_dir("browser-default");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
         for tool in bebok_tools::browser::TOOL_NAMES {
             for read_only in [true, false] {
                 let eval = engine.evaluate(
                     None,
                     tool,
-                    &serde_json::json!({ "url": "http://127.0.0.1:8787/" }),
+                    &json!({ "url": "http://127.0.0.1:8787/" }),
                     read_only,
                 );
                 assert_eq!(eval.verdict, Verdict::Ask, "{tool} read_only={read_only}");
             }
         }
         // The read-only default for everything else is untouched.
-        let eval = engine.evaluate(None, "read_file", &serde_json::json!({}), true);
+        let eval = engine.evaluate(None, "read_file", &json!({}), true);
         assert_eq!(eval.verdict, Verdict::Allow);
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// The config-only override: a `browser_*` glob rule beats the default.
     #[test]
     fn browser_glob_rule_can_allow_the_family() {
         let dir = tmp_dir("browser-rule");
-        let project_cfg = dir.join(".bebok").join("config.json");
-        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project_cfg,
-            r#"{ "permission": { "rules": [ { "pattern": "browser_*", "action": "allow" } ] } }"#,
-        )
-        .unwrap();
-        let engine = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        let db = db_for(&dir);
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([{ "pattern": "browser_*", "action": "allow" }]),
+        );
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let eval = engine.evaluate(None, "browser_screenshot", &json!({}), true);
         assert_eq!(eval.verdict, Verdict::Allow);
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// WP-AUTOVERIFY (F8-1): `set_browser_auto(true)` flips the default of
@@ -568,7 +562,8 @@ mod tests {
     #[test]
     fn browser_auto_switch_allows_the_family_except_eval() {
         let dir = tmp_dir("browser-auto");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
         assert!(!engine.browser_auto());
         engine.set_browser_auto(true);
         assert!(engine.browser_auto());
@@ -577,7 +572,7 @@ mod tests {
                 let eval = engine.evaluate(
                     None,
                     tool,
-                    &serde_json::json!({ "url": "http://localhost:4200/" }),
+                    &json!({ "url": "http://localhost:4200/" }),
                     read_only,
                 );
                 let expected = if *tool == "browser_eval" {
@@ -589,30 +584,15 @@ mod tests {
             }
         }
         // Unrelated defaults are unchanged: mutating tools still ask, fetch still asks.
-        let eval = engine.evaluate(
-            None,
-            "write_file",
-            &serde_json::json!({ "path": "x" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "write_file", &json!({ "path": "x" }), false);
         assert_eq!(eval.verdict, Verdict::Ask);
-        let eval = engine.evaluate(
-            None,
-            "fetch",
-            &serde_json::json!({ "url": "http://x/" }),
-            true,
-        );
+        let eval = engine.evaluate(None, "fetch", &json!({ "url": "http://x/" }), true);
         assert_eq!(eval.verdict, Verdict::Ask);
         // Reversible.
         engine.set_browser_auto(false);
-        let eval = engine.evaluate(
-            None,
-            "browser_open",
-            &serde_json::json!({ "url": "http://x/" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "browser_open", &json!({ "url": "http://x/" }), false);
         assert_eq!(eval.verdict, Verdict::Ask);
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// The user's explicit rules keep winning over the auto default: a
@@ -620,46 +600,30 @@ mod tests {
     #[test]
     fn browser_auto_never_overrides_explicit_rules() {
         let dir = tmp_dir("browser-auto-rules");
-        let project_cfg = dir.join(".bebok").join("config.json");
-        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project_cfg,
-            r#"{ "permission": { "rules": [
+        let db = db_for(&dir);
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([
                 { "pattern": "browser_open(*)", "action": "deny" },
                 { "pattern": "browser_screenshot*", "action": "ask" },
                 { "pattern": "browser_eval*", "action": "allow" }
-            ] } }"#,
-        )
-        .unwrap();
-        let engine = PermissionEngine::load_with_global(&dir, None);
-        engine.set_browser_auto(true);
-        let eval = engine.evaluate(
-            None,
-            "browser_open",
-            &serde_json::json!({ "url": "http://x/" }),
-            false,
+            ]),
         );
+        let engine = PermissionEngine::load_at(&db, &dir);
+        engine.set_browser_auto(true);
+        let eval = engine.evaluate(None, "browser_open", &json!({ "url": "http://x/" }), false);
         assert_eq!(eval.verdict, Verdict::Deny);
         assert_eq!(eval.pattern, "browser_open(*)");
-        let eval = engine.evaluate(None, "browser_screenshot", &serde_json::json!({}), true);
+        let eval = engine.evaluate(None, "browser_screenshot", &json!({}), true);
         assert_eq!(eval.verdict, Verdict::Ask);
         // ...and an explicit allow on eval beats the eval carve-out.
-        let eval = engine.evaluate(
-            None,
-            "browser_eval",
-            &serde_json::json!({ "js": "1" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "browser_eval", &json!({ "js": "1" }), false);
         assert_eq!(eval.verdict, Verdict::Allow);
         // Tools without a rule get the auto default.
-        let eval = engine.evaluate(
-            None,
-            "browser_click",
-            &serde_json::json!({ "selector": "a" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "browser_click", &json!({ "selector": "a" }), false);
         assert_eq!(eval.verdict, Verdict::Allow);
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
@@ -676,101 +640,69 @@ mod tests {
     #[test]
     fn always_allow_persists_and_recompiles() {
         let dir = tmp_dir("always");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
         engine.always_allow("bash(pwd)").unwrap();
 
-        let path = dir.join(".bebok").join("config.json");
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("bash(pwd)"));
-        assert!(text.contains("allow"));
+        let persisted = project_rules(&db, &dir);
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].pattern, "bash(pwd)");
+        assert_eq!(persisted[0].action, Action::Allow);
 
         // In-memory layer updated -> no reload required.
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "pwd" }),
-            false,
-        );
+        let eval = engine.evaluate(None, "bash", &bash("pwd"), false);
         assert_eq!(eval.verdict, Verdict::Allow);
 
-        // Persisted file reloads cleanly into a fresh engine.
-        let engine2 = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine2.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "pwd" }),
-            false,
-        );
+        // Persisted rules reload cleanly into a fresh engine.
+        let engine2 = PermissionEngine::load_at(&db, &dir);
+        let eval = engine2.evaluate(None, "bash", &bash("pwd"), false);
         assert_eq!(eval.verdict, Verdict::Allow);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn always_allow_upserts_same_pattern() {
         let dir = tmp_dir("always-upsert");
-        let project_cfg = dir.join(".bebok").join("config.json");
-        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project_cfg,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(pwd)", "action": "ask" } ] } }"#,
-        )
-        .unwrap();
-        let engine = PermissionEngine::load_with_global(&dir, None);
-
-        let before = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "pwd" }),
-            false,
+        let db = db_for(&dir);
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([{ "pattern": "bash(pwd)", "action": "ask" }]),
         );
+        let engine = PermissionEngine::load_at(&db, &dir);
+
+        let before = engine.evaluate(None, "bash", &bash("pwd"), false);
         assert_eq!(before.verdict, Verdict::Ask);
 
         engine.always_allow("bash(pwd)").unwrap();
-        let after = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "pwd" }),
-            false,
-        );
+        let after = engine.evaluate(None, "bash", &bash("pwd"), false);
         assert_eq!(after.verdict, Verdict::Allow);
 
-        // Only one rule remains in the file (upsert, not duplicate).
-        let text = std::fs::read_to_string(&project_cfg).unwrap();
-        let value: Value = crate::config::jsonc::parse(&text).unwrap();
-        let rules = super::super::rule::parse_rules(&value["permission"]);
-        assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].action, Action::Allow);
-        let _ = std::fs::remove_dir_all(&dir);
+        // Only one rule remains in the scope (upsert, not duplicate).
+        let persisted = project_rules(&db, &dir);
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].action, Action::Allow);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
     fn reload_picks_up_external_config_changes() {
         let dir = tmp_dir("reload");
-        let engine = PermissionEngine::load_with_global(&dir, None);
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "rm -rf x" }),
-            false,
-        );
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let eval = engine.evaluate(None, "bash", &bash("rm -rf x"), false);
         assert_eq!(eval.verdict, Verdict::Ask);
 
-        let project_cfg = dir.join(".bebok").join("config.json");
-        std::fs::create_dir_all(project_cfg.parent().unwrap()).unwrap();
-        std::fs::write(
-            &project_cfg,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(rm *)", "action": "deny" } ] } }"#,
-        )
-        .unwrap();
-        engine.reload();
-        let eval = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "rm -rf x" }),
-            false,
+        // Another process (the settings UI) writes the project scope.
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([{ "pattern": "bash(rm *)", "action": "deny" }]),
         );
+        engine.reload();
+        let eval = engine.evaluate(None, "bash", &bash("rm -rf x"), false);
         assert_eq!(eval.verdict, Verdict::Deny);
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// F7-1: `is_mutating` backs both the engine's own auto-`Allow` default
@@ -788,23 +720,22 @@ mod tests {
 
     #[test]
     fn persist_via_store_module_path() {
-        // Guards the engine -> store persistence seam (atomic write).
+        // Guards the engine -> store persistence seam.
         let dir = tmp_dir("seam");
-        let path = dir.join(".bebok").join("config.json");
-        persist_project_rule(
-            &path,
+        let db = db_for(&dir);
+        persist_project_rule_at(
+            &db,
+            &dir,
             &Rule {
                 pattern: "bash(pwd)".into(),
                 action: Action::Allow,
             },
         )
         .unwrap();
-        assert!(
-            std::fs::read_to_string(&path)
-                .unwrap()
-                .contains("bash(pwd)")
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+        let persisted = project_rules(&db, &dir);
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].pattern, "bash(pwd)");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// F9-5: a default `Ask` suggests the tool-level rule, an explicit rule
@@ -813,42 +744,30 @@ mod tests {
     #[test]
     fn suggested_rule_is_tool_level_and_sticks_for_other_paths() {
         let dir = tmp_dir("suggested");
-        let engine = PermissionEngine::load_with_global(&dir, None);
-        let a = engine.evaluate(
-            None,
-            "write_file",
-            &serde_json::json!({ "path": "src/a.ts" }),
-            false,
-        );
+        let db = db_for(&dir);
+        let engine = PermissionEngine::load_at(&db, &dir);
+        let a = engine.evaluate(None, "write_file", &json!({ "path": "src/a.ts" }), false);
         assert_eq!(a.verdict, Verdict::Ask);
         assert_eq!(a.suggested_rule, "write_file(*)");
         engine.always_allow(&a.suggested_rule).unwrap();
-        let b = engine.evaluate(
-            None,
-            "write_file",
-            &serde_json::json!({ "path": "src/b.ts" }),
-            false,
-        );
+        let b = engine.evaluate(None, "write_file", &json!({ "path": "src/b.ts" }), false);
         assert_eq!(b.verdict, Verdict::Allow);
         // Another tool is not covered.
-        let c = engine.evaluate(None, "bash", &serde_json::json!({ "command": "ls" }), false);
+        let c = engine.evaluate(None, "bash", &bash("ls"), false);
         assert_eq!(c.verdict, Verdict::Ask);
         assert_eq!(c.suggested_rule, "bash(*)");
 
         // An explicit `ask` rule suggests its own (generic) pattern.
-        let project = dir.join(".bebok/config.json");
-        std::fs::write(
-            &project,
-            r#"{ "permission": { "rules": [ { "pattern": "bash(git *)", "action": "ask" } ] } }"#,
-        )
-        .unwrap();
-        engine.reload();
-        let d = engine.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "git push" }),
-            false,
+        rules(
+            &db,
+            &project_scope(&dir),
+            json!([
+                { "pattern": "write_file(*)", "action": "allow" },
+                { "pattern": "bash(git *)", "action": "ask" }
+            ]),
         );
+        engine.reload();
+        let d = engine.evaluate(None, "bash", &bash("git push"), false);
         assert_eq!(d.verdict, Verdict::Ask);
         assert_eq!(d.suggested_rule, "bash(git *)");
         assert!(PermissionEngine::rule_matches(
@@ -856,13 +775,13 @@ mod tests {
             "write_file(x/y.ts)"
         ));
         assert!(!PermissionEngine::rule_matches("write_file(*)", "bash(ls)"));
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// Helper: build an engine forced into hub mode (`root_is_global = true`)
     /// regardless of whether the directory is the real data dir.
     fn hub_engine(dir: &Path) -> PermissionEngine {
-        let eng = PermissionEngine::load_with_global(dir, None);
+        let eng = PermissionEngine::load_at(&db_for(dir), dir);
         eng.set_global_mode();
         eng
     }
@@ -895,7 +814,7 @@ mod tests {
             "hub: read_file should be Allow"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// Hub security: YOLO mode is forced off in global/hub instances.
@@ -915,14 +834,14 @@ mod tests {
             "YOLO bypass must not work in hub mode"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     /// Hub security: non-hub instances are unaffected.
     #[test]
     fn non_hub_yolo_works_normally() {
         let dir = tmp_dir("non-hub-yolo");
-        let engine = PermissionEngine::load_with_global(&dir, None);
+        let engine = PermissionEngine::load_at(&db_for(&dir), &dir);
         assert!(!engine.root_is_global.load(Ordering::Relaxed));
         engine.set_yolo(true);
         assert!(engine.yolo());
@@ -932,6 +851,6 @@ mod tests {
             Verdict::Allow,
             "YOLO should work in non-hub mode"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

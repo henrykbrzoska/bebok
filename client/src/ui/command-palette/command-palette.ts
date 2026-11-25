@@ -22,6 +22,7 @@ import { Router } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
 import { I18nService } from '../../i18n/i18n.service';
+import { COMPACT_REQUESTED_EVENT } from '../compact-confirm-dialog/compact-confirm-dialog';
 import { ChatSessionStore } from '../../views/chat/chat-session.store';
 import { ProjectSessionsStore } from '../shell/project-sessions.store';
 import { ShellStore } from '../shell/shell.store';
@@ -153,7 +154,7 @@ export class CommandPalette {
         await this.newSession(directory);
         return;
       case 'compactSession':
-        await this.compactSession();
+        this.compactSession();
         return;
       case 'switchProject':
         this.shell.openProjectSwitcher();
@@ -192,22 +193,18 @@ export class CommandPalette {
   }
 
   /**
-   * Compact the open session (F6-4). Compaction forks: the engine answers
-   * with a *new* session id, so the palette navigates there. A running turn
-   * is left alone (the engine would race the transcript).
+   * Compact the open session (F6-4). The chat view owns the preview +
+   * confirmation flow (and the fork + navigation), so the palette only asks
+   * for it. A running turn is left alone (the engine would race the transcript).
    */
-  private async compactSession(): Promise<void> {
+  private compactSession(): void {
     const meta = this.session.meta();
     if (!meta || this.session.running() || !this.session.canCompact()) {
       return;
     }
-    try {
-      const forked = await this.engine.compactSession(meta.id, this.session.compactBudget());
-      await this.project.refresh();
-      await this.router.navigate(['/chat', forked.sessionID]);
-    } catch {
-      /* the chat view surfaces compaction errors; the palette stays quiet */
-    }
+    window.dispatchEvent(
+      new CustomEvent(COMPACT_REQUESTED_EVENT, { detail: { sessionID: meta.id } }),
+    );
   }
 
   private async newSession(directory: string | null): Promise<void> {

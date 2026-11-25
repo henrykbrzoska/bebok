@@ -11,11 +11,15 @@ use crate::error::{ApiError, err_response};
 use crate::routes::common::DirectoryQuery;
 use crate::state::AppState;
 
-/// Build the full `GET /config` payload: resolved view + redacted config files.
-/// `files` carries layer contents with credentials removed so the GUI can edit
-/// *actual* `config.json` text (resolved `config` is merged and unpatchable):
-/// `files.global` = `~/.config/bebok/config.json`, `files.project` =
-/// `<directory>/.bebok/config.json` (each `{ exists, path, content }`).
+/// Build the full `GET /config` payload: the resolved view plus the raw JSON
+/// document of each config **scope** (the storage is `bebok.db`, there are no
+/// config files any more).
+///
+/// `scopes` carries each scope's raw JSONC text with credentials removed, so
+/// the GUI's raw JSON editor can edit *actual* stored text (the resolved
+/// `config` is merged and cannot be written back):
+/// `scopes.global` = the `global` scope, `scopes.project` = the
+/// `project:<directory>` scope — each `{ scope, exists, content }`.
 fn config_response(instance: &Instance) -> serde_json::Value {
     use bebok_core::config;
     let cfg = instance.config_snapshot();
@@ -24,29 +28,32 @@ fn config_response(instance: &Instance) -> serde_json::Value {
     let servers = instance.mcp.status();
     let agents = instance.agent_infos();
 
-    let global_path = config::global_config_path();
-    let project_path = config::project_config_path(&instance.root);
-    let layer = |path: &std::path::Path| {
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                // Do not return unparsed text: secrets may also occur in JSONC
-                // comments, which the editor must not receive.
-                let mut parsed =
-                    config::jsonc::parse(&content).unwrap_or_else(|_| serde_json::json!({}));
-                redact_secrets(&mut parsed);
-                let content = serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| "{}".into());
-                serde_json::json!({
-                    "exists": true,
-                    "path": path.to_string_lossy(),
-                    "content": content,
-                })
-            }
-            Err(_) => serde_json::json!({
+    let db = instance.config_db_path().to_path_buf();
+    let scope_doc = |scope: String| {
+        let exists = config::store::read_scope_at(&db, &scope)
+            .map(|m| !m.is_empty())
+            .unwrap_or(false);
+        if !exists {
+            return serde_json::json!({
+                "scope": scope,
                 "exists": false,
-                "path": path.to_string_lossy(),
                 "content": "{}",
-            }),
+            });
         }
+        let text = bebok_core::db::open_db_at(&db)
+            .ok()
+            .and_then(|conn| config::export::export_scope(&conn, &scope).ok())
+            .unwrap_or_else(|| "{}".to_string());
+        // Do not return unparsed text: secrets may also occur in JSONC comments,
+        // which the editor must not receive.
+        let mut parsed = config::jsonc::parse(&text).unwrap_or_else(|_| serde_json::json!({}));
+        redact_secrets(&mut parsed);
+        let content = serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| "{}".into());
+        serde_json::json!({
+            "scope": scope,
+            "exists": true,
+            "content": content,
+        })
     };
 
     // The top-level `config.api_key` is a fallback for every provider that
@@ -72,9 +79,9 @@ fn config_response(instance: &Instance) -> serde_json::Value {
         "mcp": servers,
         "agents": agents,
         "runtimes": Runtimes::from_config(&cfg.runtimes),
-        "files": {
-            "global": layer(&global_path),
-            "project": layer(&project_path),
+        "scopes": {
+            "global": scope_doc(config::GLOBAL_SCOPE.to_string()),
+            "project": scope_doc(config::project_scope(&instance.root)),
         },
     });
     redact_secrets(&mut response);
@@ -153,6 +160,175 @@ fn restore_secrets(incoming: &mut serde_json::Value, previous: &serde_json::Valu
     }
 }
 
+/// `POST /config/import-to-db?directory=` -> import everything into bebok.db:
+/// all sessions of all instances, the global config
+/// (`~/.config/bebok/config.json`) and the `.bebok/config.json` of every known
+/// project (registry + session directories + `directory`). Idempotent: a
+/// second call with unchanged files is a no-op. The response carries `steps`
+/// (human-readable log), `sessions` counters and a per-project `projects` list. Project `mcp` is ignored (MCP is global-only); project `skills`
+/// contributes only per-skill disables. Each file is retired to `*.bak` once
+/// the DB holds its content.
+///
+/// Response: `{ ok, imported: {scopes, keys, secrets}, deleted_files, backups,
+/// unchanged, skipped, mcp_mode, conflicts: {count, items, summary} }`.
+/// This is the ONLY endpoint that touches config **files**: the engine reads
+/// and writes every scope in `bebok.db`, and after the import a config file is
+/// ignored (and retired to `*.bak`, or deleted with `--keep-backup` off).
+pub async fn import_config_to_db(
+    State(state): State<AppState>,
+    Query(q): Query<DirectoryQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    use bebok_core::config;
+
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let current_root = instance.root.clone();
+    let global_path = config::global_config_path();
+    // The config DB of *this* store, so a test store never writes the real one.
+    let db_path = state.store.config_db_path();
+
+    let mut steps: Vec<String> = Vec::new();
+
+    // Claude CLI detection is logged on every run; it only matters for summaries.
+    let claude = config::import::detect_claude();
+    let claude_note = claude
+        .as_ref()
+        .map(|p| format!("claude-cli found at {}", p.display()))
+        .unwrap_or_else(|| "claude-cli not found (plain code merge)".into());
+    tracing::info!("config import: {claude_note}");
+    steps.push(claude_note);
+
+    let outcome = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        use bebok_core::session::persist;
+        let mut steps = Vec::new();
+        let db_path = db_path;
+
+        // 1. Sessions: every instance's session dirs -> `sessions`/`messages`.
+        let data_root = persist::data_root();
+        let sessions = persist::import_all_sessions(&data_root)?;
+        let msg = format!(
+            "sessions: {} scanned, {} imported, {} skipped, {} failed",
+            sessions.scanned, sessions.imported, sessions.skipped, sessions.failed
+        );
+        tracing::info!("config import: {msg}");
+        steps.push(msg);
+
+        // 2. Every known project: registry (read before the global file is
+        //    retired) + session directories + the current one.
+        let mut dirs: Vec<std::path::PathBuf> = vec![current_root.clone()];
+        let registry = config::projects::load_at(&db_path);
+        let from_sessions = persist::session_directories(&data_root).unwrap_or_default();
+        for d in registry.iter().map(|p| p.path.clone()).chain(from_sessions) {
+            let path = std::path::PathBuf::from(&d);
+            if path.is_dir() && !dirs.contains(&path) {
+                dirs.push(path);
+            }
+        }
+        steps.push(format!(
+            "projects: {} found ({} in registry)",
+            dirs.len(),
+            registry.len()
+        ));
+
+        // 3. Global config (first pass) + each project's `.bebok/config.json`.
+        let conn = bebok_core::db::open_db_at(&db_path)?;
+        let mut merged = config::import::ImportReport::default();
+        let mut projects = Vec::new();
+        let mut errors = Vec::new();
+        for dir in &dirs {
+            let project_path = config::project_config_path(dir);
+            let had_file = project_path.is_file();
+            match config::import::import_to_db(&conn, dir, &global_path, &project_path) {
+                Ok(r) => {
+                    let status = if !had_file {
+                        "no config"
+                    } else if r.unchanged.iter().any(|s| s.starts_with("project:")) {
+                        "unchanged"
+                    } else {
+                        "imported"
+                    };
+                    projects.push(serde_json::json!({
+                        "directory": dir.to_string_lossy(),
+                        "status": status,
+                        "keys": r.keys,
+                    }));
+                    merged.scopes.extend(r.scopes);
+                    merged.keys += r.keys;
+                    merged.secrets += r.secrets;
+                    merged.unchanged.extend(r.unchanged);
+                    merged.deleted_files.extend(r.deleted_files);
+                    merged.backups.extend(r.backups);
+                    merged.skipped.extend(r.skipped);
+                    merged.conflicts.extend(r.conflicts);
+                }
+                Err(e) => {
+                    tracing::warn!("config import: {} failed: {e}", dir.display());
+                    projects.push(serde_json::json!({
+                        "directory": dir.to_string_lossy(),
+                        "status": "error",
+                        "error": e,
+                    }));
+                    errors.push(format!("{}: {e}", dir.display()));
+                }
+            }
+        }
+        steps.push(format!(
+            "config: {} scope(s), {} key(s), {} secret(s) written; {} file(s) retired to .bak",
+            merged.scopes.len(),
+            merged.keys,
+            merged.secrets,
+            merged.deleted_files.len()
+        ));
+
+        // 4. The DB is the config: nothing else to switch, the runtime reads
+        //    every scope from `bebok.db` and never from a file.
+        steps.push("config lives in bebok.db (no file fallback)".into());
+        Ok((sessions, projects, merged, errors, steps))
+    })
+    .await
+    .map_err(|e| err_response(&CoreError::Other(e.to_string())))?
+    .map_err(|e| err_response(&CoreError::Other(e)))?;
+    let (sessions, projects, report, errors, more_steps) = outcome;
+    steps.extend(more_steps);
+
+    let summary = config::import::summarize_conflicts(&report.conflicts, claude.as_deref()).await;
+
+    // Always reload: the scopes may have just been created or updated.
+    state
+        .store
+        .reload_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+
+    Ok(Json(serde_json::json!({
+        "ok": errors.is_empty() && sessions.failed == 0,
+        "steps": steps,
+        "claude": claude.map(|p| p.to_string_lossy().into_owned()),
+        "sessions": sessions,
+        "projects": projects,
+        "errors": errors,
+        "imported": {
+            "scopes": report.scopes.len(),
+            "keys": report.keys,
+            "secrets": report.secrets,
+        },
+        "scopes": report.scopes,
+        "unchanged": report.unchanged,
+        "deleted_files": report.deleted_files,
+        "backups": report.backups,
+        "skipped": report.skipped,
+        "mcp_mode": "global_only",
+        "conflicts": {
+            "count": report.conflicts.len(),
+            "items": report.conflicts,
+            "summary": summary,
+        },
+    })))
+}
+
 /// `GET /config?directory=` -> resolved config view (config + skills + mcp + agents).
 pub async fn get_config(
     State(state): State<AppState>,
@@ -187,34 +363,34 @@ pub async fn put_config(
     // Capture the previous skills/yolo so we can surface what changed.
     let old_cfg = instance.config_snapshot();
 
-    // `?scope=global` writes to `~/.config/bebok/config.json`; default (or
-    // `project`) writes to `<directory>/.bebok/config.json`. A full-object
-    // body from the raw JSON editor replaces the whole file (keys absent from
-    // the body are deleted); partial bodies merge top-level keys.
+    // `?scope=global` writes the `global` scope; default (or `project`) writes
+    // this directory's `project:<dir>` scope. A full-object body from the raw
+    // JSON editor replaces the whole scope (keys absent from the body are
+    // deleted); partial bodies merge top-level keys.
     let scope_global = q.scope.as_deref() == Some("global");
     let replace = q.replace.unwrap_or(false);
-    let layer_path = if scope_global {
-        config::global_config_path()
+    let db = instance.config_db_path().to_path_buf();
+    let scope_id = if scope_global {
+        config::GLOBAL_SCOPE.to_string()
     } else {
-        config::project_config_path(&instance.root)
+        config::project_scope(&instance.root)
     };
-    if let Ok(raw) = std::fs::read_to_string(&layer_path) {
-        let previous = config::jsonc::parse(&raw)
-            .map_err(|e| ApiError::bad_request(format!("invalid config: {e}")).into_response())?;
-        restore_secrets(&mut delta, &previous);
-    }
+
+    // The previous scope, read from the database (never from a file).
+    let previous = config::store::read_scope_at(&db, &scope_id)
+        .map(serde_json::Value::Object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    restore_secrets(&mut delta, &previous);
+
     // `skills` is a toggle map: merge the incoming keys into the existing
     // section instead of replacing it, so flipping one skill off does not
     // silently re-enable every skill that was previously turned off (the
     // panel sends single-key deltas like `{"skills": {"code-index": false}}`).
     if !replace && let Some(incoming) = delta.get("skills").and_then(|s| s.as_object()) {
-        let previous_skills = std::fs::read_to_string(&layer_path)
-            .ok()
-            .and_then(|raw| config::jsonc::parse(&raw).ok())
-            .and_then(|prev| prev.get("skills").cloned())
+        let mut merged = previous
+            .get("skills")
             .and_then(|s| s.as_object().cloned())
             .unwrap_or_default();
-        let mut merged = previous_skills;
         for (k, v) in incoming {
             merged.insert(k.clone(), v.clone());
         }
@@ -222,19 +398,19 @@ pub async fn put_config(
             obj.insert("skills".to_string(), serde_json::Value::Object(merged));
         }
     }
-    if replace {
-        let write = if scope_global {
-            config::write_full_global(&delta)
+
+    let write = if replace {
+        if scope_global {
+            config::write_full_global_at(&db, &delta)
         } else {
-            config::write_full_project(&instance.root, &delta)
-        };
-        write.map_err(|e| err_response(&CoreError::Other(e)))?;
+            config::write_full_project_at(&db, &instance.root, &delta)
+        }
     } else if scope_global {
-        config::write_global_delta(&delta).map_err(|e| err_response(&CoreError::Other(e)))?;
+        config::write_global_delta_at(&db, &delta)
     } else {
-        config::write_project_delta(&instance.root, &delta)
-            .map_err(|e| err_response(&CoreError::Other(e)))?;
-    }
+        config::write_project_delta_at(&db, &instance.root, &delta)
+    };
+    write.map_err(|e| err_response(&CoreError::Other(e)))?;
 
     let instance = state
         .store

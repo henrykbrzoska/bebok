@@ -7,7 +7,32 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 /// AST-aware structural code search tool.
-pub struct CodeAstSearch;
+///
+/// The `ast_search.enabled` switch lives in the project's config scope, so the
+/// tool carries the config database it must read (`Instance::config_db_path`),
+/// keeping it independent of the process-wide default database.
+#[derive(Default)]
+pub struct CodeAstSearch {
+    db: Option<std::path::PathBuf>,
+}
+
+impl CodeAstSearch {
+    /// Tool bound to an explicit config database (what the instance store
+    /// registers).
+    pub fn new(db: std::path::PathBuf) -> Self {
+        Self { db: Some(db) }
+    }
+
+    fn config(&self, root: &std::path::Path) -> crate::config::ResolvedConfig {
+        match &self.db {
+            Some(db) => crate::config::store::load_scoped(db, root).unwrap_or_else(|e| {
+                tracing::warn!("code_ast: failed to read config of {}: {e}", root.display());
+                crate::config::ResolvedConfig::default()
+            }),
+            None => crate::config::load(root),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct AstArgs {
@@ -124,12 +149,12 @@ impl Tool for CodeAstSearch {
         }
 
         // Check that ast_search is enabled in config.
-        let config = crate::config::load(&ctx.root);
+        let config = self.config(&ctx.root);
         if !config.ast_search.enabled {
             return ToolOutput::new(
                 serde_json::to_string(&json!({
                     "ok": false,
-                    "error": "ast_search is disabled in project config (set ast_search.enabled = true in .bebok/config.json)"
+                    "error": "ast_search is disabled in project config (enable it in Settings → Code features, or set ast_search.enabled = true in the project config scope)"
                 }))
                 .unwrap_or_default(),
                 "code_ast",
@@ -185,12 +210,13 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_kind() {
+        let tool = CodeAstSearch::default();
         let ctx = ToolCtx {
             root: std::path::PathBuf::from("/tmp"),
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch.execute(ctx, json!({})).await;
+        let out = tool.execute(ctx, json!({})).await;
         assert!(out.text.contains("invalid arguments"), "got: {}", out.text);
     }
 
@@ -198,19 +224,22 @@ mod tests {
     async fn returns_disabled_when_ast_search_off() {
         let root =
             std::env::temp_dir().join(format!("bebok-ast-disabled-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".bebok")).unwrap();
-        std::fs::write(
-            root.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": false } }"#,
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("bebok.db");
+        crate::config::store::write_delta_at(
+            &db,
+            &crate::config::store::project_scope(&root),
+            &crate::config::jsonc::parse(r#"{ "ast_search": { "enabled": false } }"#).unwrap(),
         )
         .unwrap();
+        let tool = CodeAstSearch::new(db);
 
         let ctx = ToolCtx {
             root: root.clone(),
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch.execute(ctx, json!({ "kind": "fn" })).await;
+        let out = tool.execute(ctx, json!({ "kind": "fn" })).await;
         assert!(out.text.contains("disabled"), "got: {}", out.text);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -224,12 +253,15 @@ mod tests {
             std::env::temp_dir().join(format!("bebok-ast-decl-ignored-{}", uuid::Uuid::new_v4()));
         let plugins_dir = root.join(".bebok").join("plugins");
         std::fs::create_dir_all(&plugins_dir).unwrap();
-        std::fs::create_dir_all(root.join(".bebok")).unwrap();
-        std::fs::write(
-            root.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": true } }"#,
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("bebok.db");
+        crate::config::store::write_delta_at(
+            &db,
+            &crate::config::store::project_scope(&root),
+            &crate::config::jsonc::parse(r#"{ "ast_search": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
+        let tool = CodeAstSearch::new(db);
 
         // Write a disabled declaration for bebok-ast.
         let decl = crate::plugin_decl::PluginDecl {
@@ -252,7 +284,7 @@ mod tests {
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch.execute(ctx, json!({ "kind": "fn" })).await;
+        let out = tool.execute(ctx, json!({ "kind": "fn" })).await;
         assert!(out.text.contains("\"ok\": true"), "got: {}", out.text);
         assert!(out.text.contains("hello"), "got: {}", out.text);
 
@@ -262,19 +294,22 @@ mod tests {
     #[tokio::test]
     async fn rejects_empty_kind() {
         let root = std::env::temp_dir().join(format!("bebok-ast-empty-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".bebok")).unwrap();
-        std::fs::write(
-            root.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": true } }"#,
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("bebok.db");
+        crate::config::store::write_delta_at(
+            &db,
+            &crate::config::store::project_scope(&root),
+            &crate::config::jsonc::parse(r#"{ "ast_search": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
+        let tool = CodeAstSearch::new(db);
 
         let ctx = ToolCtx {
             root: root.clone(),
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch.execute(ctx, json!({ "kind": "  " })).await;
+        let out = tool.execute(ctx, json!({ "kind": "  " })).await;
         assert!(out.text.contains("must not be empty"), "got: {}", out.text);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -283,12 +318,15 @@ mod tests {
     #[tokio::test]
     async fn returns_results_when_enabled() {
         let root = std::env::temp_dir().join(format!("bebok-ast-results-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".bebok")).unwrap();
-        std::fs::write(
-            root.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": true } }"#,
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("bebok.db");
+        crate::config::store::write_delta_at(
+            &db,
+            &crate::config::store::project_scope(&root),
+            &crate::config::jsonc::parse(r#"{ "ast_search": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
+        let tool = CodeAstSearch::new(db);
         std::fs::write(
             root.join("test.rs"),
             r#"
@@ -303,7 +341,7 @@ pub fn world() -> i32 { 42 }
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch.execute(ctx, json!({ "kind": "fn" })).await;
+        let out = tool.execute(ctx, json!({ "kind": "fn" })).await;
         assert!(out.text.contains("\"ok\": true"), "got: {}", out.text);
         assert!(out.text.contains("hello"), "got: {}", out.text);
         assert!(out.text.contains("world"), "got: {}", out.text);
@@ -342,12 +380,15 @@ pub fn world() -> i32 { 42 }
         // Regression: flat filter keys used to be silently dropped, so a
         // `name_regex` query returned every function in the tree.
         let root = std::env::temp_dir().join(format!("bebok-ast-flat-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join(".bebok")).unwrap();
-        std::fs::write(
-            root.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": true } }"#,
+        std::fs::create_dir_all(&root).unwrap();
+        let db = root.join("bebok.db");
+        crate::config::store::write_delta_at(
+            &db,
+            &crate::config::store::project_scope(&root),
+            &crate::config::jsonc::parse(r#"{ "ast_search": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
+        let tool = CodeAstSearch::new(db);
         std::fs::write(root.join("test.rs"), "fn hello() {}\nfn world() {}\n").unwrap();
 
         let ctx = ToolCtx {
@@ -355,7 +396,7 @@ pub fn world() -> i32 { 42 }
             session_id: "test".to_string(),
             abort: CancellationToken::new(),
         };
-        let out = CodeAstSearch
+        let out = tool
             .execute(ctx, json!({ "kind": "fn", "name_regex": "^hello$" }))
             .await;
         let v: serde_json::Value = serde_json::from_str(&out.text).unwrap();

@@ -8,6 +8,7 @@ pub mod cli_turn_token;
 pub mod code_graph;
 pub mod config;
 pub mod context;
+pub mod db;
 pub mod debug;
 pub mod error;
 pub mod event;

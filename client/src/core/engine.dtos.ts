@@ -351,6 +351,8 @@ export interface QuestionOption {
 
 /** One question inside a `question.asked` prompt. */
 export interface QuestionItem {
+  /** Stable key; the answer object is keyed by it. */
+  id: string;
   /** Short heading shown above the question (may be empty). */
   header: string;
   question: string;
@@ -376,15 +378,15 @@ export interface QuestionResolved {
 
 /** One answer to one question: `selected` holds option labels, `text` a free-text answer. */
 export interface QuestionAnswer {
-  /** Index into `QuestionAsked.questions`. */
-  questionIndex: number;
+  /** Stable key of the question (`QuestionItem.id`). */
+  id: string;
   selected: string[];
   text?: string;
 }
 
-/** `POST /session/{id}/question/{requestID}` body. `skipped: true` means no answers were given. */
+/** `POST /session/{id}/question/{requestID}` body: `{ <questionId>: string | string[] }`. */
 export interface QuestionAnswerBody {
-  answers: QuestionAnswer[];
+  answers: Record<string, string | string[]>;
   skipped?: boolean;
 }
 
@@ -949,6 +951,25 @@ export interface ConfigResponse {
   files: { global: ConfigLayerFile; project: ConfigLayerFile };
 }
 
+/** `POST /config/import-to-db?directory=` response. */
+export interface ImportToDbResponse {
+  ok: boolean;
+  imported?: { scopes: number; keys: number; secrets: number };
+  scopes?: string[];
+  /** Human-readable log of what the import did, in order. */
+  steps?: string[];
+  /** Path of the claude CLI used for the conflict summary, if found. */
+  claude?: string | null;
+  sessions?: { scanned: number; imported: number; skipped: number; failed: number; errors?: string[] };
+  projects?: { directory: string; status: string; keys?: number; error?: string }[];
+  errors?: string[];
+  conflicts?: { count: number; summary?: { source: string; text: string } };
+  deleted_files?: string[];
+  mcp_mode?: string;
+  error?: string;
+  message?: string;
+}
+
 // ---------------------------------------------------------------------------
 // M6: explorer (/fs/*), providers (/models), session lifecycle
 // ---------------------------------------------------------------------------
@@ -1094,6 +1115,32 @@ export interface CompactResponse {
   before?: number;
   /** Estimated context size of the forked transcript. */
   after?: number;
+}
+
+/** One transcript message in a compaction preview (`index` = position in the transcript). */
+export interface CompactPreviewMessage {
+  index: number;
+  role: string;
+  excerpt: string;
+  tokens: number;
+}
+
+/**
+ * `POST /session/{id}/compact/preview` - what a compaction would do, without
+ * forking. Messages with `index < cutoff` are summarized; the rest are kept.
+ */
+export interface CompactPreviewResponse {
+  /** First kept message index: messages `0..cutoff-1` get summarized. */
+  cutoff: number;
+  /** Total number of messages in the transcript. */
+  total: number;
+  /** Number of messages kept verbatim after the summary. */
+  kept: number;
+  /** Estimated context size before compaction. */
+  before: number;
+  /** Estimated context size of the compacted transcript. */
+  after: number;
+  messages: CompactPreviewMessage[];
 }
 
 export interface DeleteSessionResponse {

@@ -20,8 +20,10 @@ import {
   CliBackend,
   CliProbeResult,
   CliProfilePreview,
+  CompactPreviewResponse,
   CompactResponse,
   ConfigResponse,
+  ImportToDbResponse,
   CreatePtyResponse,
   CreateSessionResponse,
   CreateSessionResult,
@@ -83,7 +85,6 @@ import {
   CodeGraphResponse,
   ScheduleTask,
   SshSessionInfo,
-  QuestionAnswer,
   QuestionAnswerBody,
 } from './engine.dtos';
 import {
@@ -457,9 +458,21 @@ export class EngineClient {
     return this.request<ExportResponse>('GET', `/session/${id}/export`);
   }
 
-  compactSession(id: string, budget?: number): Promise<CompactResponse> {
+  /** Dry-run of a compaction: what would be summarized and kept (no fork). */
+  previewCompaction(id: string, budget?: number): Promise<CompactPreviewResponse> {
+    return this.request<CompactPreviewResponse>('POST', `/session/${id}/compact/preview`, {
+      ...(budget ? { budget } : {}),
+    });
+  }
+
+  /**
+   * Fork-based compaction. `cutoff` (from a preview) pins the split point;
+   * omitted, the engine chooses it.
+   */
+  compactSession(id: string, budget?: number, cutoff?: number): Promise<CompactResponse> {
     return this.request<CompactResponse>('POST', `/session/${id}/compact`, {
       ...(budget ? { budget } : {}),
+      ...(cutoff !== undefined ? { cutoff } : {}),
     });
   }
 
@@ -626,10 +639,10 @@ export class EngineClient {
   async answerQuestion(
     sessionID: string,
     requestID: string,
-    answers: QuestionAnswer[],
+    answers: Record<string, string | string[]>,
     skipped = false,
   ): Promise<void> {
-    const body: QuestionAnswerBody = skipped ? { answers: [], skipped: true } : { answers };
+    const body: QuestionAnswerBody = skipped ? { answers: {}, skipped: true } : { answers };
     await this.request<unknown>(
       'POST',
       `/session/${encodeURIComponent(sessionID)}/question/${encodeURIComponent(requestID)}`,
@@ -812,6 +825,19 @@ export class EngineClient {
       (opts?.scope ? `&scope=${encodeURIComponent(opts.scope)}` : '') +
       (opts?.replace ? '&replace=true' : '');
     return this.request<ConfigResponse>('PUT', `/config?${query}`, delta);
+  }
+
+  /**
+   * `POST /config/import-to-db?directory=` -> import .bebok/config.json files
+   * into DB. Returns `{ok, imported, deleted_files, mcp_mode}`. Defensive:
+   * the backend may not exist yet (404) or return `ok:false`.
+   */
+  importToDb(directory: string): Promise<ImportToDbResponse> {
+    return this.request<ImportToDbResponse>(
+      'POST',
+      `/config/import-to-db?directory=${encodeURIComponent(directory)}`,
+      {},
+    );
   }
 
   /**

@@ -28,9 +28,18 @@ pub fn build_app() -> (Router, AppState) {
     let store = InstanceStore::new();
 
     // Single debug.log file, cleared on startup (fresh every app open).
+    // It lives in the engine data dir: the config is in the database now, so
+    // there is no "config directory" to sit beside any more.
     let debug = Arc::new(DebugLog::new(
-        bebok_core::config::global_config_path().with_file_name("debug.log"),
+        bebok_core::session::persist::data_root().join("debug.log"),
     ));
+    // `BEBOK_CONFIG_BACKEND` is gone: config always comes from `bebok.db`. Say
+    // so loudly instead of silently ignoring a stale dev habit.
+    if std::env::var("BEBOK_CONFIG_BACKEND").is_ok() {
+        tracing::error!(
+            "BEBOK_CONFIG_BACKEND is ignored: config is stored in the bebok database only              (import legacy config files with POST /config/import-to-db)"
+        );
+    }
     {
         // Forward engine-side LLM debug events into the debug log.
         // Survives broadcast lag (a lagged receiver resyncs) and only exits
@@ -79,8 +88,21 @@ pub fn build_app() -> (Router, AppState) {
         llm_trace,
         remote_extensions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         command_queue: Arc::new(tokio::sync::Mutex::new(crate::state::CommandRegistry::new())),
-        batches: Arc::new(bebok_core::BatchStore::new()),
+        batches: Arc::new(match bebok_core::BatchStore::open_default() {
+            Ok(store) => store,
+            Err(e) => {
+                tracing::error!("batch store: SQLite unavailable, batches stay in memory: {e}");
+                bebok_core::BatchStore::new()
+            }
+        }),
     };
+
+    // A task still marked `running` after a restart belongs to a dead process.
+    match bebok_core::scheduler::recover_interrupted() {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!("marked {n} interrupted scheduled task(s) as failed"),
+        Err(e) => tracing::error!("scheduler startup recovery failed: {e}"),
+    }
 
     // Scheduler: tick-loop that fires due tasks via create_session + prompt_turn.
     crate::routes::schedules::spawn_scheduler(state.clone());

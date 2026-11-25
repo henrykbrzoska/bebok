@@ -70,9 +70,37 @@ impl InstanceStore {
         })
     }
 
+    /// Path of the config database (`bebok.db`) belonging to this store's data
+    /// dir. Every config read/write of an instance goes through it, so a store
+    /// built with `with_data_dir` never touches the developer's real config.
+    pub fn config_db_path(&self) -> PathBuf {
+        self.data_dir.join("bebok.db")
+    }
+
     /// Build the store value (shared constructors wrap it in `Arc`).
     fn build_with(data_dir: PathBuf) -> Self {
-        let recovered = persist::repair(&data_dir);
+        let from_files = persist::repair(&data_dir);
+        // One-shot backfill of the SQLite mirror. Once it is complete the
+        // mirror is the metadata source; files only answer if it cannot be read.
+        let imported = match persist::import_sessions_once(&data_dir) {
+            Ok(done) => done,
+            Err(e) => {
+                tracing::warn!("bebok.db session import failed: {e}");
+                false
+            }
+        };
+        let seeded = if imported {
+            match persist::load_live_sessions(&data_dir) {
+                Ok(sessions) => Some(sessions),
+                Err(e) => {
+                    tracing::warn!("failed to seed sessions from bebok.db: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let recovered = seeded.unwrap_or(from_files);
         let meta: HashMap<Uuid, Session> = recovered.into_iter().map(|s| (s.id, s)).collect();
         tracing::info!("recovered {} session(s) from disk", meta.len());
         let bus = EventBus::default();
@@ -427,10 +455,16 @@ impl InstanceStore {
                 .map_err(CoreError::Io)?;
         }
 
-        let config = Arc::new(std::sync::RwLock::new(config::load(&root)));
+        let db = self.config_db_path();
+        let config = Arc::new(std::sync::RwLock::new(
+            config::store::load_scoped(&db, &root).unwrap_or_else(|e| {
+                tracing::warn!("failed to read config of {}: {e}", root.display());
+                config::store::load(&root)
+            }),
+        ));
         configure_browser(&root, &config.read().unwrap());
         let tools = Arc::new(ToolRegistry::new(builtin_tools()));
-        let permission = Arc::new(PermissionEngine::load(&root));
+        let permission = Arc::new(PermissionEngine::load_at(&db, &root));
         if normalized == GLOBAL_INSTANCE_KEY {
             // Hub mode: YOLO is never allowed, mutating tools always Ask.
             permission.set_global_mode();
@@ -447,6 +481,7 @@ impl InstanceStore {
         let mcp = Arc::new(McpManager::new());
         let instance = Arc::new(Instance {
             directory: normalized.clone(),
+            db: db.clone(),
             root: root.clone(),
             config,
             tools,
@@ -508,6 +543,11 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::TaskReportTool::new(weak.clone())));
+            // Blocking multiple-choice question to the human (main thread
+            // only; withheld from sub-agents in `request.rs`).
+            instance
+                .tools
+                .register_tool(Arc::new(crate::agent::AskUserTool::new(weak.clone())));
             // In-process code-index tools: delegate to the `bebok-index` plugin.
             instance
                 .tools
@@ -531,7 +571,9 @@ impl InstanceStore {
             if instance.config_snapshot().ast_search.enabled {
                 instance
                     .tools
-                    .register_tool(Arc::new(crate::agent::CodeAstSearch));
+                    .register_tool(Arc::new(crate::agent::CodeAstSearch::new(
+                        instance.db.clone(),
+                    )));
             }
             // Remote-server access (on by default; off hides the built-in so
             // neither the tool nor its schema reaches a request).
@@ -562,7 +604,10 @@ impl InstanceStore {
     pub async fn reload_instance(&self, directory: &str) -> Result<Arc<Instance>> {
         let instance = self.get_or_create_instance(directory).await?;
 
-        let config = config::load(&instance.root);
+        let config = config::store::load_scoped(&instance.db, &instance.root).unwrap_or_else(|e| {
+            tracing::warn!("failed to read config of {}: {e}", instance.root.display());
+            config::store::load(&instance.root)
+        });
         *instance.config.write().unwrap() = config.clone();
         instance.permission.reload();
         instance.permission.set_yolo(config.yolo);
@@ -575,7 +620,9 @@ impl InstanceStore {
         if config.ast_search.enabled {
             instance
                 .tools
-                .register_tool(Arc::new(crate::agent::CodeAstSearch));
+                .register_tool(Arc::new(crate::agent::CodeAstSearch::new(
+                    instance.db.clone(),
+                )));
         } else {
             instance.tools.unregister_tool("code_ast");
         }
@@ -1255,9 +1302,16 @@ mod tests {
             assert_eq!(eval.pattern, "write_file(*)");
         }
         // The rule is persisted at project level, not per path.
-        let cfg = std::fs::read_to_string(project.join(".bebok").join("config.json")).unwrap();
-        assert!(cfg.contains("write_file(*)"), "{cfg}");
-        assert!(!cfg.contains("orders.ts"), "{cfg}");
+        let rules = crate::permission::store::read_rules_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+        );
+        let patterns: Vec<&str> = rules.iter().map(|r| r.pattern.as_str()).collect();
+        assert!(patterns.contains(&"write_file(*)"), "{patterns:?}");
+        assert!(
+            !patterns.iter().any(|p| p.contains("orders.ts")),
+            "{patterns:?}"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1356,9 +1410,10 @@ mod tests {
         );
 
         // Disable in the project config and reload.
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "ssh": { "enabled": false } }"#,
+        crate::config::store::write_delta_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+            &crate::config::jsonc::parse(r#"{ "ssh": { "enabled": false } }"#).unwrap(),
         )
         .unwrap();
         let reloaded = store
@@ -1368,9 +1423,10 @@ mod tests {
         assert!(!has_ssh(&reloaded), "ssh tool registered while disabled");
 
         // A bare bool disables it too, and re-enabling brings it back.
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "ssh": false }"#,
+        crate::config::store::write_delta_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+            &crate::config::jsonc::parse(r#"{ "ssh": false }"#).unwrap(),
         )
         .unwrap();
         let bare = store
@@ -1379,9 +1435,10 @@ mod tests {
             .unwrap();
         assert!(!has_ssh(&bare), "`ssh: false` did not disable the tool");
 
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "ssh": { "enabled": true } }"#,
+        crate::config::store::write_delta_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+            &crate::config::jsonc::parse(r#"{ "ssh": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
         let back = store
@@ -1423,9 +1480,10 @@ mod tests {
         }
 
         // Enable in the project config and reload.
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "code_graph": { "enabled": true } }"#,
+        crate::config::store::write_delta_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+            &crate::config::jsonc::parse(r#"{ "code_graph": { "enabled": true } }"#).unwrap(),
         )
         .unwrap();
         let reloaded = store
@@ -1445,9 +1503,10 @@ mod tests {
         }
 
         // Disable again -> tools are unregistered.
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "code_graph": { "enabled": false } }"#,
+        crate::config::store::write_delta_at(
+            &store.config_db_path(),
+            &crate::config::store::project_scope(&project),
+            &crate::config::jsonc::parse(r#"{ "code_graph": { "enabled": false } }"#).unwrap(),
         )
         .unwrap();
         let off = store
@@ -1466,6 +1525,34 @@ mod tests {
             );
         }
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn startup_seeds_sessions_from_the_mirror_once_imported() {
+        let base = std::env::temp_dir().join(format!("bebok-seed-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let data = base.join("data");
+        let (id, meta_file) = {
+            // First start: the (empty) import runs and records its sentinel.
+            let store = InstanceStore::with_data_dir(data.clone());
+            let s = store
+                .create_session(project.to_str().unwrap(), "code", None)
+                .await
+                .unwrap();
+            s.append_user_message("hi").await.unwrap();
+            (
+                s.id(),
+                crate::session::persist::session_meta_path(s.disk_dir()),
+            )
+        };
+        // Damage the metadata file: the mirror must still seed the session.
+        std::fs::write(&meta_file, b"{broken").unwrap();
+
+        let store = InstanceStore::with_data_dir(data);
+        let listed = store.list_sessions(project.to_str().unwrap()).await;
+        assert!(listed.iter().any(|s| s.id == id), "seeded from bebok.db");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

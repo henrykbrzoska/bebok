@@ -1,7 +1,8 @@
-//! Minimal task scheduler: persist schedules on disk, compute next-run times,
-//! and tick every 30 s to fire due tasks.
+//! Minimal task scheduler: persist schedules in the `schedules` table of the
+//! Bebok database, compute next-run times, and tick every 30 s to fire due tasks.
 
 use chrono::{DateTime, Datelike, TimeDelta, Utc};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -44,24 +45,32 @@ fn default_true() -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence (JSON per task in data dir)
+// Persistence (`schedules` table in the Bebok database, see `db.rs`)
 // ---------------------------------------------------------------------------
 
-fn data_dir() -> PathBuf {
+const COLUMNS: &str = "id, name, kind, interval_mins, hour, minute, weekday, prompt, \
+     directory, agent, enabled, last_run_at, last_status, next_run_at";
+
+/// Pre-SQLite layout: one JSON file per task under `<data dir>/bebok/scheduled_tasks/`.
+fn legacy_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("bebok")
         .join("scheduled_tasks")
 }
 
-fn task_path(id: &str) -> PathBuf {
-    data_dir().join(format!("{id}.json"))
+fn open_store() -> Result<Connection, String> {
+    let conn = crate::db::open_db()?;
+    import_legacy_json(&conn)?;
+    Ok(conn)
 }
 
-pub fn load_all() -> Vec<ScheduledTask> {
-    let dir = data_dir();
+/// One-time import of the old JSON files. The folder is renamed afterwards,
+/// so deleted schedules cannot come back on the next start.
+fn import_legacy_json(conn: &Connection) -> Result<(), String> {
+    let dir = legacy_dir();
     if !dir.is_dir() {
-        return Vec::new();
+        return Ok(());
     }
     let mut tasks = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -75,23 +84,152 @@ pub fn load_all() -> Vec<ScheduledTask> {
             }
         }
     }
-    tasks
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for task in &tasks {
+        let exists: bool = tx
+            .query_row("SELECT 1 FROM schedules WHERE id = ?1", [&task.id], |_| {
+                Ok(true)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or(false);
+        if !exists {
+            write_task(&tx, task).map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    let target = dir.with_file_name("scheduled_tasks.migrated");
+    if let Err(e) = std::fs::rename(&dir, &target) {
+        tracing::warn!("could not retire legacy scheduled_tasks folder: {e}");
+    } else {
+        tracing::info!(
+            count = tasks.len(),
+            "imported legacy scheduled tasks into SQLite"
+        );
+    }
+    Ok(())
+}
+
+fn read_task(row: &Row<'_>) -> rusqlite::Result<ScheduledTask> {
+    Ok(ScheduledTask {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        kind: row.get(2)?,
+        interval_mins: row
+            .get::<_, Option<i64>>(3)?
+            .and_then(|v| u64::try_from(v).ok()),
+        hour: row
+            .get::<_, Option<i64>>(4)?
+            .and_then(|v| u8::try_from(v).ok()),
+        minute: row
+            .get::<_, Option<i64>>(5)?
+            .and_then(|v| u8::try_from(v).ok()),
+        weekday: row
+            .get::<_, Option<i64>>(6)?
+            .and_then(|v| u8::try_from(v).ok()),
+        prompt: row.get(7)?,
+        directory: row.get(8)?,
+        agent: row.get(9)?,
+        enabled: row.get::<_, i64>(10)? != 0,
+        last_run_at: row.get(11)?,
+        last_status: row.get(12)?,
+        next_run_at: row.get(13)?,
+    })
+}
+
+fn load_all_in(conn: &Connection) -> rusqlite::Result<Vec<ScheduledTask>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM schedules ORDER BY name, id"
+    ))?;
+    let rows = stmt.query_map([], read_task)?;
+    rows.collect()
+}
+
+/// Upsert one task.
+fn write_task(conn: &Connection, task: &ScheduledTask) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO schedules (id, name, kind, interval_mins, hour, minute, weekday,
+             prompt, directory, agent, enabled, last_run_at, last_status, next_run_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             kind = excluded.kind,
+             interval_mins = excluded.interval_mins,
+             hour = excluded.hour,
+             minute = excluded.minute,
+             weekday = excluded.weekday,
+             prompt = excluded.prompt,
+             directory = excluded.directory,
+             agent = excluded.agent,
+             enabled = excluded.enabled,
+             last_run_at = excluded.last_run_at,
+             last_status = excluded.last_status,
+             next_run_at = excluded.next_run_at",
+        params![
+            task.id,
+            task.name,
+            task.kind,
+            task.interval_mins.map(|v| v as i64),
+            task.hour.map(i64::from),
+            task.minute.map(i64::from),
+            task.weekday.map(i64::from),
+            task.prompt,
+            task.directory,
+            task.agent,
+            task.enabled as i64,
+            task.last_run_at,
+            task.last_status,
+            task.next_run_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_all() -> Vec<ScheduledTask> {
+    match open_store().and_then(|c| load_all_in(&c).map_err(|e| e.to_string())) {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            tracing::error!("loading scheduled tasks failed: {e}");
+            Vec::new()
+        }
+    }
 }
 
 pub fn save(task: &ScheduledTask) -> Result<(), String> {
-    let dir = data_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let bytes = serde_json::to_vec_pretty(task).map_err(|e| e.to_string())?;
-    std::fs::write(task_path(&task.id), bytes).map_err(|e| e.to_string())?;
-    Ok(())
+    let conn = open_store()?;
+    write_task(&conn, task).map_err(|e| e.to_string())
 }
 
 pub fn delete(id: &str) -> Result<(), String> {
-    let p = task_path(id);
-    if p.exists() {
-        std::fs::remove_file(p).map_err(|e| e.to_string())?;
-    }
+    let conn = open_store()?;
+    conn.execute("DELETE FROM schedules WHERE id = ?1", [id])
+        .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Startup recovery: a task still marked `running` belongs to a process that
+/// died mid-turn, so mark it `failed`. Returns the number of rows changed.
+pub fn recover_interrupted() -> Result<usize, String> {
+    let conn = open_store()?;
+    conn.execute(
+        "UPDATE schedules SET last_status = 'failed' WHERE last_status = 'running'",
+        [],
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// If `task.next_run_at` is not in the future (or cannot be parsed), move it
+/// to the next occurrence after `now`. Returns `true` when it was changed.
+/// Used when a disabled task is re-enabled so it does not fire immediately.
+pub fn refresh_next_if_past(task: &mut ScheduledTask, now: DateTime<Utc>) -> bool {
+    let past = match DateTime::parse_from_rfc3339(&task.next_run_at) {
+        Ok(dt) => dt.with_timezone(&Utc) <= now,
+        Err(_) => true,
+    };
+    if past {
+        task.next_run_at = compute_next(task, now).to_rfc3339();
+    }
+    past
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +287,66 @@ pub fn compute_next(task: &ScheduledTask, after: DateTime<Utc>) -> DateTime<Utc>
 mod tests {
     use super::*;
     use chrono::Timelike;
+
+    fn sample(id: &str) -> ScheduledTask {
+        ScheduledTask {
+            id: id.into(),
+            name: format!("task {id}"),
+            kind: "interval_mins".into(),
+            interval_mins: Some(15),
+            hour: None,
+            minute: None,
+            weekday: None,
+            prompt: "run".into(),
+            directory: "/tmp/p".into(),
+            agent: Some("code".into()),
+            enabled: true,
+            last_run_at: None,
+            last_status: "pending".into(),
+            next_run_at: "2000-01-01T00:00:00+00:00".into(),
+        }
+    }
+
+    #[test]
+    fn save_load_delete_roundtrip() {
+        let conn = crate::db::open_memory().unwrap();
+        write_task(&conn, &sample("a")).unwrap();
+        let mut b = sample("b");
+        b.enabled = false;
+        b.hour = Some(9);
+        write_task(&conn, &b).unwrap();
+
+        let all = load_all_in(&conn).unwrap();
+        assert_eq!(all.len(), 2);
+        let got_b = all.iter().find(|t| t.id == "b").unwrap();
+        assert!(!got_b.enabled);
+        assert_eq!(got_b.hour, Some(9));
+        assert_eq!(got_b.interval_mins, Some(15));
+
+        // upsert, not duplicate
+        b.name = "renamed".into();
+        write_task(&conn, &b).unwrap();
+        assert_eq!(load_all_in(&conn).unwrap().len(), 2);
+
+        conn.execute("DELETE FROM schedules WHERE id = ?1", ["a"])
+            .unwrap();
+        assert_eq!(load_all_in(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn refresh_moves_past_next_run_forward() {
+        let now = Utc::now();
+        let mut t = sample("x");
+        assert!(refresh_next_if_past(&mut t, now));
+        let next = DateTime::parse_from_rfc3339(&t.next_run_at).unwrap();
+        assert_eq!(next.with_timezone(&Utc), now + TimeDelta::minutes(15));
+
+        // future next_run_at is left alone
+        let future = (now + TimeDelta::hours(3)).to_rfc3339();
+        t.next_run_at = future.clone();
+        assert!(!refresh_next_if_past(&mut t, now));
+        assert_eq!(t.next_run_at, future);
+    }
 
     #[test]
     fn daily_next_run_is_tomorrow_when_hour_passed() {

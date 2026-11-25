@@ -6,7 +6,8 @@
 //! - `409` session busy (`CoreError::SessionBusy`)
 //! - `404` unknown session / ask id / pty / provider
 //! - `400` bad request bodies / truncate preconditions / provider misconfig / fs errors / compact preconditions
-//! - `403` invalid PTY ticket
+//! - `403` invalid PTY ticket / protected file
+//! - `410` retired config file (`<project>/.bebok/config.json`)
 //! - `502` provider `list_models` failure
 //! - `500` everything else (pty spawn, config write, …)
 
@@ -22,6 +23,9 @@ pub enum ApiError {
     NotFound(String),
     Conflict(String),
     Forbidden(String),
+    /// `410` — the resource existed but is gone for good (used for the retired
+    /// `<project>/.bebok/config.json`, whose config now lives in the database).
+    Gone(String),
     BadGateway(String),
     ServiceUnavailable(String),
     Internal(String),
@@ -42,6 +46,10 @@ impl ApiError {
 
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self::Forbidden(msg.into())
+    }
+
+    pub fn gone(msg: impl Into<String>) -> Self {
+        Self::Gone(msg.into())
     }
 
     pub fn bad_gateway(msg: impl Into<String>) -> Self {
@@ -77,6 +85,7 @@ impl IntoResponse for ApiError {
             Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
             Self::Conflict(m) => (StatusCode::CONFLICT, m),
             Self::Forbidden(m) => (StatusCode::FORBIDDEN, m),
+            Self::Gone(m) => (StatusCode::GONE, m),
             Self::BadGateway(m) => (StatusCode::BAD_GATEWAY, m),
             Self::ServiceUnavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
             Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),

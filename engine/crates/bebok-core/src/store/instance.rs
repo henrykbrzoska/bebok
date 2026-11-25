@@ -1,6 +1,6 @@
 //! Directory-keyed instance: resolved config + tool registry + permission engine.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bebok_mcp::McpManager;
@@ -14,6 +14,9 @@ use crate::permission::PermissionEngine;
 pub struct Instance {
     pub directory: String,
     pub root: PathBuf,
+    /// Config database (`bebok.db`) this instance reads/writes its config
+    /// scopes in — the store's data dir, so tests stay isolated.
+    pub db: PathBuf,
     /// Live resolved config (reloadable via `PUT /config` / toggles).
     pub config: Arc<std::sync::RwLock<ResolvedConfig>>,
     pub tools: Arc<ToolRegistry>,
@@ -30,6 +33,11 @@ pub struct Instance {
 }
 
 impl Instance {
+    /// Path of the config database backing this instance.
+    pub fn config_db_path(&self) -> &Path {
+        &self.db
+    }
+
     /// Snapshot of the current resolved config.
     pub fn config_snapshot(&self) -> ResolvedConfig {
         self.config.read().unwrap().clone()

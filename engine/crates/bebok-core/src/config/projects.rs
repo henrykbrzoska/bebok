@@ -1,12 +1,12 @@
-//! Projects registry (F5-1): the `"projects"` top-level key of the global
-//! config file (`~/.config/bebok/config.json`).
+//! Projects registry (F5-1): the `"projects"` key of the `global` config
+//! scope in `bebok.db`.
 //!
 //! This is **not** part of `ResolvedConfig` and does not take part in the
 //! defaults -> global -> project merge: it is sibling infrastructure that
-//! happens to live in the same file. Reads go through
-//! [`loader::read_layer_json`] and writes through [`writer::write_delta_to`],
-//! so unrelated top-level keys (and their JSONC comments) survive untouched -
-//! `write_full_*` would delete them and must not be used here.
+//! happens to live in the same scope. Reads go through
+//! [`config_store::read_scope_at`] and writes through a one-key delta, so
+//! unrelated top-level config keys survive untouched - a full-scope write
+//! would delete them and must not be used here.
 //!
 //! Every stored `path` has been through [`crate::util::normalize_path`], which
 //! canonicalises and strips the Windows extended-length `\\?\` prefix, so the
@@ -18,8 +18,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::loader::{global_config_path, read_layer_json};
-use super::writer::write_delta_to;
+use super::store::{self as config_store, GLOBAL_SCOPE};
 use crate::util::{normalize_path, now_ms};
 
 /// One registered project directory.
@@ -90,15 +89,16 @@ pub struct ProjectPatch {
 // load / save
 // ---------------------------------------------------------------------------
 
-/// Read the registry from an explicit config file. A missing file, an
-/// unparsable file or a missing/!array `"projects"` key all yield an empty
-/// list - the registry never fails a read, because an unreadable global config
-/// must not make the picker unusable.
-pub fn load_from(config_path: &Path) -> Vec<ProjectEntry> {
-    let Some(value) = read_layer_json(config_path) else {
+/// Read the registry from the config database at `db_path`.
+///
+/// A missing database, a missing scope or a missing/!array `"projects"` key all
+/// yield an empty list - the registry never fails a read, because an
+/// unreadable config must not make the picker unusable.
+pub fn load_at(db_path: &Path) -> Vec<ProjectEntry> {
+    let Some(obj) = config_store::read_scope_at(db_path, GLOBAL_SCOPE) else {
         return Vec::new();
     };
-    let Some(items) = value.get("projects").and_then(Value::as_array) else {
+    let Some(items) = obj.get("projects").and_then(Value::as_array) else {
         return Vec::new();
     };
     items
@@ -107,21 +107,22 @@ pub fn load_from(config_path: &Path) -> Vec<ProjectEntry> {
         .collect()
 }
 
-/// Persist the registry to an explicit config file (delta write: only the
-/// `"projects"` key is replaced).
-pub fn save_to(config_path: &Path, projects: &[ProjectEntry]) -> Result<(), ProjectsError> {
+/// Persist the registry to the config database at `db_path` (delta write:
+/// only the `"projects"` key is replaced).
+pub fn save_at(db_path: &Path, projects: &[ProjectEntry]) -> Result<(), ProjectsError> {
     let array = serde_json::to_value(projects).map_err(|e| ProjectsError::Io(e.to_string()))?;
-    write_delta_to(config_path, &json!({ "projects": array })).map_err(ProjectsError::Io)
+    config_store::write_delta_at(db_path, GLOBAL_SCOPE, &json!({ "projects": array }))
+        .map_err(ProjectsError::Io)
 }
 
-/// Read the registry from the global config file.
+/// Read the registry from the default config database.
 pub fn load() -> Vec<ProjectEntry> {
-    load_from(&global_config_path())
+    load_at(&config_store::bebok_db_path())
 }
 
-/// Persist the registry to the global config file.
+/// Persist the registry to the default config database.
 pub fn save(projects: &[ProjectEntry]) -> Result<(), ProjectsError> {
-    save_to(&global_config_path(), projects)
+    save_at(&config_store::bebok_db_path(), projects)
 }
 
 // ---------------------------------------------------------------------------
@@ -140,16 +141,16 @@ pub fn sort_entries(projects: &mut [ProjectEntry]) {
 }
 
 /// The registry in display order.
-pub fn list_from(config_path: &Path) -> Vec<ProjectEntry> {
-    let mut projects = load_from(config_path);
+pub fn list_at(db_path: &Path) -> Vec<ProjectEntry> {
+    let mut projects = load_at(db_path);
     sort_entries(&mut projects);
     projects
 }
 
 /// Look up one entry by id (WP-GIT: `GET /projects/{id}/git` and the
 /// worktree endpoints resolve a project id to its registered path here).
-pub fn find_in(config_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsError> {
-    load_from(config_path)
+pub fn find_at(db_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsError> {
+    load_at(db_path)
         .into_iter()
         .find(|p| p.id == id)
         .ok_or(ProjectsError::NotFound)
@@ -167,8 +168,8 @@ pub fn find_in(config_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsErr
 /// Returns `(entry, created)` - `created == false` means an entry for the same
 /// canonical path already existed and is returned unchanged (the caller
 /// answers 200 instead of 201).
-pub fn add_in(
-    config_path: &Path,
+pub fn add_at(
+    db_path: &Path,
     raw_path: &str,
     name: Option<String>,
 ) -> Result<(ProjectEntry, bool), ProjectsError> {
@@ -184,7 +185,7 @@ pub fn add_in(
     }
     let normalized = normalize_path(candidate);
 
-    let mut projects = load_from(config_path);
+    let mut projects = load_at(db_path);
     if let Some(existing) = projects.iter().find(|p| same_path(&p.path, &normalized)) {
         return Ok((existing.clone(), false));
     }
@@ -202,17 +203,17 @@ pub fn add_in(
         group: None,
     };
     projects.push(entry.clone());
-    save_to(config_path, &projects)?;
+    save_at(db_path, &projects)?;
     Ok((entry, true))
 }
 
 /// Partially update an entry (name and/or pinned). 404 when the id is unknown.
-pub fn patch_in(
-    config_path: &Path,
+pub fn patch_at(
+    db_path: &Path,
     id: &str,
     patch: &ProjectPatch,
 ) -> Result<ProjectEntry, ProjectsError> {
-    let mut projects = load_from(config_path);
+    let mut projects = load_at(db_path);
     let Some(index) = projects.iter().position(|p| p.id == id) else {
         return Err(ProjectsError::NotFound);
     };
@@ -235,32 +236,32 @@ pub fn patch_in(
         };
     }
     let updated = projects[index].clone();
-    save_to(config_path, &projects)?;
+    save_at(db_path, &projects)?;
     Ok(updated)
 }
 
 /// Forget a project. This only removes the registry entry - it never touches
 /// anything on disk.
-pub fn remove_in(config_path: &Path, id: &str) -> Result<(), ProjectsError> {
-    let mut projects = load_from(config_path);
+pub fn remove_at(db_path: &Path, id: &str) -> Result<(), ProjectsError> {
+    let mut projects = load_at(db_path);
     let before = projects.len();
     projects.retain(|p| p.id != id);
     if projects.len() == before {
         return Err(ProjectsError::NotFound);
     }
-    save_to(config_path, &projects)
+    save_at(db_path, &projects)
 }
 
 /// Mark a project as opened now and return it (the caller switches to the
 /// returned, normalised `path`).
-pub fn mark_opened_in(config_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsError> {
-    let mut projects = load_from(config_path);
+pub fn mark_opened_at(db_path: &Path, id: &str) -> Result<ProjectEntry, ProjectsError> {
+    let mut projects = load_at(db_path);
     let Some(index) = projects.iter().position(|p| p.id == id) else {
         return Err(ProjectsError::NotFound);
     };
     projects[index].last_opened_at = Some(now_ms());
     let updated = projects[index].clone();
-    save_to(config_path, &projects)?;
+    save_at(db_path, &projects)?;
     Ok(updated)
 }
 
@@ -295,7 +296,7 @@ fn same_path(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// A throwaway global-config path + project directories, mirroring the
+    /// A throwaway config database + project directories, mirroring the
     /// `std::env::temp_dir().join(...)` pattern `config/loader.rs`'s own tests
     /// use (no drive letters or home directory assumed).
     struct Fixture {
@@ -310,8 +311,9 @@ mod tests {
             Self { base }
         }
 
+        /// The config database this fixture works against.
         fn config(&self) -> std::path::PathBuf {
-            self.base.join("config.json")
+            self.base.join("bebok.db")
         }
 
         fn dir(&self, name: &str) -> std::path::PathBuf {
@@ -330,31 +332,31 @@ mod tests {
     #[test]
     fn missing_file_loads_an_empty_registry() {
         let fx = Fixture::new();
-        assert!(load_from(&fx.config()).is_empty());
+        assert!(load_at(&fx.config()).is_empty());
     }
 
     #[test]
     fn find_in_resolves_a_known_id_and_404s_an_unknown_one() {
         let fx = Fixture::new();
         let dir = fx.dir("alpha");
-        let (entry, _) = add_in(&fx.config(), dir.to_str().unwrap(), None).unwrap();
-        let found = find_in(&fx.config(), &entry.id).unwrap();
+        let (entry, _) = add_at(&fx.config(), dir.to_str().unwrap(), None).unwrap();
+        let found = find_at(&fx.config(), &entry.id).unwrap();
         assert_eq!(found.path, entry.path);
-        assert_eq!(find_in(&fx.config(), "nope"), Err(ProjectsError::NotFound));
+        assert_eq!(find_at(&fx.config(), "nope"), Err(ProjectsError::NotFound));
     }
 
     #[test]
     fn add_persists_and_defaults_the_name_to_the_last_component() {
         let fx = Fixture::new();
         let dir = fx.dir("alpha");
-        let (entry, created) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        let (entry, created) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
         assert!(created);
         assert_eq!(entry.name, "alpha");
         assert!(!entry.path.starts_with(r"\\?\"), "{}", entry.path);
         assert_eq!(entry.last_opened_at, None);
         assert!(!entry.pinned);
 
-        let loaded = load_from(&fx.config());
+        let loaded = load_at(&fx.config());
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], entry);
     }
@@ -362,28 +364,30 @@ mod tests {
     #[test]
     fn add_keeps_unrelated_top_level_config_keys() {
         let fx = Fixture::new();
-        std::fs::write(fx.config(), "{\n  // keep me\n  \"model\": \"gpt-4\"\n}\n").unwrap();
+        // A registry write is a one-key delta: other config keys survive.
+        config_store::write_delta_at(&fx.config(), GLOBAL_SCOPE, &json!({ "model": "gpt-4" }))
+            .unwrap();
         let dir = fx.dir("beta");
-        add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
-        let text = std::fs::read_to_string(fx.config()).unwrap();
-        assert!(text.contains("\"model\""), "{text}");
-        assert!(text.contains("keep me"), "{text}");
-        assert!(text.contains("\"projects\""), "{text}");
+        add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+
+        let obj = config_store::read_scope_at(&fx.config(), GLOBAL_SCOPE).unwrap();
+        assert_eq!(obj.get("model").unwrap(), "gpt-4", "unrelated key survives");
+        assert_eq!(obj["projects"].as_array().unwrap().len(), 1);
     }
 
     #[test]
     fn add_dedupes_by_canonical_path() {
         let fx = Fixture::new();
         let dir = fx.dir("gamma");
-        let (first, created_first) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        let (first, created_first) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
         // Same location, spelled with a redundant "." segment.
         let noisy = dir.join(".");
         let (second, created_second) =
-            add_in(&fx.config(), &noisy.to_string_lossy(), None).unwrap();
+            add_at(&fx.config(), &noisy.to_string_lossy(), None).unwrap();
         assert!(created_first);
         assert!(!created_second, "second add must reuse the existing entry");
         assert_eq!(first.id, second.id);
-        assert_eq!(load_from(&fx.config()).len(), 1);
+        assert_eq!(load_at(&fx.config()).len(), 1);
     }
 
     #[test]
@@ -391,31 +395,31 @@ mod tests {
         let fx = Fixture::new();
         let missing = fx.base.join("nope");
         assert!(matches!(
-            add_in(&fx.config(), &missing.to_string_lossy(), None),
+            add_at(&fx.config(), &missing.to_string_lossy(), None),
             Err(ProjectsError::Invalid(_))
         ));
 
         let file = fx.base.join("a-file.txt");
         std::fs::write(&file, "x").unwrap();
         assert!(matches!(
-            add_in(&fx.config(), &file.to_string_lossy(), None),
+            add_at(&fx.config(), &file.to_string_lossy(), None),
             Err(ProjectsError::Invalid(_))
         ));
         assert!(matches!(
-            add_in(&fx.config(), "   ", None),
+            add_at(&fx.config(), "   ", None),
             Err(ProjectsError::Invalid(_))
         ));
         // Nothing was written before the rejection.
-        assert!(load_from(&fx.config()).is_empty());
+        assert!(load_at(&fx.config()).is_empty());
     }
 
     #[test]
     fn patch_updates_name_and_pinned_and_404s_on_unknown_id() {
         let fx = Fixture::new();
         let dir = fx.dir("delta");
-        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        let (entry, _) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
 
-        let patched = patch_in(
+        let patched = patch_at(
             &fx.config(),
             &entry.id,
             &ProjectPatch {
@@ -427,34 +431,27 @@ mod tests {
         .unwrap();
         assert_eq!(patched.name, "Delta");
         assert!(patched.pinned);
-        assert_eq!(load_from(&fx.config())[0].name, "Delta");
+        assert_eq!(load_at(&fx.config())[0].name, "Delta");
 
         assert_eq!(
-            patch_in(&fx.config(), "no-such-id", &ProjectPatch::default()),
+            patch_at(&fx.config(), "no-such-id", &ProjectPatch::default()),
             Err(ProjectsError::NotFound)
         );
     }
 
     #[test]
     fn load_without_group_key_defaults_to_ungrouped() {
-        // An on-disk registry written before this field existed: the
-        // "projects" entries have no "group" key at all.
         let fx = Fixture::new();
-        std::fs::write(
-            fx.config(),
-            r#"{
-  "projects": [
-    {
-      "id": "legacy-1",
-      "name": "legacy",
-      "path": "/legacy",
-      "added_at": 1
-    }
-  ]
-}"#,
+        // A registry entry persisted before `group` existed (no such key).
+        config_store::write_delta_at(
+            &fx.config(),
+            GLOBAL_SCOPE,
+            &json!({ "projects": [
+                { "id": "legacy-1", "name": "legacy", "path": "/legacy", "added_at": 1 }
+            ] }),
         )
         .unwrap();
-        let loaded = load_from(&fx.config());
+        let loaded = load_at(&fx.config());
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].group, None);
     }
@@ -463,10 +460,10 @@ mod tests {
     fn patch_sets_group_and_trims_it() {
         let fx = Fixture::new();
         let dir = fx.dir("theta");
-        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        let (entry, _) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
         assert_eq!(entry.group, None);
 
-        let patched = patch_in(
+        let patched = patch_at(
             &fx.config(),
             &entry.id,
             &ProjectPatch {
@@ -477,15 +474,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(patched.group.as_deref(), Some("Backend"));
-        assert_eq!(load_from(&fx.config())[0].group.as_deref(), Some("Backend"));
+        assert_eq!(load_at(&fx.config())[0].group.as_deref(), Some("Backend"));
     }
 
     #[test]
     fn patch_clears_group_with_an_empty_or_whitespace_only_string() {
         let fx = Fixture::new();
         let dir = fx.dir("iota");
-        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
-        patch_in(
+        let (entry, _) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        patch_at(
             &fx.config(),
             &entry.id,
             &ProjectPatch {
@@ -498,7 +495,7 @@ mod tests {
 
         // Absent group field (the ProjectPatch::default() used elsewhere)
         // leaves the group unchanged.
-        let unchanged = patch_in(
+        let unchanged = patch_at(
             &fx.config(),
             &entry.id,
             &ProjectPatch {
@@ -510,7 +507,7 @@ mod tests {
         assert_eq!(unchanged.group.as_deref(), Some("Backend"));
 
         // A present-but-blank group clears it.
-        let cleared = patch_in(
+        let cleared = patch_at(
             &fx.config(),
             &entry.id,
             &ProjectPatch {
@@ -521,19 +518,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cleared.group, None);
-        assert_eq!(load_from(&fx.config())[0].group, None);
+        assert_eq!(load_at(&fx.config())[0].group, None);
     }
 
     #[test]
     fn remove_forgets_the_entry_but_leaves_the_directory_alone() {
         let fx = Fixture::new();
         let dir = fx.dir("epsilon");
-        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
-        remove_in(&fx.config(), &entry.id).unwrap();
-        assert!(load_from(&fx.config()).is_empty());
+        let (entry, _) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        remove_at(&fx.config(), &entry.id).unwrap();
+        assert!(load_at(&fx.config()).is_empty());
         assert!(dir.is_dir(), "removing a project must never touch disk");
         assert_eq!(
-            remove_in(&fx.config(), &entry.id),
+            remove_at(&fx.config(), &entry.id),
             Err(ProjectsError::NotFound)
         );
     }
@@ -542,18 +539,18 @@ mod tests {
     fn mark_opened_sets_the_timestamp() {
         let fx = Fixture::new();
         let dir = fx.dir("zeta");
-        let (entry, _) = add_in(&fx.config(), &dir.to_string_lossy(), None).unwrap();
+        let (entry, _) = add_at(&fx.config(), &dir.to_string_lossy(), None).unwrap();
         assert_eq!(entry.last_opened_at, None);
 
-        let opened = mark_opened_in(&fx.config(), &entry.id).unwrap();
+        let opened = mark_opened_at(&fx.config(), &entry.id).unwrap();
         assert!(opened.last_opened_at.is_some());
         assert_eq!(opened.path, entry.path);
         assert_eq!(
-            load_from(&fx.config())[0].last_opened_at,
+            load_at(&fx.config())[0].last_opened_at,
             opened.last_opened_at
         );
         assert_eq!(
-            mark_opened_in(&fx.config(), "no-such-id"),
+            mark_opened_at(&fx.config(), "no-such-id"),
             Err(ProjectsError::NotFound)
         );
     }

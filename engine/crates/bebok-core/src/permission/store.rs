@@ -1,51 +1,43 @@
-//! Persistence of `always allow` rules (project config file).
+//! Persistence of `always allow` rules (project config scope).
 //!
-//! Atomic write (tmp + rename); never clobbers a config that fails to parse.
+//! Rules live in the `permission` key of the project's config scope
+//! (`project:<dir>`) inside the config database; other top-level keys are
+//! untouched because the write is a delta on a single key.
 
 use std::path::Path;
 
 use serde_json::Value;
 
 use super::rule::{Rule, parse_rules};
-use crate::config::jsonc::JsoncDocument;
+use crate::config::store::{self, project_scope};
 use crate::error::{CoreError, Result};
 
-/// Read the permission rules from a config file (missing/invalid -> empty).
-pub fn read_rules_from(path: &Path) -> Vec<Rule> {
-    let Ok(text) = std::fs::read_to_string(path) else {
+/// Read the permission rules of one config scope (`global`, `project:<dir>`).
+/// A missing scope or a malformed section yields no rules.
+pub fn read_rules_at(db_path: &Path, scope: &str) -> Vec<Rule> {
+    let Some(obj) = store::read_scope_at(db_path, scope) else {
         return Vec::new();
     };
-    match crate::config::jsonc::parse(&text) {
-        Ok(v) => parse_rules(v.get("permission").unwrap_or(&Value::Null)),
-        Err(e) => {
-            tracing::warn!("invalid config {}: {e}", path.display());
-            Vec::new()
-        }
-    }
+    let value = obj.get("permission").cloned().unwrap_or(Value::Null);
+    parse_rules(&value)
 }
 
-/// Persist an upserted rule under `permission.rules` of the project config,
-/// preserving every unrelated top-level key, comment and bit of formatting
-/// (via `JsoncDocument::with_set`). Atomic write (tmp + rename).
-pub fn persist_project_rule(project_config: &Path, rule: &Rule) -> Result<()> {
-    let mut rules: Vec<Rule> = Vec::new();
-    let existing: Option<JsoncDocument> = match std::fs::read_to_string(project_config) {
-        Ok(text) => match JsoncDocument::parse(&text) {
-            Ok(doc) => {
-                let permission = doc.value().get("permission").unwrap_or(&Value::Null);
-                rules = parse_rules(permission);
-                Some(doc)
-            }
-            Err(e) => {
-                // Never clobber a config we cannot parse.
-                return Err(CoreError::Other(format!(
-                    "cannot update invalid project config {}: {e}",
-                    project_config.display()
-                )));
-            }
-        },
-        Err(_) => None, // file does not exist yet -> create it
+/// [`read_rules_at`] against the default database path.
+pub fn read_rules_scope(scope: &str) -> Vec<Rule> {
+    let Some(obj) = store::read_scope_db(scope) else {
+        return Vec::new();
     };
+    let value = obj.get("permission").cloned().unwrap_or(Value::Null);
+    parse_rules(&value)
+}
+
+/// Persist an upserted rule under `permission.rules` of the project scope,
+/// preserving every unrelated top-level key (the write is a one-key delta).
+pub fn persist_project_rule_at(db_path: &Path, directory: &Path, rule: &Rule) -> Result<()> {
+    let scope = project_scope(directory);
+    let obj = store::read_scope_at(db_path, &scope).unwrap_or_default();
+    let permission = obj.get("permission").cloned().unwrap_or(Value::Null);
+    let mut rules: Vec<Rule> = parse_rules(&permission);
 
     // Upsert: replacing the same pattern keeps first-match ordering sane (a
     // stale `ask`/`deny` for the same pattern must not shadow the `allow`).
@@ -54,31 +46,27 @@ pub fn persist_project_rule(project_config: &Path, rule: &Rule) -> Result<()> {
         None => rules.push(rule.clone()),
     }
 
-    let permission_value = serde_json::json!({ "rules": rules });
-    let output = match &existing {
-        Some(doc) => doc.with_set("permission", &permission_value),
-        None => serde_json::to_string_pretty(&serde_json::json!({
-            "permission": permission_value
-        }))
-        .unwrap_or_default(),
+    // Keep any non-`rules` keys of the existing `permission` section.
+    let mut section = match permission {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
     };
+    section.insert(
+        "rules".to_string(),
+        serde_json::to_value(&rules).map_err(|e| CoreError::Other(e.to_string()))?,
+    );
 
-    if let Some(dir) = project_config.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    write_atomic(project_config, &output)?;
-    Ok(())
+    store::write_delta_at(
+        db_path,
+        &scope,
+        &serde_json::json!({ "permission": Value::Object(section) }),
+    )
+    .map_err(CoreError::Other)
 }
 
-fn write_atomic(path: &Path, text: &str) -> Result<()> {
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "config.json".to_string());
-    let tmp = path.with_file_name(format!("{file_name}.tmp-{}", std::process::id()));
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+/// [`persist_project_rule_at`] against the default database path.
+pub fn persist_project_rule(directory: &Path, rule: &Rule) -> Result<()> {
+    persist_project_rule_at(&store::bebok_db_path(), directory, rule)
 }
 
 #[cfg(test)]
@@ -88,51 +76,94 @@ mod tests {
     use super::super::rule::Action;
     use super::*;
 
-    fn tmp_path(name: &str) -> PathBuf {
-        let d =
+    /// Temp base dir, project dir and the config DB path (never the real one).
+    fn tmp(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let base =
             std::env::temp_dir().join(format!("bebok-perm-store-{name}-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&d).unwrap();
-        d.join(".bebok").join("config.json")
+        let dir = base.join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = base.join("bebok.db");
+        (base, dir, db)
+    }
+
+    fn rule(pattern: &str, action: Action) -> Rule {
+        Rule {
+            pattern: pattern.into(),
+            action,
+        }
     }
 
     #[test]
-    fn atomic_write_creates_parent_dirs() {
-        let path = tmp_path("mkdir");
-        persist_project_rule(
-            &path,
-            &Rule {
-                pattern: "bash(pwd)".into(),
-                action: Action::Allow,
-            },
+    fn persist_creates_the_scope_and_round_trips() {
+        let (base, dir, db) = tmp("persist");
+        // No scope yet: reading yields no rules.
+        assert!(read_rules_at(&db, &project_scope(&dir)).is_empty());
+
+        persist_project_rule_at(&db, &dir, &rule("bash(pwd)", Action::Allow)).unwrap();
+        let rules = read_rules_at(&db, &project_scope(&dir));
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].pattern, "bash(pwd)");
+        assert_eq!(rules[0].action, Action::Allow);
+
+        // A second, different rule appends.
+        persist_project_rule_at(&db, &dir, &rule("bash(git *)", Action::Deny)).unwrap();
+        assert_eq!(read_rules_at(&db, &project_scope(&dir)).len(), 2);
+
+        // Re-persisting the same pattern replaces its action in place.
+        persist_project_rule_at(&db, &dir, &rule("bash(pwd)", Action::Deny)).unwrap();
+        let rules = read_rules_at(&db, &project_scope(&dir));
+        assert_eq!(rules.len(), 2, "same pattern must not be duplicated");
+        assert_eq!(rules[0].action, Action::Deny);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn persist_keeps_unrelated_keys_and_other_permission_fields() {
+        let (base, dir, db) = tmp("keep");
+        let scope = project_scope(&dir);
+        store::write_delta_at(
+            &db,
+            &scope,
+            &serde_json::json!({
+                "model": "zai/glm-5.3",
+                "permission": { "edit": "allow", "rules": [] }
+            }),
         )
         .unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("bash(pwd)"));
-        // No stray tmp file left behind.
-        assert!(
-            !path.parent().unwrap().read_dir().unwrap().any(|e| e
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .contains(".tmp-"))
+
+        persist_project_rule_at(&db, &dir, &rule("bash(pwd)", Action::Allow)).unwrap();
+
+        let obj = store::read_scope_at(&db, &scope).unwrap();
+        assert_eq!(
+            obj.get("model").unwrap(),
+            "zai/glm-5.3",
+            "unrelated keys survive"
         );
+        assert_eq!(
+            obj["permission"]["edit"], "allow",
+            "other permission fields survive"
+        );
+        let persisted = read_rules_at(&db, &scope);
+        assert!(
+            persisted.iter().any(|r| r.pattern == "bash(pwd)"),
+            "the new rule is persisted: {persisted:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn refuses_to_clobber_invalid_config() {
-        let path = tmp_path("invalid");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "{ not valid json").unwrap();
-        let err = persist_project_rule(
-            &path,
-            &Rule {
-                pattern: "bash(pwd)".into(),
-                action: Action::Allow,
-            },
+    fn read_rules_of_an_unknown_scope_is_empty() {
+        let (base, _dir, db) = tmp("unknown");
+        store::write_delta_at(
+            &db,
+            store::GLOBAL_SCOPE,
+            &serde_json::json!({ "model": "x/y" }),
         )
-        .unwrap_err();
-        assert!(err.to_string().contains("invalid project config"));
-        // Original bytes untouched.
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not valid json");
+        .unwrap();
+        assert!(read_rules_at(&db, store::GLOBAL_SCOPE).is_empty());
+        assert!(read_rules_at(&db, "project:/nonexistent").is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

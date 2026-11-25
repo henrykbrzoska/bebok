@@ -116,6 +116,10 @@ pub async fn patch_schedule(
     }
     if let Some(enabled) = body.enabled {
         task.enabled = enabled;
+        // Re-enabling must not fire a run that came due while the task was off.
+        if enabled {
+            scheduler::refresh_next_if_past(&mut task, Utc::now());
+        }
     }
     if let Some(prompt) = body.prompt {
         task.prompt = prompt;
@@ -215,6 +219,7 @@ pub fn spawn_scheduler(state: AppState) {
                             | crate::error::ApiError::NotFound(m)
                             | crate::error::ApiError::Conflict(m)
                             | crate::error::ApiError::Forbidden(m)
+                            | crate::error::ApiError::Gone(m)
                             | crate::error::ApiError::BadGateway(m)
                             | crate::error::ApiError::ServiceUnavailable(m)
                             | crate::error::ApiError::Internal(m) => m.clone(),
