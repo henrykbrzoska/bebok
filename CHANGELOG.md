@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Bebok now has an embedded SQLite database (`bebok.db` in the data folder)
+  with WAL mode, foreign keys and versioned schema migrations. Schedules and
+  batch jobs are the first data stored in it.
+- Explorer workspace is now persisted per project in the database
+  (`GET/PUT /fs/workspace?directory=` backed by `explorer_state`), so open
+  tabs and layout survive engine restarts.
+
+- Context compaction now shows a confirmation dialog before compacting (summary, kept messages, fork note) with Compact / Cancel / Send without compacting actions.
+- Context compaction settings moved to Settings → General: "Kompaktowanie kontekstu" card with "Proponuj kompaktowanie, gdy kontekst sie zapelnia" toggle and threshold (50–99, default 85).
+
+### Fixes
+
+- Scheduled tasks and batch jobs are stored in the Bebok database. Batch jobs
+  survive an engine restart, and a scheduled run that was interrupted by a
+  restart is shown as failed instead of staying "running". Re-enabling a
+  paused schedule no longer fires a run that came due while it was off; it
+  waits for its next time slot. Existing schedules are imported once.
+- The question dialog (ask_user) now sends answers in the format the engine
+  expects, so Submit and Skip actually close the dialog instead of showing
+  "Could not send your answer". Skip (and a Submit that hits a question the
+  engine no longer knows, e.g. after a restart) always dismisses the dialog
+  so it can never block the composer forever.
+
 ## 1.12.1 — 2026-11-25
 
 ### Features

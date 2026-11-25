@@ -43,3 +43,4 @@ tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 zip.workspace = true
+rusqlite = { version = "0.43.0", features = ["bundled"] }

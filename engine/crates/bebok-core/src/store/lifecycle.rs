@@ -105,6 +105,7 @@ impl InstanceStore {
             }
             idx += 1;
         }
+        persist::mirror_truncate(&dir, keep).await;
         state.max_message_index.store(keep, Ordering::Relaxed);
         // The CLI still remembers the dropped tail: never resume into it.
         state.set_cli_session(None).await;
@@ -164,6 +165,7 @@ impl InstanceStore {
         // Append-only index entry so the deletion itself is auditable.
         let inst_dir = persist::instance_dir(self.data_dir(), &meta.directory);
         persist::append_index_event(&inst_dir, "deleted", &meta).await;
+        persist::mirror_session_deleted(&disk_dir, crate::util::now_ms()).await;
 
         self.bus.publish(crate::event::Event::new(
             "session.deleted",
@@ -347,6 +349,43 @@ mod tests {
         assert!(fork.cli_session().await.is_none());
         assert!(s.cli_session().await.is_some(), "source keeps its record");
 
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn truncate_and_delete_are_mirrored_into_sqlite() {
+        use crate::db;
+        use crate::session::persist;
+
+        let base = std::env::temp_dir().join(format!("bebok-mirror-{}", uuid::Uuid::new_v4()));
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let data = base.join("data");
+        let store = InstanceStore::with_data_dir(data.clone());
+        let s = store
+            .create_session(project.to_str().unwrap(), "code", None)
+            .await
+            .unwrap();
+        for text in ["one", "two", "three"] {
+            s.append_user_message(text).await.unwrap();
+        }
+        let id = s.id().to_string();
+        let db_path = data.join("bebok.db");
+        let rows = || {
+            persist::with_conn(&db_path, |c| db::load_transcript_db(c, &id))
+                .unwrap()
+                .len()
+        };
+        assert_eq!(rows(), 3, "appends are dual-written");
+
+        store.truncate_session(s.id(), 1).await.unwrap();
+        assert_eq!(rows(), 1, "truncate drops the mirror tail");
+
+        store.delete_session(s.id()).await.unwrap();
+        let meta = persist::with_conn(&db_path, |c| db::get_session_meta(c, &id))
+            .unwrap()
+            .expect("row kept for audit");
+        assert!(meta.deleted_at.is_some(), "delete soft-deletes the row");
         let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -2,7 +2,8 @@
 //! `POST /projects/{id}/git/worktree/remove`.
 //!
 //! Same shape as `routes::projects`: thin handlers that resolve the project id
-//! through `bebok_core::config::projects` (global config file, no `AppState`)
+//! through `bebok_core::config::projects` (the `global` config scope in the
+//! store's `bebok.db`)
 //! and hand the registered path to `bebok_core::git`. Both inherit the
 //! capability-token layer from `routes::build_api_router`.
 //!
@@ -14,7 +15,7 @@
 use std::path::{Path as FsPath, PathBuf};
 
 use axum::Json;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
@@ -22,6 +23,7 @@ use bebok_core::config::projects::{self, ProjectEntry, ProjectsError};
 use bebok_core::git::{self, GitError};
 
 use crate::error::ApiError;
+use crate::state::AppState;
 
 fn map_projects_err(e: ProjectsError) -> axum::response::Response {
     match e {
@@ -55,9 +57,10 @@ pub struct RemoveWorktreeBody {
 /// A non-repo (or a host without `git`) answers `{ "is_repo": false, ... }`
 /// with the other fields `null`, never an error; only an unknown id is 404.
 pub async fn project_git(
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let entry = resolve(&bebok_core::config::global_config_path(), &id)?;
+    let entry = resolve(&state.store.config_db_path(), &id)?;
     let info = git::inspect(FsPath::new(&entry.path)).await;
     let mut value = serde_json::to_value(info).unwrap_or_default();
     value["project_id"] = serde_json::json!(entry.id);
@@ -70,19 +73,19 @@ pub async fn project_git(
 /// `POST /projects/{id}/git/worktree/remove` -> `git worktree remove` for a
 /// path strictly below `<project>/.bebok/worktrees/` (anything else is 400).
 pub async fn remove_worktree(
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<RemoveWorktreeBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let removed =
-        remove_worktree_in(&bebok_core::config::global_config_path(), &id, &body.path).await?;
+    let removed = remove_worktree_in(&state.store.config_db_path(), &id, &body.path).await?;
     Ok(Json(serde_json::json!({
         "removed": true,
         "path": removed.to_string_lossy(),
     })))
 }
 
-/// Testable core of [`remove_worktree`]: explicit config path instead of the
-/// global one.
+/// Testable core of [`remove_worktree`]: explicit config **database** path
+/// instead of the store's own.
 pub async fn remove_worktree_in(
     config_path: &FsPath,
     id: &str,
@@ -99,7 +102,7 @@ pub async fn remove_worktree_in(
 }
 
 fn resolve(config_path: &FsPath, id: &str) -> Result<ProjectEntry, axum::response::Response> {
-    projects::find_in(config_path, id).map_err(map_projects_err)
+    projects::find_at(config_path, id).map_err(map_projects_err)
 }
 
 #[cfg(test)]
@@ -202,9 +205,10 @@ mod tests {
         let other = base.join("other");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::create_dir_all(&other).unwrap();
-        let config = base.join("config.json");
+        // The registry now lives in a config database; same temp location.
+        let config = base.join("bebok.db");
         let (entry, _) =
-            bebok_core::config::projects::add_in(&config, project.to_str().unwrap(), None).unwrap();
+            bebok_core::config::projects::add_at(&config, project.to_str().unwrap(), None).unwrap();
 
         for bad in [
             other.to_string_lossy().to_string(),

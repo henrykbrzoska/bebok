@@ -7,10 +7,11 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use bebok_core::permission::{PermissionAnswer, ResolveOutcome};
+use bebok_core::session::{Message, Part, Role};
 
 use crate::error::{ApiError, err_response};
 use crate::services::turn::prompt_turn;
@@ -97,10 +98,140 @@ pub struct PermissionBody {
     pub always: bool,
 }
 
-/// `POST /session/{id}/compact` body.
+/// `POST /session/{id}/compact` and `.../compact/preview` body.
 #[derive(Deserialize)]
 pub struct CompactBody {
     pub budget: Option<usize>,
+    /// Explicit cutoff (number of leading messages to summarize). When set it
+    /// is used as-is instead of recomputing from `budget`, so the compaction
+    /// that runs is exactly the one the user previewed. Must be `1..=n-2`.
+    #[serde(default)]
+    pub cutoff: Option<usize>,
+}
+
+/// Excerpt length (chars) of one message in a compaction preview.
+const PREVIEW_EXCERPT_CHARS: usize = 160;
+
+/// One message row of a compaction preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlannedMessage {
+    pub index: usize,
+    pub role: &'static str,
+    pub excerpt: String,
+    pub tokens: usize,
+}
+
+/// What a compaction would do, computed without touching the session.
+///
+/// `before` is the chars/4 estimate of the whole transcript; the route
+/// replaces it with the live gauge when one exists so preview and result agree.
+/// `after` estimates the forked transcript (summary + kept tail) before the
+/// route appends its marker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompactionPlan {
+    pub cutoff: usize,
+    pub total: usize,
+    pub kept: usize,
+    pub before: u64,
+    pub after: u64,
+    pub messages: Vec<PlannedMessage>,
+}
+
+/// Plan a compaction over `messages`.
+///
+/// With `explicit_cutoff` the cutoff is validated (`1..=n-2`, so at least two
+/// messages stay) and used verbatim; otherwise it is chosen by
+/// [`compact_cutoff`] from `budget`. Errors match the compact route: a session
+/// under four messages is too short, and a zero cutoff means nothing to do.
+pub fn plan_compaction(
+    messages: &[Message],
+    budget: usize,
+    explicit_cutoff: Option<usize>,
+) -> Result<CompactionPlan, ApiError> {
+    let n = messages.len();
+    if n < 4 {
+        return Err(ApiError::bad_request("session too short to compact"));
+    }
+    let cutoff = match explicit_cutoff {
+        Some(c) if (1..=n - 2).contains(&c) => c,
+        Some(c) => {
+            return Err(ApiError::bad_request(format!(
+                "invalid cutoff {c}: must be between 1 and {}",
+                n - 2
+            )));
+        }
+        None => {
+            let c = compact_cutoff(messages, budget);
+            if c == 0 {
+                return Err(ApiError::bad_request(
+                    "session fits the budget; nothing to compact",
+                ));
+            }
+            c
+        }
+    };
+
+    let summary = bebok_core::context::compact_summary(messages, cutoff);
+    let after = bebok_core::context::estimate_transcript(&[Message::summary(&summary)])
+        + bebok_core::context::estimate_transcript(&messages[cutoff..]);
+
+    let rows = messages
+        .iter()
+        .enumerate()
+        .map(|(index, m)| {
+            let text = m.text_content();
+            let excerpt = if !text.is_empty() {
+                text.chars().take(PREVIEW_EXCERPT_CHARS).collect()
+            } else if m.parts.iter().any(|p| matches!(p, Part::Tool { .. })) {
+                "(tool calls)".to_string()
+            } else {
+                String::new()
+            };
+            PlannedMessage {
+                index,
+                role: match m.role {
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                },
+                excerpt,
+                tokens: bebok_core::context::estimate_message(m),
+            }
+        })
+        .collect();
+
+    Ok(CompactionPlan {
+        cutoff,
+        total: n,
+        kept: n - cutoff,
+        before: bebok_core::context::estimate_transcript(messages),
+        after,
+        messages: rows,
+    })
+}
+
+/// `POST /session/{id}/compact/preview` -> what `compact` would do, as a
+/// [`CompactionPlan`]. Nothing is persisted; pass the accepted `cutoff` back
+/// to `POST /session/{id}/compact` to run exactly this plan.
+pub async fn preview_compaction(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CompactBody>,
+) -> Result<Json<CompactionPlan>, axum::response::Response> {
+    let source = state
+        .store
+        .open_session(id)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let messages = source.messages_snapshot().await;
+    let budget = body
+        .budget
+        .unwrap_or(source.config_snapshot().context_budget);
+    let mut plan =
+        plan_compaction(&messages, budget, body.cutoff).map_err(|e| e.into_response())?;
+    if let Some(live) = source.meta_snapshot().await.context_used {
+        plan.before = live;
+    }
+    Ok(Json(plan))
 }
 
 /// `POST /session/{id}/truncate` body: rewind in place, keep `keep` leading messages.
@@ -545,28 +676,18 @@ pub async fn compact_session(
         .await
         .map_err(|e| err_response(&e))?;
     let messages = source.messages_snapshot().await;
-    if messages.len() < 4 {
-        return Err(ApiError::bad_request("session too short to compact").into_response());
-    }
-
     let budget = body
         .budget
         .unwrap_or(source.config_snapshot().context_budget);
-    let cutoff = compact_cutoff(&messages, budget);
-    if cutoff == 0 {
-        return Err(
-            ApiError::bad_request("session fits the budget; nothing to compact").into_response(),
-        );
-    }
+    let plan = plan_compaction(&messages, budget, body.cutoff).map_err(|e| e.into_response())?;
+    let cutoff = plan.cutoff;
 
     let summary = bebok_core::context::compact_summary(&messages, cutoff);
     let source_meta = source.meta_snapshot().await;
     // "From" is the live gauge when a turn has run (provider-counted), else
     // the chars/4 estimate of the whole transcript; "to" is always estimated
     // because the fork has not been sent to a provider yet.
-    let before = source_meta
-        .context_used
-        .unwrap_or_else(|| bebok_core::context::estimate_transcript(&messages));
+    let before = source_meta.context_used.unwrap_or(plan.before);
     let fork = state
         .store
         .compact_session(id, summary, cutoff)
@@ -715,21 +836,22 @@ mod tests {
     async fn attach_effective_model_resolves_default_to_a_real_id() {
         let base = std::env::temp_dir().join(format!("bebok-effmodel-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
-        std::fs::create_dir_all(project.join(".bebok")).unwrap();
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "model": "openai/gpt-5.6-luna", "models": { "ask": "zai/glm-5.3-flash" } }"#,
+        std::fs::create_dir_all(&project).unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        // The store owns its config database, so this test is isolated from the
+        // developer's real `bebok.db` by construction — no global layer can
+        // leak a `models.code` into the assertions below.
+        bebok_core::config::store::write_delta_at(
+            &store.config_db_path(),
+            &bebok_core::config::project_scope(&project),
+            &serde_json::json!({
+                "model": "openai/gpt-5.6-luna",
+                "models": { "ask": "zai/glm-5.3-flash" }
+            }),
         )
         .unwrap();
-        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
         let dir = project.to_string_lossy().to_string();
         let instance = store.get_or_create_instance(&dir).await.unwrap();
-        // Isolate from the ambient global config: `config::load` merges the
-        // real `~/.config/bebok/config.json` under the project layer, and its
-        // `models` map merges per key — a global `models.code` survives the
-        // project file above and masks the project default asserted below.
-        // Reload project-only (defaults -> project, no global layer).
-        *instance.config.write().unwrap() = bebok_core::config::load_with_global(&project, None);
 
         // No override anywhere: the config default.
         let plain = bebok_core::session::Session::new(dir.clone(), "code");
@@ -782,5 +904,105 @@ mod tests {
         // A generous budget keeps everything except the very first message
         // (the loop always leaves at least one message to summarize).
         assert_eq!(compact_cutoff(&messages, 100_000), 1);
+    }
+
+    fn six_messages() -> Vec<Message> {
+        (0..6)
+            .map(|i| Message::user(format!("{i}").repeat(400)))
+            .collect()
+    }
+
+    #[test]
+    fn preview_matches_compact_cutoff() {
+        let messages = six_messages();
+        for budget in [0, 400, 1_000, 100_000] {
+            let plan = plan_compaction(&messages, budget, None).unwrap();
+            assert_eq!(plan.cutoff, compact_cutoff(&messages, budget));
+            assert_eq!(plan.total, 6);
+            assert_eq!(plan.kept, 6 - plan.cutoff);
+            assert_eq!(plan.messages.len(), 6);
+        }
+        let plan = plan_compaction(&messages, 400, None).unwrap();
+        assert_eq!(plan.cutoff, 4);
+        assert_eq!(
+            plan.before,
+            bebok_core::context::estimate_transcript(&messages)
+        );
+        // `after` is the summary message plus the kept tail, exactly as the
+        // fork will hold them (the marker is appended later and not counted).
+        let summary = bebok_core::context::compact_summary(&messages, 4);
+        let expected_after = bebok_core::context::estimate_transcript(&[Message::summary(summary)])
+            + bebok_core::context::estimate_transcript(&messages[4..]);
+        assert_eq!(plan.after, expected_after);
+        assert_eq!(plan.messages[0].index, 0);
+        assert_eq!(plan.messages[0].role, "user");
+        assert_eq!(
+            plan.messages[5].tokens,
+            bebok_core::context::estimate_message(&messages[5])
+        );
+    }
+
+    #[test]
+    fn preview_excerpt_is_capped_at_160_chars() {
+        let messages = six_messages();
+        let plan = plan_compaction(&messages, 400, None).unwrap();
+        assert_eq!(plan.messages[0].excerpt.chars().count(), 160);
+        assert_eq!(plan.messages[0].excerpt, "0".repeat(160));
+    }
+
+    #[test]
+    fn short_session_is_rejected_for_preview_and_explicit_cutoff() {
+        let three: Vec<Message> = (0..3).map(|i| Message::user(format!("m{i}"))).collect();
+        assert!(matches!(
+            plan_compaction(&three, 100, None),
+            Err(ApiError::BadRequest(m)) if m == "session too short to compact"
+        ));
+        assert!(matches!(
+            plan_compaction(&three, 100, Some(1)),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn bad_explicit_cutoff_is_rejected() {
+        let messages = six_messages();
+        // Valid range is 1..=n-2 = 1..=4.
+        for bad in [0, 5, 6, 100] {
+            assert!(
+                matches!(
+                    plan_compaction(&messages, 100_000, Some(bad)),
+                    Err(ApiError::BadRequest(_))
+                ),
+                "cutoff {bad} should be rejected"
+            );
+        }
+        assert!(plan_compaction(&messages, 100_000, Some(1)).is_ok());
+        assert!(plan_compaction(&messages, 100_000, Some(4)).is_ok());
+    }
+
+    #[test]
+    fn explicit_cutoff_takes_precedence_over_budget() {
+        let messages = six_messages();
+        // A generous budget would compact just 1 message...
+        assert_eq!(plan_compaction(&messages, 100_000, None).unwrap().cutoff, 1);
+        // ...but an accepted preview's cutoff is what runs.
+        assert_eq!(
+            plan_compaction(&messages, 100_000, Some(3)).unwrap().cutoff,
+            3
+        );
+        // And a tiny budget does not override an explicit cutoff either.
+        let plan = plan_compaction(&messages, 0, Some(2)).unwrap();
+        assert_eq!(plan.cutoff, 2);
+        assert_eq!(plan.kept, 4);
+    }
+
+    #[test]
+    fn compact_body_accepts_optional_cutoff() {
+        let plain: CompactBody = serde_json::from_str(r#"{"budget":500}"#).unwrap();
+        assert_eq!(plain.budget, Some(500));
+        assert_eq!(plain.cutoff, None);
+        let with: CompactBody = serde_json::from_str(r#"{"cutoff":3}"#).unwrap();
+        assert_eq!(with.budget, None);
+        assert_eq!(with.cutoff, Some(3));
     }
 }

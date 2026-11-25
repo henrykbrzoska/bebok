@@ -54,15 +54,6 @@
       </span>
     }
 
-    <label class="tb-field tb-compact-toggle" [title]="t('chat.autoCompactHint')">
-      <input
-        type="checkbox"
-        data-testid="auto-compact-toggle"
-        [checked]="autoCompactEnabled()"
-        (change)="onAutoCompactToggle($event)"
-      />
-      <span class="tb-label">{{ t('chat.autoCompact') }}</span>
-    </label>
     <button
       class="tb-compact"
       type="button"
@@ -196,6 +187,7 @@
             [activeSessionID]="sessionID()"
             [directory]="meta()?.directory"
           />
+          <app-compact-confirm-dialog />
           <app-question-dialog
             #question
             [activeSessionID]="sessionID()"

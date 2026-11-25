@@ -50,6 +50,7 @@ export type ContextLevel = 'ok' | 'warning' | 'danger';
  */
 export const DEFAULT_AUTO_COMPACT_PERCENT = 85;
 const KEY_AUTO_COMPACT_PERCENT = 'bebok.chat.autoCompactPercent';
+const KEY_SUGGEST_COMPACT = 'bebok.chat.suggestCompact';
 /** The engine refuses to compact a transcript shorter than this. */
 export const MIN_COMPACTABLE_MESSAGES = 4;
 
@@ -63,6 +64,18 @@ function readAutoCompactPercent(): number {
     return Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : DEFAULT_AUTO_COMPACT_PERCENT;
   } catch {
     return DEFAULT_AUTO_COMPACT_PERCENT;
+  }
+}
+
+function readSuggestCompact(): boolean {
+  try {
+    const raw = localStorage.getItem(KEY_SUGGEST_COMPACT);
+    if (raw === null) {
+      return true;
+    }
+    return raw === 'true';
+  } catch {
+    return true;
   }
 }
 
@@ -163,9 +176,12 @@ export class ChatSessionStore {
   /** Auto-compaction threshold (percent of the window; 0 = off). */
   readonly autoCompactPercent = signal(readAutoCompactPercent());
 
+  /** Whether to suggest compaction when the context fills up (persisted separately). */
+  readonly suggestCompactEnabled = signal(readSuggestCompact());
+
   /** True when the next prompt should be preceded by a compaction. */
   readonly needsAutoCompact = computed(() =>
-    shouldAutoCompact(this.contextPercent(), this.autoCompactPercent()),
+    this.suggestCompactEnabled() && shouldAutoCompact(this.contextPercent(), this.autoCompactPercent()),
   );
 
   /** Budget for a compaction request derived from the live window. */
@@ -188,6 +204,15 @@ export class ChatSessionStore {
 
   setAutoCompactEnabled(enabled: boolean): void {
     this.setAutoCompactPercent(enabled ? DEFAULT_AUTO_COMPACT_PERCENT : 0);
+  }
+
+  setSuggestCompactEnabled(enabled: boolean): void {
+    this.suggestCompactEnabled.set(enabled);
+    try {
+      localStorage.setItem(KEY_SUGGEST_COMPACT, String(enabled));
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   /** `42k / 200k · 21%` for the toolbar and the drawer; empty before a turn. */

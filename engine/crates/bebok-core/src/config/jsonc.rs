@@ -262,6 +262,52 @@ fn scan_balanced(raw: &str, start: usize) -> usize {
     bytes.len()
 }
 
+pub fn with_remove_impl(raw: &str, key: &str) -> String {
+    let range = top_level_value_range(raw, key);
+    let Some((start, end)) = range else {
+        return raw.to_string();
+    };
+    // Find key start (opening quote) and remove preceding comma/whitespace
+    // Simplify: find key quoted string before start
+    let key_pat = format!("\"{key}\"");
+    if let Some(kpos) = raw[..start].rfind(&key_pat) {
+        let before = raw[..kpos].trim_end();
+        let after = raw[end..].trim_start();
+        let has_comma_before = before.ends_with(',');
+        let has_comma_after = after.starts_with(',');
+        let mut out = String::new();
+        if has_comma_before {
+            if let Some(cp) = raw[..kpos].rfind(',') {
+                out.push_str(&raw[..cp]);
+                if has_comma_after {
+                    out.push_str(&raw[end + 1..]);
+                } else {
+                    out.push_str(&raw[end..]);
+                }
+            } else {
+                out.push_str(&raw[..kpos]);
+                out.push_str(&raw[end..]);
+            }
+        } else if has_comma_after {
+            out.push_str(&raw[..kpos]);
+            out.push_str(&raw[end + 1..]);
+        } else {
+            out.push_str(&raw[..kpos]);
+            // trim trailing comma/whitespace before closing brace
+            let rest = &raw[end..];
+            out.push_str(rest);
+        }
+        return out;
+    }
+    raw.to_string()
+}
+
+impl JsoncDocument {
+    pub fn with_remove(&self, key: &str) -> String {
+        with_remove_impl(&self.raw, key)
+    }
+}
+
 /// Append `key` to a JSON object before its final closing brace.
 fn append_key(raw: &str, key: &str, new_value: &Value) -> String {
     let replacement =

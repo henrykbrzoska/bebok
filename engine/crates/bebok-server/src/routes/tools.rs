@@ -42,8 +42,9 @@ fn safety_response(instance: &Instance) -> serde_json::Value {
         .iter()
         .filter(|t| t.category == SafetyCategory::Uncategorized)
         .count();
-    let layer = |path: &std::path::Path| {
-        config::read_layer_json(path)
+    let db = instance.config_db_path();
+    let layer = |scope: String| {
+        config::store::read_scope_at(db, &scope)
             .and_then(|v| v.get("tool_safety").cloned())
             .unwrap_or_else(|| serde_json::json!({}))
     };
@@ -52,8 +53,8 @@ fn safety_response(instance: &Instance) -> serde_json::Value {
         "uncategorized": uncategorized,
         "categories": SafetyCategory::ALL.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
         "overrides": {
-            "global": layer(&config::global_config_path()),
-            "project": layer(&config::project_config_path(&instance.root)),
+            "global": layer(config::GLOBAL_SCOPE.to_string()),
+            "project": layer(config::project_scope(&instance.root)),
         },
     })
 }
@@ -128,12 +129,13 @@ pub async fn put_tool_safety(
     }
 
     let scope_project = q.scope.as_deref() == Some("project");
-    let layer_path = if scope_project {
-        config::project_config_path(&instance.root)
+    let db = instance.config_db_path().to_path_buf();
+    let scope_id = if scope_project {
+        config::project_scope(&instance.root)
     } else {
-        config::global_config_path()
+        config::GLOBAL_SCOPE.to_string()
     };
-    let mut section = config::read_layer_json(&layer_path)
+    let mut section = config::store::read_scope_at(&db, &scope_id)
         .and_then(|v| v.get("tool_safety").cloned())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
@@ -147,8 +149,9 @@ pub async fn put_tool_safety(
             }
         }
     }
-    config::write_delta_to(
-        &layer_path,
+    config::store::write_delta_at(
+        &db,
+        &scope_id,
         &serde_json::json!({ "tool_safety": serde_json::Value::Object(section) }),
     )
     .map_err(|e| err_response(&CoreError::Other(e)))?;

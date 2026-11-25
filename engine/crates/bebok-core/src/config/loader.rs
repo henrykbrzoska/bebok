@@ -1,50 +1,27 @@
-//! Config layer loading: defaults -> global -> project.
+//! Config layer resolution: defaults -> global -> project.
 //!
-//! Providers merge by name; `ui` merges (`customCss` overwrites per layer,
-//! `customCssFiles` concatenates de-duplicated).
+//! The layers come from the config **database** (`crate::config::store`),
+//! never from files: the modules here are pure value merging on top of the
+//! `Value` objects read out of `config_kv`. Providers merge by name; `ui`
+//! merges (`customCss` overwrites per layer, `customCssFiles` concatenates
+//! de-duplicated).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::Value;
 
 use bebok_llm::{ProviderSpec, Thinking};
 
-use super::jsonc;
 use super::model::{
     AstSearchConfig, CodeGraphConfig, DelegationConfig, FleetConfig, ResolvedConfig, SshConfig,
     UiConfig,
 };
 
-/// Load and resolve configuration for a project directory.
+/// Load and resolve configuration for a project directory from the config
+/// database. An empty database resolves to the defaults; there is no file
+/// fallback. See [`crate::config::store::load_scoped`].
 pub fn load(directory: &Path) -> ResolvedConfig {
-    let global = dirs::config_dir().map(|d| d.join("bebok").join("config.json"));
-    load_with_global(directory, global.as_deref())
-}
-
-/// Resolve configuration with an explicit global config file (testable).
-pub fn load_with_global(directory: &Path, global_file: Option<&Path>) -> ResolvedConfig {
-    let mut cfg = ResolvedConfig::default();
-
-    if let Some(global) = global_file {
-        apply_file(&mut cfg, global, "global");
-    }
-
-    let project = directory.join(".bebok").join("config.json");
-    apply_file(&mut cfg, &project, "project");
-
-    cfg.provider = provider_from_model(&cfg.model);
-    cfg
-}
-
-/// Read one JSONC file and apply it as a config layer (ignored when missing).
-pub fn apply_file(cfg: &mut ResolvedConfig, path: &Path, layer: &str) {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return;
-    };
-    match jsonc::parse(&text) {
-        Ok(v) => apply(cfg, &v),
-        Err(e) => tracing::warn!("invalid {layer} config {}: {}", path.display(), e),
-    }
+    super::store::load(directory)
 }
 
 /// Apply a config layer on top of the current value (project wins over global).
@@ -101,7 +78,6 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     for (key, field) in [
         ("permission", &mut cfg.permission),
         ("mcp", &mut cfg.mcp),
-        ("skills", &mut cfg.skills),
         ("terminal", &mut cfg.terminal),
         ("runtimes", &mut cfg.runtimes),
         ("browser", &mut cfg.browser),
@@ -109,6 +85,18 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
     ] {
         if let Some(section) = v.get(key) {
             *field = section.clone();
+        }
+    }
+    // `skills` is a toggle map: a higher layer overrides per skill, so a
+    // project's per-skill disables do not wipe the global toggles.
+    if let Some(section) = v.get("skills") {
+        match (section.as_object(), cfg.skills.as_object_mut()) {
+            (Some(incoming), Some(existing)) => {
+                for (k, val) in incoming {
+                    existing.insert(k.clone(), val.clone());
+                }
+            }
+            _ => cfg.skills = section.clone(),
         }
     }
     // F7-7: tool safety categories merge per key (project wins per tool),
@@ -403,65 +391,59 @@ pub fn provider_from_model(model: &str) -> String {
     model.split('/').next().unwrap_or(model).to_string()
 }
 
-/// The project config file path for a directory.
-pub fn project_config_path(directory: &Path) -> PathBuf {
-    directory.join(".bebok").join("config.json")
-}
-
-/// The global config file path (`~/.config/bebok/config.json`).
-pub fn global_config_path() -> PathBuf {
-    dirs::config_dir()
-        .map(|d| d.join("bebok").join("config.json"))
-        .unwrap_or_else(|| PathBuf::from("bebok-config.json"))
-}
-
-/// Read a JSONC layer file, returning the parsed object (or `Null` when the
-/// file is missing). Returns `None` only when the file exists but is invalid.
-pub fn read_layer_json(path: &Path) -> Option<Value> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => jsonc::parse(&text).ok(),
-        Err(_) => Some(Value::Null),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::model::DEFAULT_AST_SEARCH_MAX_FILES;
     use super::super::model::DEFAULT_MODEL;
+    use super::super::store::{self, GLOBAL_SCOPE, project_scope};
     use super::*;
+    use serde_json::json;
+
+    /// Fresh temp project dir + the config DB path for it (never the real one).
+    fn tmp(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!("bebok-cfg-{tag}-{}", uuid::Uuid::new_v4()));
+        let project_dir = base.join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let db = base.join("bebok.db");
+        (base, project_dir, db)
+    }
+
+    fn global(db: &Path, v: Value) {
+        store::write_delta_at(db, GLOBAL_SCOPE, &v).unwrap();
+    }
+
+    fn project(db: &Path, dir: &Path, v: Value) {
+        store::write_delta_at(db, &project_scope(dir), &v).unwrap();
+    }
+
+    fn resolve(db: &Path, dir: &Path) -> ResolvedConfig {
+        store::load_scoped(db, dir).unwrap()
+    }
 
     #[test]
     fn layered_resolution_defaults_global_project() {
-        let base = std::env::temp_dir().join(format!("bebok-cfg-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        let (base, project_dir, db) = tmp("layers");
 
-        // 1. Nothing present -> defaults.
-        let cfg = load_with_global(&project_dir, None);
+        // 1. Empty DB -> defaults.
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.model, DEFAULT_MODEL);
 
-        // 2. Global only.
-        std::fs::write(
-            &global,
-            r#"{ "model": "zai/glm-4.5", "terminal": { "shell": "bash" } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        // 2. Global scope only.
+        global(
+            &db,
+            json!({ "model": "zai/glm-4.5", "terminal": { "shell": "bash" } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.model, "zai/glm-4.5");
         assert_eq!(cfg.terminal["shell"], "bash");
 
-        // 3. Project overrides global.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{
-                // project model wins
-                "model": "zai/glm-4.6",
-                "permission": { "edit": "allow" }
-            }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        // 3. Project scope overrides global.
+        project(
+            &db,
+            &project_dir,
+            json!({ "model": "zai/glm-4.6", "permission": { "edit": "allow" } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(
             cfg.model, "zai/glm-4.6",
             "project config must override global"
@@ -475,54 +457,50 @@ mod tests {
 
     #[test]
     fn allowed_paths_defaults_empty_and_layers_global_project() {
-        let base = std::env::temp_dir().join(format!("bebok-allow-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        let (base, project_dir, db) = tmp("allow");
 
-        // 1. Nothing present -> empty list.
-        let cfg = load_with_global(&project_dir, None);
+        // 1. Empty DB -> empty list.
+        let cfg = resolve(&db, &project_dir);
         assert!(cfg.allowed_paths.is_empty(), "default must be empty");
 
-        // 2. Global only: parsed into ResolvedConfig.
-        std::fs::write(
-            &global,
-            r#"{
-                // hub: workspace allowlist
-                "allowed_paths": ["/home/user/hub", "/home/user/work"]
-            }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        // 2. Global scope.
+        global(
+            &db,
+            json!({ "allowed_paths": ["/home/user/hub", "/home/user/work"] }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
 
-        // 3. Project layer replaces the global list when it carries the key.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "allowed_paths": ["/home/user/other"] }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        // 3. Project scope replaces the global list when it carries the key.
+        project(
+            &db,
+            &project_dir,
+            json!({ "allowed_paths": ["/home/user/other"] }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.allowed_paths, vec!["/home/user/other"]);
 
-        // 4. Project without the key keeps the global list.
-        std::fs::write(project_dir.join(".bebok").join("config.json"), r#"{}"#).unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        // 4. Project scope without the key keeps the global list.
+        let (base2, project_dir2, db2) = tmp("allow2");
+        global(
+            &db2,
+            json!({ "allowed_paths": ["/home/user/hub", "/home/user/work"] }),
+        );
+        project(&db2, &project_dir2, json!({}));
+        let cfg = resolve(&db2, &project_dir2);
         assert_eq!(cfg.allowed_paths, vec!["/home/user/hub", "/home/user/work"]);
 
         // 5. Malformed values are ignored gracefully.
         let mut cfg = ResolvedConfig::default();
-        apply(&mut cfg, &serde_json::json!({ "allowed_paths": "nope" }));
+        apply(&mut cfg, &json!({ "allowed_paths": "nope" }));
         assert!(cfg.allowed_paths.is_empty());
-        apply(
-            &mut cfg,
-            &serde_json::json!({ "allowed_paths": ["ok", 42, null] }),
-        );
+        apply(&mut cfg, &json!({ "allowed_paths": ["ok", 42, null] }));
         assert_eq!(cfg.allowed_paths, vec!["ok"]);
-        apply(&mut cfg, &serde_json::json!({ "allowed_paths": [] }));
+        apply(&mut cfg, &json!({ "allowed_paths": [] }));
         assert!(cfg.allowed_paths.is_empty(), "empty array clears the list");
 
         std::fs::remove_dir_all(&base).ok();
+        std::fs::remove_dir_all(&base2).ok();
     }
 
     #[test]
@@ -540,50 +518,39 @@ mod tests {
 
     #[test]
     fn config_reads_thinking_level() {
-        let base = std::env::temp_dir().join(format!("bebok-think-{}", uuid::Uuid::new_v4()));
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "thinking": "high" }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, None);
+        let (base, project_dir, db) = tmp("think");
+        project(&db, &project_dir, json!({ "thinking": "high" }));
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.thinking, bebok_llm::Thinking::High);
         std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn ui_custom_css_merges_global_project() {
-        let base = std::env::temp_dir().join(format!("bebok-css-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
+        let (base, project_dir, db) = tmp("css");
+        global(
+            &db,
+            json!({ "ui": { "customCss": "body { color: red; }", "customCssFiles": ["a.css"] } }),
+        );
+        project(
+            &db,
+            &project_dir,
+            json!({ "ui": { "customCssFiles": ["b.css", "a.css"] } }),
+        );
 
-        std::fs::write(
-            &global,
-            r#"{ "ui": { "customCss": "body { color: red; }", "customCssFiles": ["a.css"] } }"#,
-        )
-        .unwrap();
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "ui": { "customCssFiles": ["b.css", "a.css"] } }"#,
-        )
-        .unwrap();
-
-        let cfg = load_with_global(&project_dir, Some(&global));
+        let cfg = resolve(&db, &project_dir);
         // Global CSS survives when project does not override it.
         assert_eq!(cfg.ui.custom_css, "body { color: red; }");
         // Files concatenate de-duplicated, global first.
         assert_eq!(cfg.ui.custom_css_files, vec!["a.css", "b.css"]);
 
         // Project non-empty customCss wins.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "ui": { "customCss": "body { color: blue; }" } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        project(
+            &db,
+            &project_dir,
+            json!({ "ui": { "customCss": "body { color: blue; }" } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.ui.custom_css, "body { color: blue; }");
 
         std::fs::remove_dir_all(&base).ok();
@@ -598,29 +565,23 @@ mod tests {
 
     #[test]
     fn fleet_project_replaces_global() {
-        let base = std::env::temp_dir().join(format!("bebok-fleet-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-
-        // Global fleet inherited when project has no fleet key.
-        std::fs::write(
-            &global,
-            r#"{ "fleet": { "enabled": true, "members": [{ "name": "a", "agent": "code", "model": "zai/glm-4.5" }] } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        let (base, project_dir, db) = tmp("fleet");
+        global(
+            &db,
+            json!({ "fleet": { "enabled": true, "members": [{ "name": "a", "agent": "code", "model": "zai/glm-4.5" }] } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert!(cfg.is_fleet_enabled());
         assert_eq!(cfg.fleet_members().len(), 1);
         assert_eq!(cfg.fleet_members()[0].name, "a");
 
         // Project fleet fully replaces global.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "fleet": { "enabled": false, "members": [] } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        project(
+            &db,
+            &project_dir,
+            json!({ "fleet": { "enabled": false, "members": [] } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert!(!cfg.is_fleet_enabled());
         assert!(cfg.fleet_members().is_empty());
 
@@ -668,22 +629,19 @@ mod tests {
 
     #[test]
     fn delegation_max_concurrent_layers() {
-        let base = std::env::temp_dir().join(format!("bebok-deleg-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(&global, r#"{ "delegation": { "max_concurrent": 5 } }"#).unwrap();
+        let (base, project_dir, db) = tmp("deleg");
+        global(&db, json!({ "delegation": { "max_concurrent": 5 } }));
         // No project key: global wins entirely.
-        let cfg = load_with_global(&project_dir, Some(&global));
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.delegation.max_concurrent, 5);
 
         // Project max_concurrent overrides the global one.
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "delegation": { "max_concurrent": 7 } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        project(
+            &db,
+            &project_dir,
+            json!({ "delegation": { "max_concurrent": 7 } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert_eq!(cfg.delegation.max_concurrent, 7);
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -747,23 +705,20 @@ mod tests {
 
     #[test]
     fn code_map_project_overrides_global() {
-        let base = std::env::temp_dir().join(format!("bebok-codemap-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(&global, r#"{ "code_map": { "enabled": true } }"#).unwrap();
+        let (base, project_dir, db) = tmp("codemap");
+        global(&db, json!({ "code_map": { "enabled": true } }));
 
         // Global on, project silent -> on.
-        let cfg = load_with_global(&project_dir, Some(&global));
+        let cfg = resolve(&db, &project_dir);
         assert!(cfg.code_map.enabled);
 
         // Project flips it off (per-field override).
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "code_map": { "enabled": false } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        project(
+            &db,
+            &project_dir,
+            json!({ "code_map": { "enabled": false } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert!(!cfg.code_map.enabled);
 
         let _ = std::fs::remove_dir_all(&base);
@@ -888,23 +843,20 @@ mod tests {
 
     #[test]
     fn ast_search_project_overrides_global() {
-        let base = std::env::temp_dir().join(format!("bebok-astsearch-{}", uuid::Uuid::new_v4()));
-        let global = base.join("global.json");
-        let project_dir = base.join("project");
-        std::fs::create_dir_all(project_dir.join(".bebok")).unwrap();
-        std::fs::write(&global, r#"{ "ast_search": { "enabled": true } }"#).unwrap();
+        let (base, project_dir, db) = tmp("astsearch");
+        global(&db, json!({ "ast_search": { "enabled": true } }));
 
         // Global on, project silent -> on.
-        let cfg = load_with_global(&project_dir, Some(&global));
+        let cfg = resolve(&db, &project_dir);
         assert!(cfg.ast_search.enabled);
 
         // Project flips it off (per-field override).
-        std::fs::write(
-            project_dir.join(".bebok").join("config.json"),
-            r#"{ "ast_search": { "enabled": false } }"#,
-        )
-        .unwrap();
-        let cfg = load_with_global(&project_dir, Some(&global));
+        project(
+            &db,
+            &project_dir,
+            json!({ "ast_search": { "enabled": false } }),
+        );
+        let cfg = resolve(&db, &project_dir);
         assert!(!cfg.ast_search.enabled);
 
         let _ = std::fs::remove_dir_all(&base);

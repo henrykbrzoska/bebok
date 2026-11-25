@@ -148,11 +148,8 @@ pub fn build_provider_for(
         .map_err(CoreError::ProviderConfig);
     }
 
-    bebok_llm::build_provider(
-        &spec,
-        config.api_key.clone().filter(|s| !s.trim().is_empty()),
-    )
-    .map_err(CoreError::ProviderConfig)
+    let resolved_key = crate::config::secrets::resolve_secret(&spec.name, config.api_key.clone());
+    bebok_llm::build_provider(&spec, resolved_key).map_err(CoreError::ProviderConfig)
 }
 
 pub type ChildProviderFactory =

@@ -72,6 +72,10 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/fleet/generate", post(agents::generate_fleet))
         .route("/session/{id}/export", get(session::export_session))
         .route("/session/{id}/compact", post(session::compact_session))
+        .route(
+            "/session/{id}/compact/preview",
+            post(session::preview_compaction),
+        )
         .route("/session/{id}/changes", get(changes::list_changes))
         .route("/session/{id}/changes/diff", get(changes::change_diff))
         .route("/session/{id}/changes/revert", post(changes::revert_change))
@@ -113,6 +117,7 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/mcp", get(mcp::list_mcp))
         .route("/mcp/{name}/toggle", post(mcp::toggle_mcp))
         .route("/config", get(config::get_config).put(config::put_config))
+        .route("/config/import-to-db", post(config::import_config_to_db))
         .route("/docker", get(meta::check_docker_endpoint))
         .route("/models", get(meta::list_models))
         .route("/providers/catalog", get(providers::provider_catalog))
@@ -146,6 +151,10 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/fs/files", get(fs::fs_files))
         .route("/fs/symbols", get(fs::fs_symbols))
         .route("/fs/complete", post(fs::fs_complete))
+        .route(
+            "/fs/workspace",
+            get(fs::fs_workspace_get).put(fs::fs_workspace_put),
+        )
         .route(
             "/projects",
             get(projects::list_projects).post(projects::add_project),

@@ -854,6 +854,11 @@ pub async fn run_turn(
 
 #[cfg(test)]
 mod parallel_tests {
+    /// The config DB an `InstanceStore::with_data_dir(<base>/data)` opens.
+    fn test_db(project: &std::path::Path) -> std::path::PathBuf {
+        project.parent().unwrap().join("data").join("bebok.db")
+    }
+
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
 
@@ -1095,7 +1100,7 @@ mod parallel_tests {
                 }),
             ]],
         });
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         session.try_begin_turn();
         run_turn(
             session.clone(),
@@ -1141,7 +1146,7 @@ mod parallel_tests {
                 StreamEvent::Done(Usage::default()),
             ]],
         });
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         session.try_begin_turn();
         run_turn(
             session.clone(),
@@ -1177,16 +1182,16 @@ mod parallel_tests {
     ) -> (Duration, Vec<(String, crate::session::ToolState)>) {
         let base = std::env::temp_dir().join(format!("bebok-loop-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
-        tokio::fs::create_dir_all(project.join(".bebok"))
-            .await
-            .unwrap();
+        tokio::fs::create_dir_all(&project).await.unwrap();
         // The probes are test doubles, not real tools: allow them outright so
         // the mutating one does not suspend the turn on a consent prompt.
-        tokio::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{ "permission": { "rules": [ { "pattern": "slow_write(*)", "action": "allow" } ] } }"#,
+        crate::config::store::write_delta_at(
+            &test_db(&project),
+            &crate::config::store::project_scope(&project),
+            &serde_json::json!({ "permission": { "rules": [
+                { "pattern": "slow_write(*)", "action": "allow" }
+            ] } }),
         )
-        .await
         .unwrap();
         let store = InstanceStore::with_data_dir(base.join("data"));
         let session = store
@@ -1204,7 +1209,7 @@ mod parallel_tests {
             calls: AtomicUsize::new(0),
             script: vec![first],
         });
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
 
         let started = Instant::now();
         session.try_begin_turn();

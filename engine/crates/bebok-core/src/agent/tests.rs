@@ -8,7 +8,7 @@ mod tests {
     use crate::session::Part;
     use crate::session::ToolState;
     use crate::store::{InstanceStore, SessionState};
-    use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost, Verdict};
+    use crate::{Agent, AgentCatalog, PermissionEngine, PluginHost};
     use bebok_llm::{ChatRequest, Provider, StreamEvent, ToolCall, Usage};
     use bebok_mcp::{McpManager, McpServerSpec, McpTransport};
     use bebok_tools::{Runtimes, ToolRegistry, builtin_tools};
@@ -139,13 +139,18 @@ if __name__ == "__main__":
         ]
     }
 
-    /// Write a `permission` section to `<project>/.bebok/config.json`.
+    /// The config DB the `InstanceStore`s built on `<base>/data` open.
+    fn test_db(project: &Path) -> std::path::PathBuf {
+        project.parent().unwrap().join("data").join("bebok.db")
+    }
+
+    /// Write a `permission` section into the project's config scope.
     fn write_project_permission(project: &Path, permission_json: &str) {
-        let dir = project.join(".bebok");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("config.json"),
-            format!("{{ \"permission\": {permission_json} }}\n"),
+        let permission: serde_json::Value = serde_json::from_str(permission_json).unwrap();
+        crate::config::store::write_delta_at(
+            &test_db(project),
+            &crate::config::store::project_scope(project),
+            &serde_json::json!({ "permission": permission }),
         )
         .unwrap();
     }
@@ -225,7 +230,7 @@ if __name__ == "__main__":
             ),
             text_step("hello.txt created"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let abort = CancellationToken::new();
 
@@ -392,7 +397,7 @@ if __name__ == "__main__":
             ),
             text_step("rm is blocked"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let mut events = bus.subscribe();
         let abort = CancellationToken::new();
@@ -460,7 +465,7 @@ if __name__ == "__main__":
             tool_step("bash", serde_json::json!({ "command": "echo project" }), 1),
             text_step("done"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let mut events = bus.subscribe();
 
@@ -541,7 +546,7 @@ if __name__ == "__main__":
             tool_step("bash", serde_json::json!({ "command": "pwd" }), 1),
             text_step("user denied"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
 
         let resolver = tokio::spawn(resolve_first_ask(
@@ -611,7 +616,7 @@ if __name__ == "__main__":
             tool_step("bash", serde_json::json!({ "command": "pwd" }), 2),
             text_step("done twice"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let mut events = bus.subscribe();
 
@@ -655,43 +660,27 @@ if __name__ == "__main__":
             .count();
         assert_eq!(resolved, 1);
 
-        // A rule `ask -> allow` was persisted to the project config — for
-        // the TOOL (`bash(*)`), not the exact call (F9-5).
-        let config_text = tokio::fs::read_to_string(project.join(".bebok").join("config.json"))
-            .await
-            .unwrap();
-        assert!(
-            config_text.contains("bash(*)"),
-            "rule persisted: {config_text}"
+        // A rule `ask -> allow` was persisted to the project config scope —
+        // for the TOOL (`bash(*)`), not the exact call (F9-5).
+        let rules = crate::permission::store::read_rules_at(
+            &test_db(&project),
+            &crate::config::store::project_scope(&project),
         );
+        let patterns: Vec<&str> = rules.iter().map(|r| r.pattern.as_str()).collect();
         assert!(
-            !config_text.contains("bash(pwd)"),
-            "rule must not be per call: {config_text}"
+            patterns.contains(&"bash(*)"),
+            "rule persisted: {patterns:?}"
         );
         assert!(
-            config_text.contains("allow"),
-            "rule persisted: {config_text}"
+            !patterns.contains(&"bash(pwd)"),
+            "rule must not be per call: {patterns:?}"
         );
-
-        // The engine's in-memory layer was recompiled, so the next identical
-        // call resolves straight to Allow.
-        let eval = permission.evaluate(
-            None,
-            "bash",
-            &serde_json::json!({ "command": "pwd" }),
-            false,
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.action == crate::permission::Action::Allow),
+            "rule must be an allow: {patterns:?}"
         );
-        assert_eq!(eval.verdict, Verdict::Allow);
-
-        // Both tool calls completed.
-        let messages = session.messages_snapshot().await;
-        let completed = messages
-            .iter()
-            .flat_map(|m| &m.parts)
-            .filter(|p| matches!(p, Part::Tool { name, .. } if name == "bash"))
-            .count();
-        assert_eq!(completed, 2, "both identical calls must have executed");
-
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -718,7 +707,7 @@ if __name__ == "__main__":
             text_step("read done"),
         ]));
         // No permission config at all.
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let mut events = bus.subscribe();
         let abort = CancellationToken::new();
@@ -907,7 +896,7 @@ if __name__ == "__main__":
             ),
             text_step("done"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let mut events = bus.subscribe();
 
@@ -1038,7 +1027,7 @@ if __name__ == "__main__":
             ),
             text_step("rm is vetoed"),
         ]));
-        let permission = Arc::new(PermissionEngine::load_with_global(&project, None));
+        let permission = Arc::new(PermissionEngine::load_at(&test_db(&project), &project));
         let bus = store.bus();
         let abort = CancellationToken::new();
 

@@ -1,6 +1,6 @@
 //! Explorer routes: `GET /fs/tree`, `GET/PUT/POST /fs/file`, `POST /fs/dir`,
 //! `DELETE /fs/path`, `POST /fs/rename`, `GET /fs/definition`, `GET /fs/search`,
-//! `POST /fs/complete`.
+//! `POST /fs/complete`, `GET/PUT /fs/workspace`.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -20,6 +20,19 @@ pub struct FsQuery {
     /// content and return `binary: true` + `media_type` in the response.
     #[serde(default)]
     pub binary: bool,
+}
+
+/// Response for a legacy `<project>/.bebok/config.json` write.
+///
+/// The file is not read by the engine any more (config lives in the bebok
+/// database), so recreating it would silently do nothing. Answer `410 Gone`
+/// with the new location so an agent learns where the config went.
+fn config_file_gone() -> axum::response::Response {
+    ApiError::gone(
+        "config is stored in the bebok database, not in .bebok/config.json \
+         (use GET/PUT /config, or the Settings raw JSON editor, scope project)",
+    )
+    .into_response()
 }
 
 fn is_project_config_path(root: &std::path::Path, rel: &str) -> bool {
@@ -184,9 +197,7 @@ pub async fn fs_file_write(
         .map_err(|e| err_response(&e))?;
     let rel = q.path.as_deref().unwrap_or(".");
     if is_project_config_path(&instance.root, rel) {
-        return Err(
-            ApiError::forbidden("use /config to modify project configuration").into_response(),
-        );
+        return Err(config_file_gone());
     }
     let content = body
         .get("content")
@@ -214,9 +225,7 @@ pub async fn fs_file_create(
         .map_err(|e| err_response(&e))?;
     let rel = q.path.as_deref().unwrap_or(".");
     if is_project_config_path(&instance.root, rel) {
-        return Err(
-            ApiError::forbidden("use /config to modify project configuration").into_response(),
-        );
+        return Err(config_file_gone());
     }
     match bebok_core::explorer::create_file(&instance.root, rel) {
         Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "created": true }))),
@@ -255,9 +264,7 @@ pub async fn fs_path_delete(
         .map_err(|e| err_response(&e))?;
     let rel = q.path.as_deref().unwrap_or(".");
     if is_project_config_path(&instance.root, rel) {
-        return Err(
-            ApiError::forbidden("use /config to modify project configuration").into_response(),
-        );
+        return Err(config_file_gone());
     }
     match bebok_core::explorer::delete_path(&instance.root, rel, q.recursive()) {
         Ok(()) => Ok(Json(serde_json::json!({ "path": rel, "deleted": true }))),
@@ -302,9 +309,7 @@ pub async fn fs_rename(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ApiError::bad_request("missing 'to'").into_response())?;
     if is_project_config_path(&instance.root, from) || is_project_config_path(&instance.root, to) {
-        return Err(
-            ApiError::forbidden("use /config to modify project configuration").into_response(),
-        );
+        return Err(config_file_gone());
     }
     match bebok_core::explorer::rename_path(&instance.root, from, to) {
         Ok(()) => Ok(Json(
@@ -370,7 +375,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn file_route_rejects_project_config_write_over_http() {
+    async fn file_route_reports_the_retired_config_file_as_gone() {
         let base =
             std::env::temp_dir().join(format!("bebok-fs-config-http-{}", uuid::Uuid::new_v4()));
         let root = base.join("root");
@@ -415,7 +420,7 @@ mod tests {
         let mut response = Vec::new();
         stream.read_to_end(&mut response).await.unwrap();
         let response = String::from_utf8(response).unwrap();
-        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+        assert!(response.starts_with("HTTP/1.1 410"), "{response}");
         assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
 
         // The protected file must remain protected even when it is absent and
@@ -430,8 +435,11 @@ mod tests {
         let mut response = Vec::new();
         stream.read_to_end(&mut response).await.unwrap();
         let response = String::from_utf8(response).unwrap();
-        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
-        assert!(!config.exists());
+        assert!(response.starts_with("HTTP/1.1 410"), "{response}");
+        assert!(
+            !config.exists(),
+            "the retired config file must not be recreated"
+        );
         server.abort();
         std::fs::remove_dir_all(base).unwrap();
     }
@@ -695,4 +703,56 @@ pub async fn fs_complete(
     .await
     .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
     Ok(Json(serde_json::to_value(resp).unwrap_or_default()))
+}
+
+/// `GET /fs/workspace?directory=` query.
+#[derive(Deserialize)]
+pub struct FsWorkspaceQuery {
+    pub directory: String,
+}
+
+/// `GET /fs/workspace?directory=` -> persisted explorer workspace for the
+/// project. Missing workspace returns `200 {}`.
+pub async fn fs_workspace_get(
+    State(state): State<AppState>,
+    Query(q): Query<FsWorkspaceQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let key = instance.root.to_string_lossy().to_string();
+    let stored = tokio::task::spawn_blocking(move || bebok_core::db::get_workspace(&key))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()).into_response())?;
+    match stored {
+        Some(json) => {
+            let value: serde_json::Value =
+                serde_json::from_str(&json).unwrap_or(serde_json::Value::String(json));
+            Ok(Json(value))
+        }
+        None => Ok(Json(serde_json::json!({}))),
+    }
+}
+
+/// `PUT /fs/workspace?directory=` -> replace the whole workspace document.
+/// Body is stored as JSON TEXT in `explorer_state`.
+pub async fn fs_workspace_put(
+    State(state): State<AppState>,
+    Query(q): Query<FsWorkspaceQuery>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let instance = state
+        .store
+        .get_or_create_instance(&q.directory)
+        .await
+        .map_err(|e| err_response(&e))?;
+    let key = instance.root.to_string_lossy().to_string();
+    let json = body.to_string();
+    tokio::task::spawn_blocking(move || bebok_core::db::put_workspace(&key, &json))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()).into_response())?
+        .map_err(|e| ApiError::internal(e).into_response())?;
+    Ok(Json(serde_json::json!({ "saved": true })))
 }

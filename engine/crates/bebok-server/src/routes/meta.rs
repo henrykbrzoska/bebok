@@ -61,9 +61,9 @@ pub async fn check_docker_endpoint(
 }
 
 /// `GET /models?directory=&provider=` -> list a provider's available models and
-/// persist them into the **project** config `.bebok/config.json` for the
-/// instance (`<directory>`), so `GET /config` and the GUI's model selects see
-/// them (the project layer is authoritative over the global config). This is
+/// persist them into the **project** config scope (`project:<directory>` in
+/// `bebok.db`) of the instance, so `GET /config` and the GUI's model selects
+/// see them (the project layer is authoritative over the global one). This is
 /// the GUI's "check available models" button.
 pub async fn list_models(
     State(state): State<AppState>,
@@ -86,8 +86,14 @@ pub async fn list_models(
 
     // Persist the fetched models into the instance's project config providers
     // list, then reload so `GET /config` reflects them for the model selects.
-    config::save_provider_models(&instance.root, &q.provider, spec.kind, &models)
-        .map_err(|e| err_response(&CoreError::Other(e)))?;
+    config::save_provider_models_at(
+        instance.config_db_path(),
+        &instance.root,
+        &q.provider,
+        spec.kind,
+        &models,
+    )
+    .map_err(|e| err_response(&CoreError::Other(e)))?;
     state
         .store
         .reload_instance(&q.directory)

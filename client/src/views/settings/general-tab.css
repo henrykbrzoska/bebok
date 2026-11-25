@@ -58,3 +58,10 @@
 .plugin-binary-warn {
   color: var(--warning);
 }
+
+.import-progress { margin: 8px 0 0; opacity: 0.8; font-style: italic; }
+.import-report { margin-top: 10px; font-size: 12px; }
+.import-steps { margin: 0 0 8px; padding-left: 18px; }
+.import-projects { margin: 4px 0 0; padding-left: 18px; max-height: 220px; overflow: auto; }
+.import-report .err { color: var(--danger, #e5534b); }
+.import-summary { white-space: pre-wrap; }

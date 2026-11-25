@@ -1,7 +1,9 @@
 /**
- * F6-4: "Compact now" (toolbar) and client-side auto-compaction before the
- * next prompt. Compaction is fork-based, so both paths must navigate to the
- * *new* session id the engine returns rather than expect an in-place change.
+ * F6-4: "Compact now" (toolbar, palette) and client-side auto-compaction before
+ * the next prompt. Every compaction is preview-first: the engine previews the
+ * split, the user confirms in the compaction dialog, and only then the engine
+ * forks with the previewed cutoff. Compaction is fork-based, so the confirmed
+ * paths navigate to the *new* session id the engine returns.
  */
 
 import { provideZonelessChangeDetection, signal } from '@angular/core';
@@ -10,8 +12,9 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { of } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { Message, SessionMeta } from '../../core/engine.dtos';
+import { CompactPreviewResponse, Message, SessionMeta } from '../../core/engine.dtos';
 import { EventsStore } from '../../core/events.store';
+import { COMPACT_REQUESTED_EVENT } from '../../ui/compact-confirm-dialog/compact-confirm-dialog';
 import { ChatView } from './chat';
 import { ChatSessionStore } from './chat-session.store';
 
@@ -39,6 +42,21 @@ const FOUR_MESSAGES: Message[] = [
   userMessage('m4', 'four'),
 ];
 
+/** Preview of FOUR_MESSAGES: the first two are summarized, the last two kept. */
+const PREVIEW: CompactPreviewResponse = {
+  cutoff: 2,
+  total: 4,
+  kept: 2,
+  before: 170_000,
+  after: 30_000,
+  messages: [
+    { index: 0, role: 'user', excerpt: 'one', tokens: 10 },
+    { index: 1, role: 'user', excerpt: 'two', tokens: 10 },
+    { index: 2, role: 'user', excerpt: 'three', tokens: 10 },
+    { index: 3, role: 'user', excerpt: 'four', tokens: 10 },
+  ],
+};
+
 /** Let awaited promises inside the component settle, then re-render. */
 async function settle(fixture: ComponentFixture<ChatView>): Promise<void> {
   for (let i = 0; i < 8; i++) {
@@ -56,6 +74,7 @@ interface EngineMock {
   listAgents: jasmine.Spy;
   getConfig: jasmine.Spy;
   pendingPermissions: jasmine.Spy;
+  previewCompaction: jasmine.Spy;
   compactSession: jasmine.Spy;
   prompt: jasmine.Spy;
   abort: jasmine.Spy;
@@ -66,7 +85,11 @@ describe('ChatView compaction (F6-4)', () => {
   let engine: EngineMock;
   let navigate: jasmine.Spy;
 
-  async function mount(meta: SessionMeta, messages: Message[] = FOUR_MESSAGES): Promise<void> {
+  async function mount(
+    meta: SessionMeta,
+    messages: Message[] = FOUR_MESSAGES,
+    preview: jasmine.Spy = jasmine.createSpy('previewCompaction').and.resolveTo(PREVIEW),
+  ): Promise<void> {
     engine = {
       connected: signal(true),
       connect: jasmine.createSpy('connect').and.resolveTo({}),
@@ -77,6 +100,7 @@ describe('ChatView compaction (F6-4)', () => {
         .createSpy('getConfig')
         .and.resolveTo({ config: { thinking: 'off' }, providers: [], mcp: [], skills: [] }),
       pendingPermissions: jasmine.createSpy('pendingPermissions').and.resolveTo([]),
+      previewCompaction: preview,
       compactSession: jasmine
         .createSpy('compactSession')
         .and.resolveTo({ sessionID: 'fork-1', parent: ['s1', 2], before: 170_000, after: 30_000 }),
@@ -125,11 +149,25 @@ describe('ChatView compaction (F6-4)', () => {
     return button!;
   }
 
+  /** The open compaction dialog's button, by its data-testid suffix. */
+  function dialogButton(name: 'compact' | 'cancel' | 'send-without'): HTMLButtonElement | null {
+    return (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      `[data-testid="compact-confirm-${name}"]`,
+    );
+  }
+
+  function dialogOpen(): boolean {
+    return (
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="compact-confirm"]') !==
+      null
+    );
+  }
+
   afterEach(() => {
     fixture?.destroy();
   });
 
-  it('"Compact now" calls the engine and opens the forked session', async () => {
+  it('"Compact now" previews, then compacts at the previewed cutoff once confirmed', async () => {
     await mount(sessionMeta({ context_used: 42_000, context_window: 200_000 }));
     const button = compactButton();
     expect(button.disabled).toBeFalse();
@@ -138,9 +176,74 @@ describe('ChatView compaction (F6-4)', () => {
     button.click();
     await settle(fixture);
 
-    expect(engine.compactSession).toHaveBeenCalledWith('s1', 100_000);
+    expect(engine.previewCompaction).toHaveBeenCalledWith('s1', 100_000);
+    expect(dialogOpen()).toBeTrue();
+    // Nothing is forked before the user confirms.
+    expect(engine.compactSession).not.toHaveBeenCalled();
+
+    dialogButton('compact')!.click();
+    await settle(fixture);
+
+    expect(engine.compactSession).toHaveBeenCalledWith('s1', 100_000, 2);
     expect(navigate).toHaveBeenCalledWith(['/chat', 'fork-1']);
     expect(engine.prompt).not.toHaveBeenCalled();
+    expect(dialogOpen()).toBeFalse();
+  });
+
+  it('cancelling the "Compact now" dialog compacts nothing and stays on the session', async () => {
+    await mount(sessionMeta({ context_used: 42_000, context_window: 200_000 }));
+
+    compactButton().click();
+    await settle(fixture);
+    dialogButton('cancel')!.click();
+    await settle(fixture);
+
+    expect(engine.compactSession).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.compactPrompting()).toBeFalse();
+  });
+
+  it('falls back to a direct compaction when the preview route is unavailable', async () => {
+    const preview = jasmine.createSpy('previewCompaction').and.rejectWith(new Error('404'));
+    await mount(sessionMeta({ context_used: 42_000, context_window: 200_000 }), FOUR_MESSAGES, preview);
+
+    compactButton().click();
+    await settle(fixture);
+
+    expect(dialogOpen()).toBeFalse();
+    expect(engine.compactSession).toHaveBeenCalledWith('s1', 100_000, undefined);
+    expect(navigate).toHaveBeenCalledWith(['/chat', 'fork-1']);
+  });
+
+  it('never compacts silently in suggest mode when the preview route is unavailable', async () => {
+    const preview = jasmine.createSpy('previewCompaction').and.rejectWith(new Error('404'));
+    await mount(sessionMeta({ context_used: 170_000, context_window: 200_000 }), FOUR_MESSAGES, preview);
+
+    fixture.componentInstance.draft.set('next question');
+    await fixture.componentInstance.sendPrompt();
+    await settle(fixture);
+
+    expect(dialogOpen()).toBeFalse();
+    expect(engine.compactSession).not.toHaveBeenCalled();
+    expect(engine.prompt).toHaveBeenCalledTimes(1);
+    expect(engine.prompt.calls.mostRecent().args[0]).toBe('s1');
+  });
+
+  it('the palette event compacts the open session through the same flow', async () => {
+    await mount(sessionMeta({ context_used: 42_000, context_window: 200_000 }));
+
+    window.dispatchEvent(new CustomEvent(COMPACT_REQUESTED_EVENT, { detail: { sessionID: 'other' } }));
+    await settle(fixture);
+    expect(engine.previewCompaction).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new CustomEvent(COMPACT_REQUESTED_EVENT, { detail: { sessionID: 's1' } }));
+    await settle(fixture);
+    expect(engine.previewCompaction).toHaveBeenCalledWith('s1', 100_000);
+    expect(dialogOpen()).toBeTrue();
+
+    dialogButton('compact')!.click();
+    await settle(fixture);
+    expect(navigate).toHaveBeenCalledWith(['/chat', 'fork-1']);
   });
 
   it('renders the context meter in the toolbar once a turn has run', async () => {
@@ -152,22 +255,62 @@ describe('ChatView compaction (F6-4)', () => {
     expect(meter?.classList.contains('warning')).toBeFalse();
   });
 
-  it('auto-compacts before sending when the meter is at the threshold', async () => {
+  it('no longer renders the auto-compact toolbar toggle', async () => {
+    await mount(sessionMeta({ context_used: 42_000, context_window: 200_000 }));
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="auto-compact-toggle"]'),
+    ).toBeNull();
+  });
+
+  it('suggests compaction before sending when the meter is at the threshold, and compacts on accept', async () => {
     // 85% of 200k: exactly the default threshold.
     await mount(sessionMeta({ context_used: 170_000, context_window: 200_000 }));
     expect(TestBed.inject(ChatSessionStore).needsAutoCompact()).toBeTrue();
 
     fixture.componentInstance.draft.set('next question');
-    await fixture.componentInstance.sendPrompt();
+    // sendPrompt() resolves only after the queue drains, i.e. after the dialog answer.
+    const sent = fixture.componentInstance.sendPrompt();
     await settle(fixture);
 
-    expect(engine.compactSession).toHaveBeenCalledWith('s1', 100_000);
+    expect(engine.previewCompaction).toHaveBeenCalledWith('s1', 100_000);
+    expect(dialogOpen()).toBeTrue();
+    expect(dialogButton('send-without')).not.toBeNull();
+    expect(engine.compactSession).not.toHaveBeenCalled();
+
+    dialogButton('compact')!.click();
+    await sent;
+    await settle(fixture);
+
+    expect(engine.compactSession).toHaveBeenCalledWith('s1', 100_000, 2);
     expect(navigate).toHaveBeenCalledWith(['/chat', 'fork-1']);
     // The prompt was carried over to the fork, not sent to the old session.
     expect(engine.prompt).not.toHaveBeenCalled();
   });
 
-  it('never auto-compacts a session under the threshold', async () => {
+  it('"send without compacting" sends the prompt to the current session and does not ask again', async () => {
+    await mount(sessionMeta({ context_used: 170_000, context_window: 200_000 }));
+
+    fixture.componentInstance.draft.set('next question');
+    const sent = fixture.componentInstance.sendPrompt();
+    await settle(fixture);
+    dialogButton('send-without')!.click();
+    await sent;
+    await settle(fixture);
+
+    expect(engine.compactSession).not.toHaveBeenCalled();
+    expect(engine.prompt).toHaveBeenCalledTimes(1);
+    expect(engine.prompt.calls.mostRecent().args[0]).toBe('s1');
+
+    // The same session is not offered compaction a second time.
+    fixture.componentInstance.draft.set('another question');
+    const again = fixture.componentInstance.sendPrompt();
+    await settle(fixture);
+    expect(engine.previewCompaction).toHaveBeenCalledTimes(1);
+    expect(dialogOpen()).toBeFalse();
+    await again;
+  });
+
+  it('never suggests compaction for a session under the threshold', async () => {
     await mount(sessionMeta({ context_used: 168_000, context_window: 200_000 })); // 84%
     expect(TestBed.inject(ChatSessionStore).needsAutoCompact()).toBeFalse();
 
@@ -175,6 +318,7 @@ describe('ChatView compaction (F6-4)', () => {
     await fixture.componentInstance.sendPrompt();
     await settle(fixture);
 
+    expect(engine.previewCompaction).not.toHaveBeenCalled();
     expect(engine.compactSession).not.toHaveBeenCalled();
     expect(engine.prompt).toHaveBeenCalledTimes(1);
     expect(engine.prompt.calls.mostRecent().args[0]).toBe('s1');

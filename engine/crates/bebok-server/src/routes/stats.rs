@@ -89,7 +89,7 @@ impl StatsCache {
             return corpus.clone();
         }
         let scan_dir = data_dir.clone();
-        let scanned = tokio::task::spawn_blocking(move || stats::scan(&scan_dir))
+        let scanned = tokio::task::spawn_blocking(move || stats::scan_preferred(&scan_dir))
             .await
             .unwrap_or_default();
         let corpus = Arc::new(scanned);

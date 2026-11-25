@@ -15,6 +15,7 @@ import type { ElementRef } from '@angular/core';
 import { Subscription } from 'rxjs';
 
 import { EngineClient } from '../../core/engine-client.service';
+import type { CompactPreviewResponse } from '../../core/engine.dtos';
 import { selectableModels } from '../../core/model-list';
 import {
   ActiveTask,
@@ -32,6 +33,11 @@ import { SessionActivityStore } from '../../core/session-activity.store';
 import { TaskProgressStore } from '../../core/task-progress.store';
 import { ToolSafetyStore } from '../../core/tool-safety.store';
 import { I18nService } from '../../i18n/i18n.service';
+import {
+  COMPACT_REQUESTED_EVENT,
+  CompactConfirmDialog,
+  type CompactConfirmMode,
+} from '../../ui/compact-confirm-dialog/compact-confirm-dialog';
 import { ModelSelect } from '../../ui/model-select/model-select';
 import { PermissionPopup } from '../../ui/permission-popup/permission-popup';
 import { QuestionDialog, type AnsweredQuestion } from '../../ui/question-dialog/question-dialog';
@@ -80,6 +86,16 @@ const IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
 const COMPOSER_MAX_HEIGHT = 200;
 let pendingSeq = 0;
 let attachmentSeq = 0;
+
+/**
+ * What to do before a prompt/compaction: `compact` (with the cutoff the user
+ * saw in the preview), or leave the session as it is (`cancel`) / send without
+ * compacting (`send-without`).
+ */
+type CompactDecision =
+  | { action: 'compact'; cutoff?: number }
+  | { action: 'cancel' }
+  | { action: 'send-without' };
 
 /** Minimal shape of the (non-standard) Web Speech API we rely on. */
 interface SpeechRecognitionResultLike {
@@ -202,6 +218,7 @@ function persistDrafts(drafts: Record<string, string>): void {
     FormsModule,
     RouterLink,
     ModelSelect,
+    CompactConfirmDialog,
     PermissionPopup,
     QuestionDialog,
     QuestionRecord,
@@ -294,6 +311,8 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** F6-4: a compaction request is in flight (manual or automatic). */
   readonly compacting = signal(false);
+  /** The compaction confirmation dialog is open (the queue waits for the answer). */
+  readonly compactPrompting = signal(false);
   /** "Compact now" is offered once the engine has enough to summarize. */
   readonly canCompact = computed(
     () =>
@@ -301,17 +320,14 @@ export class ChatView implements OnInit, OnDestroy {
       !this.running() &&
       !this.sending() &&
       !this.loading() &&
-      !this.compacting(),
+      !this.compacting() &&
+      !this.compactPrompting(),
   );
-  /** Sessions already auto-compacted once (never loop on a stubborn gauge). */
+  /** Sessions already offered auto-compaction once (never loop on a stubborn gauge). */
   private readonly autoCompacted = new Set<string>();
 
-  readonly autoCompactEnabled = this.sessionStore.autoCompactEnabled;
-
-  onAutoCompactToggle(event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.sessionStore.setAutoCompactEnabled(checked);
-  }
+  /** Confirmation dialog: previews a compaction, then resolves the user's choice. */
+  readonly compactConfirm = viewChild(CompactConfirmDialog);
 
   /** M6: prompt queue - messages waiting to be sent while a turn runs. */
   readonly queue = signal<QueuedPrompt[]>([]);
@@ -430,6 +446,9 @@ export class ChatView implements OnInit, OnDestroy {
 
   constructor() {
     this.unsubscribeEvents = this.events.onEvent((ev) => this.handleEvent(ev));
+    // The command palette asks for a compaction of the open session (it has no
+    // access to this view's confirmation dialog, so it dispatches an event).
+    window.addEventListener(COMPACT_REQUESTED_EVENT, this.onCompactRequested);
 
     // Publish the visible session to the shared store so the right drawer's
     // Session panel derives tokens/cost/files from the same data (F2-12).
@@ -587,7 +606,17 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
+  /** Palette "Compact session" → same flow as the toolbar button, for the open session only. */
+  private readonly onCompactRequested = (event: Event): void => {
+    const sessionID = (event as CustomEvent<{ sessionID?: string }>).detail?.sessionID;
+    if (sessionID && sessionID === this.sessionID()) {
+      void this.compactNow();
+    }
+  };
+
   ngOnDestroy(): void {
+    window.removeEventListener(COMPACT_REQUESTED_EVENT, this.onCompactRequested);
+    this.compactConfirm()?.close();
     this.sessionStore.clear();
     this.unsubscribeEvents();
     this.routeSub?.unsubscribe();
@@ -1085,34 +1114,47 @@ export class ChatView implements OnInit, OnDestroy {
 
   /** Send the first queued message when the agent is idle. */
   private async drainQueue(): Promise<void> {
-    if (this.running() || this.sending() || this.compacting() || this.queue().length === 0) {
+    if (
+      this.running() ||
+      this.sending() ||
+      this.compacting() ||
+      this.compactPrompting() ||
+      this.queue().length === 0
+    ) {
       return;
     }
     const sessionID = this.sessionID();
     if (!sessionID) {
       return;
     }
-    // F6-4: the meter crossed the auto-compact threshold - compact first and
-    // carry the queue over to the fork, which drains it once loaded.
+    // F6-4: the meter crossed the auto-compact threshold - ask first (suggest
+    // mode). Accept = compact and carry the queue over to the fork, which
+    // drains it once loaded. Cancel / send-without = send here as usual.
     if (
       this.sessionStore.needsAutoCompact() &&
       this.sessionStore.canCompact() &&
       !this.autoCompacted.has(sessionID)
     ) {
       this.autoCompacted.add(sessionID);
-      const forked = await this.compactInto(sessionID);
-      if (forked) {
-        this.queuedBySession.set(forked, this.queue());
-        this.pendingBySession.set(forked, this.pending());
-        this.queue.set([]);
-        this.pending.set([]);
-        await this.router.navigate(['/chat', forked]);
-        return;
-      }
+      const decision = await this.decideCompaction(sessionID, 'suggest');
       if (sessionID !== this.sessionID()) {
         return;
       }
-      // Compaction failed: fall through and send anyway (error is shown).
+      if (decision.action === 'compact') {
+        const forked = await this.compactInto(sessionID, decision.cutoff);
+        if (forked) {
+          this.queuedBySession.set(forked, this.queue());
+          this.pendingBySession.set(forked, this.pending());
+          this.queue.set([]);
+          this.pending.set([]);
+          await this.router.navigate(['/chat', forked]);
+          return;
+        }
+        if (sessionID !== this.sessionID()) {
+          return;
+        }
+        // Compaction failed: fall through and send anyway (error is shown).
+      }
     }
     const head = this.queue()[0];
     this.sending.set(true);
@@ -1358,20 +1400,66 @@ export class ChatView implements OnInit, OnDestroy {
       return;
     }
     const sessionID = this.sessionID();
-    const forked = await this.compactInto(sessionID);
+    const decision = await this.decideCompaction(sessionID, 'manual');
+    if (decision.action !== 'compact' || sessionID !== this.sessionID()) {
+      return;
+    }
+    const forked = await this.compactInto(sessionID, decision.cutoff);
     if (forked && sessionID === this.sessionID()) {
       await this.router.navigate(['/chat', forked]);
     }
   }
 
+  /**
+   * Preview the compaction, then ask the user. Resolves with `compact` (and the
+   * preview's cutoff, so the engine splits exactly where the user saw), or with
+   * `cancel` / `send-without`. When the preview route is unavailable (older
+   * engine) manual mode falls back to a direct compaction, but suggest mode
+   * never compacts silently: it resolves `send-without` so the prompt is sent
+   * as-is instead.
+   */
+  private async decideCompaction(
+    sessionID: string,
+    mode: CompactConfirmMode,
+  ): Promise<CompactDecision> {
+    // Set before the preview fetch so a second request cannot start meanwhile.
+    this.compactPrompting.set(true);
+    try {
+      let preview: CompactPreviewResponse;
+      try {
+        preview = await this.engine.previewCompaction(sessionID, this.sessionStore.compactBudget());
+      } catch {
+        if (mode === 'suggest') {
+          return { action: 'send-without' };
+        }
+        return { action: 'compact' };
+      }
+      const dialog = this.compactConfirm();
+      if (!dialog) {
+        if (mode === 'suggest') {
+          return { action: 'send-without' };
+        }
+        return { action: 'compact' };
+      }
+      const outcome = await dialog.open(preview, mode);
+      if (outcome === 'compact') {
+        return { action: 'compact', cutoff: preview.cutoff };
+      }
+      return { action: outcome === 'send-without' ? 'send-without' : 'cancel' };
+    } finally {
+      this.compactPrompting.set(false);
+    }
+  }
+
   /** Run one compaction of `sessionID`; the forked session id, or null on error. */
-  private async compactInto(sessionID: string): Promise<string | null> {
+  private async compactInto(sessionID: string, cutoff?: number): Promise<string | null> {
     this.compacting.set(true);
     this.error.set(null);
     try {
       const result = await this.engine.compactSession(
         sessionID,
         this.sessionStore.compactBudget(),
+        cutoff,
       );
       return result.sessionID;
     } catch (err) {

@@ -642,14 +642,17 @@ mod tests {
             let base =
                 std::env::temp_dir().join(format!("bebok-cli-hook-{tag}-{}", uuid::Uuid::new_v4()));
             let root = base.join("root");
-            std::fs::create_dir_all(root.join(".bebok")).unwrap();
-            std::fs::write(
-                root.join(".bebok").join("config.json"),
-                format!(r#"{{ "permission": {{ "rules": [{rules}] }} }}"#),
+            std::fs::create_dir_all(&root).unwrap();
+            let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+            // Config lives in the store's database (no config file any more).
+            bebok_core::config::store::write_delta_at(
+                &store.config_db_path(),
+                &bebok_core::config::project_scope(&root),
+                &serde_json::json!({ "permission": { "rules": serde_json::from_str::<serde_json::Value>(&format!("[{rules}]")).unwrap() } }),
             )
             .unwrap();
             let state = AppState {
-                store: bebok_core::InstanceStore::with_data_dir(base.join("data")),
+                store,
                 #[cfg(not(target_os = "android"))]
                 ptys: Arc::new(bebok_pty::PtyManager::new()),
                 debug: Arc::new(bebok_core::DebugLog::new(base.join("debug.log"))),
@@ -980,12 +983,15 @@ mod tests {
     #[tokio::test]
     async fn pre_denies_a_test_command_when_the_build_test_policy_is_off() {
         let fx = Fixture::new("buildtest", r#"{ "pattern": "cli:*", "action": "allow" }"#);
-        // Re-write the config with `verify.buildTest = off` before the instance
-        // is created.
-        std::fs::write(
-            fx.root.join(".bebok").join("config.json"),
-            r#"{ "verify": { "buildTest": "off" },
-                 "permission": { "rules": [ { "pattern": "cli:*", "action": "allow" } ] } }"#,
+        // Re-write the project scope with `verify.buildTest = off` before the
+        // instance is created.
+        bebok_core::config::store::write_delta_at(
+            &fx.state.store.config_db_path(),
+            &bebok_core::config::project_scope(&fx.root),
+            &serde_json::json!({
+                "verify": { "buildTest": "off" },
+                "permission": { "rules": [ { "pattern": "cli:*", "action": "allow" } ] }
+            }),
         )
         .unwrap();
         let session = fx.session().await;

@@ -130,5 +130,75 @@
   }
 </div>
 
+<div class="card" data-testid="compact-card">
+  <h3>{{ t('settings.compactTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.compactHint') }}</p>
+  <label class="compact-row">
+    <input
+      type="checkbox"
+      data-testid="compact-suggest-toggle"
+      [checked]="chatStore.suggestCompactEnabled()"
+      (change)="chatStore.setSuggestCompactEnabled($any($event.target).checked)"
+    />
+    <span>{{ t('settings.compactSuggest') }}</span>
+  </label>
+  <label class="compact-row">
+    <span>{{ t('settings.compactThreshold') }}</span>
+    <input
+      type="number"
+      data-testid="compact-threshold"
+      [value]="chatStore.autoCompactPercent()"
+      [disabled]="!chatStore.suggestCompactEnabled()"
+      min="50"
+      max="99"
+      (change)="chatStore.setAutoCompactPercent($any($event.target).valueAsNumber || 85)"
+    />
+  </label>
+</div>
+
+<div class="card" data-testid="import-db-card">
+  <h3>{{ t('settings.importDbTitle') }}</h3>
+  <p class="card-sub">{{ t('settings.importDbHint') }}</p>
+  <button
+    type="button"
+    data-testid="import-bebok-db"
+    [disabled]="importLoading()"
+    (click)="importToDb()"
+  >{{ importLoading() ? t('settings.importDbImporting') : t('settings.importDbButton') }}</button>
+  @if (importLoading()) {
+    <p class="import-progress" data-testid="import-db-progress">{{ t('settings.importDbImporting') }}</p>
+  }
+  @if (importReport(); as r) {
+    <div class="import-report" data-testid="import-db-report">
+      <ol class="import-steps">
+        @for (s of r.steps ?? []; track $index) {
+          <li>{{ s }}</li>
+        }
+      </ol>
+      @if (r.projects?.length) {
+        <details open>
+          <summary>{{ r.projects!.length }} × project</summary>
+          <ul class="import-projects">
+            @for (p of r.projects!; track p.directory) {
+              <li [class.err]="p.status === 'error'">
+                <code>{{ p.directory }}</code> — {{ p.status }}@if (p.keys) { ({{ p.keys }}) }@if (p.error) { : {{ p.error }} }
+              </li>
+            }
+          </ul>
+        </details>
+      }
+      @if (r.conflicts?.summary?.text) {
+        <p class="import-summary"><strong>{{ r.conflicts!.summary!.source }}:</strong> {{ r.conflicts!.summary!.text }}</p>
+      }
+      @for (e of r.errors ?? []; track $index) {
+        <p class="err">{{ e }}</p>
+      }
+      @for (e of r.sessions?.errors ?? []; track $index) {
+        <p class="err">{{ e }}</p>
+      }
+    </div>
+  }
+</div>
+
 <app-code-features-card />
 

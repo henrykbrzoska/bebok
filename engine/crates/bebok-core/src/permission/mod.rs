@@ -12,7 +12,7 @@
 //! `ask` suspends the agent loop: a oneshot channel is registered per request,
 //! a `permission.asked` event reaches the clients, and the loop awaits. The
 //! decision endpoint answers through the oneshot; `always` persists a project
-//! rule (`ask → allow`) to `<project>/.bebok/config.json`.
+//! rule (`ask → allow`) to the project's config scope in `bebok.db`.
 
 pub mod engine;
 pub mod matcher;
@@ -25,4 +25,4 @@ pub use engine::{
 };
 pub use matcher::{call_arg_text, call_string};
 pub use rule::{Action, Rule, parse_rules};
-pub use store::{persist_project_rule, read_rules_from};
+pub use store::{persist_project_rule, persist_project_rule_at, read_rules_at, read_rules_scope};

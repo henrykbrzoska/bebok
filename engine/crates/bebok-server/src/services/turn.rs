@@ -616,6 +616,7 @@ mod tests {
             | ApiError::NotFound(m)
             | ApiError::Conflict(m)
             | ApiError::Forbidden(m)
+            | ApiError::Gone(m)
             | ApiError::BadGateway(m)
             | ApiError::ServiceUnavailable(m)
             | ApiError::Internal(m) => m,
@@ -677,19 +678,20 @@ mod tests {
     async fn assembled_prompt_carries_the_configured_fleet_roster() {
         let base = std::env::temp_dir().join(format!("bebok-fleet-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
-        std::fs::create_dir_all(project.join(".bebok")).unwrap();
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{
+        std::fs::create_dir_all(&project).unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        bebok_core::config::store::write_delta_at(
+            &store.config_db_path(),
+            &bebok_core::config::project_scope(&project),
+            &bebok_core::config::jsonc::parse(r#"{
                  "delegation": { "mode": "auto" },
                  "fleet": { "enabled": true, "members": [
                      { "name": "ask-openai-gpt-4.1-nano", "agent": "ask", "model": "openai/gpt-4.1-nano" },
                      { "name": "code-zai-glm-5.3-flash", "agent": "code", "model": "zai/glm-5.3-flash" }
                  ]}
-               }"#,
+               }"#).unwrap(),
         )
         .unwrap();
-        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
         let dir = project.to_string_lossy().to_string();
         let instance = store.get_or_create_instance(&dir).await.unwrap();
         let cfg = instance.config_snapshot();
@@ -747,18 +749,22 @@ mod tests {
     async fn assembled_prompt_section_order() {
         let base = std::env::temp_dir().join(format!("bebok-order-{}", uuid::Uuid::new_v4()));
         let project = base.join("project");
-        std::fs::create_dir_all(project.join(".bebok")).unwrap();
-        std::fs::write(
-            project.join(".bebok").join("config.json"),
-            r#"{
+        std::fs::create_dir_all(&project).unwrap();
+        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
+        bebok_core::config::store::write_delta_at(
+            &store.config_db_path(),
+            &bebok_core::config::project_scope(&project),
+            &bebok_core::config::jsonc::parse(
+                r#"{
                  "verify": { "frontend": "auto", "buildTest": "auto" },
                  "fleet": { "enabled": true, "members": [
                      { "name": "ask-a", "agent": "ask", "model": "openai/gpt-4.1-nano" }
                  ]}
                }"#,
+            )
+            .unwrap(),
         )
         .unwrap();
-        let store = bebok_core::InstanceStore::with_data_dir(base.join("data"));
         let dir = project.to_string_lossy().to_string();
         let instance = store.get_or_create_instance(&dir).await.unwrap();
         let cfg = instance.config_snapshot();

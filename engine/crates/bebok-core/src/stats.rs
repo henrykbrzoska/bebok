@@ -204,6 +204,34 @@ pub fn scan(root: &Path) -> Vec<SessionDigest> {
     out
 }
 
+/// Digest every live session from the SQLite mirror. `None` until the import
+/// has completed or when the mirror cannot be read (the caller falls back to
+/// `scan`). Uses the same digest as the file path, so both answer alike.
+pub fn scan_db(root: &Path) -> Option<Vec<SessionDigest>> {
+    let rows = match persist::load_live_transcripts(root) {
+        Ok(Some(rows)) => rows,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::warn!("stats: bebok.db unreadable, scanning files: {e}");
+            return None;
+        }
+    };
+    Some(
+        rows.iter()
+            .map(|(session, messages)| {
+                let mut digest = digest_session(session, messages);
+                digest.directory = normalize_path(Path::new(&digest.directory));
+                digest
+            })
+            .collect(),
+    )
+}
+
+/// SQLite mirror when the import is done, the session files otherwise.
+pub fn scan_preferred(root: &Path) -> Vec<SessionDigest> {
+    scan_db(root).unwrap_or_else(|| scan(root))
+}
+
 /// Load `msg-*.json` files of one session in index order.
 fn load_transcript(dir: &Path) -> Vec<Message> {
     let Ok(files) = std::fs::read_dir(dir) else {
@@ -1164,6 +1192,54 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(aggregate(&digests, &filter, NOW).totals.sessions, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The SQLite digest path must equal the file path, and the file path
+    /// must answer until the import has run.
+    #[test]
+    fn scan_db_matches_scan_after_import() {
+        use crate::session::Part;
+        let root = std::env::temp_dir().join(format!("bebok-stats-db-{}", Uuid::new_v4()));
+        let mut usage = Message::new(Role::Assistant);
+        usage.meta.model = Some("openai/gpt-x".into());
+        usage.parts.push(Part::Usage {
+            input_tokens: 7,
+            output_tokens: 3,
+            cost: Some(0.5),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        });
+        for directory in ["/p1", "/p2"] {
+            let session = Session::new(directory, "code");
+            let dir = persist::session_dir(&persist::instance_dir(&root, directory), session.id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                persist::persist_session_meta(&dir, &session).await.unwrap();
+                persist::persist_message(&dir, 0, &Message::user("hi"))
+                    .await
+                    .unwrap();
+                persist::persist_message(&dir, 1, &usage).await.unwrap();
+            });
+        }
+
+        assert!(
+            scan_db(&root).is_none(),
+            "no digest from an unimported mirror"
+        );
+        assert_eq!(scan_preferred(&root).len(), 2, "falls back to files");
+
+        assert!(persist::import_sessions_once(&root).unwrap());
+        let mut from_db = scan_db(&root).expect("mirror after import");
+        let mut from_files = scan(&root);
+        from_db.sort_by_key(|d| d.id);
+        from_files.sort_by_key(|d| d.id);
+        assert_eq!(from_db, from_files);
+        assert_eq!(from_db[0].calls.len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

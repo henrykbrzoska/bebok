@@ -2,7 +2,8 @@
 //! `PATCH/DELETE /projects/{id}`, `POST /projects/{id}/open`.
 //!
 //! The registry itself lives in `bebok_core::config::projects` (the
-//! `"projects"` key of the global config file). These handlers are thin:
+//! `"projects"` key of the `global` config scope in `bebok.db`). These
+//! handlers are thin:
 //! extract -> registry -> JSON, mapping `ProjectsError` onto the project's
 //! usual status codes (400 invalid input, 404 unknown id, 500 write failure).
 //!
@@ -11,13 +12,14 @@
 //! needed.
 
 use axum::Json;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use bebok_core::config::projects::{self, ProjectPatch, ProjectsError};
 
 use crate::error::ApiError;
+use crate::state::AppState;
 
 fn map_err(e: ProjectsError) -> axum::response::Response {
     match e {
@@ -38,51 +40,49 @@ pub struct AddProjectBody {
 
 /// `GET /projects` -> the registry in display order (pinned, then most
 /// recently opened, then name).
-pub async fn list_projects() -> Json<serde_json::Value> {
-    let projects = projects::list_from(&bebok_core::config::global_config_path());
+pub async fn list_projects(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let projects = projects::list_at(&state.store.config_db_path());
     Json(serde_json::json!({ "projects": projects }))
 }
 
 /// `POST /projects` -> register a directory (or return the existing entry when
 /// the path normalises onto one already registered).
 pub async fn add_project(
+    State(state): State<AppState>,
     Json(body): Json<AddProjectBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let (entry, _created) = projects::add_in(
-        &bebok_core::config::global_config_path(),
-        &body.path,
-        body.name,
-    )
-    .map_err(map_err)?;
+    let (entry, _created) =
+        projects::add_at(&state.store.config_db_path(), &body.path, body.name).map_err(map_err)?;
     // 200 in both cases: a duplicate add is idempotent, not an error.
     Ok(Json(serde_json::to_value(entry).unwrap_or_default()))
 }
 
 /// `PATCH /projects/{id}` -> partial update (name and/or pinned).
 pub async fn patch_project(
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(patch): Json<ProjectPatch>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let entry = projects::patch_in(&bebok_core::config::global_config_path(), &id, &patch)
-        .map_err(map_err)?;
+    let entry = projects::patch_at(&state.store.config_db_path(), &id, &patch).map_err(map_err)?;
     Ok(Json(serde_json::to_value(entry).unwrap_or_default()))
 }
 
 /// `DELETE /projects/{id}` -> forget the project. Never touches disk.
 pub async fn delete_project(
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    projects::remove_in(&bebok_core::config::global_config_path(), &id).map_err(map_err)?;
+    projects::remove_at(&state.store.config_db_path(), &id).map_err(map_err)?;
     Ok(Json(serde_json::json!({ "removed": true, "id": id })))
 }
 
 /// `POST /projects/{id}/open` -> stamp `last_opened_at` and return the entry
 /// with its normalised path (what the client switches the active directory to).
 pub async fn open_project(
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
-    let entry = projects::mark_opened_in(&bebok_core::config::global_config_path(), &id)
-        .map_err(map_err)?;
+    let entry = projects::mark_opened_at(&state.store.config_db_path(), &id).map_err(map_err)?;
     Ok(Json(serde_json::to_value(entry).unwrap_or_default()))
 }
 
