@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.13.2 — 2026-11-27
+
+### Fixes
+- **explorer**: accept snake_case hunk fields from engine file/diff (da27c01)
+
+### Other
+- release 1.13.1 (#51) (e3ec97c)
+
 ## 1.13.1 — 2026-11-27
 
 ### Features
