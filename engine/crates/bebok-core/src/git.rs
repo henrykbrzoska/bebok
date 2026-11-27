@@ -418,6 +418,8 @@ pub async fn log(
     let owned;
     if let Some(p) = path {
         owned = p.to_string();
+        // Follow renames so a file's history survives `git mv`.
+        args.push("--follow");
         args.push("--");
         args.push(&owned);
     }
@@ -618,6 +620,258 @@ pub async fn show(dir: &Path, rev: &str) -> Result<GitShow, GitError> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Per-file read ops: diff hunks, blame
+// ---------------------------------------------------------------------------
+
+/// One unified-diff hunk header `@@ -old_start,old_lines +new_start,new_lines @@`.
+/// An omitted count means 1 (git prints `@@ -3 +3 @@` for single-line hunks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Hunk {
+    pub old_start: usize,
+    pub old_lines: usize,
+    pub new_start: usize,
+    pub new_lines: usize,
+}
+
+/// Hunks of one file's diff. Produced with `--unified=0`, so only the headers
+/// carry information and no context lines are returned.
+pub type Hunks = Vec<Hunk>;
+
+/// Parse one `@@ -a,b +c,d @@ ...` header line.
+fn parse_hunk_header(line: &str) -> Option<Hunk> {
+    let rest = line.strip_prefix("@@ ")?;
+    let mut parts = rest.split_whitespace();
+    let old = parts.next()?.strip_prefix('-')?;
+    let new = parts.next()?.strip_prefix('+')?;
+    let range = |s: &str| -> Option<(usize, usize)> {
+        match s.split_once(',') {
+            Some((start, lines)) => Some((start.parse().ok()?, lines.parse().ok()?)),
+            None => Some((s.parse().ok()?, 1)),
+        }
+    };
+    let (old_start, old_lines) = range(old)?;
+    let (new_start, new_lines) = range(new)?;
+    Some(Hunk {
+        old_start,
+        old_lines,
+        new_start,
+        new_lines,
+    })
+}
+
+fn parse_hunks(diff: &str) -> Hunks {
+    diff.lines()
+        .filter(|l| l.starts_with("@@"))
+        .filter_map(parse_hunk_header)
+        .collect()
+}
+
+/// Hunks of `path` against `rev` (default `HEAD`), working tree on the other
+/// side. An untracked file falls back to `diff --no-index /dev/null <path>`,
+/// so every line shows up as added.
+pub async fn diff_file(dir: &Path, path: &str, rev: Option<&str>) -> Result<Hunks, GitError> {
+    ensure_repo(dir).await?;
+    validate_pathspec(path)?;
+    let rev = rev
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .unwrap_or("HEAD");
+    validate_ref_public(rev)?;
+    let tracked = run(dir, &["ls-files", "--error-unmatch", "--", path])
+        .await
+        .ok_or(GitError::Unavailable)?
+        .success;
+    let out = if tracked {
+        exec(
+            dir,
+            &[
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--unified=0",
+                rev,
+                "--",
+                path,
+            ],
+        )
+        .await?
+    } else {
+        // `--no-index` exits 1 whenever the files differ, which is the normal
+        // case here; only empty stdout plus stderr means a real failure.
+        let out = run(
+            dir,
+            &[
+                "diff",
+                "--no-index",
+                "--no-color",
+                "--no-ext-diff",
+                "--unified=0",
+                "/dev/null",
+                path,
+            ],
+        )
+        .await
+        .ok_or(GitError::Unavailable)?;
+        if !out.success && out.stdout.is_empty() && !out.stderr.is_empty() {
+            return Err(GitError::Failed(stderr_summary(&out)));
+        }
+        out
+    };
+    Ok(parse_hunks(&out.stdout))
+}
+
+/// One line of `git blame --line-porcelain` output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BlameLine {
+    /// 1-based line number in the blamed revision (or working tree).
+    pub line: usize,
+    pub hash: String,
+    pub author: String,
+    pub author_mail: String,
+    pub ts: i64,
+    pub summary: String,
+    pub content: String,
+}
+
+/// Parse `--line-porcelain` output: each line starts with a
+/// `<hash> <orig> <final> [count]` header, carries full metadata, and ends
+/// with the source text prefixed by a tab.
+fn parse_blame_porcelain(text: &str) -> Vec<BlameLine> {
+    let mut out = Vec::new();
+    let mut cur: Option<BlameLine> = None;
+    for raw in text.lines() {
+        if let Some(content) = raw.strip_prefix('\t') {
+            if let Some(mut line) = cur.take() {
+                line.content = content.to_string();
+                out.push(line);
+            }
+            continue;
+        }
+        let mut fields = raw.split(' ');
+        let first = fields.next().unwrap_or("");
+        let is_header = (first.len() == 40 || first.len() == 64)
+            && first.bytes().all(|b| b.is_ascii_hexdigit());
+        if is_header {
+            // Skip the original line number, keep the final one.
+            let line = fields.nth(1).and_then(|n| n.parse().ok()).unwrap_or(0);
+            cur = Some(BlameLine {
+                line,
+                hash: first.to_string(),
+                author: String::new(),
+                author_mail: String::new(),
+                ts: 0,
+                summary: String::new(),
+                content: String::new(),
+            });
+            continue;
+        }
+        let Some(entry) = cur.as_mut() else {
+            continue;
+        };
+        if let Some(v) = raw.strip_prefix("author ") {
+            entry.author = v.to_string();
+        } else if let Some(v) = raw.strip_prefix("author-mail ") {
+            entry.author_mail = v.trim_matches(|c| c == '<' || c == '>').to_string();
+        } else if let Some(v) = raw.strip_prefix("author-time ") {
+            entry.ts = v.parse().unwrap_or(0);
+        } else if let Some(v) = raw.strip_prefix("summary ") {
+            entry.summary = v.to_string();
+        }
+    }
+    out
+}
+
+/// `git blame --line-porcelain [rev] -- <path>`. Without `rev` the working
+/// tree is blamed (uncommitted lines show as "Not Committed Yet").
+pub async fn blame_file(
+    dir: &Path,
+    path: &str,
+    rev: Option<&str>,
+) -> Result<Vec<BlameLine>, GitError> {
+    ensure_repo(dir).await?;
+    validate_pathspec(path)?;
+    let rev = rev.map(str::trim).filter(|r| !r.is_empty());
+    let mut args = vec!["blame", "--line-porcelain"];
+    if let Some(r) = rev {
+        validate_ref_public(r)?;
+        args.push(r);
+    }
+    args.push("--");
+    args.push(path);
+    let out = exec(dir, &args).await?;
+    Ok(parse_blame_porcelain(&out.stdout))
+}
+
+/// Largest blob [`file_content`] returns, in bytes.
+pub const FILE_CONTENT_MAX_BYTES: u64 = 1_000_000;
+
+/// Text of one file at a revision. `exists` is false when the path is not
+/// present there (untracked, added later, deleted, or a directory).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileContent {
+    pub content: String,
+    pub exists: bool,
+}
+
+/// Content of `path` at `rev` (default `HEAD`), read with `git cat-file blob`
+/// from `<rev>:./<path>` so it is relative to `dir` like the other per-file
+/// ops and skips textconv / smudge filters. A missing path is `exists: false`,
+/// not an error. Binary blobs and blobs over [`FILE_CONTENT_MAX_BYTES`] are
+/// rejected with `InvalidInput`.
+pub async fn file_content(
+    dir: &Path,
+    path: &str,
+    rev: Option<&str>,
+) -> Result<FileContent, GitError> {
+    ensure_repo(dir).await?;
+    validate_pathspec(path)?;
+    let rev = rev
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .unwrap_or("HEAD");
+    validate_ref_public(rev)?;
+    if rev.contains(':') {
+        return Err(GitError::InvalidInput(format!("invalid ref: {rev}")));
+    }
+    let object = format!("{rev}:./{path}");
+    let object: &str = &object;
+    let missing = FileContent {
+        content: String::new(),
+        exists: false,
+    };
+
+    let size = run(dir, &["cat-file", "-s", object])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if !size.success {
+        return Ok(missing);
+    }
+    let bytes: u64 = size.stdout.trim().parse().unwrap_or(u64::MAX);
+    if bytes > FILE_CONTENT_MAX_BYTES {
+        return Err(GitError::InvalidInput(format!(
+            "file too large: {bytes} bytes (limit {FILE_CONTENT_MAX_BYTES})"
+        )));
+    }
+
+    let out = run(dir, &["cat-file", "blob", object])
+        .await
+        .ok_or(GitError::Unavailable)?;
+    if !out.success {
+        // Size resolved but it is not a blob (a directory / tree at this path).
+        return Ok(missing);
+    }
+    if out.stdout.contains('\0') {
+        return Err(GitError::InvalidInput(
+            "binary file: content is not shown".to_string(),
+        ));
+    }
+    Ok(FileContent {
+        content: out.stdout,
+        exists: true,
+    })
+}
+
 /// Public ref validation shared by `show` and later write ops: no options,
 /// no whitespace, no parent traversal.
 pub fn validate_ref_public(rev: &str) -> Result<(), GitError> {
@@ -638,6 +892,107 @@ pub fn validate_ref_public(rev: &str) -> Result<(), GitError> {
 // Git panel (write ops): stage / commit / reset / stash / checkout /
 // branch / cherry-pick / conflicts
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Repository discovery: the registered project root is not always the repo
+// root (e.g. project `~/site` with the repo in `~/site/htdocs/.git`).
+// ---------------------------------------------------------------------------
+
+/// `dir/.git` exists (a directory, or a file for worktrees / submodules).
+fn has_dot_git(dir: &Path) -> bool {
+    dir.join(".git").exists()
+}
+
+/// Directories never scanned for nested repos (big, vendored or ours).
+const NESTED_REPO_SKIP: &[&str] = &["node_modules", "vendor", "target", "dist", "build"];
+
+/// How deep below the project root [`project_repo_dir`] looks for a `.git`.
+const NESTED_REPO_DEPTH: usize = 2;
+
+/// Directory to run project-wide git commands in (status, branches, log, ...).
+///
+/// - `root` itself, or any of its ancestors, holds `.git` -> `root` (git finds
+///   the repo by walking up, as before).
+/// - otherwise the shallowest nested repo within [`NESTED_REPO_DEPTH`] levels
+///   (alphabetical among equals), e.g. `root/htdocs`.
+/// - nothing found -> `root` (callers then report `NotRepo` as before).
+pub fn project_repo_dir(root: &Path) -> PathBuf {
+    if root.ancestors().any(has_dot_git) {
+        return root.to_path_buf();
+    }
+    let mut level = vec![root.to_path_buf()];
+    for _ in 0..NESTED_REPO_DEPTH {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(read) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            let mut children: Vec<PathBuf> = read
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .filter(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    !name.starts_with('.') && !NESTED_REPO_SKIP.contains(&name.as_ref())
+                })
+                .map(|e| e.path())
+                .collect();
+            children.sort();
+            next.extend(children);
+        }
+        if let Some(found) = next.iter().find(|d| has_dot_git(d)) {
+            return found.clone();
+        }
+        level = next;
+    }
+    root.to_path_buf()
+}
+
+/// Repo directory for a file-scoped op on `rel` (relative to `root`) and the
+/// path rewritten relative to that directory. Walks up from the file's
+/// directory towards `root` and stops at the first `.git`, so a nested repo
+/// (`root/htdocs/.git`) wins over the project root. No nested `.git` ->
+/// `(root, rel)` unchanged. An invalid `rel` is passed through untouched so
+/// the op's own validation reports it.
+pub fn file_repo_dir(root: &Path, rel: &str) -> (PathBuf, String) {
+    let unchanged = || (root.to_path_buf(), rel.to_string());
+    let rel_path = Path::new(rel);
+    if rel.is_empty()
+        || !rel_path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+    {
+        return unchanged();
+    }
+    let full = root.join(rel_path);
+    let start = if full.is_dir() {
+        full.as_path()
+    } else {
+        match full.parent() {
+            Some(p) => p,
+            None => return unchanged(),
+        }
+    };
+    for dir in start.ancestors() {
+        if dir == root || !dir.starts_with(root) {
+            break;
+        }
+        if has_dot_git(dir) {
+            let Ok(inner) = full.strip_prefix(dir) else {
+                return unchanged();
+            };
+            let inner = inner.to_string_lossy().replace('\\', "/");
+            // `rel` was the repo dir itself -> the whole repo.
+            let inner = if inner.is_empty() {
+                ".".to_string()
+            } else {
+                inner
+            };
+            return (dir.to_path_buf(), inner);
+        }
+    }
+    unchanged()
+}
 
 /// Shared prelude for every mutating op: the directory exists and is a git
 /// work tree. Returns `NotRepo` otherwise (never `Failed`).
@@ -1835,6 +2190,189 @@ mod tests {
     // -- pure helpers (no git needed) --------------------------------------
 
     #[test]
+    fn parse_hunk_header_reads_counts_and_defaults() {
+        assert_eq!(
+            parse_hunk_header("@@ -3,2 +5,4 @@ fn x()"),
+            Some(Hunk {
+                old_start: 3,
+                old_lines: 2,
+                new_start: 5,
+                new_lines: 4
+            })
+        );
+        assert_eq!(
+            parse_hunk_header("@@ -3 +3 @@"),
+            Some(Hunk {
+                old_start: 3,
+                old_lines: 1,
+                new_start: 3,
+                new_lines: 1
+            })
+        );
+        assert_eq!(
+            parse_hunk_header("@@ -0,0 +1,7 @@"),
+            Some(Hunk {
+                old_start: 0,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: 7
+            })
+        );
+        assert_eq!(parse_hunk_header("not a header"), None);
+    }
+
+    #[test]
+    fn parse_blame_porcelain_reads_each_line() {
+        let text = "\
+0123456789012345678901234567890123456789 1 1 1
+author Ann
+author-mail <ann@example.com>
+author-time 1700000000
+summary first
+filename a.txt
+\thello
+0123456789012345678901234567890123456789 2 2 1
+author Bob
+author-mail <bob@example.com>
+author-time 1700000100
+summary second
+filename a.txt
+\tworld
+";
+        let lines = parse_blame_porcelain(text);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].line, 1);
+        assert_eq!(lines[0].author, "Ann");
+        assert_eq!(lines[0].author_mail, "ann@example.com");
+        assert_eq!(lines[0].ts, 1_700_000_000);
+        assert_eq!(lines[0].content, "hello");
+        assert_eq!(lines[1].line, 2);
+        assert_eq!(lines[1].summary, "second");
+        assert_eq!(lines[1].content, "world");
+    }
+
+    #[tokio::test]
+    async fn file_diff_and_blame_round_trip() {
+        require_git!();
+        let fx = Fixture::new("file-ops");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        std::fs::write(repo.join("README.md"), "hello\nmore\n").unwrap();
+        let hunks = diff_file(&repo, "README.md", None).await.unwrap();
+        assert_eq!(
+            hunks,
+            vec![Hunk {
+                old_start: 1,
+                old_lines: 0,
+                new_start: 2,
+                new_lines: 1
+            }]
+        );
+
+        std::fs::write(repo.join("new.txt"), "a\nb\n").unwrap();
+        let untracked = diff_file(&repo, "new.txt", None).await.unwrap();
+        assert_eq!(
+            untracked,
+            vec![Hunk {
+                old_start: 0,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: 2
+            }]
+        );
+
+        let at_head = blame_file(&repo, "README.md", Some("HEAD")).await.unwrap();
+        assert_eq!(at_head.len(), 1);
+        assert_eq!(at_head[0].author, "Bebok Test");
+        assert_eq!(at_head[0].content, "hello");
+
+        let worktree = blame_file(&repo, "README.md", None).await.unwrap();
+        assert_eq!(worktree.len(), 2);
+        assert_eq!(worktree[1].author, "Not Committed Yet");
+
+        assert!(matches!(
+            diff_file(&repo, "../escape", None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            blame_file(&repo, "README.md", Some("--output=/tmp/x")).await,
+            Err(GitError::InvalidInput(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn file_content_round_trip_and_rejects_bad_input() {
+        require_git!();
+        let fx = Fixture::new("file-content");
+        let repo = fx.dir("repo");
+        init_repo(&repo).await;
+
+        // Uncommitted edit: HEAD still has the old text, the disk has the new.
+        std::fs::write(repo.join("README.md"), "changed\n").unwrap();
+        let at_head = file_content(&repo, "README.md", None).await.unwrap();
+        assert_eq!(
+            at_head,
+            FileContent {
+                content: "hello\n".to_string(),
+                exists: true
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "changed\n"
+        );
+        assert_eq!(
+            file_content(&repo, "README.md", Some("HEAD"))
+                .await
+                .unwrap(),
+            at_head
+        );
+
+        git_ok(&repo, &["commit", "-q", "-am", "change"]).await;
+        let now = file_content(&repo, "README.md", None).await.unwrap();
+        assert_eq!(now.content, "changed\n");
+        let before = file_content(&repo, "README.md", Some("HEAD~1"))
+            .await
+            .unwrap();
+        assert_eq!(before.content, "hello\n");
+
+        // Untracked file: not in HEAD -> exists false, no error.
+        std::fs::write(repo.join("new.txt"), "a\nb\n").unwrap();
+        let untracked = file_content(&repo, "new.txt", None).await.unwrap();
+        assert_eq!(
+            untracked,
+            FileContent {
+                content: String::new(),
+                exists: false
+            }
+        );
+
+        // Binary blob committed to the repo is refused.
+        std::fs::write(repo.join("bin.dat"), b"a\0b").unwrap();
+        git_ok(&repo, &["add", "bin.dat"]).await;
+        git_ok(&repo, &["commit", "-q", "-m", "bin"]).await;
+        assert!(matches!(
+            file_content(&repo, "bin.dat", None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+
+        // Traversal, absolute paths and option-like revs are rejected.
+        assert!(matches!(
+            file_content(&repo, "../escape", None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            file_content(&repo, "/etc/passwd", None).await,
+            Err(GitError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            file_content(&repo, "README.md", Some("--output=/tmp/x")).await,
+            Err(GitError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
     fn worktrees_dir_is_built_from_path_segments() {
         let root = Path::new("proj");
         assert_eq!(
@@ -2544,5 +3082,134 @@ mod tests {
             clone("https://github.com/acme/x.git", "../escape", None).await,
             Err(GitError::InvalidInput(_))
         ));
+    }
+
+    fn scratch_root(tag: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("bebok-gitdisc-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn file_repo_dir_finds_nested_repo() {
+        let root = scratch_root("file");
+        let repo = root.join("htdocs");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("app/code")).unwrap();
+        std::fs::write(repo.join("app/code/Data.php"), "<?php").unwrap();
+
+        let (dir, rel) = file_repo_dir(&root, "htdocs/app/code/Data.php");
+        assert_eq!(dir, repo);
+        assert_eq!(rel, "app/code/Data.php");
+        // A not-yet-existing file still resolves through its parent dirs.
+        let (dir, rel) = file_repo_dir(&root, "htdocs/app/code/New.php");
+        assert_eq!(dir, repo);
+        assert_eq!(rel, "app/code/New.php");
+        // The repo dir itself -> whole repo.
+        assert_eq!(
+            file_repo_dir(&root, "htdocs"),
+            (repo.clone(), ".".to_string())
+        );
+        // Outside the nested repo, or invalid input -> unchanged.
+        assert_eq!(
+            file_repo_dir(&root, "README.md"),
+            (root.clone(), "README.md".to_string())
+        );
+        assert_eq!(
+            file_repo_dir(&root, "../x"),
+            (root.clone(), "../x".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The route resolves `<project>/<rel>` through `file_repo_dir` before
+    /// calling the per-file ops; a repo nested one level below the project
+    /// root (`root/sub/.git`) must answer diff / content / blame / log.
+    #[tokio::test]
+    async fn nested_repo_file_ops_resolve_through_file_repo_dir() {
+        require_git!();
+        let root = scratch_root("nested-ops");
+        let repo = root.join("sub");
+        std::fs::create_dir_all(repo.join("dir")).unwrap();
+        init_repo(&repo).await;
+        std::fs::write(repo.join("dir/file.txt"), "a\nb\n").unwrap();
+        git_ok(&repo, &["add", "."]).await;
+        git_ok(&repo, &["commit", "-q", "-m", "add file"]).await;
+        std::fs::write(repo.join("dir/file.txt"), "a\nB\n").unwrap();
+
+        let (dir, rel) = file_repo_dir(&root, "sub/dir/file.txt");
+        assert_eq!(dir, repo);
+        assert_eq!(rel, "dir/file.txt");
+
+        let hunks = diff_file(&dir, &rel, None).await.expect("diff resolves");
+        assert_eq!(
+            hunks,
+            vec![Hunk {
+                old_start: 2,
+                old_lines: 1,
+                new_start: 2,
+                new_lines: 1,
+            }]
+        );
+        let content = file_content(&dir, &rel, None)
+            .await
+            .expect("content resolves");
+        assert!(content.exists);
+        assert_eq!(content.content, "a\nb\n");
+        let blame = blame_file(&dir, &rel, None).await.expect("blame resolves");
+        assert_eq!(blame.len(), 2);
+        let history = log(&dir, 10, 0, Some(&rel)).await.expect("log resolves");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].subject, "add file");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A project root with no repo in it or in its direct children is still
+    /// `NotRepo` for every per-file op.
+    #[tokio::test]
+    async fn plain_root_without_repo_is_not_repo() {
+        require_git!();
+        let root = scratch_root("plain");
+        std::fs::create_dir_all(root.join("sub/dir")).unwrap();
+        std::fs::write(root.join("sub/dir/file.txt"), "x\n").unwrap();
+
+        let (dir, rel) = file_repo_dir(&root, "sub/dir/file.txt");
+        assert_eq!(dir, root);
+        assert_eq!(rel, "sub/dir/file.txt");
+        assert!(matches!(
+            diff_file(&dir, &rel, None).await,
+            Err(GitError::NotRepo(_))
+        ));
+        assert!(matches!(
+            file_content(&dir, &rel, None).await,
+            Err(GitError::NotRepo(_))
+        ));
+        assert!(matches!(
+            blame_file(&dir, &rel, None).await,
+            Err(GitError::NotRepo(_))
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_repo_dir_prefers_root_then_nested() {
+        let root = scratch_root("proj");
+        // No repo anywhere (temp dir is not inside a repo) -> root.
+        assert_eq!(project_repo_dir(&root), root);
+        // Repos in skipped / hidden dirs are ignored.
+        std::fs::create_dir_all(root.join("vendor/lib/.git")).unwrap();
+        std::fs::create_dir_all(root.join(".cache/.git")).unwrap();
+        assert_eq!(project_repo_dir(&root), root);
+        // Nested repo two levels down is found.
+        std::fs::create_dir_all(root.join("web/htdocs/.git")).unwrap();
+        assert_eq!(project_repo_dir(&root), root.join("web/htdocs"));
+        // A shallower one wins.
+        std::fs::create_dir_all(root.join("site/.git")).unwrap();
+        assert_eq!(project_repo_dir(&root), root.join("site"));
+        // Root repo wins over everything.
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        assert_eq!(project_repo_dir(&root), root);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

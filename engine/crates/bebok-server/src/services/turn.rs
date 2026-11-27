@@ -128,6 +128,17 @@ pub async fn prompt_turn(
                 })),
             ));
         }
+        // A native turn takes it at its next step boundary (after the tool
+        // calls in flight finish) — the loop appends the user message itself.
+        if running.push_steer(&body.message) {
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "sessionID": id.to_string(),
+                    "status": "injected",
+                })),
+            ));
+        }
     }
     // Validate image attachments before claiming the turn slot.
     let image_parts = validate_images(body.images)?;

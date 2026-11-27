@@ -352,6 +352,18 @@ impl Tool for TaskTool {
             |a| cfg.model_for(a),
             args.model.as_deref(),
         );
+        // Spread siblings: when other models are configured, a second `ask`
+        // (etc.) child goes to the least-used one instead of repeating the
+        // same model (ties keep the resolved model first).
+        let candidates = crate::agent::model_policy::subagent_model_candidates(
+            &cfg,
+            &model,
+            &agent_name,
+            args.model.as_deref(),
+        );
+        let model = parent
+            .pick_subagent_model(&agent_name, &candidates)
+            .unwrap_or(model);
         // Sampling follows the same override chain: per-agent default →
         // config → explicit per-call `sampling` (per-field merge).
         let call_sampling = args.sampling.map(|s| {

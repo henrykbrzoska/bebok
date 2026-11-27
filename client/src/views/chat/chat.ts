@@ -146,6 +146,8 @@ export interface QueuedPrompt {
   model?: string;
   /** Per-prompt fleet fan-out requested when this message was queued. */
   fleet?: boolean;
+  /** `/btw` side question: delivered into the running turn, never aborts it. */
+  btw?: boolean;
 }
 
 /** Freeze the composer settings together with the message that will use them. */
@@ -267,6 +269,8 @@ export class ChatView implements OnInit, OnDestroy {
   readonly aborting = signal(false);
   /** Force-send is stopping the current turn and dispatching the queue. */
   readonly forceSending = signal(false);
+  /** Injection POSTs in flight (steering a running turn). */
+  private readonly injecting = signal(0);
   readonly draft = signal('');
   readonly follow = signal(true);
 
@@ -1045,7 +1049,8 @@ export class ChatView implements OnInit, OnDestroy {
     // /btw <prompt> — ask about current task status without interrupting the turn.
     // When a turn is running, inject as a side question; otherwise send normally
     // with a status-context prefix so the model answers about the current work.
-    if (text.startsWith('/btw ')) {
+    const btw = text.startsWith('/btw ');
+    if (btw) {
       const btwPrompt = text.slice(5).trim();
       if (!btwPrompt) return;
       // Build a prompt that asks the model to answer about current status
@@ -1076,10 +1081,11 @@ export class ChatView implements OnInit, OnDestroy {
     // wait for a running turn, and reading these controls in `drainQueue()`
     // would otherwise send it using whichever model happens to be selected
     // later rather than the model the user chose before pressing Send.
-    this.queue.update((q) => [
-      ...q,
-      queuePrompt(text, images, this.selectedAgent(), this.selectedModel(), fleet, files),
-    ]);
+    const queued = {
+      ...queuePrompt(text, images, this.selectedAgent(), this.selectedModel(), fleet, files),
+      ...(btw ? { btw: true } : {}),
+    };
+    this.queue.update((q) => [...q, queued]);
     this.pending.update((p) => [
       ...p,
       {
@@ -1092,10 +1098,10 @@ export class ChatView implements OnInit, OnDestroy {
       },
     ]);
     // Steering: while the model works, offer the message to the engine. A CLI
-    // turn takes it on the spot; anything else answers 409 and the message
-    // stays queued for the end of the turn ("Send now" still aborts).
+    // turn takes it on the spot, a native turn at its next step boundary;
+    // a 409 (turn finishing) keeps it queued for the end of the turn.
     if (this.running()) {
-      await this.injectHead();
+      await this.injectPrompt(queued);
       return;
     }
     await this.drainQueue();
@@ -1119,6 +1125,7 @@ export class ChatView implements OnInit, OnDestroy {
       this.sending() ||
       this.compacting() ||
       this.compactPrompting() ||
+      this.injecting() > 0 ||
       this.queue().length === 0
     ) {
       return;
@@ -1198,34 +1205,55 @@ export class ChatView implements OnInit, OnDestroy {
     }
   }
 
-  /** Try to hand the oldest queued message to the running turn. */
-  private async injectHead(): Promise<void> {
-    const head = this.queue()[0];
+  /**
+   * Try to hand a queued message to the running turn (text only). Returns
+   * `true` when the engine took it; otherwise it stays queued and drains
+   * when the turn ends.
+   */
+  private async injectPrompt(item: QueuedPrompt): Promise<boolean> {
     const sessionID = this.sessionID();
-    if (!head || !sessionID || this.sending() || head.images.length || head.files?.length) {
-      return;
+    if (!sessionID || item.images.length || item.files?.length) {
+      return false;
     }
-    this.sending.set(true);
+    this.injecting.update((n) => n + 1);
     try {
-      const result = await this.engine.prompt(sessionID, queuedPromptBody(head));
+      const result = await this.engine.prompt(sessionID, queuedPromptBody(item));
       if (sessionID !== this.sessionID() || result?.status !== 'injected') {
-        return;
+        return false;
       }
-      this.markPending(head.text, 'sent');
-      this.queue.update((q) => q.filter((x) => x !== head));
+      this.markPending(item.text, 'sent');
+      this.queue.update((q) => q.filter((x) => x !== item));
+      return true;
     } catch {
       // 409 or transport error: the message stays queued and drains normally.
+      return false;
     } finally {
-      if (sessionID === this.sessionID()) {
-        this.sending.set(false);
+      this.injecting.update((n) => Math.max(0, n - 1));
+      // The turn may have ended while the POST was in flight.
+      if (sessionID === this.sessionID() && !this.running()) {
+        void this.drainQueue();
       }
     }
   }
 
-  /** Force-send: abort the running turn and send the queued message now. */
+  /**
+   * Force-send: deliver the queued message now. Text is first steered into
+   * the running turn; only when the engine cannot take it is the turn
+   * aborted — and never for a `/btw` side question.
+   */
   async forceSend(): Promise<void> {
     if (this.queue().length === 0 || this.forceSending() || this.aborting()) {
       return;
+    }
+    if (this.running()) {
+      for (const item of [...this.queue()]) {
+        await this.injectPrompt(item);
+      }
+      const rest = this.queue();
+      if (rest.length === 0 || rest.every((q) => q.btw)) {
+        // Only side questions left: they wait for the turn, work continues.
+        return;
+      }
     }
     const sessionID = this.sessionID();
     this.forceSending.set(true);

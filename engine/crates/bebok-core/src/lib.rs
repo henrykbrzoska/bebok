@@ -26,6 +26,7 @@ pub mod scheduler;
 pub mod session;
 pub mod stats;
 pub mod store;
+pub mod tool_config;
 pub mod tool_safety;
 pub mod util;
 

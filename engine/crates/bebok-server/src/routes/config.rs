@@ -27,6 +27,7 @@ fn config_response(instance: &Instance) -> serde_json::Value {
     bebok_core::skills::apply_toggles(&mut discovered, Some(&cfg.skills));
     let servers = instance.mcp.status();
     let agents = instance.agent_infos();
+    let tool_entries = crate::routes::tools::tool_entries(instance);
 
     let db = instance.config_db_path().to_path_buf();
     let scope_doc = |scope: String| {
@@ -76,6 +77,7 @@ fn config_response(instance: &Instance) -> serde_json::Value {
             })
             .collect::<Vec<_>>(),
         "skills": discovered.skills,
+        "tools": tool_entries,
         "mcp": servers,
         "agents": agents,
         "runtimes": Runtimes::from_config(&cfg.runtimes),
@@ -396,6 +398,37 @@ pub async fn put_config(
         }
         if let Some(obj) = delta.as_object_mut() {
             obj.insert("skills".to_string(), serde_json::Value::Object(merged));
+        }
+    }
+
+    // `tool_config` is a per-tool map: deep-merge the incoming entries into
+    // the existing section so patching one tool does not wipe the others
+    // (each per-tool entry merges field-by-field; a null removes the tool).
+    if !replace && let Some(incoming) = delta.get("tool_config").and_then(|s| s.as_object()) {
+        let mut merged = previous
+            .get("tool_config")
+            .and_then(|s| s.as_object().cloned())
+            .unwrap_or_default();
+        for (name, value) in incoming {
+            if value.is_null() {
+                merged.remove(name);
+                continue;
+            }
+            let mut entry = merged
+                .get(name)
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            if let Some(patch) = value.as_object() {
+                for (k, v) in patch {
+                    entry.insert(k.clone(), v.clone());
+                }
+            } else {
+                entry.insert("enabled".to_string(), value.clone());
+            }
+            merged.insert(name.clone(), serde_json::Value::Object(entry));
+        }
+        if let Some(obj) = delta.as_object_mut() {
+            obj.insert("tool_config".to_string(), serde_json::Value::Object(merged));
         }
     }
 

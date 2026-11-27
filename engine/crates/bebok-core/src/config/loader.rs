@@ -110,6 +110,31 @@ pub fn apply(cfg: &mut ResolvedConfig, v: &Value) {
             cfg.tool_safety = Value::Object(map.clone());
         }
     }
+    // Per-tool enable/disable + custom descriptions: merged per tool (project
+    // wins per tool) and deep-merged per field, so a project can flip only
+    // `enabled` (or only `description`) without repeating the global entry.
+    if let Some(map) = v.get("tool_config").and_then(|x| x.as_object()) {
+        if let Some(existing) = cfg.tool_config.as_object_mut() {
+            for (k, val) in map {
+                match (existing.get_mut(k), val.as_object()) {
+                    (Some(Value::Object(old)), Some(obj)) => {
+                        for (fk, fv) in obj {
+                            old.insert(fk.clone(), fv.clone());
+                        }
+                    }
+                    // A JSON null removes the whole per-tool entry.
+                    _ if val.is_null() => {
+                        existing.remove(k);
+                    }
+                    _ => {
+                        existing.insert(k.clone(), val.clone());
+                    }
+                }
+            }
+        } else {
+            cfg.tool_config = Value::Object(map.clone());
+        }
+    }
     // UI overrides (client-only custom CSS, plain text, never executed here).
     // Layer order: defaults -> global -> project. `customCss` overwrites per
     // layer (project non-empty wins; an explicit empty string clears);
@@ -912,5 +937,43 @@ mod tests {
             &serde_json::json!({ "ast_search": { "languages": [] } }),
         );
         assert_eq!(cfg.ast_search.languages, vec!["rs"]);
+    }
+
+    #[test]
+    fn tool_config_merges_per_tool_and_field() {
+        let mut cfg = ResolvedConfig::default();
+        apply(
+            &mut cfg,
+            &serde_json::json!({
+                "tool_config": {
+                    "bash": { "enabled": false, "description": "global bash" },
+                    "rm":   { "enabled": false },
+                }
+            }),
+        );
+        // Project flips only `enabled` on bash, leaves rm alone, adds one tool.
+        apply(
+            &mut cfg,
+            &serde_json::json!({
+                "tool_config": {
+                    "bash": { "enabled": true },
+                    "grep": { "description": "project grep" },
+                }
+            }),
+        );
+        let map = crate::tool_config::ToolConfigMap::parse(&cfg.tool_config);
+        assert!(map.is_enabled("bash"), "project enabled override wins");
+        // Field-level merge: the global description survives the project flip.
+        assert_eq!(map.custom_description("bash"), Some("global bash"));
+        assert!(!map.is_enabled("rm"), "untouched project-wise");
+        assert_eq!(map.custom_description("grep"), Some("project grep"));
+
+        // A JSON null removes the whole per-tool entry.
+        apply(
+            &mut cfg,
+            &serde_json::json!({ "tool_config": { "rm": null } }),
+        );
+        let map = crate::tool_config::ToolConfigMap::parse(&cfg.tool_config);
+        assert!(map.is_enabled("rm"), "null resets to default (enabled)");
     }
 }

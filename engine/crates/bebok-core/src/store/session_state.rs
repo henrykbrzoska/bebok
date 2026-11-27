@@ -100,6 +100,14 @@ pub struct TaskResult {
     pub collected: bool,
 }
 
+/// Mid-turn message queue of a native turn (see `SessionState::push_steer`).
+#[derive(Default)]
+struct SteerQueue {
+    /// `true` while a native turn loop is able to pick messages up.
+    open: bool,
+    items: Vec<String>,
+}
+
 struct PendingPermissionRequest {
     sender: oneshot::Sender<PermissionAnswer>,
     properties: Value,
@@ -138,6 +146,13 @@ pub struct SessionState {
     /// set by `prompt_turn` before the turn starts. Kept for back-compat;
     /// the `fleet` tool no longer refuses a fan-out when it is false.
     fleet_requested: AtomicBool,
+    /// Messages steered into a running native turn (`/btw`, follow-ups typed
+    /// while the agent works). The turn loop drains them at the next step
+    /// boundary — never between a tool call and its result.
+    steer: std::sync::Mutex<SteerQueue>,
+    /// How often each `agent -> model` pair was handed to a delegated child
+    /// in this session; `task` spreads siblings over the least-used model.
+    subagent_model_uses: std::sync::Mutex<HashMap<(String, String), u32>>,
     /// Live stdin of the running CLI turn (see `bebok_cli_agents::LiveInput`).
     cli_input: bebok_cli_agents::CliInputSlot,
     /// Pending `ask` permission requests awaiting a client decision (M2).
@@ -182,6 +197,8 @@ impl SessionState {
             running: AtomicBool::new(false),
             abort: Mutex::new(None),
             fleet_requested: AtomicBool::new(false),
+            steer: std::sync::Mutex::new(SteerQueue::default()),
+            subagent_model_uses: std::sync::Mutex::new(HashMap::new()),
             cli_input: Default::default(),
             pending_asks: Mutex::new(HashMap::new()),
             decision_cache: Mutex::new(HashMap::new()),
@@ -566,6 +583,75 @@ impl SessionState {
         }
         let input = self.cli_input.lock().ok().and_then(|g| g.clone());
         input.is_some_and(|i| i.send(text))
+    }
+
+    /// A native turn loop starts accepting steered messages.
+    pub fn open_steering(&self) {
+        if let Ok(mut q) = self.steer.lock() {
+            q.open = true;
+        }
+    }
+
+    /// The native turn loop stopped; later messages go through the queue.
+    /// Undelivered items stay and are picked up by the next turn.
+    pub fn close_steering(&self) {
+        if let Ok(mut q) = self.steer.lock() {
+            q.open = false;
+        }
+    }
+
+    /// Hand `text` to the running native turn. `false` = no native turn can
+    /// take it right now (idle, CLI turn, or the loop is already finishing).
+    pub fn push_steer(&self, text: &str) -> bool {
+        if !self.is_running() {
+            return false;
+        }
+        let Ok(mut q) = self.steer.lock() else {
+            return false;
+        };
+        if !q.open {
+            return false;
+        }
+        q.items.push(text.to_string());
+        true
+    }
+
+    /// Drain every steered message (oldest first).
+    pub fn take_steer(&self) -> Vec<String> {
+        self.steer
+            .lock()
+            .map(|mut q| std::mem::take(&mut q.items))
+            .unwrap_or_default()
+    }
+
+    /// Called by the loop right before it would end the turn: `true` when
+    /// steered messages are waiting (keep going); otherwise steering closes
+    /// atomically, so no message can slip in after the final check.
+    pub fn steer_pending_or_close(&self) -> bool {
+        let Ok(mut q) = self.steer.lock() else {
+            return false;
+        };
+        if q.items.is_empty() {
+            q.open = false;
+            false
+        } else {
+            true
+        }
+    }
+
+    /// Pick the least-used model for a new `agent` child among `candidates`
+    /// (ties keep candidate order) and record the use. `None` = no candidates.
+    pub fn pick_subagent_model(&self, agent: &str, candidates: &[String]) -> Option<String> {
+        let mut uses = self.subagent_model_uses.lock().ok()?;
+        let agent_key = agent.trim().to_ascii_lowercase();
+        let key = |m: &str| (agent_key.clone(), m.trim().to_ascii_lowercase());
+        let pick = candidates
+            .iter()
+            .enumerate()
+            .min_by_key(|(i, m)| (uses.get(&key(m)).copied().unwrap_or(0), *i))
+            .map(|(_, m)| m.clone())?;
+        *uses.entry(key(&pick)).or_insert(0) += 1;
+        Some(pick)
     }
 
     /// True while a turn is running on this session.

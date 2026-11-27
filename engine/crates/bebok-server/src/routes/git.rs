@@ -65,7 +65,7 @@ pub async fn project_git(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let info = git::inspect(FsPath::new(&entry.path)).await;
+    let info = git::inspect(&git::project_repo_dir(FsPath::new(&entry.path))).await;
     let mut value = serde_json::to_value(info).unwrap_or_default();
     value["project_id"] = serde_json::json!(entry.id);
     value["path"] = serde_json::json!(entry.path);
@@ -94,7 +94,7 @@ pub async fn git_status(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let status = git::status(FsPath::new(&entry.path))
+    let status = git::status(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     Ok(Json(serde_json::to_value(status).unwrap_or_default()))
@@ -109,7 +109,15 @@ pub async fn git_log(
     let entry = resolve(&state.store.config_db_path(), &id)?;
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let skip = query.skip.unwrap_or(0);
-    let entries = git::log(FsPath::new(&entry.path), limit, skip, query.path.as_deref())
+    let root = FsPath::new(&entry.path);
+    let (dir, path) = match query.path.as_deref() {
+        Some(p) => {
+            let (dir, rel) = git::file_repo_dir(root, p);
+            (dir, Some(rel))
+        }
+        None => (git::project_repo_dir(root), None),
+    };
+    let entries = git::log(&dir, limit, skip, path.as_deref())
         .await
         .map_err(map_git_err)?;
     Ok(Json(serde_json::json!({
@@ -124,7 +132,7 @@ pub async fn git_branches(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let branches = git::branches(FsPath::new(&entry.path))
+    let branches = git::branches(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     let current = branches.iter().find(|b| b.current).map(|b| &b.name);
@@ -141,16 +149,79 @@ pub async fn git_show(
     Query(query): Query<GitShowQuery>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let shown = git::show(FsPath::new(&entry.path), query.rev.trim())
+    let shown = git::show(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        query.rev.trim(),
+    )
+    .await
+    .map_err(map_git_err)?;
+    Ok(Json(serde_json::to_value(shown).unwrap_or_default()))
+}
+
+/// `GET /projects/{id}/git/file/diff` query: `?path=&rev=` (rev defaults to HEAD).
+#[derive(Deserialize)]
+pub struct GitFileQuery {
+    pub path: String,
+    pub rev: Option<String>,
+}
+
+/// `GET /projects/{id}/git/file/diff?path=&rev=` -> hunk headers of one file.
+pub async fn git_file_diff(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<GitFileQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let entry = resolve(&state.store.config_db_path(), &id)?;
+    let (dir, rel) = git::file_repo_dir(FsPath::new(&entry.path), &query.path);
+    let hunks = git::diff_file(&dir, &rel, query.rev.as_deref())
         .await
         .map_err(map_git_err)?;
-    Ok(Json(serde_json::to_value(shown).unwrap_or_default()))
+    Ok(Json(serde_json::json!({
+        "path": query.path,
+        "hunks": hunks,
+    })))
+}
+
+/// `GET /projects/{id}/git/file/blame?path=&rev=` -> per-line authorship.
+pub async fn git_file_blame(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<GitFileQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let entry = resolve(&state.store.config_db_path(), &id)?;
+    let (dir, rel) = git::file_repo_dir(FsPath::new(&entry.path), &query.path);
+    let lines = git::blame_file(&dir, &rel, query.rev.as_deref())
+        .await
+        .map_err(map_git_err)?;
+    Ok(Json(serde_json::json!({
+        "path": query.path,
+        "lines": lines,
+    })))
+}
+
+/// `GET /projects/{id}/git/file/content?path=&rev=` -> file text at a revision
+/// (rev defaults to HEAD); `exists: false` when the path is absent there.
+pub async fn git_file_content(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<GitFileQuery>,
+) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    let entry = resolve(&state.store.config_db_path(), &id)?;
+    let (dir, rel) = git::file_repo_dir(FsPath::new(&entry.path), &query.path);
+    let file = git::file_content(&dir, &rel, query.rev.as_deref())
+        .await
+        .map_err(map_git_err)?;
+    Ok(Json(serde_json::json!({
+        "path": query.path,
+        "content": file.content,
+        "exists": file.exists,
+    })))
 }
 
 /// Publish `git.changed` after a successful mutation so the client panel
 /// can refresh. Best effort: a failed inspect still emits with nulls.
 async fn emit(state: &AppState, entry: &ProjectEntry, op: &str) {
-    let info = git::inspect(FsPath::new(&entry.path)).await;
+    let info = git::inspect(&git::project_repo_dir(FsPath::new(&entry.path))).await;
     state.store.bus().publish(Event::git_changed(
         &entry.path,
         op,
@@ -239,9 +310,12 @@ pub async fn git_stage(
     Json(body): Json<PathsBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::stage(FsPath::new(&entry.path), &body.paths)
-        .await
-        .map_err(map_git_err)?;
+    git::stage(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.paths,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "stage").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -253,9 +327,12 @@ pub async fn git_unstage(
     Json(body): Json<PathsBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::unstage(FsPath::new(&entry.path), &body.paths)
-        .await
-        .map_err(map_git_err)?;
+    git::unstage(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.paths,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "unstage").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -268,7 +345,7 @@ pub async fn git_commit(
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
     let hash = git::commit(
-        FsPath::new(&entry.path),
+        &git::project_repo_dir(FsPath::new(&entry.path)),
         &body.message,
         body.amend.unwrap_or(false),
     )
@@ -288,9 +365,13 @@ pub async fn git_reset(
         return Err(need_confirm("reset --hard"));
     }
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::reset(FsPath::new(&entry.path), body.mode, &body.rev)
-        .await
-        .map_err(map_git_err)?;
+    git::reset(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        body.mode,
+        &body.rev,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "reset").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -301,7 +382,7 @@ pub async fn git_stash_list(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let stashes = git::stash_list(FsPath::new(&entry.path))
+    let stashes = git::stash_list(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     Ok(Json(serde_json::json!({ "stashes": stashes })))
@@ -314,9 +395,12 @@ pub async fn git_stash_push(
     Json(body): Json<StashPushBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::stash_push(FsPath::new(&entry.path), body.message.as_deref())
-        .await
-        .map_err(map_git_err)?;
+    git::stash_push(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        body.message.as_deref(),
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "stash").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -329,7 +413,7 @@ pub async fn git_stash_action(
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let (id, action) = params;
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let dir = FsPath::new(&entry.path);
+    let dir = &git::project_repo_dir(FsPath::new(&entry.path));
     match action.as_str() {
         "pop" => git::stash_pop(dir, body.index).await.map_err(map_git_err)?,
         "apply" => git::stash_apply(dir, body.index)
@@ -355,7 +439,7 @@ pub async fn git_checkout(
     }
     let entry = resolve(&state.store.config_db_path(), &id)?;
     git::checkout(
-        FsPath::new(&entry.path),
+        &git::project_repo_dir(FsPath::new(&entry.path)),
         &body.target,
         body.force.unwrap_or(false),
     )
@@ -372,9 +456,13 @@ pub async fn git_branch_create(
     Json(body): Json<BranchBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::branch_create(FsPath::new(&entry.path), &body.name, body.base.as_deref())
-        .await
-        .map_err(map_git_err)?;
+    git::branch_create(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.name,
+        body.base.as_deref(),
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "branch").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -390,7 +478,7 @@ pub async fn git_branch_delete(
     }
     let entry = resolve(&state.store.config_db_path(), &id)?;
     git::branch_delete(
-        FsPath::new(&entry.path),
+        &git::project_repo_dir(FsPath::new(&entry.path)),
         &query.name,
         query.force.unwrap_or(false),
     )
@@ -407,9 +495,13 @@ pub async fn git_branch_rename(
     Json(body): Json<RenameBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::branch_rename(FsPath::new(&entry.path), &body.from, &body.to)
-        .await
-        .map_err(map_git_err)?;
+    git::branch_rename(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.from,
+        &body.to,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "branch").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -421,7 +513,7 @@ pub async fn git_cherry_pick(
     Json(body): Json<RevBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::cherry_pick(FsPath::new(&entry.path), &body.rev)
+    git::cherry_pick(&git::project_repo_dir(FsPath::new(&entry.path)), &body.rev)
         .await
         .map_err(map_git_err)?;
     emit(&state, &entry, "cherry-pick").await;
@@ -434,7 +526,7 @@ pub async fn git_cherry_pick_abort(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::cherry_pick_abort(FsPath::new(&entry.path))
+    git::cherry_pick_abort(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     emit(&state, &entry, "cherry-pick").await;
@@ -447,7 +539,7 @@ pub async fn git_cherry_pick_continue(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::cherry_pick_continue(FsPath::new(&entry.path))
+    git::cherry_pick_continue(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     emit(&state, &entry, "cherry-pick").await;
@@ -460,7 +552,7 @@ pub async fn git_conflicts(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let conflicts = git::conflicts(FsPath::new(&entry.path))
+    let conflicts = git::conflicts(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     Ok(Json(serde_json::json!({ "conflicts": conflicts })))
@@ -576,7 +668,7 @@ pub async fn git_remotes(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let remotes = git::remotes_list(FsPath::new(&entry.path))
+    let remotes = git::remotes_list(&git::project_repo_dir(FsPath::new(&entry.path)))
         .await
         .map_err(map_git_err)?;
     Ok(Json(serde_json::json!({ "remotes": remotes })))
@@ -589,9 +681,13 @@ pub async fn git_remote_set_url(
     Json(body): Json<SetRemoteUrlBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::remotes_set_remote_url(FsPath::new(&entry.path), &body.remote, &body.url)
-        .await
-        .map_err(map_git_err)?;
+    git::remotes_set_remote_url(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.remote,
+        &body.url,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "remote-set-url").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -603,9 +699,12 @@ pub async fn git_sync_fetch(
     Json(body): Json<SyncFetchBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::remotes_fetch(FsPath::new(&entry.path), &body.remote)
-        .await
-        .map_err(map_git_err)?;
+    git::remotes_fetch(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.remote,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "fetch").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -618,7 +717,7 @@ pub async fn git_sync_pull(
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
     git::remotes_pull(
-        FsPath::new(&entry.path),
+        &git::project_repo_dir(FsPath::new(&entry.path)),
         &body.remote,
         body.refspec.as_deref(),
     )
@@ -635,9 +734,13 @@ pub async fn git_sync_push(
     Json(body): Json<SyncPushBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::remotes_push(FsPath::new(&entry.path), &body.remote, &body.refspec)
-        .await
-        .map_err(map_git_err)?;
+    git::remotes_push(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.remote,
+        &body.refspec,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "push").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -651,7 +754,7 @@ pub async fn git_config_get(
     Query(query): Query<GitConfigQuery>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    match git::config_get(FsPath::new(&entry.path), &query.key).await {
+    match git::config_get(&git::project_repo_dir(FsPath::new(&entry.path)), &query.key).await {
         Ok(value) => Ok(Json(
             serde_json::json!({ "key": query.key, "value": value }),
         )),
@@ -674,9 +777,14 @@ pub async fn git_config_set(
         return Err(need_confirm("config set --global"));
     }
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    git::config_set(FsPath::new(&entry.path), &body.key, &body.value, body.scope)
-        .await
-        .map_err(map_git_err)?;
+    git::config_set(
+        &git::project_repo_dir(FsPath::new(&entry.path)),
+        &body.key,
+        &body.value,
+        body.scope,
+    )
+    .await
+    .map_err(map_git_err)?;
     emit(&state, &entry, "config").await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -768,7 +876,7 @@ pub async fn git_forge(
         return Err(ApiError::bad_request("tool must be 'gh' or 'glab'").into_response());
     }
     let entry = resolve(&state.store.config_db_path(), &id)?;
-    let dir = FsPath::new(&entry.path);
+    let dir = &git::project_repo_dir(FsPath::new(&entry.path));
     let output = if body.tool == "gh" {
         git::forge_gh(dir, &body.args).await
     } else {

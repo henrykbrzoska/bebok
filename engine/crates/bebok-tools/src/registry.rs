@@ -17,6 +17,43 @@ pub enum ToolSource {
     Mcp,
 }
 
+/// A tool with a config-supplied description (`tool_config.<name>.description`).
+///
+/// Wraps the real tool so every LLM schema builder sees the custom text while
+/// execution, parameters and safety hints stay the built-in ones.
+struct DescriptionOverride {
+    inner: Arc<dyn Tool>,
+    description: String,
+}
+
+#[async_trait::async_trait]
+impl Tool for DescriptionOverride {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+    async fn execute(&self, ctx: crate::ToolCtx, args: serde_json::Value) -> crate::ToolOutput {
+        self.inner.execute(ctx, args).await
+    }
+    fn is_read_only(&self) -> bool {
+        self.inner.is_read_only()
+    }
+    fn is_read_only_for(&self, args: &serde_json::Value) -> bool {
+        self.inner.is_read_only_for(args)
+    }
+    fn destructive_hint(&self) -> Option<bool> {
+        self.inner.destructive_hint()
+    }
+    fn read_only_hint(&self) -> Option<bool> {
+        self.inner.read_only_hint()
+    }
+}
+
 /// A per-instance registry of available tools, keyed by name.
 ///
 /// Built-in tools are fixed; MCP tools are contributed by the MCP bridge and
@@ -31,10 +68,15 @@ pub struct ToolRegistry {
     /// shadow a built-in of the same name).
     dynamic: RwLock<HashMap<String, Arc<dyn Tool>>>,
     mcp: RwLock<HashMap<String, Arc<dyn Tool>>>,
-    /// Built-ins switched off by config (`ssh.enabled: false`). They stay in
-    /// `builtin` so re-enabling needs no reconstruction, but every lookup and
-    /// `list()` skips them, so they never reach a provider request.
+    /// Built-ins and every other tool switched off by config
+    /// (`ssh.enabled: false`, `tool_config.<name>.enabled: false`). Built-ins
+    /// stay in `builtin` so re-enabling needs no reconstruction, but every
+    /// lookup and `list()` skips a disabled name in *every* slice, so it never
+    /// reaches a provider request.
     disabled: RwLock<HashSet<String>>,
+    /// Config-supplied description overrides (`tool_config.<name>.description`).
+    /// Lookups wrap the tool so the LLM schema carries the custom text.
+    descriptions: RwLock<HashMap<String, String>>,
 }
 
 impl Default for ToolRegistry {
@@ -50,6 +92,7 @@ impl ToolRegistry {
             dynamic: RwLock::new(HashMap::new()),
             mcp: RwLock::new(HashMap::new()),
             disabled: RwLock::new(HashSet::new()),
+            descriptions: RwLock::new(HashMap::new()),
         }
     }
 
@@ -62,6 +105,17 @@ impl ToolRegistry {
         if !self.builtin.iter().any(|t| t.name() == name) {
             return;
         }
+        self.set_enabled(name, enabled);
+    }
+
+    /// Enable or disable a tool of **any** slice (built-in, dynamic or MCP) by
+    /// name. A disabled name is skipped by every lookup ([`get`](Self::get),
+    /// [`list`](Self::list), [`names`](Self::names),
+    /// [`list_with_source`](Self::list_with_source),
+    /// [`source_of`](Self::source_of)), so a disabled tool's schema never
+    /// reaches a provider request. Unknown names may still be marked disabled
+    /// so a future registration is honoured.
+    pub fn set_enabled(&self, name: &str, enabled: bool) {
         let mut disabled = self.disabled.write().unwrap();
         if enabled {
             disabled.remove(name);
@@ -70,25 +124,71 @@ impl ToolRegistry {
         }
     }
 
-    /// Whether a built-in of that name is currently switched off.
-    pub fn builtin_disabled(&self, name: &str) -> bool {
+    /// Whether a tool of that name is currently switched off.
+    pub fn is_disabled(&self, name: &str) -> bool {
         self.disabled.read().unwrap().contains(name)
     }
 
+    /// Whether a built-in of that name is currently switched off.
+    pub fn builtin_disabled(&self, name: &str) -> bool {
+        self.is_disabled(name)
+    }
+
+    /// Clear the disabled set (every tool becomes visible again). Used when
+    /// re-deriving the whole `tool_config` + `ssh.enabled` state on reload.
+    pub fn clear_disabled(&self) {
+        self.disabled.write().unwrap().clear();
+    }
+
+    /// Drop every configured description override.
+    pub fn clear_description_overrides(&self) {
+        self.descriptions.write().unwrap().clear();
+    }
+
+    /// Set (or clear, with `None`) a config-supplied description override for a
+    /// tool. When set, every lookup wraps the tool so its schema carries the
+    /// custom text; execution and parameters are unaffected.
+    pub fn set_description_override(&self, name: &str, description: Option<&str>) {
+        let mut map = self.descriptions.write().unwrap();
+        match description.map(str::trim).filter(|d| !d.is_empty()) {
+            Some(d) => {
+                map.insert(name.to_string(), d.to_string());
+            }
+            None => {
+                map.remove(name);
+            }
+        }
+    }
+
+    /// The description override in effect for a tool, if any.
+    pub fn description_override(&self, name: &str) -> Option<String> {
+        self.descriptions.read().unwrap().get(name).cloned()
+    }
+
+    /// Wrap a tool with its description override, if one is configured.
+    fn with_override(&self, tool: Arc<dyn Tool>) -> Arc<dyn Tool> {
+        let name = tool.name();
+        match self.descriptions.read().unwrap().get(name) {
+            Some(description) => Arc::new(DescriptionOverride {
+                inner: tool,
+                description: description.clone(),
+            }),
+            None => tool,
+        }
+    }
+
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        if self.is_disabled(name) {
+            return None;
+        }
         if let Some(t) = self.dynamic.read().unwrap().get(name) {
-            return Some(t.clone());
+            return Some(self.with_override(t.clone()));
         }
-        let disabled = self.disabled.read().unwrap();
-        if let Some(t) = self
-            .builtin
-            .iter()
-            .find(|t| t.name() == name && !disabled.contains(t.name()))
-        {
-            return Some(t.clone());
+        if let Some(t) = self.builtin.iter().find(|t| t.name() == name) {
+            return Some(self.with_override(t.clone()));
         }
-        drop(disabled);
-        self.mcp.read().unwrap().get(name).cloned()
+        let mcp = self.mcp.read().unwrap().get(name).cloned();
+        mcp.map(|t| self.with_override(t))
     }
 
     /// All registered tools (plugin first, then built-ins, then MCP).
@@ -98,19 +198,10 @@ impl ToolRegistry {
     /// dedup the provider request would carry two tools under one name and
     /// e.g. DeepSeek rejects it with 400 "Tool names must be unique".
     pub fn list(&self) -> Vec<Arc<dyn Tool>> {
-        let dynamic = self.dynamic.read().unwrap();
-        let disabled = self.disabled.read().unwrap();
-        let mut out: Vec<Arc<dyn Tool>> = dynamic.values().cloned().collect();
-        out.extend(
-            self.builtin
-                .iter()
-                .filter(|t| !dynamic.contains_key(t.name()) && !disabled.contains(t.name()))
-                .cloned(),
-        );
-        drop(disabled);
-        drop(dynamic);
-        out.extend(self.mcp.read().unwrap().values().cloned());
-        out
+        self.list_with_source()
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect()
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -120,8 +211,41 @@ impl ToolRegistry {
     /// Every registered tool with the slice it lives in (F7-7), in the same
     /// order as [`ToolRegistry::list`]: plugin/dynamic first, then built-ins,
     /// then MCP. A dynamic tool shadowing a built-in is listed once, as
-    /// dynamic.
+    /// dynamic. Disabled names are skipped in every slice and a configured
+    /// description override is applied.
     pub fn list_with_source(&self) -> Vec<(ToolSource, Arc<dyn Tool>)> {
+        let dynamic = self.dynamic.read().unwrap();
+        let disabled = self.disabled.read().unwrap();
+        let mut out: Vec<(ToolSource, Arc<dyn Tool>)> = dynamic
+            .values()
+            .filter(|t| !disabled.contains(t.name()))
+            .map(|t| (ToolSource::Dynamic, t.clone()))
+            .collect();
+        out.extend(
+            self.builtin
+                .iter()
+                .filter(|t| !dynamic.contains_key(t.name()) && !disabled.contains(t.name()))
+                .map(|t| (ToolSource::Builtin, t.clone())),
+        );
+        drop(disabled);
+        drop(dynamic);
+        out.extend(
+            self.mcp
+                .read()
+                .unwrap()
+                .values()
+                .filter(|t| !self.is_disabled(t.name()))
+                .map(|t| (ToolSource::Mcp, t.clone())),
+        );
+        out.into_iter()
+            .map(|(s, t)| (s, self.with_override(t)))
+            .collect()
+    }
+
+    /// Like [`list_with_source`](Self::list_with_source) but includes tools
+    /// currently disabled by config (so the Settings "Tools" tab can list and
+    /// re-enable them). Description overrides are still applied.
+    pub fn list_all_with_source(&self) -> Vec<(ToolSource, Arc<dyn Tool>)> {
         let dynamic = self.dynamic.read().unwrap();
         let mut out: Vec<(ToolSource, Arc<dyn Tool>)> = dynamic
             .values()
@@ -141,19 +265,35 @@ impl ToolRegistry {
                 .values()
                 .map(|t| (ToolSource::Mcp, t.clone())),
         );
-        out
+        out.into_iter()
+            .map(|(s, t)| (s, self.with_override(t)))
+            .collect()
+    }
+
+    /// The tool's own (built-in) description, ignoring any config override.
+    pub fn default_description(&self, name: &str) -> Option<String> {
+        if let Some(t) = self.dynamic.read().unwrap().get(name) {
+            return Some(t.description().to_string());
+        }
+        if let Some(t) = self.builtin.iter().find(|t| t.name() == name) {
+            return Some(t.description().to_string());
+        }
+        self.mcp
+            .read()
+            .unwrap()
+            .get(name)
+            .map(|t| t.description().to_string())
     }
 
     /// Where a tool by that name comes from (same precedence as `get`).
     pub fn source_of(&self, name: &str) -> Option<ToolSource> {
+        if self.is_disabled(name) {
+            return None;
+        }
         if self.dynamic.read().unwrap().contains_key(name) {
             return Some(ToolSource::Dynamic);
         }
-        if self
-            .builtin
-            .iter()
-            .any(|t| t.name() == name && !self.disabled.read().unwrap().contains(name))
-        {
+        if self.builtin.iter().any(|t| t.name() == name) {
             return Some(ToolSource::Builtin);
         }
         if self.mcp.read().unwrap().contains_key(name) {
@@ -276,5 +416,43 @@ mod tests {
         let reg = ToolRegistry::new(vec![Arc::new(StubTool("bash"))]);
         reg.set_builtin_enabled("not-a-tool", false);
         assert!(!reg.builtin_disabled("not-a-tool"));
+    }
+
+    /// `set_enabled` hides a tool in *every* slice (dynamic/MCP too), and a
+    /// description override changes the description the schema carries while
+    /// leaving the tool usable.
+    #[test]
+    fn set_enabled_covers_all_slices_and_description_override_applies() {
+        let reg = ToolRegistry::new(vec![Arc::new(StubTool("bash"))]);
+        reg.register_tool(Arc::new(StubTool("code_ast")));
+        reg.set_mcp_tools(vec![Arc::new(StubTool("mcp__srv__thing"))]);
+
+        reg.set_enabled("code_ast", false);
+        reg.set_enabled("mcp__srv__thing", false);
+        assert!(reg.get("code_ast").is_none());
+        assert!(reg.get("mcp__srv__thing").is_none());
+        assert!(!reg.names().contains(&"code_ast".to_string()));
+        assert!(!reg.names().contains(&"mcp__srv__thing".to_string()));
+        assert_eq!(reg.source_of("code_ast"), None);
+        // list_all still reports them (Settings can re-enable).
+        let all: Vec<String> = reg
+            .list_all_with_source()
+            .into_iter()
+            .map(|(_, t)| t.name().to_string())
+            .collect();
+        assert!(all.contains(&"code_ast".to_string()));
+        assert!(all.contains(&"mcp__srv__thing".to_string()));
+
+        reg.set_enabled("code_ast", true);
+        assert!(reg.get("code_ast").is_some());
+
+        assert_eq!(reg.default_description("bash").as_deref(), Some("stub"));
+        reg.set_description_override("bash", Some("custom bash text"));
+        let bash = reg.get("bash").unwrap();
+        assert_eq!(bash.description(), "custom bash text");
+        assert_eq!(reg.default_description("bash").as_deref(), Some("stub"));
+        // Clearing restores the built-in description.
+        reg.set_description_override("bash", None);
+        assert_eq!(reg.get("bash").unwrap().description(), "stub");
     }
 }

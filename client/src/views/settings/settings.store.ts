@@ -21,18 +21,21 @@ import {
   FleetMember,
   McpStatus,
   ResolvedSkill,
+  ResolvedTool,
+  ToolConfigPatch,
 } from '../../core/engine.dtos';
 import { I18nService } from '../../i18n/i18n.service';
 import { selectableModels } from '../../core/model-list';
 import { ProviderDraft } from './provider-catalog';
 
-/** The eight tabs of the redesigned Settings screen (design handoff §8). */
+/** The nine tabs of the redesigned Settings screen (design handoff §8). */
 export type SettingsTab =
   | 'general'
   | 'providers'
   | 'agents'
   | 'mcp'
   | 'skills'
+  | 'tools'
   | 'permissions'
   | 'appearance'
   | 'rawJson';
@@ -43,6 +46,7 @@ export const SETTINGS_TABS: readonly SettingsTab[] = [
   'agents',
   'mcp',
   'skills',
+  'tools',
   'permissions',
   'appearance',
   'rawJson',
@@ -86,6 +90,7 @@ export class SettingsStore {
   readonly selectedAgent = signal<string | null>(null);
   readonly selectedMcp = signal<string | null>(null);
   readonly selectedSkill = signal<string | null>(null);
+  readonly selectedTool = signal<string | null>(null);
 
   /** Native file pickers are only available in the Tauri desktop shell. */
   readonly isTauri = this.engine.isTauri;
@@ -121,6 +126,15 @@ export class SettingsStore {
 
   /** Validation error for the fleet list (null = valid). */
   readonly fleetError = signal<string | null>(null);
+
+  // --- tools ---------------------------------------------------------------
+
+  /** Every tool the engine exposes for this project (`GET /tools/list`). */
+  readonly toolConfigs = signal<ResolvedTool[]>([]);
+  /** True while the tool list is being fetched. */
+  readonly loadingTools = signal(false);
+  /** Tool-tab-local error (the global banner is reserved for config saves). */
+  readonly toolsError = signal<string | null>(null);
 
   // --- permissions ---------------------------------------------------------
 
@@ -177,6 +191,7 @@ export class SettingsStore {
   async load(directory: string | null): Promise<void> {
     this.directory.set(directory);
     await this.reload();
+    await this.loadTools();
   }
 
   async reload(): Promise<void> {
@@ -568,6 +583,99 @@ export class SettingsStore {
       await this.reload();
     } catch (err) {
       this.error.set(this.describe(err));
+    }
+  }
+
+  // --- tools actions -------------------------------------------------------
+
+  /**
+   * `GET /tools/list` -> the per-tool rows of the Tools tab. Kept separate
+   * from `GET /config` because the list depends on the instance's live tool
+   * registry (MCP servers, plugins, conditional tools).
+   */
+  async loadTools(): Promise<void> {
+    const dir = this.directory();
+    if (!dir || this.loadingTools()) {
+      return;
+    }
+    this.loadingTools.set(true);
+    this.toolsError.set(null);
+    try {
+      const tools = await this.engine.listTools(dir);
+      this.toolConfigs.set(tools);
+      if (!tools.some((t) => t.name === this.selectedTool())) {
+        this.selectedTool.set(tools[0]?.name ?? null);
+      }
+    } catch (err) {
+      this.toolsError.set(this.describe(err));
+    } finally {
+      this.loadingTools.set(false);
+    }
+  }
+
+  /**
+   * Enable/disable one tool. Like `toggleSkill`, the save is a merge: every
+   * known tool keeps its current state and only the clicked one flips, so a
+   * project config this tab has not seen can never be wiped by accident.
+   */
+  async toggleTool(name: string, enabled: boolean): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    this.toolsError.set(null);
+    this.saved.set(null);
+    const tools = this.toolsPatch();
+    tools[name] = { ...(tools[name] ?? {}), enabled };
+    try {
+      await this.putTools(dir, tools);
+      this.saved.set(
+        this.i18n.t(enabled ? 'settings.toolsEnabled' : 'settings.toolsDisabled', { name }),
+      );
+    } catch (err) {
+      this.toolsError.set(this.describe(err));
+    }
+  }
+
+  /** Persist one tool's user-facing description (empty restores the default). */
+  async saveToolDescription(name: string, description: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    this.toolsError.set(null);
+    this.saved.set(null);
+    const tools = this.toolsPatch();
+    tools[name] = { ...(tools[name] ?? {}), description: description.trim() };
+    try {
+      await this.putTools(dir, tools);
+      this.saved.set(this.i18n.t('settings.toolsSaved', { name }));
+    } catch (err) {
+      this.toolsError.set(this.describe(err));
+    }
+  }
+
+  /** Current per-tool state as a merge patch (all flags, no descriptions). */
+  private toolsPatch(): Record<string, ToolConfigPatch> {
+    const patch: Record<string, ToolConfigPatch> = {};
+    for (const tool of this.toolConfigs()) {
+      patch[tool.name] = { enabled: tool.enabled };
+    }
+    return patch;
+  }
+
+  private async putTools(
+    dir: string,
+    tools: Record<string, ToolConfigPatch>,
+  ): Promise<void> {
+    const next = await this.engine.putToolsConfig(dir, tools);
+    if (next.length > 0) {
+      this.toolConfigs.set(next);
+      if (!next.some((t) => t.name === this.selectedTool())) {
+        this.selectedTool.set(next[0]?.name ?? null);
+      }
+    } else {
+      await this.loadTools();
     }
   }
 

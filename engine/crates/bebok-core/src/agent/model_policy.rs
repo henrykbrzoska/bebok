@@ -146,6 +146,65 @@ pub fn resolve_subagent_model(
     configured_trim.to_string()
 }
 
+/// Models a `child_agent` sub-agent may run on, in preference order, so
+/// sibling children can be spread over different models instead of all
+/// landing on `chosen` (the [`resolve_subagent_model`] result).
+///
+/// Order: `chosen`, the per-call `requested` model (when usable), then — with
+/// the fleet on — roster members of the same agent, then the rest of the
+/// roster; with the fleet off, `models.<child_agent>`, the other configured
+/// `models.*` values and the global model. Only available (and, with the
+/// fleet on, rostered) models are listed; duplicates are dropped.
+/// `"heavy"` pins the parent's model: only `chosen` is returned.
+pub fn subagent_model_candidates(
+    cfg: &ResolvedConfig,
+    chosen: &str,
+    child_agent: &str,
+    requested: Option<&str>,
+) -> Vec<String> {
+    let chosen = chosen.trim();
+    let requested = requested.map(str::trim).filter(|m| !m.is_empty());
+    if requested.is_some_and(|r| r.eq_ignore_ascii_case(HEAVY)) {
+        return vec![chosen.to_string()];
+    }
+    let fleet_enabled = cfg.is_fleet_enabled() && !cfg.fleet_members().is_empty();
+    let usable =
+        |m: &str| cfg.is_model_available(m) && (!fleet_enabled || cfg.is_model_in_fleet(m));
+
+    let mut raw: Vec<String> = Vec::new();
+    raw.push(chosen.to_string());
+    raw.extend(requested.map(str::to_string));
+    if fleet_enabled {
+        let members = cfg.fleet_members();
+        let same = members
+            .iter()
+            .filter(|m| m.agent.trim().eq_ignore_ascii_case(child_agent));
+        let other = members
+            .iter()
+            .filter(|m| !m.agent.trim().eq_ignore_ascii_case(child_agent));
+        raw.extend(same.chain(other).map(|m| m.model.trim().to_string()));
+    } else {
+        raw.push(cfg.model_for(child_agent));
+        if let Some(map) = cfg.models.as_object() {
+            raw.extend(map.values().filter_map(|v| v.as_str()).map(str::to_string));
+        }
+        raw.push(cfg.model.clone());
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    for m in raw {
+        let m = m.trim();
+        if m.is_empty() || !usable(m) || out.iter().any(|o| o.eq_ignore_ascii_case(m)) {
+            continue;
+        }
+        out.push(m.to_string());
+    }
+    if out.is_empty() {
+        out.push(chosen.to_string());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,6 +475,49 @@ mod tests {
         assert_eq!(
             resolve_subagent_model(&cfg, "x/parent", "ask", |_| "missing/gone".into(), None),
             "openai/o3"
+        );
+    }
+
+    #[test]
+    fn candidates_prefer_chosen_then_same_agent_members() {
+        let mut cfg = test_cfg(
+            providers_with(&[("a", &["m1", "m2", "m3"]), ("x", &["parent"])]),
+            serde_json::json!({}),
+            "x/parent",
+        );
+        cfg.fleet.enabled = true;
+        let member = |name: &str, agent: &str, model: &str| crate::config::FleetMember {
+            name: name.into(),
+            agent: agent.into(),
+            model: model.into(),
+        };
+        cfg.fleet.members = vec![
+            member("code-1", "code", "a/m3"),
+            member("ask-1", "ask", "a/m1"),
+            member("ask-2", "ask", "a/m2"),
+            member("ask-3", "ask", "a/m1"),
+        ];
+        assert_eq!(
+            subagent_model_candidates(&cfg, "a/m1", "ask", None),
+            vec!["a/m1", "a/m2", "a/m3"]
+        );
+        // `heavy` pins the parent's model.
+        assert_eq!(
+            subagent_model_candidates(&cfg, "x/parent", "ask", Some("heavy")),
+            vec!["x/parent"]
+        );
+    }
+
+    #[test]
+    fn candidates_without_fleet_use_configured_models() {
+        let cfg = test_cfg(
+            providers_with(&[("a", &["m1", "m2"]), ("x", &["parent"])]),
+            serde_json::json!({ "ask": "a/m1", "plan": "a/m2", "code": "gone/x" }),
+            "x/parent",
+        );
+        assert_eq!(
+            subagent_model_candidates(&cfg, "a/m1", "ask", None),
+            vec!["a/m1", "a/m2", "x/parent"]
         );
     }
 

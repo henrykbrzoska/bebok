@@ -1,8 +1,8 @@
 /**
  * Settings screen (WP-SETTINGS / F2-22): one full-screen list+detail view.
  *
- * A 210px left rail lists the eight tabs of the design handoff (§8) -
- * Providers, Agents, MCP, Skills, Permissions, Appearance, Raw JSON - and the
+ * A 210px left rail lists the tabs of the design handoff (§8) - Providers,
+ * Agents, MCP, Skills, Tools, Permissions, Appearance, Raw JSON - and the
  * detail pane swaps one component per tab. The old standalone Config page is
  * folded in as the Raw JSON tab; `/config` redirects here (WP-SHELL / F1-11).
  *
@@ -28,6 +28,7 @@ import { ProvidersTab } from './providers-tab';
 import { AgentsTab } from './agents-tab';
 import { McpTab } from './mcp-tab';
 import { SkillsTab } from './skills-tab';
+import { ToolsTab } from './tools-tab';
 import { PermissionsTab } from './permissions-tab';
 import { AppearanceTab } from './appearance-tab';
 import { RawJsonTab } from './raw-json-tab';
@@ -41,6 +42,7 @@ const TAB_ALIASES: Record<string, SettingsTab> = {
   agents: 'agents',
   mcp: 'mcp',
   skills: 'skills',
+  tools: 'tools',
   permissions: 'permissions',
   appearance: 'appearance',
   raw: 'rawJson',
@@ -57,6 +59,7 @@ const TAB_ALIASES: Record<string, SettingsTab> = {
     AgentsTab,
     McpTab,
     SkillsTab,
+    ToolsTab,
     PermissionsTab,
     AppearanceTab,
     RawJsonTab,

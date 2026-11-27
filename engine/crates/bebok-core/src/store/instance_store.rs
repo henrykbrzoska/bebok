@@ -555,20 +555,30 @@ impl InstanceStore {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::CodeIndexSearch));
-            // In-process code-graph tools: gated on code_graph.enabled.
+            // In-process code-graph tools: gated on code_graph.enabled and on
+            // `tool_config` (an explicitly disabled dynamic tool is never
+            // registered at all).
+            let tool_cfg =
+                crate::tool_config::ToolConfigMap::parse(&instance.config_snapshot().tool_config);
             if instance.config_snapshot().code_graph.enabled {
-                instance
-                    .tools
-                    .register_tool(Arc::new(crate::agent::CodeGraphDepends));
-                instance
-                    .tools
-                    .register_tool(Arc::new(crate::agent::CodeGraphDependents));
-                instance
-                    .tools
-                    .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+                if tool_cfg.is_enabled("code_graph_depends") {
+                    instance
+                        .tools
+                        .register_tool(Arc::new(crate::agent::CodeGraphDepends));
+                }
+                if tool_cfg.is_enabled("code_graph_dependents") {
+                    instance
+                        .tools
+                        .register_tool(Arc::new(crate::agent::CodeGraphDependents));
+                }
+                if tool_cfg.is_enabled("code_graph_impact") {
+                    instance
+                        .tools
+                        .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+                }
             }
             // AST-aware structural search (opt-in per project).
-            if instance.config_snapshot().ast_search.enabled {
+            if instance.config_snapshot().ast_search.enabled && tool_cfg.is_enabled("code_ast") {
                 instance
                     .tools
                     .register_tool(Arc::new(crate::agent::CodeAstSearch::new(
@@ -576,7 +586,9 @@ impl InstanceStore {
                     )));
             }
             // Remote-server access (on by default; off hides the built-in so
-            // neither the tool nor its schema reaches a request).
+            // neither the tool nor its schema reaches a request). The full
+            // `tool_config` state is re-derived after MCP tools are registered
+            // (`apply_tool_config`), which also re-applies `ssh.enabled`.
             instance
                 .tools
                 .set_builtin_enabled("ssh", instance.config_snapshot().ssh.enabled);
@@ -588,6 +600,7 @@ impl InstanceStore {
         let runtimes = Runtimes::from_config(&instance.config_snapshot().runtimes);
         let mcp_tools = instance.mcp.sync(&specs, &runtimes).await;
         instance.tools.set_mcp_tools(mcp_tools);
+        apply_tool_config(&instance);
 
         let _ = spawn_agent_watcher(root.clone(), instance.agents.clone(), self.bus.clone());
         // NOTE: the watcher JoinHandle is intentionally detached (engine
@@ -616,8 +629,10 @@ impl InstanceStore {
             .set_browser_auto(config.frontend_verify().auto_allows_browser());
         configure_browser(&instance.root, &config);
 
-        // AST search tool: register/unregister based on config toggle.
-        if config.ast_search.enabled {
+        // AST search tool: register/unregister based on config toggle (and on
+        // `tool_config`, which may explicitly disable it).
+        let tool_cfg = crate::tool_config::ToolConfigMap::parse(&config.tool_config);
+        if config.ast_search.enabled && tool_cfg.is_enabled("code_ast") {
             instance
                 .tools
                 .register_tool(Arc::new(crate::agent::CodeAstSearch::new(
@@ -628,21 +643,34 @@ impl InstanceStore {
         }
 
         // SSH tool: on by default, hidden from requests when disabled.
+        // (`apply_tool_config` below re-derives the full disabled state.)
         instance
             .tools
             .set_builtin_enabled("ssh", config.ssh.enabled);
 
         // Code graph tools: register/unregister based on config toggle.
         if config.code_graph.enabled {
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphDepends));
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphDependents));
-            instance
-                .tools
-                .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+            if tool_cfg.is_enabled("code_graph_depends") {
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphDepends));
+            } else {
+                instance.tools.unregister_tool("code_graph_depends");
+            }
+            if tool_cfg.is_enabled("code_graph_dependents") {
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphDependents));
+            } else {
+                instance.tools.unregister_tool("code_graph_dependents");
+            }
+            if tool_cfg.is_enabled("code_graph_impact") {
+                instance
+                    .tools
+                    .register_tool(Arc::new(crate::agent::CodeGraphImpact));
+            } else {
+                instance.tools.unregister_tool("code_graph_impact");
+            }
         } else {
             instance.tools.unregister_tool("code_graph_depends");
             instance.tools.unregister_tool("code_graph_dependents");
@@ -653,6 +681,10 @@ impl InstanceStore {
         let runtimes = Runtimes::from_config(&config.runtimes);
         let mcp_tools = instance.mcp.sync(&specs, &runtimes).await;
         instance.tools.set_mcp_tools(mcp_tools);
+        // Per-tool enable/disable + custom descriptions (global + project,
+        // project wins per tool). Re-derived from scratch so a tool removed
+        // from the map becomes visible again.
+        apply_tool_config(&instance);
 
         // A CLI profile embeds config-derived settings (permissions, prompt,
         // MCP list), so a config change must invalidate its cached hash and
@@ -996,6 +1028,31 @@ fn configure_browser(root: &Path, cfg: &config::ResolvedConfig) {
         root,
         bebok_tools::browser::BrowserSettings::from_config(&cfg.browser),
     );
+}
+
+/// Re-derive the registry's per-tool state from the resolved config:
+/// disabled set (from `ssh.enabled` plus `tool_config.<name>.enabled`) and
+/// description overrides (`tool_config.<name>.description`).
+///
+/// Rebuilt from scratch every time so a tool removed from `tool_config`
+/// becomes visible again. A disabled tool is hidden from every registry
+/// lookup, so its schema never reaches a model request; a description
+/// override is applied by wrapping the tool (execution/parameters unchanged).
+fn apply_tool_config(instance: &Instance) {
+    let cfg = instance.config_snapshot();
+    let tools = &instance.tools;
+    tools.clear_disabled();
+    tools.clear_description_overrides();
+    // `ssh.enabled` is the original dedicated toggle; keep it working.
+    tools.set_builtin_enabled("ssh", cfg.ssh.enabled);
+    let map = crate::tool_config::ToolConfigMap::parse(&cfg.tool_config);
+    if map.is_empty() {
+        return;
+    }
+    for (name, entry) in map.iter() {
+        tools.set_enabled(name, entry.enabled);
+        tools.set_description_override(name, entry.description.as_deref());
+    }
 }
 
 /// WP-BROWSER2 (F7-6): every streamed browser frame becomes a `browser.frame`
