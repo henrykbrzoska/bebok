@@ -781,3 +781,204 @@
   color: var(--text-faint);
   font-size: 11px;
 }
+
+/* Git gutter: blue bar left of the line number for uncommitted changes.
+   The bar is clickable (opens the "what was before" dialog). The hue keeps
+   the add/del/mod distinction: green = added, red = removed, amber = modified. */
+.line-gutter .gutter-add,
+.line-gutter .gutter-del,
+.line-gutter .gutter-mod {
+  position: relative;
+  cursor: pointer;
+  font-weight: 700;
+  border-left: 3px solid #1f6feb;
+  padding-left: 4px;
+}
+.line-gutter .gutter-add { color: #3fb950; border-left-color: #3fb950; }
+.line-gutter .gutter-del { color: #f85149; border-left-color: #f85149; }
+.line-gutter .gutter-mod { color: #d29922; border-left-color: #1f6feb; }
+.line-gutter .gutter-add:hover,
+.line-gutter .gutter-del:hover,
+.line-gutter .gutter-mod:hover { background: rgba(31, 111, 235, 0.15); }
+
+/* Hunk preview dialog (reuses the delete-modal overlay pattern). */
+.hunk-modal {
+  min-width: 340px;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  padding: var(--space-18);
+}
+.hunk-title {
+  margin: 0 0 var(--space-12);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: 700;
+}
+.hunk-sub {
+  margin: var(--space-12) 0 var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+  font-weight: 700;
+}
+.hunk-lines {
+  margin: 0;
+  padding: var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  max-height: 220px;
+  overflow: auto;
+}
+.hunk-lines.hunk-old { border-left: 3px solid #f85149; }
+.hunk-lines.hunk-new { border-left: 3px solid #1f6feb; }
+
+/* Code | History | Blame segment in the pane header. */
+.pane-modes {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.pane-modes .pane-btn.active {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* History pane: commit list on the left, the selected diff on the right. */
+.git-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.history-list {
+  flex: 0 0 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface-1);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.commit-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.commit-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'hash subject'
+    'meta meta';
+  gap: 2px var(--space-8);
+  padding: 6px var(--space-10);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.commit-row:hover {
+  background: var(--surface-2);
+}
+.commit-row.active {
+  background: var(--surface-3);
+  border-left-color: var(--accent);
+}
+
+.commit-hash {
+  grid-area: hash;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+.commit-subject {
+  grid-area: subject;
+  font-size: var(--fs-12-5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-meta {
+  grid-area: meta;
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.load-more {
+  margin: var(--space-8) var(--space-10) var(--space-10);
+}
+
+.history-diff {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--space-10) 14px 22px;
+}
+
+.history-diff-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding-bottom: var(--space-8);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-10);
+}
+
+.history-diff-head .commit-subject {
+  font-size: var(--fs-12-5);
+}
+
+/* Blame pane: hash+author column next to the read-only content. */
+.blame-note {
+  flex: none;
+  margin: 0;
+  padding: 6px var(--space-10);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.blame-wrap {
+  border-top: 0;
+}
+
+.blame-col {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 22px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12-5);
+  line-height: 1.75;
+  color: var(--text-faint);
+  white-space: pre;
+  overflow: hidden;
+  user-select: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface-1);
+  min-width: 150px;
+}

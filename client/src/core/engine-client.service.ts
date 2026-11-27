@@ -86,7 +86,10 @@ import {
   SafetyCategory,
   StatsQuery,
   StatsResponse,
+  ToolConfigPatch,
+  ToolListResponse,
   ToolSafetyResponse,
+  ResolvedTool,
   WorktreeSpec,
   BrowserAction,
   BrowserActionResult,
@@ -102,6 +105,10 @@ import {
   QuestionAnswerBody,
   QuestionItem,
   parseQuestionAsked,
+  FileDiffHunk,
+  FileDiffResponse,
+  FileBlameResponse,
+  BlameLine,
 } from './engine.dtos';
 import {
   BOOTSTRAP_ENGINE_PARAM,
@@ -917,6 +924,35 @@ export class EngineClient {
     return this.request<ToolSafetyResponse>('PUT', `/tools/safety?${query}`, { overrides });
   }
 
+  /**
+   * `GET /tools/list?directory=` -> every tool the engine exposes for this
+   * project with its enable flag, effective description, read-only marker,
+   * safety category and source.
+   */
+  listTools(directory: string): Promise<ResolvedTool[]> {
+    return this.request<ToolListResponse | ResolvedTool[]>(
+      'GET',
+      `/tools/list?directory=${encodeURIComponent(directory)}`,
+    ).then((d) => normalizeTools(d));
+  }
+
+  /**
+   * `PUT /tools/config?directory=` -> merge a per-tool patch
+   * (`{ "<tool>": { enabled?, description? } }`) into the project's tool
+   * config. Returns the refreshed list; callers fall back to `listTools`
+   * when the engine answers without one.
+   */
+  putToolsConfig(
+    directory: string,
+    tools: Record<string, ToolConfigPatch>,
+  ): Promise<ResolvedTool[]> {
+    return this.request<ToolListResponse | ResolvedTool[]>(
+      'PUT',
+      `/tools/config?directory=${encodeURIComponent(directory)}`,
+      { tools },
+    ).then((d) => normalizeTools(d));
+  }
+
   /** Probe Docker access for a directory (resolves `runtimes.docker`). */
   checkDocker(directory: string): Promise<DockerStatus> {
     return this.request<{ docker: DockerStatus }>(
@@ -1214,11 +1250,85 @@ export class EngineClient {
     );
   }
 
-  /** `GET /projects/{id}/git/show?rev=` - one commit with its unified diff. */
-  gitShow(projectId: string, rev: string): Promise<GitShow> {
-    return this.request<GitShow>(
+  /**
+   * `GET /projects/{id}/git/show?rev=[&path=]` - one commit with its unified
+   * diff. `path` is an optional project-relative file filter the engine may
+   * not know yet: when a server rejects the query the call is retried without
+   * it, so the caller can always ask and simply filter the answer itself.
+   */
+  async gitShow(projectId: string, rev: string, path?: string | null): Promise<GitShow> {
+    const base = `/projects/${encodeURIComponent(projectId)}/git/show?rev=${encodeURIComponent(rev)}`;
+    if (!path) {
+      return this.request<GitShow>('GET', base);
+    }
+    try {
+      return await this.request<GitShow>(
+        'GET',
+        `${base}&path=${encodeURIComponent(path)}`,
+      );
+    } catch {
+      // Older engine (or a proxy rejecting the extra query): ignore `path`.
+      return this.request<GitShow>('GET', base);
+    }
+  }
+
+  /**
+   * `GET /projects/{id}/git/file/diff?path=&rev=` - per-file hunks for the
+   * explorer gutter. Falls back to `gitStatus` (whole file marked modified)
+   * when the engine has no such route yet, so the client still compiles.
+   */
+  async gitFileDiff(projectId: string, path: string, rev?: string): Promise<FileDiffHunk[]> {
+    const q = `path=${encodeURIComponent(path)}` + (rev ? `&rev=${encodeURIComponent(rev)}` : '');
+    try {
+      const res = await this.request<FileDiffResponse | { hunks?: FileDiffHunk[] } | FileDiffHunk[]>(
+        'GET',
+        `/projects/${encodeURIComponent(projectId)}/git/file/diff?${q}`,
+      );
+      if (Array.isArray(res)) return res;
+      return res?.hunks ?? [];
+    } catch {
+      // Fallback: simplified gutter - mark the file modified if git status lists it.
+      try {
+        const st = await this.gitStatus(projectId);
+        const hit = (st.files ?? []).some((f) => f.path === path);
+        if (!hit) return [];
+        return [{ newStart: 1, newLines: Number.MAX_SAFE_INTEGER, oldStart: 1, oldLines: 1 }];
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * `GET /projects/{id}/git/file/blame?path=&rev=` - per-line authorship
+   * (`git blame --line-porcelain`). Throws when the engine has no such route
+   * yet, so callers can fall back to the client-side best-effort blame.
+   */
+  async gitFileBlame(projectId: string, path: string, rev?: string): Promise<BlameLine[]> {
+    const q = `path=${encodeURIComponent(path)}` + (rev ? `&rev=${encodeURIComponent(rev)}` : '');
+    const res = await this.request<FileBlameResponse | { lines?: BlameLine[] } | BlameLine[]>(
       'GET',
-      `/projects/${encodeURIComponent(projectId)}/git/show?rev=${encodeURIComponent(rev)}`,
+      `/projects/${encodeURIComponent(projectId)}/git/file/blame?${q}`,
+    );
+    if (Array.isArray(res)) return res;
+    return res?.lines ?? [];
+  }
+
+  /**
+   * `GET /projects/{id}/git/file/content?path=&rev=` - file text at a
+   * revision (default HEAD). The engine parallel change adds this endpoint;
+   * `exists` may be absent on older engines, so it is optional here.
+   */
+  async gitFileContent(
+    projectId: string,
+    path: string,
+    rev?: string,
+  ): Promise<{ path: string; rev: string; content: string; exists?: boolean }> {
+    const q =
+      `path=${encodeURIComponent(path)}` + (rev ? `&rev=${encodeURIComponent(rev)}` : '');
+    return this.request<{ path: string; rev: string; content: string; exists?: boolean }>(
+      'GET',
+      `/projects/${encodeURIComponent(projectId)}/git/file/content?${q}`,
     );
   }
 
@@ -1748,4 +1858,29 @@ export class EngineClient {
       `/schedules/${encodeURIComponent(id)}`,
     );
   }
+}
+
+/**
+ * `GET /tools/list` / `PUT /tools/config` reply -> typed rows. Accepts either
+ * a `{ tools: [...] }` wrapper or a bare array, and tolerates snake_case
+ * fields from a Rust serializer (`is_read_only`), so a small engine/DTO
+ * casing mismatch cannot blank the Tools tab.
+ */
+function normalizeTools(reply: ToolListResponse | ResolvedTool[] | null | undefined): ResolvedTool[] {
+  const raw = Array.isArray(reply) ? reply : (reply?.tools ?? []);
+  return raw.map((entry) => {
+    const obj = entry as unknown as Record<string, unknown>;
+    return {
+      name: String(obj['name'] ?? ''),
+      enabled: obj['enabled'] !== false,
+      description:
+        typeof obj['description'] === 'string' ? (obj['description'] as string) : null,
+      isReadOnly:
+        typeof obj['isReadOnly'] === 'boolean'
+          ? (obj['isReadOnly'] as boolean)
+          : obj['is_read_only'] === true,
+      safety: (obj['safety'] ?? obj['category']) as ResolvedTool['safety'],
+      source: typeof obj['source'] === 'string' ? (obj['source'] as string) : undefined,
+    };
+  });
 }

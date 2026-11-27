@@ -388,6 +388,14 @@ pub struct ResolvedConfig {
     /// Merged per key (global, then project overrides). Informational only -
     /// parsed by `crate::tool_safety`, never consulted by the permission engine.
     pub tool_safety: Value,
+    /// Per-tool config: `{ "<tool>": { "enabled": bool, "description": string } }`.
+    /// A missing tool (or a missing `enabled`) means enabled; an empty or
+    /// missing `description` keeps the tool's built-in description. Merged per
+    /// tool (global, then project overrides deep-merge `enabled`/`description`),
+    /// parsed by `crate::tool_config`. A disabled tool is hidden from every
+    /// registry lookup, so its schema never reaches the model.
+    #[serde(default)]
+    pub tool_config: Value,
     /// WP-DELEGATION (F8-2): sub-agent delegation policy + concurrency cap.
     #[serde(default)]
     pub delegation: DelegationConfig,
@@ -430,6 +438,7 @@ impl Default for ResolvedConfig {
             ui: UiConfig::default(),
             fleet: FleetConfig::default(),
             tool_safety: Value::Object(serde_json::Map::new()),
+            tool_config: Value::Object(serde_json::Map::new()),
             delegation: DelegationConfig::default(),
             code_map: CodeMapConfig::default(),
             code_graph: CodeGraphConfig::default(),
@@ -675,6 +684,13 @@ impl ResolvedConfigBuilder {
 
     pub fn tool_safety(mut self, v: Value) -> Self {
         self.inner.tool_safety = v;
+        self
+    }
+
+    /// Per-tool enable/disable + custom descriptions
+    /// (`{ "<tool>": { "enabled": bool, "description": string } }`).
+    pub fn tool_config(mut self, v: Value) -> Self {
+        self.inner.tool_config = v;
         self
     }
 

@@ -168,6 +168,32 @@
           @if (dirty()) {
             <span class="dirty-dot" aria-hidden="true" [title]="t('explorer.unsavedHint')">•</span>
           }
+          <div class="pane-modes" role="group" [attr.aria-label]="t('explorer.viewMode')">
+            <button
+              type="button"
+              class="pane-btn"
+              data-testid="explorer-mode-code"
+              [class.active]="!historyOpen() && !blameOpen()"
+              [attr.aria-pressed]="!historyOpen() && !blameOpen()"
+              (click)="setViewMode('code')"
+            >{{ t('explorer.viewCode') }}</button>
+            <button
+              type="button"
+              class="pane-btn"
+              data-testid="explorer-mode-history"
+              [class.active]="historyOpen()"
+              [attr.aria-pressed]="historyOpen()"
+              (click)="setViewMode('history')"
+            >{{ t('explorer.viewHistory') }}</button>
+            <button
+              type="button"
+              class="pane-btn"
+              data-testid="explorer-mode-blame"
+              [class.active]="blameOpen()"
+              [attr.aria-pressed]="blameOpen()"
+              (click)="setViewMode('blame')"
+            >{{ t('explorer.viewBlame') }}</button>
+          </div>
           <span class="spacer"></span>
           @if (gotoBusy()) {
             <span class="goto-busy">{{ t('explorer.gotoSearching') }}</span>
@@ -193,6 +219,15 @@
               {{ t('explorer.mdPreview') }}
             </button>
           }
+          <button
+            class="pane-btn"
+            data-testid="explorer-gutter-toggle"
+            [class.active]="gutterOn()"
+            (click)="toggleGutter()"
+            [title]="gutterOn() ? 'Gutter on' : 'Gutter off'"
+          >
+            Gutter
+          </button>
           <button
             class="pane-btn"
             data-testid="explorer-find-in-files"
@@ -258,12 +293,98 @@
               (closed)="htmlPreview.set(null)"
             />
           </div>
+        } @else if (historyOpen()) {
+          <div class="git-pane" data-testid="explorer-history">
+            <div class="history-list">
+              @if (historyLoading() && fileHistory().length === 0) {
+                <p class="tree-note">{{ t('explorer.historyLoading') }}</p>
+              } @else if (fileHistory().length === 0) {
+                <p class="tree-note">{{ t('explorer.historyEmpty') }}</p>
+              } @else {
+                <ul class="commit-list">
+                  @for (commit of fileHistory(); track commit.hash) {
+                    <li>
+                      <button
+                        type="button"
+                        class="commit-row"
+                        data-testid="explorer-history-commit"
+                        [class.active]="selectedCommit()?.hash === commit.hash"
+                        (click)="showCommit(commit)"
+                      >
+                        <span class="commit-hash">{{ commit.hash.slice(0, 7) }}</span>
+                        <span class="commit-subject" [title]="commit.subject">{{ commit.subject }}</span>
+                        <span class="commit-meta">{{ commit.author }} · {{ formatCommitDate(commit.ts) }}</span>
+                      </button>
+                    </li>
+                  }
+                </ul>
+                @if (historyHasMore()) {
+                  <button
+                    type="button"
+                    class="pane-btn load-more"
+                    data-testid="explorer-history-more"
+                    [disabled]="historyLoading()"
+                    (click)="loadMoreHistory()"
+                  >{{ t('explorer.historyLoadMore') }}</button>
+                }
+              }
+            </div>
+            <div class="history-diff">
+              @if (commitLoading()) {
+                <p class="tree-note">{{ t('explorer.loading') }}</p>
+              } @else if (selectedCommit(); as commit) {
+                <div class="history-diff-head">
+                  <span class="commit-hash">{{ commit.hash.slice(0, 7) }}</span>
+                  <span class="commit-subject" [title]="commit.subject">{{ commit.subject }}</span>
+                  <span class="spacer"></span>
+                  @if (comparing()) {
+                    <button type="button" class="pane-btn" (click)="clearCompare()">
+                      {{ t('explorer.compareCommit') }}
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      class="pane-btn"
+                      data-testid="explorer-compare-working"
+                      (click)="compareWithWorking()"
+                    >{{ t('explorer.compareWithWorking') }}</button>
+                  }
+                </div>
+                @if (comparing()) {
+                  @if (workingDiff()) {
+                    <app-diff-view [text]="workingDiff()" [fileLabel]="selectedPath() ?? ''" />
+                  } @else {
+                    <p class="tree-note">{{ t('explorer.compareEmpty') }}</p>
+                  }
+                } @else if (commitDiff()) {
+                  <app-diff-view [text]="commitDiff()" [fileLabel]="selectedPath() ?? ''" />
+                } @else {
+                  <p class="tree-note">{{ t('explorer.compareEmpty') }}</p>
+                }
+              } @else {
+                <p class="tree-note">{{ t('explorer.historyPick') }}</p>
+              }
+            </div>
+          </div>
+        } @else if (blameOpen()) {
+          @if (blameLoading()) {
+            <div class="placeholder">{{ t('explorer.blameLoading') }}</div>
+          } @else if (fileBlame().length === 0) {
+            <div class="placeholder">{{ t('explorer.blameEmpty') }}</div>
+          } @else {
+            <p class="blame-note">{{ t('explorer.blameApprox') }}</p>
+            <div class="file-content-wrap blame-wrap" data-testid="explorer-blame">
+              <pre class="line-gutter" aria-hidden="true">{{ fileLineNumbers() }}</pre>
+              <pre class="blame-col" aria-hidden="true">{{ blameText() }}</pre>
+              <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
+            </div>
+          }
         } @else if (editing() && !mdPreview()) {
           @if (find.open()) {
             <app-find-bar scope="explorer" [text]="draftContent()" [container]="findContainer()" />
           }
           <div class="code-editor" [class.goto-armed]="gotoArmed() && canGoto()">
-            <pre #gutterEl class="line-gutter" aria-hidden="true">{{ draftLineNumbers() }}</pre>
+            <pre #gutterEl class="line-gutter" aria-hidden="false">@for (n of draftLineNumbers().split('\n'); track $index) {<span [class]="gutterClass($index + 1)" (click)="openHunkDialog($index + 1)">{{ n }}{{ $last ? '' : '\n' }}</span>}</pre>
             <pre
               #editorLayer
               class="editor-layer"
@@ -372,7 +493,7 @@
             <app-find-bar scope="explorer" [text]="fileContent()" [container]="findContainer()" />
           }
           <div class="file-content-wrap" #readOnlyWrap (scroll)="updateMinimapViewport()">
-            <pre class="line-gutter" aria-hidden="true">{{ fileLineNumbers() }}</pre>
+            <pre class="line-gutter" aria-hidden="false">@for (n of fileLineNumbers().split('\n'); track $index) {<span [class]="gutterClass($index + 1)" (click)="openHunkDialog($index + 1)">{{ n }}{{ $last ? '' : '\n' }}</span>}</pre>
             <pre class="file-body file-content"><code class="hljs" [innerHTML]="highlightedFileContent().html"></code></pre>
             <div class="minimap" (click)="onMinimapClick($event)" (mousedown)="onMinimapDragStart($event)">
               <canvas #minimapCanvasRO width="64" height="400"></canvas>
@@ -420,9 +541,40 @@
       (closed)="gotoOpen.set(false)"
     />
   }
-  @if (pendingDelete()) {
-    <div class="delete-overlay" (click)="cancelDelete()">
+  @if (hunkDialog(); as hunk) {
+    <div class="delete-overlay" (click)="closeHunkDialog()">
       <div
+        class="hunk-modal"
+        role="dialog"
+        [attr.aria-label]="t('explorer.hunkTitle')"
+        (click)="$event.stopPropagation()"
+      >
+        <p class="hunk-title">{{ t('explorer.hunkTitle') }}</p>
+        @if (hunk.loading) {
+          <p class="tree-note">{{ t('explorer.loading') }}</p>
+        } @else {
+          <p class="hunk-sub">{{ t('explorer.hunkBefore') }}</p>
+          @if (hunk.pureAdd) {
+            <pre class="hunk-lines hunk-old">{{ t('explorer.hunkPureAdd') }}</pre>
+          } @else {
+            <pre class="hunk-lines hunk-old">{{ hunk.oldLines.join('\n') }}</pre>
+          }
+          <p class="hunk-sub">{{ t('explorer.hunkAfter') }}</p>
+          <pre class="hunk-lines hunk-new">{{ hunk.newLines.join('\n') }}</pre>
+        }
+        <div class="delete-actions">
+          <button class="pane-btn" (click)="closeHunkDialog()">{{ t('explorer.cancel') }}</button>
+          @if (!hunk.pureAdd && !hunk.loading) {
+            <button class="pane-btn primary" (click)="restoreHunkFragment()">
+              {{ t('explorer.hunkRestore') }}
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+  }
+  @if (pendingDelete()) {
+    <div class="delete-overlay" (click)="cancelDelete()">      <div
         class="delete-modal"
         role="alertdialog"
         [attr.aria-label]="t('explorer.deleteTitle')"

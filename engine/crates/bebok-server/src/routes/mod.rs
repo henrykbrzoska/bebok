@@ -5,7 +5,7 @@
 //! CSS, …) register in `build_api_router` without changing this shape.
 
 use axum::Router;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 
 use crate::state::AppState;
 
@@ -169,6 +169,12 @@ pub fn build_api_router() -> Router<AppState> {
         .route("/projects/{id}/git/log", get(git::git_log))
         .route("/projects/{id}/git/branches", get(git::git_branches))
         .route("/projects/{id}/git/show", get(git::git_show))
+        .route("/projects/{id}/git/file/diff", get(git::git_file_diff))
+        .route("/projects/{id}/git/file/blame", get(git::git_file_blame))
+        .route(
+            "/projects/{id}/git/file/content",
+            get(git::git_file_content),
+        )
         .route("/projects/{id}/git/stage", post(git::git_stage))
         .route("/projects/{id}/git/unstage", post(git::git_unstage))
         .route("/projects/{id}/git/commit", post(git::git_commit))
@@ -245,6 +251,9 @@ pub fn build_api_router() -> Router<AppState> {
             "/tools/safety",
             get(tools::get_tool_safety).put(tools::put_tool_safety),
         )
+        // Per-tool enable/disable + custom descriptions (`tool_config`).
+        .route("/tools/list", get(tools::get_tool_list))
+        .route("/tools/config", put(tools::put_tool_config))
         .route("/stats", get(stats::get_stats))
         .route(
             "/schedules",

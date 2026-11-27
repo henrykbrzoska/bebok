@@ -24,7 +24,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 
 import { EngineClient } from '../../core/engine-client.service';
-import { FsCompleteItem, FsDefinitionHit, FsEntry } from '../../core/engine.dtos';
+import { FsCompleteItem, FsDefinitionHit, FsEntry, FileDiffHunk, GitLogEntry } from '../../core/engine.dtos';
 import { ToastStore } from '../../ui/toast/toast.store';
 import { ExplorerSelectionStore } from '../../core/explorer-selection.store';
 import { ProjectSessionsStore } from '../../ui/shell/project-sessions.store';
@@ -33,11 +33,15 @@ import { CodeHighlightService } from '../../ui/code-highlight/code-highlight.ser
 import { FindStore } from '../../core/find.store';
 import { FindBarComponent } from '../../ui/find-bar/find-bar.component';
 import { HtmlPreviewComponent } from '../../ui/html-preview/html-preview';
+import { DiffViewComponent } from '../../ui/diff-view/diff-view';
 import { PreviewPanel, isImagePath } from '../../ui/right-drawer/panels/preview-panel';
 import { FindInFilesComponent, type FindInFilesTarget } from './find-in-files';
 import { GotoDialogComponent, type GotoTab, type GotoTarget } from './goto-dialog';
 import { ExplorerNavBarComponent } from './nav-bar';
 import { ShellStore } from '../../ui/shell/shell.store';
+import { EventsStore } from '../../core/events.store';
+import { ProjectsStore } from '../../core/projects.store';
+import { emptyChanges, hunksToLineChanges, type GitLineChanges } from './explorer-changes';
 import { ContextMenuDirective } from '../../ui/context-menu/context-menu.directive';
 import { ContextMenuService } from '../../ui/context-menu/context-menu.service';
 import {
@@ -51,6 +55,7 @@ import {
   type ExplorerPanePayload,
 } from './explorer.menus';
 import { lineOf, offsetOf, supportsGoto, symbolAt } from './explorer-editor';
+import { parseFileDiff, reverseApply, unifiedDiff } from './explorer-git';
 import {
   caretBox,
   filterCompletions,
@@ -74,6 +79,22 @@ const RECENT_KEY = 'bebok.explorer.recent:';
 const TABS_KEY = 'bebok.explorer.tabs:';
 const TABS_MAX = 20;
 const TABS_SAVE_DELAY_MS = 300;
+/** Commits fetched per `git log` page in the History column. */
+const HISTORY_PAGE = 30;
+/** Commits inspected when deriving blame (newest first). */
+const BLAME_COMMITS = 25;
+/** Commits reverse-applied to rebuild the pre-image for "compare with working". */
+const COMPARE_CHAIN_MAX = 10;
+
+/** One line of the blame column (`hash` empty = not attributed by the history). */
+export interface BlameLine {
+  line: number;
+  hash: string;
+  short: string;
+  author: string;
+  subject: string;
+  ts: number;
+}
 
 /** One open editor tab. `scrollTop` / `cursor` are reserved for restoring the view. */
 export interface OpenTab {
@@ -116,6 +137,7 @@ interface DirState {
     GotoDialogComponent,
     ExplorerNavBarComponent,
     PreviewPanel,
+    DiffViewComponent,
   ],
   templateUrl: './explorer.html',
   styleUrl: './explorer.css',
@@ -133,6 +155,8 @@ export class ExplorerView implements OnInit {
   private readonly i18n = inject(I18nService);
   private readonly selection = inject(ExplorerSelectionStore);
   private readonly project = inject(ProjectSessionsStore);
+  private readonly projects = inject(ProjectsStore);
+  private readonly events = inject(EventsStore);
   private readonly shell = inject(ShellStore);
   private readonly codeHighlight = inject(CodeHighlightService);
   private readonly menus = inject(ContextMenuService);
@@ -278,6 +302,25 @@ export class ExplorerView implements OnInit {
   /** Locations undone by Alt+Left (Alt+Right replays them). */
   private readonly navForward: EditorLocation[] = [];
 
+  // Git panes above the editor: Code | History | Blame.
+  readonly historyOpen = signal(false);
+  readonly blameOpen = signal(false);
+  /** Commits touching the open file, newest first (paged). */
+  readonly fileHistory = signal<GitLogEntry[]>([]);
+  readonly historyLoading = signal(false);
+  readonly historyHasMore = signal(false);
+  /** Per-line attribution of the open file, index 0 = line 1. */
+  readonly fileBlame = signal<BlameLine[]>([]);
+  readonly blameLoading = signal(false);
+  /** History: the commit whose diff is on screen. */
+  readonly selectedCommit = signal<GitLogEntry | null>(null);
+  readonly commitDiff = signal('');
+  readonly commitLoading = signal(false);
+  /** True while the pane shows the working-copy diff instead of the commit's. */
+  readonly comparing = signal(false);
+  /** Diff of the working copy against the selected commit (client-side). */
+  readonly workingDiff = signal('');
+
   readonly editorArea = viewChild<ElementRef<HTMLTextAreaElement>>('editorArea');
   readonly editorLayer = viewChild<ElementRef<HTMLElement>>('editorLayer');
   readonly canGoto = computed(() => supportsGoto(this.selectedPath()));
@@ -285,6 +328,18 @@ export class ExplorerView implements OnInit {
   /** Directory state keyed by path ('' = root). */
   private readonly dirs = signal<Record<string, DirState>>({});
   private readonly version = signal(0);
+
+  /** Close the History / Blame panes and drop their data. */
+  private resetGitPanes(): void {
+    this.historyOpen.set(false);
+    this.blameOpen.set(false);
+    this.fileHistory.set([]);
+    this.historyHasMore.set(false);
+    this.fileBlame.set([]);
+    this.selectedCommit.set(null);
+    this.commitDiff.set('');
+    this.clearCompare();
+  }
 
   /** Drop the tree + file state of the previous project on a switch. */
   private resetState(): void {
@@ -310,6 +365,7 @@ export class ExplorerView implements OnInit {
     this.error.set(null);
     this.cancelInline();
     this.pendingDelete.set(null);
+    this.resetGitPanes();
   }
 
   /** Flattened, visible tree rows. */
@@ -382,6 +438,182 @@ export class ExplorerView implements OnInit {
   readonly fileLineNumbers = computed(() => lineNumbersFor(this.fileContent()));
   readonly gutterEl = viewChild<ElementRef<HTMLElement>>('gutterEl');
 
+  /** Git gutter: per-line change sets for the open file (empty = clean). */
+  readonly gitHunks = signal<GitLineChanges>(emptyChanges());
+  /** Raw unified=0 hunks behind `gitHunks` (line -> hunk mapping for the dialog). */
+  readonly gitRawHunks = signal<FileDiffHunk[]>([]);
+  /** Hunk preview dialog state (null = closed). */
+  readonly hunkDialog = signal<{
+    line: number;
+    kind: 'added' | 'removed' | 'modified';
+    oldLines: string[];
+    newLines: string[];
+    pureAdd: boolean;
+    loading: boolean;
+  } | null>(null);
+  /** Gutter on/off, persisted in localStorage. */
+  readonly gutterOn = signal<boolean>(this.readGutterPref());
+  private gitUnsub: (() => void) | null = null;
+  private gitSeq = 0;
+
+  private readGutterPref(): boolean {
+    try {
+      return localStorage.getItem('bebok.explorer.gutter') !== 'off';
+    } catch {
+      return true;
+    }
+  }
+
+  toggleGutter(): void {
+    const next = !this.gutterOn();
+    this.gutterOn.set(next);
+    try {
+      localStorage.setItem('bebok.explorer.gutter', next ? 'on' : 'off');
+    } catch { /* ignore */ }
+  }
+
+  /** CSS class for a 1-based gutter line ('' when the gutter is off). */
+  gutterClass(line: number): string {
+    if (!this.gutterOn()) return '';
+    const ch = this.gitHunks();
+    if (ch.added.has(line)) return 'gutter-add';
+    if (ch.removed.has(line)) return 'gutter-del';
+    if (ch.modified.has(line)) return 'gutter-mod';
+    return '';
+  }
+
+  /** Project id for the current directory (worktree dirs map to their root). */
+  private matchProjectId(directory: string | null): string | null {
+    if (!directory) return null;
+    const direct = this.projects.findByPath(directory);
+    if (direct) return direct.id;
+    const normalized = directory.replace(/\\/g, '/');
+    const marker = '/.bebok/worktrees/';
+    const idx = normalized.indexOf(marker);
+    if (idx > 0) {
+      return this.projects.findByPath(normalized.slice(0, idx))?.id ?? null;
+    }
+    return null;
+  }
+
+  /** Reload per-line git changes for the open file (no-op when gutter off). */
+  async reloadChangedLines(): Promise<void> {
+    const seq = ++this.gitSeq;
+    if (!this.gutterOn()) {
+      this.gitHunks.set(emptyChanges());
+      this.gitRawHunks.set([]);
+      return;
+    }
+    const dir = this.directory();
+    const path = this.selectedPath();
+    if (!dir || !path) {
+      this.gitHunks.set(emptyChanges());
+      this.gitRawHunks.set([]);
+      return;
+    }
+    const id = this.matchProjectId(dir);
+    if (!id) {
+      this.gitHunks.set(emptyChanges());
+      this.gitRawHunks.set([]);
+      return;
+    }
+    try {
+      const hunks = await this.engine.gitFileDiff(id, path);
+      if (seq !== this.gitSeq) return;
+      this.gitRawHunks.set(hunks);
+      this.gitHunks.set(hunksToLineChanges(hunks));
+    } catch {
+      if (seq === this.gitSeq) {
+        this.gitRawHunks.set([]);
+        this.gitHunks.set(emptyChanges());
+      }
+    }
+  }
+
+  /** Hunk covering a 1-based new-file line (null when the line is clean). */
+  hunkForLine(line: number): FileDiffHunk | null {
+    for (const h of this.gitRawHunks()) {
+      const ns = h.newStart ?? 0;
+      const nl = h.newLines ?? 0;
+      if (nl <= 0) {
+        if (line === Math.max(1, ns)) return h;
+      } else if (line >= ns && line < ns + nl) {
+        return h;
+      }
+    }
+    return null;
+  }
+
+  /** Click on a gutter line: open the "what was before" dialog. */
+  async openHunkDialog(line: number): Promise<void> {
+    if (!this.gutterOn()) return;
+    const hunk = this.hunkForLine(line);
+    if (!hunk) return;
+    const ch = this.gitHunks();
+    const kind: 'added' | 'removed' | 'modified' = ch.added.has(line)
+      ? 'added'
+      : ch.removed.has(line)
+        ? 'removed'
+        : 'modified';
+    const ol = hunk.oldLines ?? 0;
+    const nl = hunk.newLines ?? 0;
+    const pureAdd = ol <= 0;
+    const current = (this.editing() ? this.draftContent() : this.fileContent()).split('\n');
+    const newLines =
+      nl <= 0
+        ? []
+        : current.slice(Math.max(0, (hunk.newStart ?? 1) - 1), (hunk.newStart ?? 1) - 1 + nl);
+    this.hunkDialog.set({ line, kind, oldLines: [], newLines, pureAdd, loading: !pureAdd });
+    if (pureAdd) return;
+    const dir = this.directory();
+    const path = this.selectedPath();
+    const id = this.matchProjectId(dir);
+    if (!dir || !path || !id) {
+      this.hunkDialog.update((d) => (d ? { ...d, loading: false } : d));
+      return;
+    }
+    try {
+      const res = await this.engine.gitFileContent(id, path, 'HEAD');
+      const head = (res.content ?? '').split('\n');
+      const start = Math.max(0, (hunk.oldStart ?? 1) - 1);
+      const oldLines = head.slice(start, start + ol);
+      this.hunkDialog.update((d) => (d && d.line === line ? { ...d, oldLines, loading: false } : d));
+    } catch (err) {
+      this.error.set(this.describe(err));
+      this.hunkDialog.update((d) => (d && d.line === line ? { ...d, loading: false } : d));
+    }
+  }
+
+  closeHunkDialog(): void {
+    this.hunkDialog.set(null);
+  }
+
+  /** Replace the dialog's hunk new-side lines with the HEAD old-side lines. */
+  restoreHunkFragment(): void {
+    const dlg = this.hunkDialog();
+    if (!dlg || dlg.pureAdd || dlg.loading) return;
+    const hunk = this.hunkForLine(dlg.line);
+    if (!hunk) return;
+    const nl = hunk.newLines ?? 0;
+    if (nl <= 0) return; // pure deletion: nothing to restore in place
+    const text = this.editing() ? this.draftContent() : this.fileContent();
+    const lines = text.split('\n');
+    const start = Math.max(0, (hunk.newStart ?? 1) - 1);
+    lines.splice(start, nl, ...dlg.oldLines);
+    const next = lines.join('\n');
+    if (this.editing()) {
+      this.onDraftChange(next);
+    } else {
+      this.draftContent.set(next);
+      this.fileContent.set(next);
+      this.dirty.set(false);
+      void this.saveEdit();
+    }
+    this.closeHunkDialog();
+    void this.reloadChangedLines();
+  }
+
+
   // Minimap (Sublime-style)
   readonly minimapCanvas = viewChild<ElementRef<HTMLCanvasElement>>('minimapCanvas');
   readonly minimapCanvasRO = viewChild<ElementRef<HTMLCanvasElement>>('minimapCanvasRO');
@@ -402,6 +634,13 @@ export class ExplorerView implements OnInit {
       }
     }
     await this.loadRoot();
+    this.gitUnsub = this.events.onEvent((ev) => {
+      if (ev.type === 'git.changed') {
+        void this.reloadChangedLines();
+      }
+    });
+    this.events.start();
+    void this.reloadChangedLines();
   }
 
   async loadRoot(): Promise<void> {
@@ -504,6 +743,7 @@ export class ExplorerView implements OnInit {
     }
     this.stashActive();
     this.addTab(node.path);
+    this.resetGitPanes();
     this.find.closeFind();
     this.htmlPreview.set(null);
     this.mdPreview.set(false);
@@ -549,6 +789,7 @@ export class ExplorerView implements OnInit {
     } finally {
       this.fileLoading.set(false);
     }
+    void this.reloadChangedLines();
   }
 
   /** Right-click a row: `.html` files open a sandboxed preview. */
@@ -716,6 +957,327 @@ export class ExplorerView implements OnInit {
     }
   }
 
+  // --- Git: file History / Blame column --------------------------------------
+
+  /** The three panes above the editor: content, commit history, blame. */
+  setViewMode(mode: 'code' | 'history' | 'blame'): void {
+    this.historyOpen.set(mode === 'history');
+    this.blameOpen.set(mode === 'blame');
+    const path = this.selectedPath();
+    if (!path) {
+      return;
+    }
+    if (mode === 'history') {
+      this.selectedCommit.set(null);
+      this.commitDiff.set('');
+      this.clearCompare();
+      void this.loadFileHistory(path);
+    } else if (mode === 'blame') {
+      void this.loadFileBlame(path);
+    }
+  }
+
+  /**
+   * The file's commit history (`GET /projects/{id}/git/log?path=`) - first
+   * page; `loadMoreHistory()` appends the next one using `skip`.
+   */
+  async loadFileHistory(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const id = this.matchProjectId(dir);
+    if (!id) {
+      this.fileHistory.set([]);
+      this.historyHasMore.set(false);
+      return;
+    }
+    this.historyLoading.set(true);
+    this.error.set(null);
+    try {
+      const res = await this.engine.gitLog(id, HISTORY_PAGE, 0, path);
+      if (this.selectedPath() !== path) {
+        return; // the user moved on while this was in flight
+      }
+      this.fileHistory.set(res.entries);
+      this.historyHasMore.set(res.has_more);
+    } catch (err) {
+      this.fileHistory.set([]);
+      this.historyHasMore.set(false);
+      this.error.set(this.describe(err));
+    } finally {
+      this.historyLoading.set(false);
+    }
+  }
+
+  /** Next history page: `skip` = how many commits are already listed. */
+  async loadMoreHistory(): Promise<void> {
+    const dir = this.directory();
+    const path = this.selectedPath();
+    if (!dir || !path || this.historyLoading() || !this.historyHasMore()) {
+      return;
+    }
+    const id = this.matchProjectId(dir);
+    if (!id) {
+      return;
+    }
+    this.historyLoading.set(true);
+    try {
+      const res = await this.engine.gitLog(id, HISTORY_PAGE, this.fileHistory().length, path);
+      if (this.selectedPath() !== path) {
+        return;
+      }
+      this.fileHistory.update((rows) => [...rows, ...res.entries]);
+      this.historyHasMore.set(res.has_more);
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.historyLoading.set(false);
+    }
+  }
+
+  /** Show one commit's unified diff (`GET /projects/{id}/git/show`). */
+  async showCommit(entry: GitLogEntry): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const id = this.matchProjectId(dir);
+    if (!id) {
+      return;
+    }
+    this.selectedCommit.set(entry);
+    this.clearCompare();
+    this.commitLoading.set(true);
+    this.commitDiff.set('');
+    try {
+      const show = await this.engine.gitShow(id, entry.hash, this.selectedPath());
+      if (this.selectedCommit()?.hash !== entry.hash) {
+        return;
+      }
+      this.commitDiff.set(show.diff);
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.commitLoading.set(false);
+    }
+  }
+
+  /**
+   * Diff of the working copy against the selected commit. First tries
+   * `GET /projects/{id}/git/file/diff?path=&rev=` (one call, working tree
+   * against the commit); when every hunk is a pure addition the pre-image is
+   * exact (strip the added lines) and the unified diff is built locally.
+   * Anything else (deletions/modifications need old-side content, or an old
+   * engine without the route) falls back to rebuilding the pre-image on the
+   * client by reverse-applying this commit and every newer one that touched
+   * the file (see `explorer-git.ts`); uncommitted edits stay in the diff.
+   */
+  async compareWithWorking(): Promise<void> {
+    const dir = this.directory();
+    const path = this.selectedPath();
+    const entry = this.selectedCommit();
+    if (!dir || !path || !entry) {
+      return;
+    }
+    this.commitLoading.set(true);
+    this.workingDiff.set('');
+    this.comparing.set(true);
+    try {
+      const working = this.editing() ? this.draftContent() : this.fileContent();
+      const label = `@${entry.hash.slice(0, 7)}`;
+      const id = this.matchProjectId(dir);
+      let done = false;
+      if (id) {
+        try {
+          const hunks = await this.engine.gitFileDiff(id, path, entry.hash);
+          if (this.selectedPath() !== path || this.selectedCommit()?.hash !== entry.hash) {
+            return;
+          }
+          if (hunks.length === 0) {
+            this.workingDiff.set('');
+            done = true;
+          } else if (hunks.every((h) => (h.oldLines ?? 0) === 0)) {
+            const drop = new Set<number>();
+            for (const h of hunks) {
+              for (let i = 0; i < (h.newLines ?? 0); i++) {
+                drop.add(h.newStart + i);
+              }
+            }
+            const before = working
+              .split('\n')
+              .filter((_, i) => !drop.has(i + 1))
+              .join('\n');
+            this.workingDiff.set(unifiedDiff(before, working, label, path, 3));
+            done = true;
+          }
+        } catch {
+          // Old engine without the route (or a failed diff): chain fallback below.
+        }
+      }
+      if (!done) {
+        const rows = this.fileHistory();
+        const idx = rows.findIndex((row) => row.hash === entry.hash);
+        const chain = [...(idx > 0 ? rows.slice(0, idx) : []), entry].slice(0, COMPARE_CHAIN_MAX);
+        let content = working;
+        const cid = this.matchProjectId(dir);
+        if (!cid) {
+          this.error.set(this.describe(new Error('explorer.noProject')));
+          return;
+        }
+        for (const commit of chain) {
+          const show = await this.engine.gitShow(cid, commit.hash, path);
+          content = reverseApply(content, parseFileDiff(show.diff, path).hunks);
+        }
+        const caretLabel = `@${entry.hash.slice(0, 7)}^`;
+        this.workingDiff.set(unifiedDiff(content, working, caretLabel, path, 3));
+      }
+    } catch (err) {
+      this.error.set(this.describe(err));
+    } finally {
+      this.commitLoading.set(false);
+    }
+  }
+
+  /**
+   * Per-line attribution for the open file. First tries
+   * `GET /projects/{id}/git/file/blame?path=`; when the engine has no blame
+   * endpoint the attribution is derived from the file's history (best-effort
+   * fallback, kept): newest commit first, each commit's diff says which
+   * new-side lines it added; the first commit that added a line owns it.
+   * Lines edited but not added stay on the older owner, which is why the
+   * fallback column is announced as best-effort.
+   */
+  async loadFileBlame(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    this.blameLoading.set(true);
+    this.error.set(null);
+    try {
+      const id = this.matchProjectId(dir);
+      if (id) {
+        try {
+          const rows = await this.engine.gitFileBlame(id, path);
+          if (this.selectedPath() !== path) {
+            return;
+          }
+          this.fileBlame.set(
+            rows.map((row) => {
+              const uncommitted = !row.hash || /^0+$/.test(row.hash);
+              return {
+                line: row.line,
+                hash: uncommitted ? '' : row.hash,
+                short: uncommitted ? '' : row.hash.slice(0, 7),
+                author: row.author ?? '',
+                subject: row.summary ?? '',
+                ts: row.ts ?? 0,
+              };
+            }),
+          );
+          return;
+        } catch {
+          // Old engine without the route: best-effort fallback below.
+        }
+      }
+      await this.loadFileBlameBestEffort(path);
+    } finally {
+      this.blameLoading.set(false);
+    }
+  }
+
+  /**
+   * Best-effort blame fallback for engines without `git/file/blame`: newest
+   * commit first, each commit's diff says which new-side lines it added; the
+   * first commit that added a line owns it.
+   */
+  private async loadFileBlameBestEffort(path: string): Promise<void> {
+    const dir = this.directory();
+    if (!dir) {
+      return;
+    }
+    const id = this.matchProjectId(dir);
+    if (!id) {
+      return;
+    }
+    try {
+      const total = Math.max(1, (this.fileContent() || this.draftContent()).split('\n').length);
+      const log = await this.engine.gitLog(id, BLAME_COMMITS, 0, path);
+      const owners: (GitLogEntry | null)[] = new Array<GitLogEntry | null>(total).fill(null);
+      let remaining = total;
+      for (const entry of log.entries) {
+        if (remaining <= 0 || this.selectedPath() !== path) {
+          break;
+        }
+        const show = await this.engine.gitShow(id, entry.hash, path);
+        for (const line of parseFileDiff(show.diff, path).added) {
+          if (line >= 1 && line <= total && !owners[line - 1]) {
+            owners[line - 1] = entry;
+            remaining--;
+          }
+        }
+      }
+      if (this.selectedPath() !== path) {
+        return;
+      }
+      this.fileBlame.set(
+        owners.map((owner, i) => ({
+          line: i + 1,
+          hash: owner?.hash ?? '',
+          short: owner ? owner.hash.slice(0, 7) : '',
+          author: owner?.author ?? '',
+          subject: owner?.subject ?? '',
+          ts: owner?.ts ?? 0,
+        })),
+      );
+    } catch (err) {
+      this.fileBlame.set([]);
+      this.error.set(this.describe(err));
+    } finally {
+      this.blameLoading.set(false);
+    }
+  }
+
+  /** Back from the working-copy diff to the commit's own diff. */
+  clearCompare(): void {
+    this.comparing.set(false);
+    this.workingDiff.set('');
+  }
+
+  /** The blame column: one `hash author` label per file line. */
+  readonly blameText = computed(() => {
+    const rows = this.fileBlame();
+    const total = this.fileLineNumbers().split('\n').length;
+    const out: string[] = [];
+    for (let i = 0; i < total; i++) {
+      out.push(this.blameLabel(rows[i]));
+    }
+    return out.join('\n');
+  });
+
+  /** Blame text of one line, as shown in the blame column. */
+  blameLabel(row: BlameLine | undefined): string {
+    if (!row || !row.hash) {
+      return this.i18n.t('explorer.blameUnknown');
+    }
+    return `${row.short} ${row.author}`;
+  }
+
+  /** Commit timestamp (`ts` is seconds since epoch) as a short local date. */
+  formatCommitDate(ts: number): string {
+    if (!ts) {
+      return '';
+    }
+    return new Date(ts * 1000).toLocaleString(this.i18n.lang(), {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
   // --- IDE: Go to File / Class / Symbol (Ctrl/Cmd+Shift+N, Ctrl/Cmd+N) --------
 
   openGoto(tab: GotoTab): void {
@@ -848,6 +1410,7 @@ export class ExplorerView implements OnInit {
       await this.engine.fsFileWrite(dir, path, this.draftContent());
       this.fileContent.set(this.draftContent());
       this.dirty.set(false);
+      void this.reloadChangedLines();
     } catch (err) {
       this.error.set(this.describe(err));
     } finally {

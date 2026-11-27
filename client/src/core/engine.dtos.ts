@@ -254,7 +254,8 @@ export interface PromptResponse {
   /**
    * `running` = a live turn was started (default), `batch` = the prompt was
    * queued into an async Batch job and no turn is running for it,
-   * `injected` = the message was written to the running CLI turn.
+   * `injected` = the message was handed to the running turn (CLI stdin, or
+   * the native loop's steering queue — appended at its next step).
    */
   status?: 'running' | 'batch' | 'injected';
   /** Batch job the prompt was queued into (only when `status` is `batch`). */
@@ -600,6 +601,32 @@ export interface ToolSafetyEntry {
   is_override: boolean;
   /** The `tool_safety` key that produced the override (name or glob). */
   override_pattern?: string;
+}
+
+/**
+ * One tool as resolved by `GET /tools/list` — the per-tool enable/disable
+ * + description view of the Settings "Tools" tab.
+ */
+export interface ResolvedTool {
+  name: string;
+  enabled: boolean;
+  /** Effective description (user override or the built-in one). */
+  description?: string | null;
+  isReadOnly?: boolean;
+  safety?: SafetyCategory;
+  /** `built-in`, `mcp:<server>`, `plugin` or `ssh` (free-form on the engine). */
+  source?: string;
+}
+
+/** `GET /tools/list` / `PUT /tools/config` payload. */
+export interface ToolListResponse {
+  tools: ResolvedTool[];
+}
+
+/** Per-tool config delta accepted by `PUT /tools/config`. */
+export interface ToolConfigPatch {
+  enabled?: boolean;
+  description?: string;
 }
 
 /** `GET /tools/safety` / `PUT /tools/safety` payload (F7-7). */
@@ -1830,3 +1857,41 @@ export interface ScheduleTask {
 }
 
 // ---------------------------------------------------------------------------
+
+/** One hunk of `GET /projects/{id}/git/file/diff` (unified=0 style). */
+export interface FileDiffHunk {
+  /** 1-based start line in the new file. */
+  newStart: number;
+  /** Number of new-file lines the hunk covers (0 = deletion only). */
+  newLines: number;
+  /** 1-based start line in the old file. */
+  oldStart: number;
+  /** Number of old-file lines the hunk covers (0 = addition only). */
+  oldLines: number;
+}
+
+/** One line of `GET /projects/{id}/git/file/blame` (`git blame --line-porcelain`). */
+export interface BlameLine {
+  /** 1-based line number in the blamed revision (or working tree). */
+  line: number;
+  hash: string;
+  author: string;
+  authorMail: string;
+  ts: number;
+  summary: string;
+  content: string;
+}
+
+/** `GET /projects/{id}/git/file/blame` reply. */
+export interface FileBlameResponse {
+  path: string;
+  lines: BlameLine[];
+}
+
+/** `GET /projects/{id}/git/file/diff` reply. */
+export interface FileDiffResponse {
+  path: string;
+  hunks: FileDiffHunk[];
+  added: number;
+  removed: number;
+}

@@ -1,0 +1,84 @@
+<div class="tab-head">
+  <h2>{{ t('settings.toolsTitle') }}</h2>
+  <p>{{ t('settings.toolsHint') }}</p>
+</div>
+
+@if (store.toolsError()) {
+  <div class="error-banner" data-testid="tools-error">{{ store.toolsError() }}</div>
+}
+@if (store.loadingTools() && tools().length === 0) {
+  <p class="empty">{{ t('settings.loading') }}</p>
+} @else if (tools().length === 0) {
+  <p class="empty">{{ t('settings.toolsEmpty') }}</p>
+} @else {
+  <div class="split">
+    <div class="side tools-side">
+      @for (tool of tools(); track tool.name) {
+        <div
+          class="row-btn tool-row"
+          [class.selected]="store.selectedTool() === tool.name"
+          role="button"
+          tabindex="0"
+          (click)="select(tool.name)"
+          (keydown.enter)="select(tool.name)"
+        >
+          <span class="row-name">{{ tool.name }}</span>
+          <button
+            type="button"
+            class="pill"
+            [class.on]="tool.enabled"
+            [attr.aria-pressed]="tool.enabled"
+            [attr.aria-label]="tool.name"
+            [attr.data-testid]="'tool-toggle-' + tool.name"
+            (click)="toggle(tool, $event)"
+          >
+            <span class="knob" aria-hidden="true"></span>
+          </button>
+        </div>
+      }
+    </div>
+
+    <div class="pane">
+      @if (selected(); as tool) {
+        <div class="card">
+          <h3>{{ tool.name }}</h3>
+          <p class="card-sub">
+            {{ tool.enabled ? t('settings.toolsOn') : t('settings.toolsOff') }}
+          </p>
+
+          <div class="badges">
+            <span class="badge" [class.on]="tool.isReadOnly" data-testid="tool-readonly">
+              {{ t('settings.toolsReadOnly') }}: {{ tool.isReadOnly ? t('settings.toolsYes') : t('settings.toolsNo') }}
+            </span>
+            <span class="badge" [attr.data-testid]="'tool-safety-' + (tool.safety ?? 'uncategorized')">
+              <span class="dot" [class]="safetyDot(tool)" aria-hidden="true"></span>
+              {{ t('settings.toolsSafety') }}: {{ tool.safety ?? 'uncategorized' }}
+            </span>
+            @if (tool.source) {
+              <span class="badge">{{ t('settings.toolsSource') }}: {{ tool.source }}</span>
+            }
+          </div>
+
+          <label class="field">
+            <span class="micro-label">{{ t('settings.toolsDescription') }}</span>
+            <textarea
+              rows="5"
+              data-testid="tool-description"
+              [value]="description()"
+              [placeholder]="t('settings.toolsDescriptionPlaceholder')"
+              (input)="setDescription($any($event.target).value)"
+            ></textarea>
+          </label>
+
+          <div class="actions">
+            <button type="button" class="primary" (click)="saveDescription()">
+              {{ t('settings.toolsSave') }}
+            </button>
+          </div>
+        </div>
+      } @else {
+        <div class="card empty">{{ t('settings.toolsNoSelected') }}</div>
+      }
+    </div>
+  </div>
+}

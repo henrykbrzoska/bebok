@@ -106,11 +106,26 @@ impl TurnRunner {
             Some(CompiledLayer::compile(&agent.permissions))
         };
 
+        // Steering: messages sent while this loop runs (`/btw`, follow-ups)
+        // are queued on the session and folded in at the next step boundary
+        // instead of waiting for the whole turn to end. The guard closes the
+        // queue on every exit path (errors included).
+        state.open_steering();
+        let _steer_guard = SteerGuard(Arc::clone(&state));
+
         loop {
             if abort.is_cancelled() {
                 // Persist a clear abort message so the transcript is informative.
                 persist_abort_message(&state, &bus, &agent.name, &model).await;
                 break;
+            }
+
+            // Fold steered messages in here: every tool call of the previous
+            // step has its result by now, so the transcript stays well-formed.
+            for text in state.take_steer() {
+                if let Ok(idx) = state.append_user_message(&text).await {
+                    emit_message(&bus, &state, "message.updated", idx);
+                }
             }
 
             let sampling = sampling_override
@@ -404,6 +419,9 @@ impl TurnRunner {
 
             if !saw_any {
                 state.persist_message_at(assistant_idx).await;
+                if state.steer_pending_or_close() {
+                    continue;
+                }
                 break;
             }
 
@@ -421,7 +439,12 @@ impl TurnRunner {
             };
 
             if pending.is_empty() {
-                break; // final answer
+                // Final answer — unless a steered message arrived meanwhile:
+                // then answer it within this turn.
+                if state.steer_pending_or_close() {
+                    continue;
+                }
+                break;
             }
 
             // Independent read-only calls run concurrently (F3-11); everything
@@ -548,6 +571,15 @@ impl TurnRunner {
 
         emit_session_running(&bus, &state, false);
         Ok(())
+    }
+}
+
+/// Closes the session's steering queue when the turn loop exits.
+struct SteerGuard(Arc<SessionState>);
+
+impl Drop for SteerGuard {
+    fn drop(&mut self) {
+        self.0.close_steering();
     }
 }
 
