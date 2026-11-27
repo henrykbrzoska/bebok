@@ -1858,16 +1858,22 @@ export interface ScheduleTask {
 
 // ---------------------------------------------------------------------------
 
-/** One hunk of `GET /projects/{id}/git/file/diff` (unified=0 style). */
+/** One hunk of `GET /projects/{id}/git/file/diff` (unified=0 style).
+ * The engine serializes Rust `Hunk` as snake_case; both casings are accepted
+ * because older payloads/tests may already use camelCase. */
 export interface FileDiffHunk {
   /** 1-based start line in the new file. */
-  newStart: number;
+  newStart?: number;
   /** Number of new-file lines the hunk covers (0 = deletion only). */
-  newLines: number;
+  newLines?: number;
   /** 1-based start line in the old file. */
-  oldStart: number;
+  oldStart?: number;
   /** Number of old-file lines the hunk covers (0 = addition only). */
-  oldLines: number;
+  oldLines?: number;
+  new_start?: number;
+  new_lines?: number;
+  old_start?: number;
+  old_lines?: number;
 }
 
 /** One line of `GET /projects/{id}/git/file/blame` (`git blame --line-porcelain`). */

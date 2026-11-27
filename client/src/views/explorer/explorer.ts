@@ -533,8 +533,8 @@ export class ExplorerView implements OnInit {
   /** Hunk covering a 1-based new-file line (null when the line is clean). */
   hunkForLine(line: number): FileDiffHunk | null {
     for (const h of this.gitRawHunks()) {
-      const ns = h.newStart ?? 0;
-      const nl = h.newLines ?? 0;
+      const ns = h.newStart ?? h.new_start ?? 0;
+      const nl = h.newLines ?? h.new_lines ?? 0;
       if (nl <= 0) {
         if (line === Math.max(1, ns)) return h;
       } else if (line >= ns && line < ns + nl) {
@@ -555,14 +555,15 @@ export class ExplorerView implements OnInit {
       : ch.removed.has(line)
         ? 'removed'
         : 'modified';
-    const ol = hunk.oldLines ?? 0;
-    const nl = hunk.newLines ?? 0;
+    const ol = hunk.oldLines ?? hunk.old_lines ?? 0;
+    const nl = hunk.newLines ?? hunk.new_lines ?? 0;
     const pureAdd = ol <= 0;
     const current = (this.editing() ? this.draftContent() : this.fileContent()).split('\n');
+    const newStart = hunk.newStart ?? hunk.new_start ?? 1;
     const newLines =
       nl <= 0
         ? []
-        : current.slice(Math.max(0, (hunk.newStart ?? 1) - 1), (hunk.newStart ?? 1) - 1 + nl);
+        : current.slice(Math.max(0, newStart - 1), newStart - 1 + nl);
     this.hunkDialog.set({ line, kind, oldLines: [], newLines, pureAdd, loading: !pureAdd });
     if (pureAdd) return;
     const dir = this.directory();
@@ -575,7 +576,8 @@ export class ExplorerView implements OnInit {
     try {
       const res = await this.engine.gitFileContent(id, path, 'HEAD');
       const head = (res.content ?? '').split('\n');
-      const start = Math.max(0, (hunk.oldStart ?? 1) - 1);
+      const oldStart = hunk.oldStart ?? hunk.old_start ?? 1;
+      const start = Math.max(0, oldStart - 1);
       const oldLines = head.slice(start, start + ol);
       this.hunkDialog.update((d) => (d && d.line === line ? { ...d, oldLines, loading: false } : d));
     } catch (err) {
@@ -594,11 +596,12 @@ export class ExplorerView implements OnInit {
     if (!dlg || dlg.pureAdd || dlg.loading) return;
     const hunk = this.hunkForLine(dlg.line);
     if (!hunk) return;
-    const nl = hunk.newLines ?? 0;
+    const nl = hunk.newLines ?? hunk.new_lines ?? 0;
     if (nl <= 0) return; // pure deletion: nothing to restore in place
     const text = this.editing() ? this.draftContent() : this.fileContent();
     const lines = text.split('\n');
-    const start = Math.max(0, (hunk.newStart ?? 1) - 1);
+    const newStart = hunk.newStart ?? hunk.new_start ?? 1;
+    const start = Math.max(0, newStart - 1);
     lines.splice(start, nl, ...dlg.oldLines);
     const next = lines.join('\n');
     if (this.editing()) {
@@ -1097,11 +1100,12 @@ export class ExplorerView implements OnInit {
           if (hunks.length === 0) {
             this.workingDiff.set('');
             done = true;
-          } else if (hunks.every((h) => (h.oldLines ?? 0) === 0)) {
+          } else if (hunks.every((h) => ((h.oldLines ?? h.old_lines ?? 0) === 0))) {
             const drop = new Set<number>();
             for (const h of hunks) {
-              for (let i = 0; i < (h.newLines ?? 0); i++) {
-                drop.add(h.newStart + i);
+              const hs = (h.newStart ?? h.new_start ?? 1);
+              for (let i = 0; i < (h.newLines ?? h.new_lines ?? 0); i++) {
+                drop.add(hs + i);
               }
             }
             const before = working

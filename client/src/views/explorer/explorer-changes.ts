@@ -14,13 +14,25 @@ export function emptyChanges(): GitLineChanges {
   return { added: new Set(), removed: new Set(), modified: new Set() };
 }
 
+/** Normalize one hunk: accept snake_case (engine) and camelCase. */
+function normHunk(h: FileDiffHunk): { oldStart: number; oldLines: number; newStart: number; newLines: number } {
+  const pick = (camel?: number, snake?: number): number => camel ?? snake ?? 0;
+  return {
+    oldStart: pick(h.oldStart, h.old_start),
+    oldLines: pick(h.oldLines, h.old_lines),
+    newStart: pick(h.newStart, h.new_start),
+    newLines: pick(h.newLines, h.new_lines),
+  };
+}
+
 /** Classify hunks into added/removed/modified new-file line numbers. */
 export function hunksToLineChanges(hunks: readonly FileDiffHunk[]): GitLineChanges {
   const out = emptyChanges();
-  for (const h of hunks) {
-    const ns = h.newStart ?? 0;
-    const nl = h.newLines ?? 0;
-    const ol = h.oldLines ?? 0;
+  for (const raw of hunks) {
+    const h = normHunk(raw);
+    const ns = h.newStart;
+    const nl = h.newLines;
+    const ol = h.oldLines;
     if (nl <= 0) {
       // Pure deletion: mark the anchor line (previous new line, min 1).
       out.removed.add(Math.max(1, ns));
